@@ -1,0 +1,73 @@
+# Rust/Cargo
+target/
+Cargo.lock
+**/*.rs.bk
+
+# Project-specific
+CLAUDE.md
+docs/
+
+# Local ledgers
+test-ledger/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+web/.next/
+web/.next-dev/
+web/.next.bak.*/
+web/.turbo/
+.playwright-cli/
+tmp/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+*.json.backup
+
+# Keys (NEVER commit)
+keys/
+*.keypair
+*-keypair.json
+edge/private/
+edge/.env*
+docs/internal/
+docs/private/
+.edge-private/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+docs/reports/launch-ops-phase2-workers-*.log
+
+# Build artifacts
+dist/
+build/
+.cache/
+
+# Test
+coverage/
+.nyc_output/
+research/
+
+# Timestamped launch evidence artifacts (canonical non-timestamp reports stay tracked)
+docs/reports/*-20??????T??????Z.json
+docs/reports/*-20??????T??????Z.md
+
+.internal_assets_location
+.claude/
