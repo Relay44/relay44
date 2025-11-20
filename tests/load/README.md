@@ -76,32 +76,3 @@ Simulates sudden traffic spikes (e.g., market event).
 | `auth_latency` | p95 < 500ms | Authentication time |
 | `market_latency` | p95 < 200ms | Market list time |
 
-## Output
-
-Results are written to:
-- Console: Real-time metrics
-- `tests/load/summary.json`: Detailed results
-- `tests/load/public-baseline-summary.json`: Public baseline scenario results
-
-## CI Integration
-
-```yaml
-load-test:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: grafana/k6-action@v0.3.0
-      with:
-        filename: tests/load/k6-config.js
-        flags: --env SCENARIO=smoke
-```
-
-## Grafana Dashboard
-
-For real-time visualization, export to InfluxDB:
-
-```bash
-k6 run --out influxdb=http://localhost:8086/k6 tests/load/k6-config.js
-```
-
-Import the Grafana dashboard from `infra/grafana/dashboards/k6-load-test.json`.
