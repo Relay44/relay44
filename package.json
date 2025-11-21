@@ -83,39 +83,3 @@
     "dx:help": "bash scripts/dx-terminal-pro.sh help",
     "dx:vault": "bash scripts/dx-terminal-pro.sh vault",
     "dx:positions": "bash scripts/dx-terminal-pro.sh positions",
-    "dx:swaps": "bash scripts/dx-terminal-pro.sh swaps 50",
-    "dx:logs": "bash scripts/dx-terminal-pro.sh logs 50",
-    "dx:strategies": "bash scripts/dx-terminal-pro.sh strategies true",
-    "dx:leaderboard": "bash scripts/dx-terminal-pro.sh leaderboard 25",
-    "dx:snapshot": "bash scripts/dx-terminal-pro.sh snapshot",
-    "evm:build": "forge build --root evm",
-    "evm:test": "forge test --root evm",
-    "evm:fmt": "forge fmt --root evm",
-    "evm:deploy:base-sepolia": "forge script script/DeployCore.s.sol:DeployCoreScript --root evm --rpc-url $BASE_SEPOLIA_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
-    "evm:deploy:base": "forge script script/DeployCore.s.sol:DeployCoreScript --root evm --rpc-url $BASE_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
-    "evm:deploy:programs:base-sepolia": "forge script script/DeployPrograms.s.sol:DeployProgramsScript --root evm --rpc-url $BASE_SEPOLIA_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
-    "evm:deploy:programs:base": "forge script script/DeployPrograms.s.sol:DeployProgramsScript --root evm --rpc-url $BASE_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
-    "evm:deploy:timelock:base": "forge script script/DeployTimelock.s.sol:DeployTimelockScript --root evm --rpc-url $BASE_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
-    "evm:deploy:timelock:base-sepolia": "forge script script/DeployTimelock.s.sol:DeployTimelockScript --root evm --rpc-url $BASE_SEPOLIA_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
-    "evm:handoff:timelock:base": "forge script script/HandoffToTimelock.s.sol:HandoffToTimelockScript --root evm --rpc-url $BASE_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast",
-    "evm:handoff:timelock:base-sepolia": "forge script script/HandoffToTimelock.s.sol:HandoffToTimelockScript --root evm --rpc-url $BASE_SEPOLIA_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast",
-    "evm:deploy:programs:sepolia:run": "bash scripts/base-deploy-programs.sh --network sepolia",
-    "evm:deploy:programs:mainnet:run": "bash scripts/base-deploy-programs.sh --network mainnet"
-  },
-  "devDependencies": {
-    "prettier": "^3.8.1",
-    "prettier-plugin-solidity": "^2.2.1",
-    "typescript": "^5.5.3"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "@x402/core": "^2.6.0",
-    "@x402/evm": "^2.6.0",
-    "@x402/express": "^2.5.0",
-    "@xmtp/agent-sdk": "^2.2.0",
-    "express": "^5.2.1",
-    "http-proxy-middleware": "^3.0.5",
-    "viem": "^2.47.1",
-    "zod": "^4.3.6"
-  }
-}
