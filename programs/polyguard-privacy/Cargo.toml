@@ -1,0 +1,36 @@
+[package]
+name = "polyguard-privacy"
+version = "0.1.0"
+description = "Polyguard Privacy Layer - Confidential trading with Arcium MPC"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "polyguard_privacy"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+std = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dev-dependencies]
+# Enable std for tests
+rand = "0.8"
+
+[dependencies]
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+anchor-spl = { version = "0.31.1", features = ["token", "associated_token"] }
+blake3 = { workspace = true }
+constant_time_eq = { workspace = true }
+
+# Cryptography - Real ElGamal and Bulletproofs
+curve25519-dalek = { version = "4.1", default-features = false, features = ["alloc", "zeroize"] }
+merlin = "3.0"
+rand = "0.8"
+sha2 = "0.10"
+zeroize = { version = "1.7", features = ["derive"] }
+bytemuck = { version = "1.14", features = ["derive"] }
