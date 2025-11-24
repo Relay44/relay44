@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/backend
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tracked git hooks are executable
+        run: |
+          test -x .githooks/pre-commit
+          test -x .githooks/pre-push
+          test -x .githooks/commit-msg
+
+      - name: Verify project silo
+        run: SILO_CHECK_INCLUDE_DOCS=1 ./scripts/verify-project-silo.sh
+
+      - name: Verify open core boundary
+        run: node ./scripts/verify-open-core-boundary.mjs
+
+      - name: Verify no private edge assets are tracked
+        run: bash ./scripts/verify-no-internal-assets.sh tracked
+
+      - name: Verify custom selects are enforced
+        run: bash ./scripts/verify-no-native-selects.sh tracked
+
+      - name: Resolve commit range
+        id: commit-range
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          range=""
+          event_name="${{ github.event_name }}"
+
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            if [[ -n "$base_sha" && -n "$head_sha" ]]; then
+              range="$base_sha..$head_sha"
+            fi
+          elif [[ "$event_name" == "push" ]]; then
+            before_sha="${{ github.event.before }}"
+            after_sha="${{ github.sha }}"
+            if [[ -n "$before_sha" && "$before_sha" != "0000000000000000000000000000000000000000" ]]; then
+              range="$before_sha..$after_sha"
+            fi
+          fi
+
+          if [[ -z "$range" ]]; then
+            range="HEAD"
+          fi
+
+          echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      - name: Verify commit hygiene
+        run: bash ./scripts/verify-commit-hygiene.sh --history-range "${{ steps.commit-range.outputs.range }}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path app/Cargo.toml -- --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path app/Cargo.toml --all-targets -- -D clippy::correctness
+
+  test-rust:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            app/target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('app/Cargo.lock') }}
+
+      - name: Run unit tests
+        run: cargo test --manifest-path app/Cargo.toml --release
+
+  test-evm:
+    name: EVM Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run forge tests
+        run: forge test --root evm
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Run security audit
+        run: cargo audit -f Cargo.lock --ignore RUSTSEC-2024-0344 --ignore RUSTSEC-2022-0093 --ignore RUSTSEC-2023-0071
+
+  test-backend:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: relay44
+          POSTGRES_PASSWORD: relay44
+          POSTGRES_DB: relay44_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            app/target/
+          key: ${{ runner.os }}-cargo-backend-${{ hashFiles('app/Cargo.lock') }}
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgres://relay44:relay44@localhost:5432/relay44_test
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres || true
+          sqlx database create || true
+          sqlx migrate run --source migrations
+
+      - name: Run backend tests
+        working-directory: app
+        env:
+          DATABASE_URL: postgres://relay44:relay44@localhost:5432/relay44_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-ci
+          EVM_ENABLED: "true"
+          EVM_READS_ENABLED: "true"
+        run: cargo test --release
+
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test-rust, test-backend, test-evm]
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
