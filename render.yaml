@@ -1,0 +1,391 @@
+services:
+  - type: keyvalue
+    name: relay44-redis
+    region: singapore
+    plan: starter
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  - type: web
+    name: relay44-api
+    runtime: docker
+    dockerfilePath: ./app/Dockerfile
+    dockerContext: .
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: relay44-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: relay44-redis
+          type: keyvalue
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: RUST_LOG
+        value: info
+      - key: PORT
+        value: "8080"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: EXTERNAL_MARKETS_ENABLED
+        value: "true"
+      - key: EXTERNAL_TRADING_ENABLED
+        value: "true"
+      - key: EXTERNAL_AGENTS_ENABLED
+        value: "true"
+      - key: EXTERNAL_EXECUTION_MODE
+        value: live
+      - key: ADMIN_WALLETS
+        sync: false
+      - key: LIMITLESS_API_KEY
+        sync: false
+      - key: POLYMARKET_API_KEY
+        sync: false
+      - key: POLYMARKET_API_SECRET
+        sync: false
+      - key: POLYMARKET_API_PASSPHRASE
+        sync: false
+      - key: EXTERNAL_CREDENTIALS_MASTER_KEY
+        sync: false
+      - key: EXTERNAL_CREDENTIALS_KEY_ID
+        value: v1
+      - key: REGION_ROUTING_ENABLED
+        value: "true"
+      - key: REGION_ROUTING_MODE
+        value: enforce
+      - key: REGION_UNKNOWN_POLICY
+        value: safe_fallback
+      - key: REGION_COUNTRY_HEADER_PRIORITY
+        value: cf-ipcountry,x-vercel-ip-country,x-country-code
+      - key: LIMITLESS_RESTRICTED_COUNTRIES
+        value: US
+      - key: LIMITLESS_MARKET_MIN_24H_VOLUME_USDC
+        value: "25000"
+      - key: LIMITLESS_MARKET_MIN_ORDERBOOK_DEPTH_USDC
+        value: "2500"
+      - key: LIMITLESS_LIQUIDITY_CHECK_CONCURRENCY
+        value: "8"
+      - key: EVM_ENABLED
+        value: "true"
+      - key: EVM_READS_ENABLED
+        value: "true"
+      - key: EVM_WRITES_ENABLED
+        value: "true"
+      - key: SOLANA_WRITES_ENABLED
+        value: "false"
+      - key: BASE_RPC_URL
+        value: https://mainnet.base.org
+      - key: BASE_RPC_FALLBACK_URLS
+        sync: false
+      - key: BASE_INDEXER_RPC_URL
+        sync: false
+      - key: BASE_CHAIN_ID
+        value: "8453"
+      - key: R44_TOKEN_ADDRESS
+        sync: false
+      - key: MARKET_CORE_ADDRESS
+        sync: false
+      - key: ORDER_BOOK_ADDRESS
+        sync: false
+      - key: AGENT_RUNTIME_ADDRESS
+        sync: false
+      - key: COLLATERAL_VAULT_ADDRESS
+        sync: false
+      - key: PROGRAM_VAULT_ADDRESS
+        sync: false
+      - key: USDC_MINT
+        value: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+      - key: SIWE_DOMAIN
+        value: relay44.com
+      - key: X402_ENABLED
+        value: "true"
+      - key: X402_RECEIVER_ADDRESS
+        sync: false
+      - key: X402_FACILITATOR_URL
+        fromService:
+          name: relay44-x402-facilitator
+          type: pserv
+          property: hostport
+      - key: X402_FACILITATOR_TOKEN
+        fromService:
+          name: relay44-x402-facilitator
+          type: pserv
+          envVarKey: X402_FACILITATOR_SHARED_SECRET
+      - key: XMTP_SWARM_ENABLED
+        value: "true"
+      - key: XMTP_SWARM_SIGNING_KEY
+        sync: false
+      - key: XMTP_SWARM_TRANSPORT
+        value: xmtp_http
+      - key: XMTP_SWARM_BRIDGE_URL
+        fromService:
+          name: relay44-xmtp-bridge
+          type: pserv
+          property: hostport
+      - key: XMTP_SWARM_TOPIC_PREFIX
+        value: relay44/base/swarm
+      - key: XMTP_SWARM_MAX_MESSAGES
+        value: "500"
+      - key: XMTP_SWARM_MAX_MESSAGE_BYTES
+        value: "32768"
+      - key: LIMITLESS_API_BASE
+        value: https://api.limitless.exchange
+      - key: POLYMARKET_GAMMA_API_BASE
+        value: https://gamma-api.polymarket.com
+      - key: POLYMARKET_CLOB_API_BASE
+        value: https://clob.polymarket.com
+      - key: CORS_ORIGINS
+        value: https://relay44.com,https://relay44-web.onrender.com,https://warpcast.com
+
+  - type: web
+    name: relay44-web
+    runtime: node
+    rootDir: web
+    region: singapore
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_PUBLIC_API_URL
+        value: https://relay44-api.onrender.com/v1
+      - key: NEXT_PUBLIC_API_PROXY_URL
+        value: /api/proxy
+      - key: API_PROXY_TARGET
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: NEXT_PUBLIC_WS_URL
+        value: wss://relay44-api.onrender.com/ws
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://relay44.com
+      - key: NEXT_PUBLIC_READ_ONLY_MODE
+        value: "false"
+      - key: NEXT_PUBLIC_DISABLE_PWA
+        value: "false"
+      - key: NEXT_PUBLIC_CHAIN_MODE
+        value: base
+      - key: NEXT_PUBLIC_BASE_RPC_URL
+        value: https://mainnet.base.org
+      - key: NEXT_PUBLIC_BASE_CHAIN_ID
+        value: "8453"
+      - key: NEXT_PUBLIC_SIWE_DOMAIN
+        value: relay44.com
+      - key: FARCASTER_ACCOUNT_ASSOCIATION_HEADER
+        sync: false
+      - key: FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD
+        sync: false
+      - key: FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE
+        sync: false
+      - key: NEXT_PUBLIC_R44_TOKEN_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_MARKET_CORE_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_ORDER_BOOK_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_AGENT_RUNTIME_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_COLLATERAL_TOKEN_ADDRESS
+        value: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+      - key: NEXT_PUBLIC_COLLATERAL_VAULT_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_ADMIN_WALLETS
+        sync: false
+      - key: AUTH_ALLOWED_ORIGINS
+        value: https://relay44.com,https://relay44-web.onrender.com
+
+  - type: pserv
+    name: relay44-x402-facilitator
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run x402:facilitator
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: X402_FACILITATOR_HOST
+        value: 0.0.0.0
+      - key: X402_FACILITATOR_PORT
+        value: "8081"
+      - key: X402_FACILITATOR_PRIVATE_KEY
+        sync: false
+      - key: X402_FACILITATOR_SHARED_SECRET
+        generateValue: true
+      - key: BASE_RPC_URL
+        value: https://mainnet.base.org
+      - key: BASE_RPC_FALLBACK_URLS
+        sync: false
+      - key: BASE_CHAIN_ID
+        value: "8453"
+
+  - type: pserv
+    name: relay44-xmtp-bridge
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run xmtp:bridge
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: XMTP_BRIDGE_HOST
+        value: 0.0.0.0
+      - key: XMTP_BRIDGE_PORT
+        value: "8090"
+      - key: XMTP_ENV
+        value: production
+      - key: XMTP_WALLET_KEY
+        sync: false
+      - key: XMTP_DB_DIRECTORY
+        value: /var/data/xmtp
+    disk:
+      name: xmtp-db
+      mountPath: /var/data/xmtp
+      sizeGB: 1
+
+  - type: cron
+    name: relay44-farcaster-bot
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "*/5 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run farcaster-bot:tick
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: FARCASTER_BOT_ENABLED
+        value: "true"
+      - key: FARCASTER_BOT_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: FARCASTER_BOT_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: FARCASTER_BOT_SIWE_DOMAIN
+        value: relay44.com
+      - key: FARCASTER_BOT_CHAIN_ID
+        value: "8453"
+      - key: FARCASTER_BOT_SITE_URL
+        value: https://relay44.com
+      - key: FARCASTER_BOT_PRICE_CHANGE_THRESHOLD
+        value: "10"
+      - key: FARCASTER_BOT_VOLUME_THRESHOLD
+        value: "10000"
+      - key: NEYNAR_API_KEY
+        sync: false
+      - key: NEYNAR_SIGNER_UUID
+        sync: false
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: farcaster-bot-state
+      mountPath: /var/data/farcaster-bot
+      sizeGB: 1
+
+  - type: cron
+    name: relay44-external-agent-runner
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "* * * * *"
+    buildCommand: npm ci
+    startCommand: npm run external-runner:tick
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: EXTERNAL_RUNNER_ENABLED
+        value: "true"
+      - key: EXTERNAL_RUNNER_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: EXTERNAL_RUNNER_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: EXTERNAL_RUNNER_SIWE_DOMAIN
+        value: relay44.com
+      - key: EXTERNAL_RUNNER_CHAIN_ID
+        value: "8453"
+      - key: EXTERNAL_RUNNER_LIMIT
+        value: "200"
+      - key: EXTERNAL_RUNNER_COUNTRY_CODE
+        sync: false
+
+  - type: cron
+    name: relay44-decision-runner
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "* * * * *"
+    buildCommand: npm ci
+    startCommand: npm run decision-runner:tick
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DECISION_RUNNER_ENABLED
+        value: "true"
+      - key: DECISION_RUNNER_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: DECISION_RUNNER_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: DECISION_RUNNER_SIWE_DOMAIN
+        value: relay44.com
+      - key: DECISION_RUNNER_CHAIN_ID
+        value: "8453"
+      - key: DECISION_RUNNER_LIMIT
+        value: "100"
+      - key: NODE_ENV
+        value: production
+
+  - type: cron
+    name: relay44-base-agent-operator
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "* * * * *"
+    buildCommand: npm ci
+    startCommand: npm run agents:operator
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: BASE_AGENT_OPERATOR_ENABLED
+        value: "false"
+      - key: BASE_AGENT_OPERATOR_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: BASE_AGENT_OPERATOR_PRIVATE_KEY
+        sync: false
+      - key: BASE_AGENT_OPERATOR_LIMIT
+        value: "100"
+      - key: BASE_CHAIN_ID
+        value: "8453"
+      - key: BASE_RPC_URL
+        sync: false
+      - key: BASE_RPC_FALLBACK_URLS
+        sync: false
+      - key: NODE_ENV
+        value: production
+
+databases:
+  - name: relay44-db
+    plan: starter
+    region: singapore
+    postgresMajorVersion: "16"
