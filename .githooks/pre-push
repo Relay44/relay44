@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+if [[ -e "docs" ]]; then
+  echo "Push blocked: root docs/ directory is not allowed."
+  echo "Remove docs/ (or move it outside the repo) before pushing."
+  exit 1
+fi
+
+if [[ ! -x ./scripts/verify-project-silo.sh ]]; then
+  echo "Missing silo checker: scripts/verify-project-silo.sh"
+  exit 1
+fi
+
+SILO_CHECK_INCLUDE_DOCS=1 ./scripts/verify-project-silo.sh
+
+if [[ ! -x ./scripts/verify-open-core-boundary.mjs ]]; then
+  echo "Missing open-core checker: scripts/verify-open-core-boundary.mjs"
+  exit 1
+fi
+
+node ./scripts/verify-open-core-boundary.mjs
+
+if [[ ! -x ./scripts/verify-commit-hygiene.sh ]]; then
+  echo "Missing commit hygiene checker: scripts/verify-commit-hygiene.sh"
+  exit 1
+fi
+
+upstream_ref="$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || true)"
+if [[ -n "$upstream_ref" ]]; then
+  ./scripts/verify-commit-hygiene.sh --history-range "${upstream_ref}..HEAD"
+else
+  ./scripts/verify-commit-hygiene.sh --history-range "HEAD"
+fi
+
+if [[ ! -x ./scripts/verify-no-internal-assets.sh ]]; then
+  echo "Missing internal asset checker: scripts/verify-no-internal-assets.sh"
+  exit 1
+fi
+
+if [[ -n "$upstream_ref" ]]; then
+  ./scripts/verify-no-internal-assets.sh range "${upstream_ref}..HEAD"
+else
+  ./scripts/verify-no-internal-assets.sh range "HEAD"
+fi
+
+if [[ ! -x ./scripts/verify-no-native-selects.sh ]]; then
+  echo "Missing custom select checker: scripts/verify-no-native-selects.sh"
+  exit 1
+fi
+
+if [[ -n "$upstream_ref" ]]; then
+  ./scripts/verify-no-native-selects.sh range "${upstream_ref}..HEAD"
+else
+  ./scripts/verify-no-native-selects.sh range "HEAD"
+fi
