@@ -698,3 +698,102 @@ mod tests {
                 "BASE_RPC_FALLBACK_URLS",
                 "https://base.rpc.backup,https://base.rpc.example, https://base.rpc.third ",
             );
+            std::env::set_var("BASE_INDEXER_RPC_URL", "https://base.indexer.example");
+            std::env::set_var("BASE_WS_URL", "wss://base.rpc.example");
+            std::env::set_var("BASE_CHAIN_ID", "8453");
+            std::env::set_var("SIWE_DOMAIN", "app.neuralminds.example");
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(config.base_rpc_url, "https://base.rpc.example");
+            assert_eq!(
+                config.base_rpc_fallback_urls,
+                vec![
+                    "https://base.rpc.backup".to_string(),
+                    "https://base.rpc.third".to_string()
+                ]
+            );
+            assert_eq!(
+                config.base_indexer_rpc_url,
+                Some("https://base.indexer.example".to_string())
+            );
+            assert_eq!(config.base_ws_url, "wss://base.rpc.example");
+            assert_eq!(config.base_chain_id, 8453);
+            assert_eq!(config.siwe_domain, "app.neuralminds.example");
+        });
+    }
+
+    #[test]
+    fn test_evm_enabled_flag() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var("EVM_ENABLED", "true");
+
+            let config = AppConfig::from_env();
+            assert!(config.evm_enabled);
+        });
+    }
+
+    #[test]
+    fn test_environment_case_insensitive() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "DEVELOPMENT");
+
+            let config = AppConfig::from_env();
+            assert!(config.is_development);
+        });
+    }
+
+    #[test]
+    fn test_paper_execution_mode_parsing() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var("EXTERNAL_EXECUTION_MODE", "paper");
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(config.external_execution_mode, ExternalExecutionMode::Paper);
+            assert_eq!(config.external_execution_mode.as_str(), "paper");
+        });
+    }
+
+    #[test]
+    fn test_admin_wallets_parsing() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var(
+                "ADMIN_WALLETS",
+                "0x1111111111111111111111111111111111111111,invalid,0x2222222222222222222222222222222222222222",
+            );
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(config.admin_wallets.len(), 2);
+            assert!(config
+                .admin_wallets
+                .contains(&"0x1111111111111111111111111111111111111111".to_string()));
+            assert!(config
+                .admin_wallets
+                .contains(&"0x2222222222222222222222222222222222222222".to_string()));
+        });
+    }
+
+    #[test]
+    fn test_provider_launch_credentials_parsing() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var("LIMITLESS_API_KEY", "limitless-key");
+            std::env::set_var("POLYMARKET_API_KEY", "poly-key");
+            std::env::set_var("POLYMARKET_API_SECRET", "poly-secret");
+            std::env::set_var("POLYMARKET_API_PASSPHRASE", "poly-passphrase");
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(config.limitless_api_key, "limitless-key");
+            assert_eq!(config.polymarket_api_key, "poly-key");
+            assert_eq!(config.polymarket_api_secret, "poly-secret");
+            assert_eq!(config.polymarket_api_passphrase, "poly-passphrase");
+        });
+    }
+}
+
