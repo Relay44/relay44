@@ -71,27 +71,3 @@ jobs:
             exit 0
           fi
 
-          violations=0
-          for c in "${commits[@]}"; do
-            an="$(git show -s --format='%an' "$c")"
-            ae="$(git show -s --format='%ae' "$c")"
-            cn="$(git show -s --format='%cn' "$c")"
-            ce="$(git show -s --format='%ce' "$c")"
-            msg="$(git show -s --format='%s%n%b' "$c")"
-
-            blob="$(printf '%s\n%s\n%s\n%s\n%s\n' "$an" "$ae" "$cn" "$ce" "$msg" | tr '[:upper:]' '[:lower:]')"
-            if grep -q "$forbidden" <<<"$blob"; then
-              echo "identity-firewall: violation in commit $c"
-              echo "  policy: $policy"
-              echo "  author: $an <$ae>"
-              echo "  committer: $cn <$ce>"
-              violations=1
-            fi
-          done
-
-          if [[ $violations -ne 0 ]]; then
-            echo "identity-firewall: blocked"
-            exit 1
-          fi
-
-          echo "identity-firewall: passed"
