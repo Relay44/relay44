@@ -597,3 +597,104 @@ mod tests {
             "EXTERNAL_EXECUTION_MODE",
             "LIMITLESS_ENABLED",
             "POLYMARKET_ENABLED",
+            "LIMITLESS_API_KEY",
+            "POLYMARKET_API_KEY",
+            "POLYMARKET_API_SECRET",
+            "POLYMARKET_API_PASSPHRASE",
+            "EXTERNAL_CREDENTIALS_MASTER_KEY",
+            "EXTERNAL_CREDENTIALS_KEY_ID",
+            "LIMITLESS_API_BASE",
+            "POLYMARKET_GAMMA_API_BASE",
+            "POLYMARKET_CLOB_API_BASE",
+            "POLYGON_RPC_URL",
+            "SANCTIONS_BLOCKED_ADDRESSES",
+            "ADMIN_WALLETS",
+            "ADMIN_CONTROL_KEY",
+            "PAPER_HOLD_DURATION_SECONDS",
+            "PAPER_FEE_BPS",
+            "PAPER_RUNNER_SCAN_LIMIT",
+            "MATCHER_ENABLED",
+            "MATCHER_MAX_FILL_SIZE",
+            "MATCHER_RATE_LIMIT_PER_MARKET",
+            "INDEXER_LOOKBACK_BLOCKS",
+            "INDEXER_CONFIRMATIONS",
+        ];
+        let saved: Vec<_> = env_vars
+            .iter()
+            .map(|k| (*k, std::env::var(*k).ok()))
+            .collect();
+
+        for k in &env_vars {
+            std::env::remove_var(*k);
+        }
+
+        let result = f();
+
+        for (k, v) in saved {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+
+        result
+    }
+
+    #[test]
+    fn test_development_mode_defaults() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            let config = AppConfig::from_env();
+
+            assert!(config.is_development);
+            assert_eq!(config.host, "0.0.0.0");
+            assert_eq!(config.port, 8080);
+            assert!(config.cors_origins.contains(&"*".to_string()));
+            assert!(config.evm_enabled);
+        });
+    }
+
+    #[test]
+    fn test_cors_origins_parsing() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var(
+                "CORS_ORIGINS",
+                "http://localhost:3000, https://app.example.com",
+            );
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(config.cors_origins.len(), 2);
+            assert!(config
+                .cors_origins
+                .contains(&"http://localhost:3000".to_string()));
+            assert!(config
+                .cors_origins
+                .contains(&"https://app.example.com".to_string()));
+        });
+    }
+
+    #[test]
+    fn test_custom_host_and_port() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var("HOST", "127.0.0.1");
+            std::env::set_var("PORT", "3000");
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(config.host, "127.0.0.1");
+            assert_eq!(config.port, 3000);
+        });
+    }
+
+    #[test]
+    fn test_custom_base_urls_and_chain_id() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var("BASE_RPC_URL", "https://base.rpc.example");
+            std::env::set_var(
+                "BASE_RPC_FALLBACK_URLS",
+                "https://base.rpc.backup,https://base.rpc.example, https://base.rpc.third ",
+            );
