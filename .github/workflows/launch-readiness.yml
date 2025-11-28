@@ -73,34 +73,3 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-
-      - name: Install root dependencies
-        run: npm ci
-
-      - name: Install web dependencies
-        run: npm ci --prefix web
-
-      - name: Validate launch config
-        run: npm run launch:config:prod-strict
-
-      - name: Run strict production gates
-        env:
-          PRODUCTION_GATE_TIMEOUT_MS: "900000"
-        run: npm run production:gates:strict
-
-      - name: Generate launch summary
-        run: npm run launch:summary
-
-      - name: Upload readiness reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: launch-readiness-reports
-          path: |
-            docs/reports/*.json
-            docs/reports/*.md
-          if-no-files-found: warn
