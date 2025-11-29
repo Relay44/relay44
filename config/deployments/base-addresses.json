@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-02-28T00:00:00Z",
+  "environments": {
+    "production": {
+      "name": "base-mainnet",
+      "chainId": 8453,
+      "contracts": {
+        "marketCore": "0x4d66ab11e147f6d8c395b36d6b0da867eb1f7a13",
+        "orderBook": "0x391050b6a7e3be5b699772880fe6d3d249d49b7b",
+        "collateralVault": "0x139290d00aebe1df9f5d40b796c0d30dea1e93a0",
+        "agentRuntime": "0xbf5d884648bd799092f5b1663c950a85dee1e825",
+        "collateralToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      }
+    },
+    "staging": {
+      "name": "base-sepolia",
+      "chainId": 84532,
+      "contracts": {
+        "marketCore": "0x823d54726ddc48a784ee6eb53235f5d68c94f1c0",
+        "orderBook": "0xc6ec840da50fc708bf155b5b15a585c5d0004ebf",
+        "collateralVault": "0x588e19e5831ddc8aed5c8e0d687f86884ff98ee2",
+        "agentRuntime": null,
+        "collateralToken": "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+      }
+    }
+  }
+}
