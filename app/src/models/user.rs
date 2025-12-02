@@ -62,27 +62,3 @@ impl From<u8> for TransactionType {
             6 => TransactionType::Redeem,
             _ => TransactionType::Deposit,
         }
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TransactionStatus {
-    Pending,
-    Confirmed,
-    Failed,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ListTransactionsQuery {
-    pub limit: Option<i64>,
-    pub offset: Option<i64>,
-    pub tx_type: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TransactionListResponse {
-    pub transactions: Vec<Transaction>,
-    pub total: i64,
-}
