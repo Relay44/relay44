@@ -775,3 +775,108 @@ mod tests {
         assert!(validate_evm_address("0xZZC7656EC7ab88b098defB751B7401B5f6d8976F").is_err());
         assert!(validate_evm_address("0x71c7656ec7ab88b098defb751b7401b5f6d8976f").is_err());
     }
+
+    #[test]
+    fn test_decode_hex_signature() {
+        let sig = format!("0x{}", "11".repeat(65));
+        let decoded = decode_hex_signature(&sig).unwrap();
+        assert_eq!(decoded.len(), 65);
+    }
+
+    #[test]
+    fn test_generate_nonce_uniqueness() {
+        let nonce1 = generate_nonce();
+        let nonce2 = generate_nonce();
+
+        assert_ne!(nonce1, nonce2);
+        assert!(nonce1.len() >= 32);
+    }
+
+    #[test]
+    fn test_generate_nonce_format() {
+        let nonce = generate_nonce();
+        assert!(nonce.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_authenticated_user_struct() {
+        let user = AuthenticatedUser {
+            wallet_address: "0xabc".to_string(),
+        };
+        assert_eq!(user.wallet_address, "0xabc");
+    }
+
+    #[test]
+    fn test_message_expiration_constant() {
+        assert_eq!(MESSAGE_EXPIRATION_SECS, 300);
+    }
+
+    #[test]
+    fn test_nonce_cleanup_age_constant() {
+        assert_eq!(NONCE_CLEANUP_AGE_SECS, 600);
+    }
+
+    #[test]
+    fn test_generate_multiple_nonces_all_unique() {
+        use std::collections::HashSet;
+        let nonces: HashSet<String> = (0..100).map(|_| generate_nonce()).collect();
+        assert_eq!(nonces.len(), 100, "All generated nonces should be unique");
+    }
+
+    #[test]
+    fn test_validate_solana_signin_message_valid() {
+        let domain = "localhost:3000";
+        let wallet = "11111111111111111111111111111111";
+        let nonce = "abc123ef45";
+        let message = build_solana_signin_message(domain, wallet, nonce, OffsetDateTime::now_utc());
+        let parsed =
+            validate_solana_signin_message(message.as_str(), wallet, domain).expect("valid signin");
+        assert_eq!(parsed, nonce);
+    }
+
+    #[test]
+    fn test_validate_solana_signin_message_rejects_domain_mismatch() {
+        let wallet = "11111111111111111111111111111111";
+        let message = build_solana_signin_message(
+            "localhost:3000",
+            wallet,
+            "abc123ef45",
+            OffsetDateTime::now_utc(),
+        );
+        assert!(validate_solana_signin_message(message.as_str(), wallet, "example.com").is_err());
+    }
+
+    #[test]
+    fn test_validate_solana_signin_message_rejects_expired_timestamp() {
+        let domain = "localhost:3000";
+        let wallet = "11111111111111111111111111111111";
+        let message = build_solana_signin_message(
+            domain,
+            wallet,
+            "abc123ef45",
+            OffsetDateTime::now_utc() - time::Duration::seconds(601),
+        );
+        assert!(validate_solana_signin_message(message.as_str(), wallet, domain).is_err());
+    }
+
+    #[test]
+    fn test_determine_user_role_from_allowlists_grants_admin() {
+        let role = determine_user_role_from_allowlists(
+            "0x1111111111111111111111111111111111111111",
+            &["0x1111111111111111111111111111111111111111".to_string()],
+        );
+
+        assert_eq!(role, UserRole::Admin);
+    }
+
+    #[test]
+    fn test_determine_user_role_from_allowlists_defaults_to_user() {
+        let role = determine_user_role_from_allowlists(
+            "0x2222222222222222222222222222222222222222",
+            &["0x1111111111111111111111111111111111111111".to_string()],
+        );
+
+        assert_eq!(role, UserRole::User);
+    }
+}
+
