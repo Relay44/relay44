@@ -266,3 +266,92 @@ impl JwtService {
         validation.set_audience(&[TOKEN_AUDIENCE, LEGACY_TOKEN_AUDIENCE]);
         validation.set_issuer(&[TOKEN_ISSUER, LEGACY_TOKEN_ISSUER]);
 
+        decode::<Claims>(token, decoding_key, &validation)
+            .map(|data| data.claims)
+            .map_err(|e| {
+                log::debug!("JWT validation failed: {}", e);
+                match e.kind() {
+                    jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
+                        ApiError::unauthorized("Token expired")
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidToken => {
+                        ApiError::unauthorized("Invalid token format")
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+                        ApiError::unauthorized("Invalid token signature")
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                        ApiError::unauthorized("Invalid token audience")
+                    }
+                    jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                        ApiError::unauthorized("Invalid token issuer")
+                    }
+                    _ => ApiError::unauthorized("Invalid token"),
+                }
+            })
+    }
+}
+
+/// Token pair response for authentication endpoints
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TokenPair {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_type: String,
+    pub expires_in: i64,
+}
+
+impl TokenPair {
+    pub fn new(access_token: String, refresh_token: String) -> Self {
+        Self {
+            access_token,
+            refresh_token,
+            token_type: "Bearer".to_string(),
+            expires_in: ACCESS_TOKEN_EXPIRATION_HOURS * 3600,
+        }
+    }
+}
+
+/// Check if user has required role
+#[allow(dead_code)]
+pub fn check_role(user_role: UserRole, required_role: UserRole) -> Result<(), ApiError> {
+    let has_access = match required_role {
+        UserRole::User => true, // Everyone can access user-level resources
+        UserRole::Keeper => matches!(user_role, UserRole::Keeper | UserRole::Admin),
+        UserRole::Admin => matches!(user_role, UserRole::Admin),
+    };
+
+    if has_access {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden("Insufficient permissions"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_jwt_service() -> JwtService {
+        JwtService::new("test-secret-key-for-unit-tests-only-12345678")
+    }
+
+    #[test]
+    fn test_generate_and_validate_access_token() {
+        let service = test_jwt_service();
+        let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+        let token = service
+            .generate_access_token(wallet, UserRole::User)
+            .unwrap();
+        let claims = service.validate_token(&token).unwrap();
+
+        assert_eq!(claims.sub, wallet);
+        assert_eq!(claims.role, UserRole::User);
+    }
+
+    #[test]
+    fn test_generate_and_validate_refresh_token() {
+        let service = test_jwt_service();
+        let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
