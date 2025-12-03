@@ -440,3 +440,338 @@ pub async fn logout(
                 }
             }
         }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "message": "Logged out successfully"
+    })))
+}
+
+#[allow(dead_code)]
+pub async fn logout_all(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<HttpResponse, ApiError> {
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok());
+
+    if let Some(header) = auth_header {
+        if let Some(token) = header.strip_prefix("Bearer ") {
+            if let Ok(claims) = state.jwt.validate_token(token) {
+                log::info!("User {} logging out from all devices", claims.sub);
+
+                if let Err(e) = state.redis.revoke_all_user_tokens(&claims.sub).await {
+                    log::error!("Failed to revoke all tokens: {}", e);
+                    return Err(ApiError::internal("Failed to logout from all devices"));
+                }
+
+                return Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "Logged out from all devices successfully"
+                })));
+            }
+        }
+    }
+
+    Err(ApiError::unauthorized("Invalid or missing token"))
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUserWithRole {
+    pub wallet_address: String,
+    pub role: UserRole,
+}
+
+pub fn extract_jwt_user(
+    req: &HttpRequest,
+    state: &web::Data<Arc<AppState>>,
+) -> Result<AuthenticatedUserWithRole, ApiError> {
+    let auth_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| ApiError::unauthorized("Missing Authorization header"))?;
+
+    if !auth_header.starts_with("Bearer ") {
+        return Err(ApiError::unauthorized(
+            "Invalid Authorization header format",
+        ));
+    }
+
+    let token = &auth_header[7..];
+    let claims = state.jwt.validate_token(token)?;
+
+    Ok(AuthenticatedUserWithRole {
+        wallet_address: claims.sub,
+        role: claims.role,
+    })
+}
+
+async fn determine_user_role(wallet: &str, _state: &web::Data<Arc<AppState>>) -> UserRole {
+    determine_user_role_from_allowlists(wallet, &_state.config.admin_wallets)
+}
+
+fn determine_user_role_from_allowlists(wallet: &str, admin_wallets: &[String]) -> UserRole {
+    let normalized = wallet.trim().to_ascii_lowercase();
+    if admin_wallets.iter().any(|entry| entry == &normalized) {
+        UserRole::Admin
+    } else {
+        UserRole::User
+    }
+}
+
+fn normalize_solana_address(wallet: &str) -> Result<String, ApiError> {
+    let trimmed = wallet.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_WALLET",
+            "Wallet is required",
+        ));
+    }
+
+    let bytes = bs58::decode(trimmed)
+        .into_vec()
+        .map_err(|_| ApiError::bad_request("INVALID_WALLET", "Invalid Solana wallet format"))?;
+    if bytes.len() != SOLANA_PUBKEY_BYTES_LEN {
+        return Err(ApiError::bad_request(
+            "INVALID_WALLET",
+            "Invalid Solana wallet length",
+        ));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+fn decode_solana_public_key(wallet: &str) -> Result<VerifyingKey, ApiError> {
+    let bytes = bs58::decode(wallet)
+        .into_vec()
+        .map_err(|_| ApiError::bad_request("INVALID_WALLET", "Invalid Solana wallet format"))?;
+    let key_bytes: [u8; SOLANA_PUBKEY_BYTES_LEN] = bytes.try_into().map_err(|_| {
+        ApiError::bad_request("INVALID_WALLET", "Invalid Solana wallet public key bytes")
+    })?;
+
+    VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|_| ApiError::bad_request("INVALID_WALLET", "Invalid Solana wallet public key"))
+}
+
+fn decode_solana_signature(signature: &str) -> Result<Ed25519Signature, ApiError> {
+    let trimmed = signature.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_SIGNATURE",
+            "signature is required",
+        ));
+    }
+
+    let decoded = if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(trimmed) {
+        bytes
+    } else {
+        bs58::decode(trimmed).into_vec().map_err(|_| {
+            ApiError::bad_request("INVALID_SIGNATURE", "signature must be base64 or base58")
+        })?
+    };
+
+    if decoded.len() != SOLANA_SIGNATURE_BYTES_LEN {
+        return Err(ApiError::bad_request(
+            "INVALID_SIGNATURE",
+            "signature must be 64-byte Ed25519 signature",
+        ));
+    }
+
+    Ed25519Signature::from_slice(&decoded)
+        .map_err(|_| ApiError::bad_request("INVALID_SIGNATURE", "invalid signature bytes"))
+}
+
+fn message_line_value<'a>(message: &'a str, label: &str) -> Option<&'a str> {
+    message
+        .lines()
+        .find_map(|line| line.strip_prefix(label).map(str::trim))
+}
+
+fn validate_solana_signin_message(
+    message: &str,
+    wallet: &str,
+    expected_domain: &str,
+) -> Result<String, ApiError> {
+    if message.len() > 4096 {
+        return Err(ApiError::bad_request(
+            "INVALID_MESSAGE",
+            "Solana signin message too large",
+        ));
+    }
+
+    let lines = message.lines().collect::<Vec<_>>();
+    if lines.len() < 8 {
+        return Err(ApiError::bad_request(
+            "INVALID_MESSAGE",
+            "Malformed Solana signin message",
+        ));
+    }
+
+    let expected_prefix = format!(
+        "{} wants you to sign in with your Solana account:",
+        expected_domain
+    );
+    if lines[0].trim() != expected_prefix {
+        return Err(ApiError::unauthorized("Solana signin domain mismatch"));
+    }
+    if lines[1].trim() != wallet {
+        return Err(ApiError::unauthorized(
+            "Wallet address mismatch in Solana signin message",
+        ));
+    }
+    if !message.contains("Sign in to relay44") {
+        return Err(ApiError::bad_request(
+            "INVALID_MESSAGE",
+            "Missing Solana signin statement",
+        ));
+    }
+
+    if let Some(chain) = message_line_value(message, "Chain:") {
+        if chain.to_ascii_lowercase() != "solana" {
+            return Err(ApiError::bad_request(
+                "INVALID_MESSAGE",
+                "Chain must be solana in Solana signin message",
+            ));
+        }
+    }
+
+    let nonce = message_line_value(message, "Nonce:").ok_or_else(|| {
+        ApiError::bad_request("INVALID_MESSAGE", "Nonce missing in signin message")
+    })?;
+    if nonce.is_empty() || nonce.len() > 128 || !nonce.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request(
+            "INVALID_MESSAGE",
+            "Invalid nonce in Solana signin message",
+        ));
+    }
+
+    let issued_at = message_line_value(message, "Issued At:").ok_or_else(|| {
+        ApiError::bad_request("INVALID_MESSAGE", "Issued At missing in signin message")
+    })?;
+    let issued_at =
+        OffsetDateTime::parse(issued_at, &time::format_description::well_known::Rfc3339)
+            .map_err(|_| ApiError::bad_request("INVALID_MESSAGE", "Invalid Issued At timestamp"))?;
+    let now = OffsetDateTime::now_utc();
+    if issued_at > now + time::Duration::seconds(30) {
+        return Err(ApiError::bad_request(
+            "INVALID_MESSAGE",
+            "Issued At cannot be in the future",
+        ));
+    }
+    if now - issued_at > time::Duration::seconds(MESSAGE_EXPIRATION_SECS as i64) {
+        return Err(ApiError::unauthorized("Solana signin message expired"));
+    }
+
+    Ok(nonce.to_string())
+}
+
+fn validate_evm_address(address: &str) -> Result<(), ApiError> {
+    if address.len() != EVM_ADDRESS_LEN || !address.starts_with("0x") {
+        return Err(ApiError::bad_request(
+            "INVALID_WALLET",
+            "Invalid EVM wallet address format",
+        ));
+    }
+
+    if !address[2..].chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request(
+            "INVALID_WALLET",
+            "Invalid EVM wallet address format",
+        ));
+    }
+
+    if !is_eip55_checksum(address) {
+        return Err(ApiError::bad_request(
+            "INVALID_WALLET",
+            "EVM wallet address must use EIP-55 checksum casing",
+        ));
+    }
+
+    Ok(())
+}
+
+fn normalize_evm_address(address: &str) -> String {
+    address.to_ascii_lowercase()
+}
+
+fn is_eip55_checksum(address: &str) -> bool {
+    if address.len() != EVM_ADDRESS_LEN || !address.starts_with("0x") {
+        return false;
+    }
+
+    let hex_part = &address[2..];
+    let lower = hex_part.to_ascii_lowercase();
+
+    if hex_part == lower || hex_part == lower.to_ascii_uppercase() {
+        return false;
+    }
+
+    let mut hasher = Keccak256::new();
+    hasher.update(lower.as_bytes());
+    let hash = hasher.finalize();
+
+    for (idx, ch) in hex_part.chars().enumerate() {
+        if ch.is_ascii_digit() {
+            continue;
+        }
+
+        let hash_byte = hash[idx / 2];
+        let nibble = if idx % 2 == 0 {
+            hash_byte >> 4
+        } else {
+            hash_byte & 0x0f
+        };
+
+        if nibble >= 8 && !ch.is_ascii_uppercase() {
+            return false;
+        }
+
+        if nibble < 8 && !ch.is_ascii_lowercase() {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn decode_hex_signature(signature: &str) -> Result<Vec<u8>, ApiError> {
+    let sig = signature.strip_prefix("0x").unwrap_or(signature);
+
+    hex::decode(sig)
+        .map_err(|_| ApiError::bad_request("INVALID_SIGNATURE", "Signature must be valid hex"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_solana_signin_message(
+        domain: &str,
+        wallet: &str,
+        nonce: &str,
+        issued_at: OffsetDateTime,
+    ) -> String {
+        let issued_at = issued_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap();
+        format!(
+            "{domain} wants you to sign in with your Solana account:\n{wallet}\n\nSign in to relay44\n\nURI: https://{domain}\nVersion: 1\nChain: solana\nNonce: {nonce}\nIssued At: {issued_at}"
+        )
+    }
+
+    #[test]
+    fn test_validate_evm_address_valid() {
+        let valid = "0x71C7656EC7ab88b098defB751B7401B5f6d8976F";
+        assert!(validate_evm_address(valid).is_ok());
+    }
+
+    #[test]
+    fn test_validate_evm_address_invalid() {
+        assert!(validate_evm_address("0x123").is_err());
+        assert!(validate_evm_address("71C7656EC7ab88b098defB751B7401B5f6d8976F").is_err());
+        assert!(validate_evm_address("0xZZC7656EC7ab88b098defB751B7401B5f6d8976F").is_err());
+        assert!(validate_evm_address("0x71c7656ec7ab88b098defb751b7401b5f6d8976f").is_err());
+    }
