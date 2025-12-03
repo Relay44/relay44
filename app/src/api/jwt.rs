@@ -1,0 +1,268 @@
+use crate::api::ApiError;
+use chrono::{Duration, Utc};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+/// JWT token claims
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Claims {
+    /// Subject (wallet address)
+    pub sub: String,
+    /// Issued at timestamp (Unix seconds)
+    pub iat: i64,
+    /// Expiration timestamp (Unix seconds)
+    pub exp: i64,
+    /// User role
+    pub role: UserRole,
+    /// Token ID for revocation tracking
+    pub jti: String,
+    /// Audience - the intended recipient of the token
+    pub aud: String,
+    /// Issuer - who created the token
+    pub iss: String,
+}
+
+/// Expected audience for newly-issued tokens.
+pub const TOKEN_AUDIENCE: &str = "relay44-api";
+/// Issuer for newly-issued tokens.
+pub const TOKEN_ISSUER: &str = "relay44";
+const LEGACY_TOKEN_AUDIENCE: &str = "polyguard-api";
+const LEGACY_TOKEN_ISSUER: &str = "polyguard";
+
+/// User roles for RBAC
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UserRole {
+    /// Regular user - can trade and manage their own orders/positions
+    #[default]
+    User,
+    /// Keeper - can settle trades and manage order book
+    Keeper,
+    /// Admin - full access to all operations
+    Admin,
+}
+
+/// Token expiration times
+pub const ACCESS_TOKEN_EXPIRATION_HOURS: i64 = 1;
+pub const REFRESH_TOKEN_EXPIRATION_DAYS: i64 = 7;
+
+/// Token type for different purposes
+#[derive(Debug, Clone, Copy)]
+pub enum TokenType {
+    Access,
+    Refresh,
+}
+
+/// A signing key with its ID for rotation support
+struct SigningKey {
+    #[allow(dead_code)]
+    kid: String,
+    encoding_key: EncodingKey,
+    decoding_key: DecodingKey,
+}
+
+/// JWT service for token management with key rotation support
+///
+/// Supports multiple active keys for graceful rotation:
+/// 1. Add new key via `add_key()`
+/// 2. Set it as primary via `set_primary_key()`
+/// 3. Old tokens continue to validate during grace period
+/// 4. Remove old key via `remove_key()` after grace period
+pub struct JwtService {
+    /// Current primary key ID (used for signing new tokens)
+    primary_kid: RwLock<String>,
+    /// All valid keys (can validate tokens signed with any of these)
+    keys: RwLock<HashMap<String, SigningKey>>,
+}
+
+impl JwtService {
+    /// Create a new JWT service with the given secret
+    pub fn new(secret: &str) -> Self {
+        let kid = Self::generate_kid();
+        let signing_key = SigningKey {
+            kid: kid.clone(),
+            encoding_key: EncodingKey::from_secret(secret.as_bytes()),
+            decoding_key: DecodingKey::from_secret(secret.as_bytes()),
+        };
+
+        let mut keys = HashMap::new();
+        keys.insert(kid.clone(), signing_key);
+
+        Self {
+            primary_kid: RwLock::new(kid),
+            keys: RwLock::new(keys),
+        }
+    }
+
+    /// Generate a unique key ID
+    fn generate_kid() -> String {
+        format!("k{}_{:08x}", Utc::now().timestamp(), rand::random::<u32>())
+    }
+
+    /// Add a new key for rotation. Returns the key ID.
+    /// The key is not used for signing until set as primary.
+    pub fn add_key(&self, secret: &str) -> String {
+        let kid = Self::generate_kid();
+        let signing_key = SigningKey {
+            kid: kid.clone(),
+            encoding_key: EncodingKey::from_secret(secret.as_bytes()),
+            decoding_key: DecodingKey::from_secret(secret.as_bytes()),
+        };
+
+        let mut keys = self.keys.write().unwrap();
+        keys.insert(kid.clone(), signing_key);
+        log::info!("Added new JWT signing key: {}", kid);
+        kid
+    }
+
+    /// Set the primary key (used for signing new tokens)
+    pub fn set_primary_key(&self, kid: &str) -> Result<(), ApiError> {
+        let keys = self.keys.read().unwrap();
+        if !keys.contains_key(kid) {
+            return Err(ApiError::bad_request("INVALID_KEY_ID", "Key not found"));
+        }
+        drop(keys);
+
+        let mut primary = self.primary_kid.write().unwrap();
+        log::info!("Rotating primary JWT key from {} to {}", *primary, kid);
+        *primary = kid.to_string();
+        Ok(())
+    }
+
+    /// Remove an old key after grace period
+    pub fn remove_key(&self, kid: &str) -> Result<(), ApiError> {
+        let primary = self.primary_kid.read().unwrap();
+        if *primary == kid {
+            return Err(ApiError::bad_request(
+                "CANNOT_REMOVE_PRIMARY",
+                "Cannot remove the primary signing key",
+            ));
+        }
+        drop(primary);
+
+        let mut keys = self.keys.write().unwrap();
+        if keys.remove(kid).is_some() {
+            log::info!("Removed old JWT signing key: {}", kid);
+            Ok(())
+        } else {
+            Err(ApiError::bad_request("INVALID_KEY_ID", "Key not found"))
+        }
+    }
+
+    /// Get list of active key IDs
+    pub fn list_key_ids(&self) -> Vec<String> {
+        let keys = self.keys.read().unwrap();
+        keys.keys().cloned().collect()
+    }
+
+    /// Get the current primary key ID
+    pub fn primary_key_id(&self) -> String {
+        self.primary_kid.read().unwrap().clone()
+    }
+
+    /// Generate an access token for a user
+    pub fn generate_access_token(
+        &self,
+        wallet_address: &str,
+        role: UserRole,
+    ) -> Result<String, ApiError> {
+        self.generate_token(wallet_address, role, TokenType::Access)
+    }
+
+    /// Generate a refresh token for a user
+    pub fn generate_refresh_token(
+        &self,
+        wallet_address: &str,
+        role: UserRole,
+    ) -> Result<String, ApiError> {
+        self.generate_token(wallet_address, role, TokenType::Refresh)
+    }
+
+    /// Generate a token of the specified type
+    fn generate_token(
+        &self,
+        wallet_address: &str,
+        role: UserRole,
+        token_type: TokenType,
+    ) -> Result<String, ApiError> {
+        let now = Utc::now();
+
+        let expiration = match token_type {
+            TokenType::Access => now + Duration::hours(ACCESS_TOKEN_EXPIRATION_HOURS),
+            TokenType::Refresh => now + Duration::days(REFRESH_TOKEN_EXPIRATION_DAYS),
+        };
+
+        // Generate unique token ID
+        let jti = format!(
+            "{:x}{:016x}",
+            now.timestamp_nanos_opt().unwrap_or(0),
+            rand::random::<u64>()
+        );
+
+        let claims = Claims {
+            sub: wallet_address.to_string(),
+            iat: now.timestamp(),
+            exp: expiration.timestamp(),
+            role,
+            jti,
+            aud: TOKEN_AUDIENCE.to_string(),
+            iss: TOKEN_ISSUER.to_string(),
+        };
+
+        // Get primary key for signing
+        let primary_kid = self.primary_kid.read().unwrap().clone();
+        let keys = self.keys.read().unwrap();
+        let signing_key = keys.get(&primary_kid).ok_or_else(|| {
+            log::error!("Primary key {} not found", primary_kid);
+            ApiError::internal("Signing key not available")
+        })?;
+
+        // Include kid in header for key identification during validation
+        let header = Header {
+            kid: Some(primary_kid),
+            ..Header::default()
+        };
+
+        encode(&header, &claims, &signing_key.encoding_key).map_err(|e| {
+            log::error!("Failed to generate JWT: {}", e);
+            ApiError::internal("Failed to generate authentication token")
+        })
+    }
+
+    /// Validate and decode a token
+    pub fn validate_token(&self, token: &str) -> Result<Claims, ApiError> {
+        // First, decode header to get kid
+        let header = jsonwebtoken::decode_header(token)
+            .map_err(|_| ApiError::unauthorized("Invalid token format"))?;
+
+        let keys = self.keys.read().unwrap();
+
+        // If kid specified, use that key; otherwise try all keys
+        let decoding_key = if let Some(kid) = &header.kid {
+            if let Some(key) = keys.get(kid) {
+                &key.decoding_key
+            } else {
+                let primary_kid = self.primary_kid.read().unwrap().clone();
+                log::debug!(
+                    "Token signed with unknown key: {}. Falling back to primary key {}",
+                    kid, primary_kid
+                );
+                keys.get(&primary_kid)
+                    .map(|key| &key.decoding_key)
+                    .ok_or_else(|| ApiError::unauthorized("No valid signing key"))?
+            }
+        } else {
+            // Legacy token without kid - try primary key
+            let primary_kid = self.primary_kid.read().unwrap().clone();
+            keys.get(&primary_kid)
+                .map(|k| &k.decoding_key)
+                .ok_or_else(|| ApiError::unauthorized("No valid signing key"))?
+        };
+
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.validate_exp = true;
+        validation.set_audience(&[TOKEN_AUDIENCE, LEGACY_TOKEN_AUDIENCE]);
+        validation.set_issuer(&[TOKEN_ISSUER, LEGACY_TOKEN_ISSUER]);
+
