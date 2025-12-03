@@ -355,3 +355,96 @@ mod tests {
         let service = test_jwt_service();
         let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
+        let token = service
+            .generate_refresh_token(wallet, UserRole::Admin)
+            .unwrap();
+        let claims = service.validate_token(&token).unwrap();
+
+        assert_eq!(claims.sub, wallet);
+        assert_eq!(claims.role, UserRole::Admin);
+    }
+
+    #[test]
+    fn test_validate_legacy_audience_and_issuer() {
+        let service = test_jwt_service();
+        let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+        let now = Utc::now();
+        let claims = Claims {
+            sub: wallet.to_string(),
+            iat: now.timestamp(),
+            exp: (now + Duration::hours(1)).timestamp(),
+            role: UserRole::User,
+            jti: "legacy-token".to_string(),
+            aud: LEGACY_TOKEN_AUDIENCE.to_string(),
+            iss: LEGACY_TOKEN_ISSUER.to_string(),
+        };
+
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret("test-secret-key-for-unit-tests-only-12345678".as_bytes()),
+        )
+        .unwrap();
+
+        let validated = service.validate_token(&token).unwrap();
+        assert_eq!(validated.sub, wallet);
+        assert_eq!(validated.aud, LEGACY_TOKEN_AUDIENCE);
+        assert_eq!(validated.iss, LEGACY_TOKEN_ISSUER);
+    }
+
+    #[test]
+    fn test_invalid_token() {
+        let service = test_jwt_service();
+
+        let result = service.validate_token("invalid.token.here");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_token_across_restart_with_same_secret() {
+        let issuer = JwtService::new("test-secret-key-for-unit-tests-only-12345678");
+        let validator = JwtService::new("test-secret-key-for-unit-tests-only-12345678");
+
+        let token = issuer
+            .generate_access_token("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", UserRole::User)
+            .unwrap();
+
+        let claims = validator.validate_token(&token).unwrap();
+        assert_eq!(claims.role, UserRole::User);
+    }
+
+    #[test]
+    fn test_tampered_token() {
+        let service = test_jwt_service();
+        let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+        let token = service
+            .generate_access_token(wallet, UserRole::User)
+            .unwrap();
+
+        // Tamper with the token
+        let tampered = format!("{}x", token);
+
+        let result = service.validate_token(&tampered);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_check_role_user() {
+        // Users can access user resources
+        assert!(check_role(UserRole::User, UserRole::User).is_ok());
+        // Keepers can access user resources
+        assert!(check_role(UserRole::Keeper, UserRole::User).is_ok());
+        // Admins can access user resources
+        assert!(check_role(UserRole::Admin, UserRole::User).is_ok());
+    }
+
+    #[test]
+    fn test_check_role_keeper() {
+        // Users cannot access keeper resources
+        assert!(check_role(UserRole::User, UserRole::Keeper).is_err());
+        // Keepers can access keeper resources
+        assert!(check_role(UserRole::Keeper, UserRole::Keeper).is_ok());
+        // Admins can access keeper resources
+        assert!(check_role(UserRole::Admin, UserRole::Keeper).is_ok());
+    }
