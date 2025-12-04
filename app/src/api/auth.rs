@@ -879,4 +879,3 @@ mod tests {
         assert_eq!(role, UserRole::User);
     }
 }
-
