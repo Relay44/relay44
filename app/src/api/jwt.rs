@@ -448,3 +448,87 @@ mod tests {
         // Admins can access keeper resources
         assert!(check_role(UserRole::Admin, UserRole::Keeper).is_ok());
     }
+
+    #[test]
+    fn test_check_role_admin() {
+        // Users cannot access admin resources
+        assert!(check_role(UserRole::User, UserRole::Admin).is_err());
+        // Keepers cannot access admin resources
+        assert!(check_role(UserRole::Keeper, UserRole::Admin).is_err());
+        // Only admins can access admin resources
+        assert!(check_role(UserRole::Admin, UserRole::Admin).is_ok());
+    }
+
+    #[test]
+    fn test_unique_token_ids() {
+        let service = test_jwt_service();
+        let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+        let token1 = service
+            .generate_access_token(wallet, UserRole::User)
+            .unwrap();
+        let token2 = service
+            .generate_access_token(wallet, UserRole::User)
+            .unwrap();
+
+        let claims1 = service.validate_token(&token1).unwrap();
+        let claims2 = service.validate_token(&token2).unwrap();
+
+        // Token IDs should be unique
+        assert_ne!(claims1.jti, claims2.jti);
+    }
+
+    #[test]
+    fn test_key_rotation() {
+        let service = test_jwt_service();
+        let wallet = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+        // Generate token with original key
+        let token1 = service
+            .generate_access_token(wallet, UserRole::User)
+            .unwrap();
+        let original_kid = service.primary_key_id();
+
+        // Add new key and rotate
+        let new_kid = service.add_key("new-secret-key-for-rotation-test-12345");
+        service.set_primary_key(&new_kid).unwrap();
+
+        // Generate token with new key
+        let token2 = service
+            .generate_access_token(wallet, UserRole::User)
+            .unwrap();
+
+        // Both tokens should validate (old key still present)
+        assert!(service.validate_token(&token1).is_ok());
+        assert!(service.validate_token(&token2).is_ok());
+
+        // Remove old key
+        service.remove_key(&original_kid).unwrap();
+
+        // Old token should still work (until expiry) if kid matches existing key
+        // But since old key is removed, it should fail
+        assert!(service.validate_token(&token1).is_err());
+        // New token still works
+        assert!(service.validate_token(&token2).is_ok());
+    }
+
+    #[test]
+    fn test_cannot_remove_primary_key() {
+        let service = test_jwt_service();
+        let primary_kid = service.primary_key_id();
+
+        let result = service.remove_key(&primary_kid);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_list_keys() {
+        let service = test_jwt_service();
+
+        assert_eq!(service.list_key_ids().len(), 1);
+
+        service.add_key("another-secret-key");
+        assert_eq!(service.list_key_ids().len(), 2);
+    }
+}
+
