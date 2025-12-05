@@ -1420,3 +1420,356 @@ async fn evaluate_and_record_alerts(
     let mut events = Vec::new();
     let mut flags = RecalculationFlags::default();
 
+    if previous_recommendation != recommendation.state {
+        flags.recommendation_changed = true;
+        let event = insert_decision_event(
+            state,
+            graph.cell.id.as_str(),
+            None,
+            EVENT_RECOMMENDATION_CHANGED,
+            json!({
+                "previous": previous_recommendation,
+                "current": recommendation.state,
+                "confidenceBps": recommendation.confidence_bps,
+            }),
+        )
+        .await?;
+        create_notification(
+            state,
+            NewNotification {
+                owner: graph.cell.owner.clone(),
+                kind: NotificationType::DecisionRecommendationChanged,
+                title: format!("{} recommendation changed", graph.cell.title),
+                message: recommendation.why_changed.clone(),
+                market_id: None,
+                order_id: None,
+                decision_cell_id: Some(graph.cell.id.clone()),
+                metadata: json!({
+                    "previous": previous_recommendation,
+                    "current": recommendation.state,
+                }),
+            },
+        )
+        .await?;
+        events.push(event);
+    }
+
+    if previous_summary.top_action_lead_bps < RECOMMENDATION_LEAD_THRESHOLD_BPS
+        && recommendation.top_action_lead_bps >= RECOMMENDATION_LEAD_THRESHOLD_BPS
+    {
+        flags.threshold_crossed = true;
+    }
+
+    let previous_confidence_bps = graph.cell.confidence_bps;
+
+    if previous_confidence_bps > 0 && recommendation.confidence_bps < previous_confidence_bps {
+        flags.confidence_dropped = true;
+    }
+
+    if recommendation.confidence_bps > previous_confidence_bps {
+        flags.confidence_gain = true;
+    }
+
+    for alert in &graph.alerts {
+        if !alert.active {
+            continue;
+        }
+
+        let mut fired = false;
+        let mut event_kind = EVENT_THRESHOLD_CROSSED;
+        let mut payload = json!({ "kind": alert.kind });
+        match alert.kind.as_str() {
+            "recommendation_changed" => {
+                fired = previous_recommendation != recommendation.state;
+                event_kind = EVENT_RECOMMENDATION_CHANGED;
+                payload = json!({
+                    "previous": previous_recommendation,
+                    "current": recommendation.state,
+                });
+            }
+            "confidence_below" => {
+                let threshold = alert
+                    .threshold
+                    .get("bps")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32;
+                let previous = graph.cell.confidence_bps;
+                fired = previous >= threshold && recommendation.confidence_bps < threshold;
+                if fired {
+                    event_kind = EVENT_CONFIDENCE_DROPPED;
+                    payload = json!({
+                        "thresholdBps": threshold,
+                        "currentConfidenceBps": recommendation.confidence_bps,
+                    });
+                    flags.confidence_dropped = true;
+                }
+            }
+            "action_lead_above" => {
+                let threshold = alert
+                    .threshold
+                    .get("bps")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(RECOMMENDATION_LEAD_THRESHOLD_BPS as i64)
+                    as i32;
+                fired = previous_summary.top_action_lead_bps < threshold
+                    && recommendation.top_action_lead_bps >= threshold;
+                if fired {
+                    payload = json!({
+                        "thresholdBps": threshold,
+                        "topActionLeadBps": recommendation.top_action_lead_bps,
+                    });
+                    flags.threshold_crossed = true;
+                }
+            }
+            "node_probability_cross" => {
+                let node_id = alert
+                    .threshold
+                    .get("nodeId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let threshold = alert
+                    .threshold
+                    .get("bps")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0) as i32;
+                let direction = alert
+                    .threshold
+                    .get("direction")
+                    .and_then(Value::as_str)
+                    .unwrap_or("above");
+                if let Some(node) = graph.nodes.iter().find(|entry| entry.id == node_id) {
+                    let previous = node.last_probability_bps.unwrap_or_default();
+                    let current = resolved_nodes
+                        .get(node.id.as_str())
+                        .and_then(|entry| entry.as_ref())
+                        .map(|entry| entry.probability_bps)
+                        .unwrap_or_default();
+                    fired = match direction {
+                        "below" => previous >= threshold && current < threshold,
+                        _ => previous < threshold && current >= threshold,
+                    };
+                    if fired {
+                        payload = json!({
+                            "nodeId": node.id,
+                            "nodeLabel": node.label,
+                            "thresholdBps": threshold,
+                            "currentProbabilityBps": current,
+                            "direction": direction,
+                        });
+                        flags.threshold_crossed = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if !fired {
+            continue;
+        }
+
+        sqlx::query(
+            "UPDATE decision_alerts SET last_triggered_at = NOW() WHERE id = $1",
+        )
+        .bind(alert.id.as_str())
+        .execute(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+        let event = insert_decision_event(state, graph.cell.id.as_str(), None, event_kind, payload.clone()).await?;
+        let notification_kind = match event_kind {
+            EVENT_RECOMMENDATION_CHANGED => NotificationType::DecisionRecommendationChanged,
+            EVENT_CONFIDENCE_DROPPED => NotificationType::DecisionConfidenceDropped,
+            _ => NotificationType::DecisionThresholdCrossed,
+        };
+        create_notification(
+            state,
+            NewNotification {
+                owner: graph.cell.owner.clone(),
+                kind: notification_kind,
+                title: format!("{} alert fired", graph.cell.title),
+                message: recommendation.why_changed.clone(),
+                market_id: None,
+                order_id: None,
+                decision_cell_id: Some(graph.cell.id.clone()),
+                metadata: payload,
+            },
+        )
+        .await?;
+        events.push(event);
+    }
+
+    Ok((events, flags))
+}
+
+async fn maybe_run_automation(
+    state: &AppState,
+    graph: &CellGraph,
+    recommendation: &DecisionRecommendation,
+    flags: &RecalculationFlags,
+) -> Result<(Vec<DecisionEventResponse>, u64, BTreeMap<String, u64>), ApiError> {
+    let mut events = Vec::new();
+    let mut executed = 0_u64;
+    let mut skipped = BTreeMap::new();
+
+    if !graph.cell.automation_enabled || !graph.policy.active {
+        return Ok((events, executed, skipped));
+    }
+
+    if recommendation.state == RECOMMENDATION_INSUFFICIENT_SIGNAL {
+        skipped.insert("insufficient_signal".to_string(), 1);
+        return Ok((events, executed, skipped));
+    }
+
+    if recommendation.confidence_bps < graph.policy.require_confidence_bps {
+        skipped.insert("confidence_too_low".to_string(), 1);
+        return Ok((events, executed, skipped));
+    }
+
+    let has_new_event = flags.recommendation_changed || flags.threshold_crossed || flags.confidence_gain;
+    if !has_new_event {
+        skipped.insert("steady_state".to_string(), 1);
+        return Ok((events, executed, skipped));
+    }
+
+    let last_success = sqlx::query(
+        "SELECT created_at FROM decision_events
+         WHERE cell_id = $1 AND kind = $2
+         ORDER BY created_at DESC
+         LIMIT 1",
+    )
+    .bind(graph.cell.id.as_str())
+    .bind(EVENT_AUTOMATION_TRIGGERED)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    if let Some(row) = last_success {
+        let created_at: DateTime<Utc> = row.try_get("created_at").map_err(|err| ApiError::internal(&err.to_string()))?;
+        if graph.policy.min_trigger_interval_seconds > 0
+            && Utc::now() < created_at + Duration::seconds(graph.policy.min_trigger_interval_seconds)
+        {
+            skipped.insert("cooldown_active".to_string(), 1);
+            return Ok((events, executed, skipped));
+        }
+    }
+
+    if graph.policy.max_triggers_per_day > 0 {
+        let today_count = sqlx::query(
+            "SELECT COUNT(*)::BIGINT AS total
+             FROM decision_events
+             WHERE cell_id = $1 AND kind = $2 AND created_at >= date_trunc('day', NOW())",
+        )
+        .bind(graph.cell.id.as_str())
+        .bind(EVENT_AUTOMATION_TRIGGERED)
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .try_get::<i64, _>("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+        if today_count >= graph.policy.max_triggers_per_day as i64 {
+            skipped.insert("daily_cap_reached".to_string(), 1);
+            return Ok((events, executed, skipped));
+        }
+    }
+
+    for attachment in &graph.node_agents {
+        if !attachment.active {
+            continue;
+        }
+
+        let trigger_matches = match attachment.trigger_mode.as_str() {
+            TRIGGER_ON_RECOMMENDATION_GAIN => flags.recommendation_changed,
+            TRIGGER_ON_CONFIDENCE_GAIN => flags.confidence_gain,
+            _ => flags.threshold_crossed,
+        };
+        if !trigger_matches {
+            continue;
+        }
+
+        let agent = match load_external_agent_for_owner(
+            state,
+            attachment.external_agent_id.as_str(),
+            graph.cell.owner.as_str(),
+        )
+        .await
+        {
+            Ok(agent) => agent,
+            Err(err) => {
+                let reason = skip_reason_from_error(&err);
+                *skipped.entry(reason.clone()).or_insert(0) += 1;
+                events.push(
+                    insert_decision_event(
+                        state,
+                        graph.cell.id.as_str(),
+                        Some(attachment.node_id.as_str()),
+                        EVENT_AUTOMATION_SKIPPED,
+                        json!({
+                            "externalAgentId": attachment.external_agent_id,
+                            "reason": reason,
+                            "message": err.message,
+                        }),
+                    )
+                    .await?,
+                );
+                continue;
+            }
+        };
+
+        if !agent.active {
+            *skipped.entry("agent_inactive".to_string()).or_insert(0) += 1;
+            events.push(
+                insert_decision_event(
+                    state,
+                    graph.cell.id.as_str(),
+                    Some(attachment.node_id.as_str()),
+                    EVENT_AUTOMATION_SKIPPED,
+                    json!({
+                        "externalAgentId": agent.id,
+                        "reason": "agent_inactive",
+                    }),
+                )
+                .await?,
+            );
+            continue;
+        }
+
+        if let Some(allowed_provider) = graph.policy.allowed_provider.as_deref() {
+            if agent.provider.as_str() != allowed_provider {
+                *skipped.entry("provider_not_allowed".to_string()).or_insert(0) += 1;
+                events.push(
+                    insert_decision_event(
+                        state,
+                        graph.cell.id.as_str(),
+                        Some(attachment.node_id.as_str()),
+                        EVENT_AUTOMATION_SKIPPED,
+                        json!({
+                            "externalAgentId": agent.id,
+                            "provider": agent.provider.as_str(),
+                            "allowedProvider": allowed_provider,
+                            "reason": "provider_not_allowed",
+                        }),
+                    )
+                    .await?,
+                );
+                continue;
+            }
+        }
+
+        let notional_usdc = (agent.price.max(0.0) * agent.quantity.max(0.0)).abs();
+        if graph.policy.max_agent_notional_usdc > 0.0
+            && notional_usdc > graph.policy.max_agent_notional_usdc
+        {
+            *skipped.entry("notional_too_large".to_string()).or_insert(0) += 1;
+            events.push(
+                insert_decision_event(
+                    state,
+                    graph.cell.id.as_str(),
+                    Some(attachment.node_id.as_str()),
+                    EVENT_AUTOMATION_SKIPPED,
+                    json!({
+                        "externalAgentId": agent.id,
+                        "notionalUsdc": notional_usdc,
+                        "maxAgentNotionalUsdc": graph.policy.max_agent_notional_usdc,
+                        "reason": "notional_too_large",
+                    }),
+                )
