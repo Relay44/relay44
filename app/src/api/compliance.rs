@@ -87,3 +87,36 @@ pub async fn create_compliance_decision(
 ) -> Result<impl Responder, ApiError> {
     ensure_admin(&req, &state)?;
 
+    let action = body.action.trim().to_ascii_lowercase();
+    let decision = body.decision.trim().to_ascii_lowercase();
+    let reason_code = body.reason_code.trim().to_ascii_uppercase();
+    if action.is_empty() || decision.is_empty() || reason_code.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_COMPLIANCE_DECISION",
+            "action, decision, and reasonCode are required",
+        ));
+    }
+
+    let entry = ComplianceDecisionEntry {
+        request_id: body.request_id.as_deref(),
+        wallet: body.wallet.as_deref(),
+        country_code: body.country_code.as_deref(),
+        action: action.as_str(),
+        route: body.route.as_str(),
+        method: body.method.as_str(),
+        decision: decision.as_str(),
+        reason_code: reason_code.as_str(),
+        metadata: body.metadata.clone(),
+    };
+
+    state
+        .db
+        .record_compliance_decision(&entry)
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Created().json(serde_json::json!({
+        "ok": true
+    })))
+}
+
