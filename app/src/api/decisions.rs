@@ -2128,3 +2128,360 @@ pub async fn list_decision_cells(
         has_more: (offset as u64 + limit as u64) < total,
     }))
 }
+
+pub async fn create_decision_cell(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateDecisionCellRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let owner = user.wallet_address;
+    let title = clean_required(body.title.as_str(), "title", 160)?;
+    let statement = clean_required(body.statement.as_str(), "statement", 4000)?;
+    let decision_type = normalize_decision_type(body.decision_type.as_str())?;
+    let horizon_at = parse_datetime(body.horizon_at.as_deref())?;
+    let actions = normalize_actions(decision_type.as_str(), body.actions.clone())?;
+    let cell_id = Uuid::new_v4().to_string();
+
+    let mut tx = state
+        .db
+        .begin_transaction()
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    sqlx::query(
+        "INSERT INTO decision_cells (
+            id, owner, title, statement, decision_type, horizon_at, status,
+            automation_enabled, current_recommendation, confidence_bps, summary
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'active', FALSE, $7, 0, '{}'::jsonb)",
+    )
+    .bind(cell_id.as_str())
+    .bind(owner.as_str())
+    .bind(title.as_str())
+    .bind(statement.as_str())
+    .bind(decision_type.as_str())
+    .bind(horizon_at)
+    .bind(RECOMMENDATION_INSUFFICIENT_SIGNAL)
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    for (rank, label) in actions.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO decision_cell_actions (id, cell_id, label, rank)
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(cell_id.as_str())
+        .bind(label.as_str())
+        .bind(rank as i32)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    }
+
+    sqlx::query(
+        "INSERT INTO decision_automation_policies (
+            cell_id, max_agent_notional_usdc, max_triggers_per_day,
+            min_trigger_interval_seconds, allowed_provider, require_confidence_bps, active
+         ) VALUES ($1, 0, 0, 0, NULL, 0, FALSE)",
+    )
+    .bind(cell_id.as_str())
+    .execute(&mut *tx)
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    for (template, effects) in build_starter_nodes(decision_type.as_str(), &actions) {
+        sqlx::query(
+            "INSERT INTO decision_nodes (
+                id, cell_id, label, description, weight_bps, source_type, source_ref,
+                status, action_effects, last_market_snapshot
+             ) VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, '{}'::jsonb)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(cell_id.as_str())
+        .bind(template.label)
+        .bind(template.description)
+        .bind(3333_i32)
+        .bind(SOURCE_TYPE_DRAFT_MARKET)
+        .bind(NODE_STATUS_DRAFT)
+        .bind(effects)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), owner.as_str(), false).await?;
+    let response = build_cell_response(&state, result.graph, result.recommendation).await?;
+    Ok(HttpResponse::Created().json(response))
+}
+
+pub async fn get_decision_cell(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    let recommendation = recommendation_from_cell(&graph.cell);
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, graph, recommendation).await?))
+}
+
+pub async fn update_decision_cell(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<UpdateDecisionCellRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    let current = ensure_cell_exists_for_owner(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+
+    let title = body.title.as_ref().map(|value| clean_required(value, "title", 160)).transpose()?.unwrap_or(current.title);
+    let statement = body.statement.as_ref().map(|value| clean_required(value, "statement", 4000)).transpose()?.unwrap_or(current.statement);
+    let horizon_at = if body.horizon_at.is_some() {
+        parse_datetime(body.horizon_at.as_deref())?
+    } else {
+        current.horizon_at
+    };
+    let status = body
+        .status
+        .as_ref()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(current.status);
+    let automation_enabled = body.automation_enabled.unwrap_or(current.automation_enabled);
+
+    sqlx::query(
+        "UPDATE decision_cells
+         SET title = $2,
+             statement = $3,
+             horizon_at = $4,
+             status = $5,
+             automation_enabled = $6
+         WHERE id = $1 AND owner = $7",
+    )
+    .bind(cell_id.as_str())
+    .bind(title)
+    .bind(statement)
+    .bind(horizon_at)
+    .bind(status)
+    .bind(automation_enabled)
+    .bind(user.wallet_address.as_str())
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn add_decision_action(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateDecisionActionRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+
+    let current_count = sqlx::query("SELECT COUNT(*)::INT AS total FROM decision_cell_actions WHERE cell_id = $1")
+        .bind(cell_id.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .try_get::<i32, _>("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    if current_count >= 3 {
+        return Err(ApiError::conflict(
+            "TOO_MANY_ACTIONS",
+            "decision cells support at most 3 actions",
+        ));
+    }
+
+    let label = clean_required(body.label.as_str(), "label", 120)?;
+    sqlx::query(
+        "INSERT INTO decision_cell_actions (id, cell_id, label, rank)
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(cell_id.as_str())
+    .bind(label)
+    .bind(current_count)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn add_decision_node(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateDecisionNodeRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    let label = clean_required(body.label.as_str(), "label", 160)?;
+    let description = clean_optional(body.description.as_deref(), 2000)?.unwrap_or_default();
+    let source_type = normalize_source_type(body.source_type.as_deref().unwrap_or(SOURCE_TYPE_DRAFT_MARKET))?;
+    let source_ref = clean_optional(body.source_ref.as_deref(), 160)?;
+    if source_type == SOURCE_TYPE_INTERNAL_MARKET {
+        let Some(source_ref) = source_ref.as_deref() else {
+            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "internal market nodes require sourceRef"));
+        };
+        ensure_internal_market_exists(&state, source_ref).await?;
+    }
+    if source_type == SOURCE_TYPE_EXTERNAL_MARKET {
+        let Some(source_ref) = source_ref.as_deref() else {
+            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "external market nodes require sourceRef"));
+        };
+        ExternalMarketId::parse(source_ref)?;
+    }
+    let action_effects = normalize_action_effects(body.action_effects.clone(), &graph.actions)?;
+    let weight_bps = body.weight_bps.unwrap_or(3333).clamp(0, 10_000);
+    let status = body.status.as_deref().unwrap_or(if source_type == SOURCE_TYPE_DRAFT_MARKET {
+        NODE_STATUS_DRAFT
+    } else {
+        NODE_STATUS_LIVE
+    });
+
+    let node_id = Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO decision_nodes (
+            id, cell_id, label, description, weight_bps, source_type, source_ref,
+            status, action_effects, last_market_snapshot
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb)",
+    )
+    .bind(node_id.as_str())
+    .bind(cell_id.as_str())
+    .bind(label.as_str())
+    .bind(description.as_str())
+    .bind(weight_bps)
+    .bind(source_type.as_str())
+    .bind(source_ref.as_deref())
+    .bind(status)
+    .bind(action_effects)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_decision_event(
+        &state,
+        cell_id.as_str(),
+        Some(node_id.as_str()),
+        EVENT_NODE_ADDED,
+        json!({ "label": label, "sourceType": source_type, "sourceRef": source_ref }),
+    )
+    .await?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn update_decision_node(
+    req: HttpRequest,
+    path: web::Path<(String, String)>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<UpdateDecisionNodeRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let (cell_id, node_id) = path.into_inner();
+    let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    let current = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == node_id)
+        .cloned()
+        .ok_or_else(|| ApiError::not_found("Decision node"))?;
+
+    let label = body.label.as_ref().map(|value| clean_required(value, "label", 160)).transpose()?.unwrap_or(current.label);
+    let description = body.description.as_ref().map(|value| clean_optional(Some(value.as_str()), 2000)).transpose()?.flatten().unwrap_or(current.description);
+    let source_type = body
+        .source_type
+        .as_deref()
+        .map(normalize_source_type)
+        .transpose()?
+        .unwrap_or(current.source_type);
+    let source_ref = if body.source_ref.is_some() {
+        clean_optional(body.source_ref.as_deref(), 160)?
+    } else {
+        current.source_ref
+    };
+    if source_type == SOURCE_TYPE_INTERNAL_MARKET {
+        let Some(source_ref) = source_ref.as_deref() else {
+            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "internal market nodes require sourceRef"));
+        };
+        ensure_internal_market_exists(&state, source_ref).await?;
+    }
+    if source_type == SOURCE_TYPE_EXTERNAL_MARKET {
+        let Some(source_ref) = source_ref.as_deref() else {
+            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "external market nodes require sourceRef"));
+        };
+        ExternalMarketId::parse(source_ref)?;
+    }
+    let actions = graph.actions;
+    let action_effects = normalize_action_effects(body.action_effects.clone().or_else(|| Some(current.action_effects.clone())), &actions)?;
+    let weight_bps = body.weight_bps.unwrap_or(current.weight_bps).clamp(0, 10_000);
+    let status = body.status.as_deref().unwrap_or(if source_type == SOURCE_TYPE_DRAFT_MARKET {
+        NODE_STATUS_DRAFT
+    } else {
+        NODE_STATUS_LIVE
+    });
+
+    sqlx::query(
+        "UPDATE decision_nodes
+         SET label = $3,
+             description = $4,
+             weight_bps = $5,
+             source_type = $6,
+             source_ref = $7,
+             status = $8,
+             action_effects = $9
+         WHERE id = $1 AND cell_id = $2",
+    )
+    .bind(node_id.as_str())
+    .bind(cell_id.as_str())
+    .bind(label.as_str())
+    .bind(description.as_str())
+    .bind(weight_bps)
+    .bind(source_type.as_str())
+    .bind(source_ref.as_deref())
+    .bind(status)
+    .bind(action_effects)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_decision_event(
+        &state,
+        cell_id.as_str(),
+        Some(node_id.as_str()),
+        EVENT_NODE_UPDATED,
+        json!({ "sourceType": source_type, "sourceRef": source_ref }),
+    )
+    .await?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn attach_market_to_decision_node(
+    req: HttpRequest,
+    path: web::Path<(String, String)>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<AttachDecisionMarketRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let (cell_id, node_id) = path.into_inner();
+    load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+
