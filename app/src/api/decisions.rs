@@ -1773,3 +1773,358 @@ async fn maybe_run_automation(
                         "reason": "notional_too_large",
                     }),
                 )
+                .await?,
+            );
+            continue;
+        }
+
+        match execute_agent_record(state, &agent, None).await {
+            Ok(outcome) => {
+                let kind = if outcome.executed {
+                    EVENT_AUTOMATION_TRIGGERED
+                } else {
+                    EVENT_AUTOMATION_SKIPPED
+                };
+                if outcome.executed {
+                    executed += 1;
+                } else if let Some(reason) = outcome.skip_reason.as_deref() {
+                    *skipped.entry(reason.to_string()).or_insert(0) += 1;
+                }
+                events.push(
+                    insert_decision_event(
+                        state,
+                        graph.cell.id.as_str(),
+                        Some(attachment.node_id.as_str()),
+                        kind,
+                        json!({
+                            "externalAgentId": agent.id,
+                            "runId": outcome.run_id,
+                            "runStatus": outcome.run_status,
+                            "provider": agent.provider.as_str(),
+                            "providerOrderId": outcome.provider_order_id,
+                            "externalOrderId": outcome.external_order_id,
+                            "skipReason": outcome.skip_reason,
+                            "notionalUsdc": notional_usdc,
+                        }),
+                    )
+                    .await?,
+                );
+            }
+            Err(err) => {
+                let reason = skip_reason_from_error(&err);
+                *skipped.entry(reason.clone()).or_insert(0) += 1;
+                events.push(
+                    insert_decision_event(
+                        state,
+                        graph.cell.id.as_str(),
+                        Some(attachment.node_id.as_str()),
+                        EVENT_AUTOMATION_SKIPPED,
+                        json!({
+                            "externalAgentId": agent.id,
+                            "runStatus": run_status_from_error(&err),
+                            "provider": agent.provider.as_str(),
+                            "reason": reason,
+                            "message": err.message,
+                        }),
+                    )
+                    .await?,
+                );
+            }
+        }
+    }
+
+    Ok((events, executed, skipped))
+}
+
+fn recommendation_from_cell(cell: &DecisionCellRecord) -> DecisionRecommendation {
+    let summary = summary_from_value(&cell.summary);
+    DecisionRecommendation {
+        state: cell.current_recommendation.clone(),
+        confidence_bps: cell.confidence_bps,
+        why_changed: summary.why_changed,
+        live_nodes: summary.live_nodes,
+        total_nodes: summary.total_nodes,
+        top_action_lead_bps: summary.top_action_lead_bps,
+        action_scores: summary.action_scores,
+        top_contributors: summary.top_contributors,
+        last_changed_node: summary.last_changed_node,
+    }
+}
+
+fn build_action_responses(
+    actions: &[DecisionActionRecord],
+    recommendation: &DecisionRecommendation,
+) -> Vec<DecisionActionResponse> {
+    actions
+        .iter()
+        .map(|action| DecisionActionResponse {
+            id: action.id.clone(),
+            label: action.label.clone(),
+            rank: action.rank,
+            score_bps: recommendation
+                .action_scores
+                .iter()
+                .find(|score| score.action_id == action.id)
+                .map(|score| score.score_bps)
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+fn build_node_responses(graph: &CellGraph) -> Vec<DecisionNodeResponse> {
+    graph
+        .nodes
+        .iter()
+        .map(|node| DecisionNodeResponse {
+            id: node.id.clone(),
+            label: node.label.clone(),
+            description: node.description.clone(),
+            weight_bps: node.weight_bps,
+            source_type: node.source_type.clone(),
+            source_ref: node.source_ref.clone(),
+            status: node.status.clone(),
+            last_probability_bps: node.last_probability_bps,
+            last_market_snapshot: node.last_market_snapshot.clone(),
+            action_effects: node.action_effects.clone(),
+            created_at: node.created_at.to_rfc3339(),
+            updated_at: node.updated_at.to_rfc3339(),
+            agents: graph
+                .node_agents
+                .iter()
+                .filter(|entry| entry.node_id == node.id)
+                .map(|entry| DecisionNodeAgentResponse {
+                    id: entry.id.clone(),
+                    external_agent_id: entry.external_agent_id.clone(),
+                    trigger_mode: entry.trigger_mode.clone(),
+                    active: entry.active,
+                    name: entry.agent_name.clone(),
+                    provider: entry.provider.clone(),
+                    agent_active: entry.agent_active,
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn build_alert_responses(alerts: &[DecisionAlertRecord]) -> Vec<DecisionAlertResponse> {
+    alerts
+        .iter()
+        .map(|alert| DecisionAlertResponse {
+            id: alert.id.clone(),
+            kind: alert.kind.clone(),
+            threshold: alert.threshold.clone(),
+            active: alert.active,
+            last_triggered_at: alert.last_triggered_at.map(|value| value.to_rfc3339()),
+        })
+        .collect()
+}
+
+fn build_policy_response(
+    cell: &DecisionCellRecord,
+    policy: &DecisionAutomationPolicyRecord,
+) -> DecisionAutomationPolicyResponse {
+    DecisionAutomationPolicyResponse {
+        automation_enabled: cell.automation_enabled,
+        max_agent_notional_usdc: policy.max_agent_notional_usdc,
+        max_triggers_per_day: policy.max_triggers_per_day,
+        min_trigger_interval_seconds: policy.min_trigger_interval_seconds,
+        allowed_provider: policy.allowed_provider.clone(),
+        require_confidence_bps: policy.require_confidence_bps,
+        active: policy.active,
+    }
+}
+
+async fn build_cell_response(
+    state: &AppState,
+    graph: CellGraph,
+    recommendation: DecisionRecommendation,
+) -> Result<DecisionCellResponse, ApiError> {
+    let events = list_cell_events(state, graph.cell.id.as_str(), 50).await?;
+    Ok(DecisionCellResponse {
+        id: graph.cell.id.clone(),
+        owner: graph.cell.owner.clone(),
+        title: graph.cell.title.clone(),
+        statement: graph.cell.statement.clone(),
+        decision_type: graph.cell.decision_type.clone(),
+        horizon_at: graph.cell.horizon_at.map(|value| value.to_rfc3339()),
+        status: graph.cell.status.clone(),
+        automation_enabled: graph.cell.automation_enabled,
+        recommendation: recommendation.clone(),
+        actions: build_action_responses(&graph.actions, &recommendation),
+        nodes: build_node_responses(&graph),
+        alerts: build_alert_responses(&graph.alerts),
+        automation_policy: build_policy_response(&graph.cell, &graph.policy),
+        events,
+        created_at: graph.cell.created_at.to_rfc3339(),
+        updated_at: graph.cell.updated_at.to_rfc3339(),
+    })
+}
+
+async fn recalculate_cell(
+    state: &AppState,
+    cell_id: &str,
+    owner: &str,
+    allow_automation: bool,
+) -> Result<RecalculateResult, ApiError> {
+    let graph = load_cell_graph(state, cell_id, owner).await?;
+    let previous_summary = summary_from_value(&graph.cell.summary);
+    let previous_recommendation = graph.cell.current_recommendation.clone();
+    let now = Utc::now();
+    let mut resolved_nodes = HashMap::new();
+
+    for node in &graph.nodes {
+        let resolved = resolve_node_market(state, node).await?;
+        resolved_nodes.insert(node.id.clone(), resolved);
+    }
+
+    persist_node_snapshots(state, &graph, &resolved_nodes).await?;
+    let recommendation = build_recommendation(
+        &graph.cell,
+        &graph.actions,
+        &graph.nodes,
+        &previous_summary,
+        &resolved_nodes,
+        now,
+    );
+    update_cell_summary(state, graph.cell.id.as_str(), &recommendation).await?;
+
+    let (mut events, flags) = evaluate_and_record_alerts(
+        state,
+        &graph,
+        &recommendation,
+        &previous_summary,
+        previous_recommendation.as_str(),
+        &resolved_nodes,
+    )
+    .await?;
+
+    let (automation_events, automations_triggered, skipped) = if allow_automation {
+        maybe_run_automation(state, &graph, &recommendation, &flags).await?
+    } else {
+        (Vec::new(), 0, BTreeMap::new())
+    };
+    events.extend(automation_events);
+
+    let fresh_graph = load_cell_graph(state, cell_id, owner).await?;
+    Ok(RecalculateResult {
+        graph: fresh_graph,
+        recommendation,
+        automations_triggered,
+        skipped,
+    })
+}
+
+pub async fn list_decision_cells(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListDecisionCellsQuery>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let limit = query.limit.unwrap_or(25).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "SELECT id, owner, title, statement, decision_type, horizon_at, status,
+                automation_enabled, current_recommendation, confidence_bps, summary,
+                created_at, updated_at
+         FROM decision_cells WHERE owner = ",
+    );
+    builder.push_bind(user.wallet_address.as_str());
+    if let Some(status) = query.status.as_ref().filter(|value| !value.trim().is_empty()) {
+        builder.push(" AND status = ");
+        builder.push_bind(status.trim().to_ascii_lowercase());
+    }
+    builder.push(" ORDER BY updated_at DESC LIMIT ");
+    builder.push_bind(limit);
+    builder.push(" OFFSET ");
+    builder.push_bind(offset);
+
+    let rows = builder
+        .build()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let cells = rows
+        .into_iter()
+        .map(parse_cell_record)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut count_builder = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*)::BIGINT AS total FROM decision_cells WHERE owner = ",
+    );
+    count_builder.push_bind(user.wallet_address.as_str());
+    if let Some(status) = query.status.as_ref().filter(|value| !value.trim().is_empty()) {
+        count_builder.push(" AND status = ");
+        count_builder.push_bind(status.trim().to_ascii_lowercase());
+    }
+    let total = count_builder
+        .build()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .try_get::<i64, _>("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .max(0) as u64;
+
+    let data = cells
+        .into_iter()
+        .map(|cell| DecisionCellListItem {
+            id: cell.id.clone(),
+            title: cell.title.clone(),
+            statement: cell.statement.clone(),
+            decision_type: cell.decision_type.clone(),
+            horizon_at: cell.horizon_at.map(|value| value.to_rfc3339()),
+            status: cell.status.clone(),
+            automation_enabled: cell.automation_enabled,
+            linked_market_refs: Vec::new(),
+            recommendation: recommendation_from_cell(&cell),
+            created_at: cell.created_at.to_rfc3339(),
+            updated_at: cell.updated_at.to_rfc3339(),
+        })
+        .collect::<Vec<_>>();
+
+    let cell_ids = data.iter().map(|cell| cell.id.clone()).collect::<Vec<_>>();
+    let market_refs = if cell_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let rows = sqlx::query(
+            "SELECT cell_id, source_ref
+             FROM decision_nodes
+             WHERE cell_id = ANY($1)
+               AND source_type IN ('internal_market', 'external_market')
+               AND source_ref IS NOT NULL",
+        )
+        .bind(&cell_ids)
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+        let mut grouped = HashMap::<String, Vec<String>>::new();
+        for row in rows {
+            let cell_id: String = row.try_get("cell_id").map_err(|err| ApiError::internal(&err.to_string()))?;
+            let source_ref: String = row.try_get("source_ref").map_err(|err| ApiError::internal(&err.to_string()))?;
+            grouped.entry(cell_id).or_default().push(source_ref);
+        }
+        for refs in grouped.values_mut() {
+            refs.sort();
+            refs.dedup();
+        }
+        grouped
+    };
+
+    let data = data
+        .into_iter()
+        .map(|mut cell| {
+            cell.linked_market_refs = market_refs.get(&cell.id).cloned().unwrap_or_default();
+            cell
+        })
+        .collect::<Vec<_>>();
+
+    Ok(HttpResponse::Ok().json(DecisionCellsListResponse {
+        data,
+        total,
+        limit: limit as u64,
+        offset: offset as u64,
+        has_more: (offset as u64 + limit as u64) < total,
+    }))
+}
