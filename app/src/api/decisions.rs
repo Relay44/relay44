@@ -2485,3 +2485,347 @@ pub async fn attach_market_to_decision_node(
     let (cell_id, node_id) = path.into_inner();
     load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
 
+    let source_type = normalize_source_type(body.source_type.as_str())?;
+    if source_type == SOURCE_TYPE_DRAFT_MARKET {
+        return Err(ApiError::bad_request(
+            "INVALID_SOURCE_TYPE",
+            "attach-market only supports internal_market or external_market",
+        ));
+    }
+    let source_ref = clean_required(body.source_ref.as_str(), "sourceRef", 160)?;
+    if source_type == SOURCE_TYPE_INTERNAL_MARKET {
+        ensure_internal_market_exists(&state, source_ref.as_str()).await?;
+    } else {
+        ExternalMarketId::parse(source_ref.as_str())?;
+    }
+
+    sqlx::query(
+        "UPDATE decision_nodes
+         SET source_type = $3,
+             source_ref = $4,
+             status = $5
+         WHERE id = $1 AND cell_id = $2",
+    )
+    .bind(node_id.as_str())
+    .bind(cell_id.as_str())
+    .bind(source_type.as_str())
+    .bind(source_ref.as_str())
+    .bind(NODE_STATUS_LIVE)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_decision_event(
+        &state,
+        cell_id.as_str(),
+        Some(node_id.as_str()),
+        EVENT_MARKET_ATTACHED,
+        json!({ "sourceType": source_type, "sourceRef": source_ref }),
+    )
+    .await?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn attach_agent_to_decision_node(
+    req: HttpRequest,
+    path: web::Path<(String, String)>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<AttachDecisionAgentRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let (cell_id, node_id) = path.into_inner();
+    load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+
+    let trigger_mode = normalize_trigger_mode(body.trigger_mode.as_str())?;
+    load_external_agent_for_owner(&state, body.external_agent_id.as_str(), user.wallet_address.as_str()).await?;
+
+    sqlx::query(
+        "INSERT INTO decision_node_agents (
+            id, cell_id, node_id, external_agent_id, trigger_mode, active
+         ) VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (cell_id, node_id, external_agent_id)
+         DO UPDATE SET trigger_mode = EXCLUDED.trigger_mode,
+                       active = EXCLUDED.active",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(cell_id.as_str())
+    .bind(node_id.as_str())
+    .bind(body.external_agent_id.as_str())
+    .bind(trigger_mode.as_str())
+    .bind(body.active.unwrap_or(true))
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_decision_event(
+        &state,
+        cell_id.as_str(),
+        Some(node_id.as_str()),
+        EVENT_AGENT_ATTACHED,
+        json!({
+            "externalAgentId": body.external_agent_id,
+            "triggerMode": trigger_mode,
+            "active": body.active.unwrap_or(true),
+        }),
+    )
+    .await?;
+
+    let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    let recommendation = recommendation_from_cell(&graph.cell);
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, graph, recommendation).await?))
+}
+
+pub async fn recalculate_decision_cell(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn update_decision_automation(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<UpdateDecisionAutomationRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+
+    let allowed_provider = clean_optional(body.allowed_provider.as_deref(), 32)?;
+    if let Some(provider) = allowed_provider.as_deref() {
+        if !matches!(provider, "limitless" | "polymarket") {
+            return Err(ApiError::bad_request(
+                "INVALID_PROVIDER",
+                "allowedProvider must be limitless or polymarket",
+            ));
+        }
+    }
+
+    let automation_enabled = body.automation_enabled.unwrap_or(graph.cell.automation_enabled);
+    let max_agent_notional_usdc = body
+        .max_agent_notional_usdc
+        .unwrap_or(graph.policy.max_agent_notional_usdc)
+        .max(0.0);
+    let max_triggers_per_day = body
+        .max_triggers_per_day
+        .unwrap_or(graph.policy.max_triggers_per_day)
+        .max(0);
+    let min_trigger_interval_seconds = body
+        .min_trigger_interval_seconds
+        .unwrap_or(graph.policy.min_trigger_interval_seconds)
+        .max(0);
+    let require_confidence_bps = body
+        .require_confidence_bps
+        .unwrap_or(graph.policy.require_confidence_bps)
+        .clamp(0, 10_000);
+    let active = body.active.unwrap_or(graph.policy.active);
+
+    sqlx::query(
+        "UPDATE decision_cells SET automation_enabled = $2 WHERE id = $1",
+    )
+    .bind(cell_id.as_str())
+    .bind(automation_enabled)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    sqlx::query(
+        "UPDATE decision_automation_policies
+         SET max_agent_notional_usdc = $2,
+             max_triggers_per_day = $3,
+             min_trigger_interval_seconds = $4,
+             allowed_provider = $5,
+             require_confidence_bps = $6,
+             active = $7
+         WHERE cell_id = $1",
+    )
+    .bind(cell_id.as_str())
+    .bind(max_agent_notional_usdc)
+    .bind(max_triggers_per_day)
+    .bind(min_trigger_interval_seconds)
+    .bind(allowed_provider.as_deref())
+    .bind(require_confidence_bps)
+    .bind(active)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_decision_event(
+        &state,
+        cell_id.as_str(),
+        None,
+        EVENT_AUTOMATION_UPDATED,
+        json!({
+            "automationEnabled": automation_enabled,
+            "maxAgentNotionalUsdc": max_agent_notional_usdc,
+            "maxTriggersPerDay": max_triggers_per_day,
+            "minTriggerIntervalSeconds": min_trigger_interval_seconds,
+            "allowedProvider": allowed_provider,
+            "requireConfidenceBps": require_confidence_bps,
+            "active": active,
+        }),
+    )
+    .await?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn upsert_decision_alert(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<UpsertDecisionAlertRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    let kind = clean_required(body.kind.as_str(), "kind", 48)?.to_ascii_lowercase();
+    let threshold = body.threshold.clone().unwrap_or_else(|| json!({}));
+    let active = body.active.unwrap_or(true);
+
+    sqlx::query(
+        "INSERT INTO decision_alerts (id, cell_id, kind, threshold, active)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (cell_id, kind)
+         DO UPDATE SET threshold = EXCLUDED.threshold,
+                       active = EXCLUDED.active",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(cell_id.as_str())
+    .bind(kind.as_str())
+    .bind(threshold.clone())
+    .bind(active)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_decision_event(
+        &state,
+        cell_id.as_str(),
+        None,
+        EVENT_ALERT_UPDATED,
+        json!({ "kind": kind, "threshold": threshold, "active": active }),
+    )
+    .await?;
+
+    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
+    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+}
+
+pub async fn list_decision_events(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let cell_id = path.into_inner();
+    ensure_cell_exists_for_owner(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    Ok(HttpResponse::Ok().json(json!({
+        "data": list_cell_events(&state, cell_id.as_str(), 100).await?
+    })))
+}
+
+pub async fn run_decision_cells_tick(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<DecisionRunnerTickRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+    let limit = body.limit.unwrap_or(100).clamp(1, MAX_PAGE_SIZE);
+
+    let rows = sqlx::query(
+        "SELECT id, owner
+         FROM decision_cells
+         WHERE status = 'active'
+         ORDER BY updated_at DESC
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut scanned = 0_u64;
+    let mut recalculated = 0_u64;
+    let mut automations_triggered = 0_u64;
+    let mut skipped = BTreeMap::new();
+
+    for row in rows {
+        let cell_id: String = row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?;
+        let owner: String = row.try_get("owner").map_err(|err| ApiError::internal(&err.to_string()))?;
+        scanned += 1;
+        match recalculate_cell(&state, cell_id.as_str(), owner.as_str(), true).await {
+            Ok(result) => {
+                recalculated += 1;
+                automations_triggered += result.automations_triggered;
+                for (reason, count) in result.skipped {
+                    *skipped.entry(reason).or_insert(0) += count;
+                }
+            }
+            Err(err) => {
+                let reason = err.code.trim().to_ascii_lowercase();
+                *skipped.entry(reason).or_insert(0) += 1;
+            }
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(DecisionRunnerTickResponse {
+        scanned,
+        recalculated,
+        automations_triggered,
+        skipped,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_actions() -> Vec<DecisionActionRecord> {
+        vec![
+            DecisionActionRecord {
+                id: "a1".to_string(),
+                label: "act now".to_string(),
+                rank: 0,
+            },
+            DecisionActionRecord {
+                id: "a2".to_string(),
+                label: "wait".to_string(),
+                rank: 1,
+            },
+        ]
+    }
+
+    #[test]
+    fn timing_defaults_are_applied() {
+        let actions = normalize_actions(DECISION_TYPE_TIMING, None).unwrap();
+        assert_eq!(actions, vec!["act now".to_string(), "wait".to_string()]);
+    }
+
+    #[test]
+    fn invalid_trigger_mode_is_rejected() {
+        assert!(normalize_trigger_mode("later").is_err());
+    }
+
+    #[test]
+    fn starter_nodes_cover_all_actions() {
+        let actions = sample_actions()
+            .into_iter()
+            .map(|entry| entry.label)
+            .collect::<Vec<_>>();
+        let starters = build_starter_nodes(DECISION_TYPE_TIMING, &actions);
+        assert_eq!(starters.len(), 3);
+        assert_eq!(starters[0].1.get("act now").and_then(Value::as_str), Some(EFFECT_SUPPORT));
+        assert_eq!(starters[0].1.get("wait").and_then(Value::as_str), Some(EFFECT_OPPOSE));
+    }
+}
+
