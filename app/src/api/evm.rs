@@ -3296,3 +3296,469 @@ fn decode_agent_snapshot(
     let Some(raw) = decode_agent_slot(slot)? else {
         return Ok(None);
     };
+
+    let next_execution_at = if raw.last_executed_at == 0 {
+        0
+    } else {
+        raw.last_executed_at.saturating_add(raw.cadence)
+    };
+    let can_execute = raw.active && (raw.last_executed_at == 0 || now >= next_execution_at);
+    let status = if !raw.active {
+        "inactive"
+    } else if can_execute {
+        "ready"
+    } else {
+        "cooldown"
+    };
+
+    Ok(Some(BaseAgentSnapshot {
+        id: index.to_string(),
+        owner: raw.owner,
+        market_id: raw.market_id.to_string(),
+        is_yes: raw.is_yes,
+        price_bps: raw.price_bps,
+        size: raw.size.to_string(),
+        cadence: raw.cadence,
+        expiry_window: raw.expiry_window,
+        last_executed_at: raw.last_executed_at,
+        next_execution_at,
+        can_execute,
+        active: raw.active,
+        status: status.to_string(),
+        strategy: raw.strategy,
+        identity_id: None,
+        identity_tier: None,
+        identity_active: None,
+        identity_updated_at: None,
+        reputation_score_bps: None,
+        reputation_confidence_bps: None,
+        reputation_events: None,
+        reputation_notional_microusdc: None,
+    }))
+}
+
+async fn enrich_agent_with_erc8004(
+    state: &Arc<AppState>,
+    mut snapshot: BaseAgentSnapshot,
+) -> BaseAgentSnapshot {
+    if let Ok(Some(identity)) = fetch_erc8004_identity(state, snapshot.owner.as_str()).await {
+        snapshot.identity_id = Some(identity.identity_id.to_string());
+        snapshot.identity_tier = Some(identity.tier);
+        snapshot.identity_active = Some(identity.active);
+        snapshot.identity_updated_at = Some(identity.updated_at);
+    }
+    if let Ok(Some(reputation)) = fetch_erc8004_reputation(state, snapshot.owner.as_str()).await {
+        snapshot.reputation_score_bps = Some(reputation.score_bps);
+        snapshot.reputation_confidence_bps = Some(reputation.confidence_bps);
+        snapshot.reputation_events = Some(reputation.events);
+        snapshot.reputation_notional_microusdc = Some(reputation.notional_microusdc.to_string());
+    }
+    snapshot
+}
+
+async fn fetch_erc8004_identity(
+    state: &Arc<AppState>,
+    wallet: &str,
+) -> Result<Option<Erc8004Identity>, ApiError> {
+    let registry = state.config.erc8004_identity_registry_address.trim();
+    if registry.is_empty() {
+        return Ok(None);
+    }
+    if !is_valid_evm_address(registry) {
+        return Err(ApiError::bad_request(
+            "INVALID_ERC8004_IDENTITY_REGISTRY",
+            "ERC8004_IDENTITY_REGISTRY_ADDRESS must be a valid 0x EVM address",
+        ));
+    }
+
+    let calldata = format!(
+        "{}{}",
+        ERC8004_IDENTITY_PROFILE_SELECTOR,
+        encode_address_word(wallet)?
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(registry, calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
+    let identity_id = parse_u128_hex(word_at(payload.as_str(), 0)?)?;
+    let tier = parse_u8_hex(word_at(payload.as_str(), 1)?)?;
+    let active = parse_bool_word(word_at(payload.as_str(), 2)?)?;
+    let updated_at = parse_u64_hex(word_at(payload.as_str(), 3)?)?;
+
+    if identity_id == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(Erc8004Identity {
+        identity_id,
+        tier,
+        active,
+        updated_at,
+    }))
+}
+
+async fn fetch_erc8004_reputation(
+    state: &Arc<AppState>,
+    wallet: &str,
+) -> Result<Option<Erc8004Reputation>, ApiError> {
+    let registry = state.config.erc8004_reputation_registry_address.trim();
+    if registry.is_empty() {
+        return Ok(None);
+    }
+    if !is_valid_evm_address(registry) {
+        return Err(ApiError::bad_request(
+            "INVALID_ERC8004_REPUTATION_REGISTRY",
+            "ERC8004_REPUTATION_REGISTRY_ADDRESS must be a valid 0x EVM address",
+        ));
+    }
+
+    let calldata = format!(
+        "{}{}",
+        ERC8004_REPUTATION_OF_SELECTOR,
+        encode_address_word(wallet)?
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(registry, calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
+    let score_raw = parse_u64_hex(word_at(payload.as_str(), 0)?)?;
+    let confidence_raw = parse_u64_hex(word_at(payload.as_str(), 1)?)?;
+    if score_raw > u32::MAX as u64 || confidence_raw > u32::MAX as u64 {
+        return Err(ApiError::internal("ERC8004 reputation value out of range"));
+    }
+    let score_bps = score_raw as u32;
+    let confidence_bps = confidence_raw as u32;
+    let events = parse_u64_hex(word_at(payload.as_str(), 2)?)?;
+    let notional_microusdc = parse_u128_hex(word_at(payload.as_str(), 3)?)?;
+
+    if events == 0 && notional_microusdc == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(Erc8004Reputation {
+        score_bps,
+        confidence_bps,
+        events,
+        notional_microusdc,
+    }))
+}
+
+async fn fetch_erc8004_validation(
+    state: &Arc<AppState>,
+    request_hash: &str,
+) -> Result<Erc8004Validation, ApiError> {
+    let registry = configured_address(
+        state.config.erc8004_validation_registry_address.as_str(),
+        "ERC8004_VALIDATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_VALIDATION_REGISTRY_ADDRESS must be configured for read operations",
+    )?;
+
+    let calldata = format!(
+        "{}{}",
+        ERC8004_VALIDATION_STATUS_SELECTOR,
+        encode_bytes32_word(request_hash)?,
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(registry.as_str(), calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
+    let validator_word = word_at(payload.as_str(), 0)?;
+    let validator = format!("0x{}", &validator_word[24..]).to_ascii_lowercase();
+    let agent_id = parse_u128_hex(word_at(payload.as_str(), 1)?)?;
+    let response = parse_u8_hex(word_at(payload.as_str(), 2)?)?;
+    let response_hash = format!("0x{}", word_at(payload.as_str(), 3)?);
+    let tag = format!("0x{}", word_at(payload.as_str(), 4)?);
+    let last_update = parse_u64_hex(word_at(payload.as_str(), 5)?)?;
+
+    Ok(Erc8004Validation {
+        validator,
+        agent_id,
+        response,
+        response_hash,
+        tag,
+        last_update,
+    })
+}
+
+fn decode_agent_slot(slot: &str) -> Result<Option<BaseRawAgent>, ApiError> {
+    let owner_word = word_at(slot, 0)?;
+    if owner_word.chars().all(|c| c == '0') {
+        return Ok(None);
+    }
+
+    Ok(Some(BaseRawAgent {
+        owner: format!("0x{}", &owner_word[24..]).to_ascii_lowercase(),
+        market_id: parse_u64_hex(word_at(slot, 1)?)?,
+        is_yes: parse_bool_word(word_at(slot, 2)?)?,
+        price_bps: parse_u64_hex(word_at(slot, 3)?)?,
+        size: parse_u128_hex(word_at(slot, 4)?)?,
+        cadence: parse_u64_hex(word_at(slot, 5)?)?,
+        expiry_window: parse_u64_hex(word_at(slot, 6)?)?,
+        last_executed_at: parse_u64_hex(word_at(slot, 7)?)?,
+        active: parse_bool_word(word_at(slot, 8)?)?,
+        strategy: decode_abi_string_at_offset(slot, word_at(slot, 9)?)?,
+    }))
+}
+
+fn decode_order_snapshot(slot: &str) -> Result<Option<BaseRawOrder>, ApiError> {
+    let maker_word = word_at(slot, 0)?;
+    if maker_word.chars().all(|c| c == '0') {
+        return Ok(None);
+    }
+
+    Ok(Some(BaseRawOrder {
+        market_id: parse_u64_hex(word_at(slot, 1)?)?,
+        is_yes: parse_bool_word(word_at(slot, 2)?)?,
+        price_bps: parse_u64_hex(word_at(slot, 3)?)?,
+        remaining: parse_u64_hex(word_at(slot, 5)?)?,
+        expiry: parse_u64_hex(word_at(slot, 6)?)?,
+        canceled: parse_bool_word(word_at(slot, 7)?)?,
+    }))
+}
+
+fn map_evm_rpc_error(err: anyhow::Error) -> ApiError {
+    ApiError::internal(&format!("Base RPC request failed: {}", err))
+}
+
+fn unix_to_rfc3339(timestamp: u64) -> String {
+    Utc.timestamp_opt(timestamp as i64, 0)
+        .single()
+        .map(|value| value.to_rfc3339())
+        .unwrap_or_else(|| Utc::now().to_rfc3339())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_evm_address() {
+        assert!(is_valid_evm_address(
+            "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"
+        ));
+        assert!(!is_valid_evm_address("0x123"));
+        assert!(!is_valid_evm_address(
+            "71C7656EC7ab88b098defB751B7401B5f6d8976F"
+        ));
+    }
+
+    #[test]
+    fn test_parse_u8_hex() {
+        assert_eq!(parse_u8_hex("0x12").unwrap(), 0x12);
+        assert_eq!(
+            parse_u8_hex("0x0000000000000000000000000000000000000000000000000000000000000006")
+                .unwrap(),
+            6
+        );
+        assert!(parse_u8_hex("0x100").is_err());
+        assert!(parse_u8_hex("0x").is_err());
+    }
+
+    #[test]
+    fn test_parse_u64_hex() {
+        assert_eq!(parse_u64_hex("0x0").unwrap(), 0);
+        assert_eq!(parse_u64_hex("0x2a").unwrap(), 42);
+        assert_eq!(
+            parse_u64_hex("0x00000000000000000000000000000000000000000000000000000000000000ff")
+                .unwrap(),
+            255
+        );
+    }
+
+    #[test]
+    fn test_parse_u128_hex() {
+        assert_eq!(parse_u128_hex("0x0").unwrap(), 0);
+        assert_eq!(parse_u128_hex("0x2a").unwrap(), 42);
+        assert_eq!(
+            parse_u128_hex("0x000000000000000000000000000000000000000000000000000000000000ffff")
+                .unwrap(),
+            65_535
+        );
+    }
+
+    #[test]
+    fn test_encode_u256_hex() {
+        let encoded = encode_u256_hex(42);
+        assert_eq!(encoded.len(), 64);
+        assert!(encoded.ends_with("2a"));
+    }
+
+    #[test]
+    fn test_is_valid_hex_payload() {
+        assert!(is_valid_hex_payload("0x1234"));
+        assert!(!is_valid_hex_payload("0x123"));
+        assert!(!is_valid_hex_payload("1234"));
+    }
+
+    #[test]
+    fn test_decode_market_metadata_tuple() {
+        let q = encode_dynamic_string_tail("question?");
+        let d = encode_dynamic_string_tail("description");
+        let c = encode_dynamic_string_tail("crypto");
+        let s = encode_dynamic_string_tail("source");
+
+        let head = format!(
+            "{}{}{}{}",
+            encode_u256_hex_u128(128),
+            encode_u256_hex_u128(128 + q.len() as u128 / 2),
+            encode_u256_hex_u128(128 + q.len() as u128 / 2 + d.len() as u128 / 2),
+            encode_u256_hex_u128(
+                128 + q.len() as u128 / 2 + d.len() as u128 / 2 + c.len() as u128 / 2
+            ),
+        );
+        let payload = format!("0x{}{}{}{}{}", head, q, d, c, s);
+        let decoded = decode_market_metadata_tuple(&payload).unwrap();
+        assert_eq!(decoded.0, "question?");
+        assert_eq!(decoded.1, "description");
+        assert_eq!(decoded.2, "crypto");
+        assert_eq!(decoded.3, "source");
+    }
+
+    #[test]
+    fn test_decode_market_snapshot() {
+        let question_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let close_time = format!("{:064x}", 1u64);
+        let resolve_time = format!("{:064x}", 2u64);
+        let resolver = "00000000000000000000000071c7656ec7ab88b098defb751b7401b5f6d8976f";
+        let resolved = format!("{:064x}", 1u64);
+        let outcome = format!("{:064x}", 1u64);
+
+        let payload = format!(
+            "0x{}{}{}{}{}{}",
+            question_hash, close_time, resolve_time, resolver, resolved, outcome
+        );
+
+        let decoded = decode_market_snapshot(7, &payload).unwrap();
+        assert_eq!(decoded.id, "7");
+        assert_eq!(
+            decoded.question_hash,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert_eq!(
+            decoded.resolver,
+            "0x71c7656ec7ab88b098defb751b7401b5f6d8976f"
+        );
+        assert_eq!(decoded.status, "resolved");
+        assert_eq!(decoded.outcome.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn test_decode_agent_snapshot() {
+        let owner = "00000000000000000000000039e4939df3763e342db531a2a58867bc26a22b98";
+        let market_id = format!("{:064x}", 12u64);
+        let is_yes = format!("{:064x}", 1u64);
+        let price_bps = format!("{:064x}", 5500u64);
+        let size = format!("{:064x}", 100_000u128);
+        let cadence = format!("{:064x}", 30u64);
+        let expiry_window = format!("{:064x}", 1800u64);
+        let last_executed_at = format!("{:064x}", 100u64);
+        let active = format!("{:064x}", 1u64);
+        let strategy_offset = encode_u256_hex_u128((32 * 10) as u128);
+        let strategy = encode_dynamic_string_tail("momentum-v1");
+
+        let payload = format!(
+            "0x{}{}{}{}{}{}{}{}{}{}{}",
+            owner,
+            market_id,
+            is_yes,
+            price_bps,
+            size,
+            cadence,
+            expiry_window,
+            last_executed_at,
+            active,
+            strategy_offset,
+            strategy
+        );
+
+        let decoded = decode_agent_snapshot(5, &payload, 120).unwrap().unwrap();
+        assert_eq!(decoded.id, "5");
+        assert_eq!(decoded.owner, "0x39e4939df3763e342db531a2a58867bc26a22b98");
+        assert_eq!(decoded.market_id, "12");
+        assert!(decoded.is_yes);
+        assert_eq!(decoded.price_bps, 5500);
+        assert_eq!(decoded.size, "100000");
+        assert_eq!(decoded.next_execution_at, 130);
+        assert_eq!(decoded.status, "cooldown");
+        assert!(!decoded.can_execute);
+        assert_eq!(decoded.strategy, "momentum-v1");
+    }
+
+    #[test]
+    fn test_decode_order_snapshot() {
+        let maker = "00000000000000000000000071c7656ec7ab88b098defb751b7401b5f6d8976f";
+        let market_id = format!("{:064x}", 5u64);
+        let is_yes = format!("{:064x}", 1u64);
+        let price_bps = format!("{:064x}", 6300u64);
+        let size = format!("{:064x}", 100u64);
+        let remaining = format!("{:064x}", 25u64);
+        let expiry = format!("{:064x}", 1_800_000_000u64);
+        let canceled = format!("{:064x}", 0u64);
+
+        let payload = format!(
+            "0x{}{}{}{}{}{}{}{}",
+            maker, market_id, is_yes, price_bps, size, remaining, expiry, canceled
+        );
+        let decoded = decode_order_snapshot(&payload).unwrap().unwrap();
+
+        assert_eq!(decoded.market_id, 5);
+        assert!(decoded.is_yes);
+        assert_eq!(decoded.price_bps, 6300);
+        assert_eq!(decoded.remaining, 25);
+        assert_eq!(decoded.expiry, 1_800_000_000);
+        assert!(!decoded.canceled);
+    }
+
+    #[test]
+    fn test_decode_order_snapshot_empty_slot() {
+        let maker = "0000000000000000000000000000000000000000000000000000000000000000";
+        let payload = format!(
+            "0x{}{}{}{}{}{}{}{}",
+            maker,
+            format!("{:064x}", 0u64),
+            format!("{:064x}", 0u64),
+            format!("{:064x}", 0u64),
+            format!("{:064x}", 0u64),
+            format!("{:064x}", 0u64),
+            format!("{:064x}", 0u64),
+            format!("{:064x}", 0u64)
+        );
+        assert!(decode_order_snapshot(&payload).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_unix_to_rfc3339() {
+        let value = unix_to_rfc3339(1_700_000_000);
+        assert!(value.starts_with("2023-"));
+    }
+
+    #[test]
+    fn test_internal_feed_warning_for_rate_limit() {
+        let warning = internal_feed_warning(&ApiError::internal(
+            "Base RPC request failed: Base RPC returned non-success status: 429 Too Many Requests",
+        ));
+
+        assert_eq!(warning.source, "internal");
+        assert_eq!(
+            warning.message,
+            "internal Base feed temporarily rate limited"
+        );
+    }
+
+    #[test]
+    fn test_internal_feed_warning_for_generic_failure() {
+        let warning = internal_feed_warning(&ApiError::internal(
+            "Base RPC request failed: connection reset",
+        ));
+
+        assert_eq!(warning.source, "internal");
+        assert_eq!(warning.message, "internal Base feed unavailable");
+    }
+}
+
