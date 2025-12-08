@@ -2358,3 +2358,471 @@ pub async fn prepare_cancel_order_write(
         "cancelOrder",
     )))
 }
+
+pub async fn prepare_claim_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareClaimWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    let data = format!(
+        "{}{}",
+        ORDER_BOOK_CLAIM_SELECTOR,
+        encode_u256_hex(body.market_id)
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        order_book,
+        data,
+        "claim",
+    )))
+}
+
+pub async fn prepare_claim_for_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareClaimForWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let user = normalize_required_address(
+        body.user.as_str(),
+        "INVALID_USER_ADDRESS",
+        "user must be a valid 0x EVM address",
+    )?;
+
+    let user_word = encode_address_word(user.as_str())?;
+    let data = format!(
+        "{}{}{}",
+        ORDER_BOOK_CLAIM_FOR_SELECTOR,
+        user_word,
+        encode_u256_hex(body.market_id)
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        order_book,
+        data,
+        "claimFor",
+    )))
+}
+
+pub async fn prepare_match_orders_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareMatchOrdersWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    if body.first_order_id == body.second_order_id {
+        return Err(ApiError::bad_request(
+            "INVALID_MATCH_PAIR",
+            "firstOrderId and secondOrderId must differ",
+        ));
+    }
+    let fill_size = parse_u128_decimal(&body.fill_size, "fillSize")?;
+    if fill_size == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_FILL_SIZE",
+            "fillSize must be greater than zero",
+        ));
+    }
+
+    let data = format!(
+        "{}{}{}{}",
+        ORDER_BOOK_MATCH_SELECTOR,
+        encode_u256_hex(body.first_order_id),
+        encode_u256_hex(body.second_order_id),
+        encode_u256_hex_u128(fill_size),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        order_book,
+        data,
+        "matchOrders",
+    )))
+}
+
+pub async fn prepare_create_agent_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareCreateAgentWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    if body.price_bps == 0 || body.price_bps >= 10_000 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE_BPS",
+            "priceBps must be between 1 and 9999",
+        ));
+    }
+    let size = parse_u128_decimal(&body.size, "size")?;
+    if size == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_SIZE",
+            "size must be greater than zero",
+        ));
+    }
+    if body.cadence == 0 || body.expiry_window == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_AGENT_TIMING",
+            "cadence and expiryWindow must be greater than zero",
+        ));
+    }
+    if body.strategy.len() > MAX_MARKET_TEXT_LENGTH {
+        return Err(ApiError::bad_request(
+            "STRATEGY_TOO_LONG",
+            "strategy exceeds max length",
+        ));
+    }
+
+    let data = encode_create_agent_calldata(
+        body.market_id,
+        body.is_yes,
+        body.price_bps,
+        size,
+        body.cadence,
+        body.expiry_window,
+        body.strategy.as_str(),
+    )?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "createAgent",
+    )))
+}
+
+pub async fn prepare_execute_agent_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareExecuteAgentWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let data = format!(
+        "{}{}",
+        AGENT_RUNTIME_EXECUTE_SELECTOR,
+        encode_u256_hex(body.agent_id)
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "executeAgent",
+    )))
+}
+
+pub async fn prepare_erc8004_register_identity_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004RegisterIdentityWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    if body.tier > ERC8004_MAX_TIER {
+        return Err(ApiError::bad_request(
+            "INVALID_TIER",
+            "tier must be between 0 and 100",
+        ));
+    }
+
+    let registry = configured_address(
+        &state.config.erc8004_identity_registry_address,
+        "ERC8004_IDENTITY_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_IDENTITY_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let wallet = normalize_required_address(
+        body.wallet.as_str(),
+        "INVALID_WALLET",
+        "wallet must be a valid 0x EVM address",
+    )?;
+    let data = format!(
+        "{}{}{}",
+        ERC8004_IDENTITY_REGISTER_SELECTOR,
+        encode_address_word(wallet.as_str())?,
+        encode_u256_hex_u128(body.tier as u128),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "registerIdentity",
+    )))
+}
+
+pub async fn prepare_erc8004_set_tier_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004SetTierWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    if body.tier > ERC8004_MAX_TIER {
+        return Err(ApiError::bad_request(
+            "INVALID_TIER",
+            "tier must be between 0 and 100",
+        ));
+    }
+
+    let registry = configured_address(
+        &state.config.erc8004_identity_registry_address,
+        "ERC8004_IDENTITY_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_IDENTITY_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let wallet = normalize_required_address(
+        body.wallet.as_str(),
+        "INVALID_WALLET",
+        "wallet must be a valid 0x EVM address",
+    )?;
+    let data = format!(
+        "{}{}{}",
+        ERC8004_IDENTITY_SET_TIER_SELECTOR,
+        encode_address_word(wallet.as_str())?,
+        encode_u256_hex_u128(body.tier as u128),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "setIdentityTier",
+    )))
+}
+
+pub async fn prepare_erc8004_set_active_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004SetActiveWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let registry = configured_address(
+        &state.config.erc8004_identity_registry_address,
+        "ERC8004_IDENTITY_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_IDENTITY_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let wallet = normalize_required_address(
+        body.wallet.as_str(),
+        "INVALID_WALLET",
+        "wallet must be a valid 0x EVM address",
+    )?;
+    let data = format!(
+        "{}{}{}",
+        ERC8004_IDENTITY_SET_ACTIVE_SELECTOR,
+        encode_address_word(wallet.as_str())?,
+        encode_bool_word(body.active),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "setIdentityActive",
+    )))
+}
+
+pub async fn prepare_erc8004_submit_outcome_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004SubmitOutcomeWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    if body.confidence_weight_bps > 10_000 {
+        return Err(ApiError::bad_request(
+            "INVALID_CONFIDENCE_WEIGHT",
+            "confidenceWeightBps must be between 0 and 10000",
+        ));
+    }
+
+    let registry = configured_address(
+        &state.config.erc8004_reputation_registry_address,
+        "ERC8004_REPUTATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_REPUTATION_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let wallet = normalize_required_address(
+        body.wallet.as_str(),
+        "INVALID_WALLET",
+        "wallet must be a valid 0x EVM address",
+    )?;
+    let notional = parse_u128_decimal(body.notional_microusdc.as_str(), "notionalMicrousdc")?;
+    let data = format!(
+        "{}{}{}{}{}",
+        ERC8004_REPUTATION_SUBMIT_OUTCOME_SELECTOR,
+        encode_address_word(wallet.as_str())?,
+        encode_bool_word(body.success),
+        encode_u256_hex_u128(notional),
+        encode_u256_hex_u128(body.confidence_weight_bps as u128),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "submitOutcome",
+    )))
+}
+
+pub async fn prepare_erc8004_validation_request_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004ValidationRequestWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let registry = configured_address(
+        &state.config.erc8004_validation_registry_address,
+        "ERC8004_VALIDATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_VALIDATION_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let validator = normalize_required_address(
+        body.validator.as_str(),
+        "INVALID_VALIDATOR",
+        "validator must be a valid 0x EVM address",
+    )?;
+    let agent_id = parse_u128_decimal(body.agent_id.as_str(), "agentId")?;
+    let request_uri = body.request_uri.trim();
+    let request_hash = match body.request_hash.as_ref() {
+        Some(raw) if !raw.trim().is_empty() => normalize_required_bytes32(
+            raw.as_str(),
+            "INVALID_REQUEST_HASH",
+            "requestHash must be a valid 0x-prefixed bytes32 value",
+        )?,
+        _ => {
+            let mut hasher = Keccak256::new();
+            hasher.update(request_uri.as_bytes());
+            format!("0x{}", hex::encode(hasher.finalize()))
+        }
+    };
+
+    let data = encode_validation_request_calldata(
+        validator.as_str(),
+        agent_id,
+        request_uri,
+        request_hash.as_str(),
+    )?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "validationRequest",
+    )))
+}
+
+pub async fn prepare_erc8004_validation_response_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004ValidationResponseWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    if body.response > 100 {
+        return Err(ApiError::bad_request(
+            "INVALID_VALIDATION_RESPONSE",
+            "response must be between 0 and 100",
+        ));
+    }
+
+    let registry = configured_address(
+        &state.config.erc8004_validation_registry_address,
+        "ERC8004_VALIDATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_VALIDATION_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let request_hash = normalize_required_bytes32(
+        body.request_hash.as_str(),
+        "INVALID_REQUEST_HASH",
+        "requestHash must be a valid 0x-prefixed bytes32 value",
+    )?;
+    let response_hash = normalize_required_bytes32(
+        body.response_hash.as_str(),
+        "INVALID_RESPONSE_HASH",
+        "responseHash must be a valid 0x-prefixed bytes32 value",
+    )?;
+    let tag = normalize_required_bytes32(
+        body.tag.as_str(),
+        "INVALID_TAG",
+        "tag must be a valid 0x-prefixed bytes32 value",
+    )?;
+
+    let data = encode_validation_response_calldata(
+        request_hash.as_str(),
+        body.response,
+        body.response_uri.as_str(),
+        response_hash.as_str(),
+        tag.as_str(),
+    )?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "validationResponse",
+    )))
+}
+
+pub async fn relay_raw_transaction(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<RelayRawTransactionRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    if !is_valid_hex_payload(body.raw_tx.as_str()) {
+        return Err(ApiError::bad_request(
+            "INVALID_RAW_TX",
+            "rawTx must be a valid 0x-prefixed hex string",
+        ));
+    }
+
+    let tx_hash = state
+        .evm_rpc
+        .eth_send_raw_transaction(body.raw_tx.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
