@@ -2826,3 +2826,473 @@ pub async fn relay_raw_transaction(
         .await
         .map_err(map_evm_rpc_error)?;
 
+    Ok(HttpResponse::Ok().json(RelayRawTransactionResponse {
+        chain_id: state.config.base_chain_id,
+        tx_hash,
+    }))
+}
+
+async fn matcher_runtime_state(state: &AppState) -> Result<MatcherRuntimeState, ApiError> {
+    match state
+        .redis
+        .get::<MatcherRuntimeState>(MATCHER_STATE_REDIS_KEY)
+        .await
+    {
+        Ok(Some(runtime)) => Ok(runtime),
+        Ok(None) => Ok(MatcherRuntimeState::default()),
+        Err(err) => Err(ApiError::internal(&err.to_string())),
+    }
+}
+
+async fn matcher_runtime_stats(state: &AppState) -> Result<MatcherRuntimeStats, ApiError> {
+    match state
+        .redis
+        .get::<MatcherRuntimeStats>(MATCHER_STATS_REDIS_KEY)
+        .await
+    {
+        Ok(Some(stats)) => Ok(stats),
+        Ok(None) => Ok(MatcherRuntimeStats::default()),
+        Err(err) => Err(ApiError::internal(&err.to_string())),
+    }
+}
+
+fn ensure_admin_control(req: &HttpRequest, state: &AppState) -> Result<(), ApiError> {
+    let expected = state.config.admin_control_key.trim();
+    if expected.is_empty() {
+        return Err(ApiError::forbidden(
+            "admin control key is not configured for this environment",
+        ));
+    }
+
+    let provided = req
+        .headers()
+        .get("x-admin-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .unwrap_or("");
+    if provided != expected {
+        return Err(ApiError::unauthorized("invalid admin key"));
+    }
+
+    Ok(())
+}
+
+fn is_valid_evm_address(address: &str) -> bool {
+    address.len() == 42
+        && address.starts_with("0x")
+        && address[2..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_valid_bytes32(value: &str) -> bool {
+    value.len() == 66
+        && value.starts_with("0x")
+        && value[2..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_valid_hex_payload(value: &str) -> bool {
+    value.len() >= 4
+        && value.starts_with("0x")
+        && value.len() % 2 == 0
+        && value[2..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn ensure_evm_writes_enabled(state: &Arc<AppState>) -> Result<(), ApiError> {
+    if !state.config.evm_enabled || !state.config.evm_writes_enabled {
+        return Err(ApiError::bad_request(
+            "EVM_WRITES_DISABLED",
+            "EVM write operations are disabled",
+        ));
+    }
+    Ok(())
+}
+
+fn configured_address(address: &str, code: &str, message: &str) -> Result<String, ApiError> {
+    let trimmed = address.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(code, message));
+    }
+    normalize_required_address(trimmed, code, message)
+}
+
+fn normalize_required_address(
+    address: &str,
+    code: &str,
+    message: &str,
+) -> Result<String, ApiError> {
+    let trimmed = address.trim();
+    if !is_valid_evm_address(trimmed) {
+        return Err(ApiError::bad_request(code, message));
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
+fn normalize_required_bytes32(value: &str, code: &str, message: &str) -> Result<String, ApiError> {
+    let trimmed = value.trim();
+    if !is_valid_bytes32(trimmed) {
+        return Err(ApiError::bad_request(code, message));
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
+fn normalize_optional_address(address: Option<&String>) -> Result<Option<String>, ApiError> {
+    match address {
+        None => Ok(None),
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            if !is_valid_evm_address(trimmed) {
+                return Err(ApiError::bad_request(
+                    "INVALID_FROM_ADDRESS",
+                    "from must be a valid 0x EVM address",
+                ));
+            }
+            Ok(Some(trimmed.to_ascii_lowercase()))
+        }
+    }
+}
+
+fn parse_u8_hex(value: &str) -> Result<u8, ApiError> {
+    let parsed = parse_u64_hex(value)?;
+    if parsed > u8::MAX as u64 {
+        return Err(ApiError::internal("RPC value out of range for u8"));
+    }
+
+    Ok(parsed as u8)
+}
+
+fn parse_u64_hex(value: &str) -> Result<u64, ApiError> {
+    let trimmed = value.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return Err(ApiError::internal("Invalid RPC hex result"));
+    }
+
+    let normalized = trimmed.trim_start_matches('0');
+    if normalized.is_empty() {
+        return Ok(0);
+    }
+    if normalized.len() > 16 {
+        return Err(ApiError::internal("RPC value out of range for u64"));
+    }
+
+    u64::from_str_radix(normalized, 16).map_err(|_| ApiError::internal("Invalid RPC hex result"))
+}
+
+fn parse_u128_hex(value: &str) -> Result<u128, ApiError> {
+    let trimmed = value.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return Err(ApiError::internal("Invalid RPC hex result"));
+    }
+
+    let normalized = trimmed.trim_start_matches('0');
+    if normalized.is_empty() {
+        return Ok(0);
+    }
+    if normalized.len() > 32 {
+        return Err(ApiError::internal("RPC value out of range for u128"));
+    }
+
+    u128::from_str_radix(normalized, 16).map_err(|_| ApiError::internal("Invalid RPC hex result"))
+}
+
+fn parse_bool_word(word: &str) -> Result<bool, ApiError> {
+    Ok(parse_u64_hex(word)? != 0)
+}
+
+fn encode_u256_hex(value: u64) -> String {
+    format!("{:064x}", value)
+}
+
+fn encode_u256_hex_u128(value: u128) -> String {
+    format!("{:064x}", value)
+}
+
+fn encode_bool_word(value: bool) -> String {
+    if value {
+        format!("{:064x}", 1)
+    } else {
+        format!("{:064x}", 0)
+    }
+}
+
+fn encode_address_word(value: &str) -> Result<String, ApiError> {
+    if !is_valid_evm_address(value) {
+        return Err(ApiError::bad_request(
+            "INVALID_ADDRESS",
+            "address must be a valid 0x EVM address",
+        ));
+    }
+    Ok(format!("{:0>64}", value[2..].to_ascii_lowercase()))
+}
+
+fn encode_bytes32_word(value: &str) -> Result<String, ApiError> {
+    if !is_valid_bytes32(value) {
+        return Err(ApiError::bad_request(
+            "INVALID_BYTES32",
+            "value must be a valid 0x-prefixed bytes32 string",
+        ));
+    }
+    Ok(value.trim_start_matches("0x").to_ascii_lowercase())
+}
+
+fn encode_dynamic_string_tail(value: &str) -> String {
+    let encoded = hex::encode(value.as_bytes());
+    let padded_len = if encoded.is_empty() {
+        0
+    } else {
+        ((encoded.len() + 63) / 64) * 64
+    };
+    let mut padded = encoded;
+    if padded.len() < padded_len {
+        padded.push_str(&"0".repeat(padded_len - padded.len()));
+    }
+    format!("{}{}", encode_u256_hex_u128(value.len() as u128), padded)
+}
+
+fn encode_create_market_rich_calldata(
+    question: &str,
+    description: &str,
+    category: &str,
+    resolution_source: &str,
+    close_time: u64,
+    resolver: &str,
+) -> Result<String, ApiError> {
+    let question_tail = encode_dynamic_string_tail(question);
+    let description_tail = encode_dynamic_string_tail(description);
+    let category_tail = encode_dynamic_string_tail(category);
+    let source_tail = encode_dynamic_string_tail(resolution_source);
+    let resolver_word = encode_address_word(resolver)?;
+
+    let head_len_bytes = 32usize * 6usize;
+    let question_offset = head_len_bytes;
+    let description_offset = question_offset + (question_tail.len() / 2);
+    let category_offset = description_offset + (description_tail.len() / 2);
+    let source_offset = category_offset + (category_tail.len() / 2);
+
+    Ok(format!(
+        "{}{}{}{}{}{}{}{}{}{}",
+        MARKET_CORE_CREATE_RICH_SELECTOR,
+        encode_u256_hex_u128(question_offset as u128),
+        encode_u256_hex_u128(description_offset as u128),
+        encode_u256_hex_u128(category_offset as u128),
+        encode_u256_hex_u128(source_offset as u128),
+        encode_u256_hex(close_time),
+        resolver_word,
+        question_tail,
+        description_tail,
+        format!("{}{}", category_tail, source_tail),
+    ))
+}
+
+fn encode_create_agent_calldata(
+    market_id: u64,
+    is_yes: bool,
+    price_bps: u64,
+    size: u128,
+    cadence: u64,
+    expiry_window: u64,
+    strategy: &str,
+) -> Result<String, ApiError> {
+    let strategy_tail = encode_dynamic_string_tail(strategy);
+    let head_len_bytes = 32usize * 7usize;
+
+    Ok(format!(
+        "{}{}{}{}{}{}{}{}{}",
+        AGENT_RUNTIME_CREATE_SELECTOR,
+        encode_u256_hex(market_id),
+        encode_bool_word(is_yes),
+        encode_u256_hex_u128(price_bps as u128),
+        encode_u256_hex_u128(size),
+        encode_u256_hex(cadence),
+        encode_u256_hex(expiry_window),
+        encode_u256_hex_u128(head_len_bytes as u128),
+        strategy_tail,
+    ))
+}
+
+fn encode_validation_request_calldata(
+    validator: &str,
+    agent_id: u128,
+    request_uri: &str,
+    request_hash: &str,
+) -> Result<String, ApiError> {
+    let request_uri_tail = encode_dynamic_string_tail(request_uri);
+    let head_len_bytes = 32usize * 4usize;
+
+    Ok(format!(
+        "{}{}{}{}{}{}",
+        ERC8004_VALIDATION_REQUEST_SELECTOR,
+        encode_address_word(validator)?,
+        encode_u256_hex_u128(agent_id),
+        encode_u256_hex_u128(head_len_bytes as u128),
+        encode_bytes32_word(request_hash)?,
+        request_uri_tail,
+    ))
+}
+
+fn encode_validation_response_calldata(
+    request_hash: &str,
+    response: u8,
+    response_uri: &str,
+    response_hash: &str,
+    tag: &str,
+) -> Result<String, ApiError> {
+    let response_uri_tail = encode_dynamic_string_tail(response_uri);
+    let head_len_bytes = 32usize * 5usize;
+
+    Ok(format!(
+        "{}{}{}{}{}{}{}",
+        ERC8004_VALIDATION_RESPONSE_SELECTOR,
+        encode_bytes32_word(request_hash)?,
+        encode_u256_hex_u128(response as u128),
+        encode_u256_hex_u128(head_len_bytes as u128),
+        encode_bytes32_word(response_hash)?,
+        encode_bytes32_word(tag)?,
+        response_uri_tail,
+    ))
+}
+
+fn parse_u128_decimal(value: &str, field: &str) -> Result<u128, ApiError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_NUMERIC_FIELD",
+            &format!("{} is required", field),
+        ));
+    }
+    trimmed.parse::<u128>().map_err(|_| {
+        ApiError::bad_request(
+            "INVALID_NUMERIC_FIELD",
+            &format!("{} must be an unsigned integer string", field),
+        )
+    })
+}
+
+fn prepared_write_response(
+    chain_id: u64,
+    from: Option<String>,
+    to: String,
+    data: String,
+    method: &str,
+) -> PreparedEvmWriteResponse {
+    PreparedEvmWriteResponse {
+        chain_id,
+        from,
+        to,
+        data: format!("0x{}", data.trim_start_matches("0x")),
+        value: "0x0".to_string(),
+        method: method.to_string(),
+    }
+}
+
+fn word_at(data: &str, index: usize) -> Result<&str, ApiError> {
+    if !data.starts_with("0x") {
+        return Err(ApiError::internal("Invalid RPC hex result"));
+    }
+
+    let start = 2 + (index * 64);
+    let end = start + 64;
+    if data.len() < end {
+        return Err(ApiError::internal("Invalid market slot payload"));
+    }
+    Ok(&data[start..end])
+}
+
+fn decode_market_metadata_tuple(
+    payload: &str,
+) -> Result<(String, String, String, String), ApiError> {
+    Ok((
+        decode_abi_string_at_offset(payload, word_at(payload, 0)?)?,
+        decode_abi_string_at_offset(payload, word_at(payload, 1)?)?,
+        decode_abi_string_at_offset(payload, word_at(payload, 2)?)?,
+        decode_abi_string_at_offset(payload, word_at(payload, 3)?)?,
+    ))
+}
+
+fn decode_abi_string_at_offset(payload: &str, offset_word: &str) -> Result<String, ApiError> {
+    let offset = parse_u64_hex(offset_word)? as usize;
+    if !payload.starts_with("0x") {
+        return Err(ApiError::internal("Invalid ABI payload"));
+    }
+
+    let head = 2 + (offset * 2);
+    if payload.len() < head + 64 {
+        return Err(ApiError::internal("Invalid ABI payload"));
+    }
+    let len_word = &payload[head..head + 64];
+    let length = parse_u64_hex(len_word)? as usize;
+    let data_start = head + 64;
+    let data_end = data_start + (length * 2);
+    if payload.len() < data_end {
+        return Err(ApiError::internal("Invalid ABI payload"));
+    }
+
+    let raw = &payload[data_start..data_end];
+    let bytes = hex::decode(raw).map_err(|_| ApiError::internal("Invalid ABI payload"))?;
+    String::from_utf8(bytes).map_err(|_| ApiError::internal("Invalid UTF-8 market metadata"))
+}
+
+fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, ApiError> {
+    let question_hash = format!("0x{}", word_at(slot, 0)?);
+    let close_time = parse_u64_hex(word_at(slot, 1)?)?;
+    let resolve_time = parse_u64_hex(word_at(slot, 2)?)?;
+    let resolver_word = word_at(slot, 3)?;
+    let resolver = format!("0x{}", &resolver_word[24..]).to_ascii_lowercase();
+    let resolved = parse_bool_word(word_at(slot, 4)?)?;
+    let outcome_true = parse_bool_word(word_at(slot, 5)?)?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ApiError::internal("System time error"))?
+        .as_secs();
+
+    let status = if resolved {
+        "resolved".to_string()
+    } else if close_time <= now {
+        "closed".to_string()
+    } else {
+        "active".to_string()
+    };
+
+    Ok(BaseMarketSnapshot {
+        id: index.to_string(),
+        question_hash,
+        question: String::new(),
+        description: String::new(),
+        category: String::new(),
+        resolution_source: String::new(),
+        resolver,
+        close_time,
+        resolve_time,
+        resolved,
+        outcome: if resolved {
+            Some(if outcome_true {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            })
+        } else {
+            None
+        },
+        status,
+        source: "internal_market_core".to_string(),
+        provider: "internal".to_string(),
+        is_external: false,
+        external_url: None,
+        chain_id: 8453,
+        requires_credentials: false,
+        execution_users: true,
+        execution_agents: true,
+        outcomes: Vec::new(),
+    })
+}
+
+fn decode_agent_snapshot(
+    index: u64,
+    slot: &str,
+    now: u64,
+) -> Result<Option<BaseAgentSnapshot>, ApiError> {
+    let Some(raw) = decode_agent_slot(slot)? else {
+        return Ok(None);
+    };
