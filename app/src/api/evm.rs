@@ -1884,3 +1884,477 @@ pub async fn get_base_orderbook(
         is_synthetic: false,
     }))
 }
+
+pub async fn get_base_trades(
+    state: web::Data<Arc<AppState>>,
+    req: HttpRequest,
+    path: web::Path<String>,
+    query: web::Query<BaseTradesQuery>,
+) -> Result<impl Responder, ApiError> {
+    if !state.config.evm_enabled || !state.config.evm_reads_enabled {
+        return Err(ApiError::bad_request(
+            "EVM_DISABLED",
+            "EVM services are disabled",
+        ));
+    }
+    x402::ensure_payment_for_request(&state, &req, X402Resource::Trades).await?;
+
+    let market_id_raw = path.into_inner();
+    let limit = query.limit.unwrap_or(50).min(MAX_TRADES_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0);
+
+    let outcome_raw = query.outcome.as_deref();
+    let outcome_filter = match outcome_raw {
+        None => None,
+        Some("yes") => Some(true),
+        Some("no") => Some(false),
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "INVALID_OUTCOME",
+                "outcome must be either 'yes' or 'no'",
+            ))
+        }
+    };
+
+    if is_external_market_id(&market_id_raw) {
+        let external_id = ExternalMarketId::parse(market_id_raw.as_str())?;
+        ensure_provider_action_allowed(
+            &req,
+            to_rail_provider(external_id.provider),
+            ProviderRailAction::MarketData,
+        )?;
+        let snapshot = external::fetch_trades(
+            &state.config,
+            &state.redis,
+            &external_id,
+            outcome_raw,
+            limit,
+            offset,
+        )
+        .await?;
+
+        let trades = snapshot
+            .trades
+            .into_iter()
+            .map(|entry| BaseTradeSnapshot {
+                id: entry.id,
+                market_id: entry.market_id,
+                outcome: entry.outcome,
+                price: entry.price,
+                price_bps: entry.price_bps,
+                quantity: entry.quantity,
+                tx_hash: entry.tx_hash,
+                block_number: entry.block_number,
+                created_at: entry.created_at,
+            })
+            .collect::<Vec<_>>();
+
+        return Ok(HttpResponse::Ok().json(BaseTradesResponse {
+            trades,
+            total: snapshot.total,
+            limit: snapshot.limit,
+            offset: snapshot.offset,
+            has_more: snapshot.has_more,
+            source: snapshot.source,
+            provider: snapshot.provider,
+            chain_id: snapshot.chain_id,
+            provider_market_ref: snapshot.provider_market_ref,
+            is_synthetic: snapshot.is_synthetic,
+        }));
+    }
+
+    let market_id = market_id_raw.parse::<u64>().map_err(|_| {
+        ApiError::bad_request(
+            "INVALID_MARKET_ID",
+            "market_id must be numeric or namespaced",
+        )
+    })?;
+
+    let order_book = state.config.order_book_address.trim();
+    if order_book.is_empty() {
+        return Err(ApiError::bad_request(
+            "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+            "ORDER_BOOK_ADDRESS must be configured for Base trades",
+        ));
+    }
+
+    if !is_valid_evm_address(order_book) {
+        return Err(ApiError::bad_request(
+            "INVALID_ORDER_BOOK_ADDRESS",
+            "ORDER_BOOK_ADDRESS must be a valid 0x EVM address",
+        ));
+    }
+
+    let latest_block = state
+        .evm_rpc
+        .eth_block_number()
+        .await
+        .map_err(map_evm_rpc_error)?;
+    if latest_block == 0 {
+        return Ok(HttpResponse::Ok().json(BaseTradesResponse {
+            trades: vec![],
+            total: 0,
+            limit,
+            offset,
+            has_more: false,
+            source: "order_book_contract".to_string(),
+            provider: "internal".to_string(),
+            chain_id: state.config.base_chain_id,
+            provider_market_ref: market_id.to_string(),
+            is_synthetic: false,
+        }));
+    }
+
+    let from_block = latest_block.saturating_sub(TRADES_BLOCK_SCAN_WINDOW);
+    let _ = state
+        .evm_indexer
+        .sync(
+            state.config.market_core_address.trim(),
+            order_book,
+            TRADES_BLOCK_SCAN_WINDOW,
+            &[ORDER_FILLED_TOPIC],
+            Some(latest_block),
+        )
+        .await;
+
+    let indexed_logs = state.evm_indexer.logs_by_topic(ORDER_FILLED_TOPIC).await;
+    let mut logs = indexed_logs
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .block_number
+                .as_deref()
+                .and_then(|v| parse_u64_hex(v).ok())
+                .map(|block| block >= from_block && block <= latest_block)
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    if logs.is_empty() {
+        logs = state
+            .evm_rpc
+            .eth_get_logs(order_book, ORDER_FILLED_TOPIC, from_block, latest_block)
+            .await
+            .map_err(map_evm_rpc_error)?;
+    }
+
+    let mut trades = Vec::new();
+    let mut block_timestamp_cache: HashMap<u64, u64> = HashMap::new();
+    for log in logs {
+        let order_id = match log.topics.get(1) {
+            Some(topic) => match parse_u64_hex(topic) {
+                Ok(value) => value,
+                Err(_) => continue,
+            },
+            None => continue,
+        };
+
+        let block_number = match log.block_number.as_deref() {
+            Some(value) => match parse_u64_hex(value) {
+                Ok(parsed) => parsed,
+                Err(_) => continue,
+            },
+            None => continue,
+        };
+        let log_index = match log.log_index.as_deref() {
+            Some(value) => parse_u64_hex(value).unwrap_or(0),
+            None => 0,
+        };
+
+        let fill_size = match word_at(&log.data, 0).and_then(parse_u64_hex) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if fill_size == 0 {
+            continue;
+        }
+
+        let calldata = format!(
+            "{}{}",
+            ORDER_BOOK_ORDERS_SELECTOR,
+            encode_u256_hex(order_id)
+        );
+        let payload = state
+            .evm_rpc
+            .eth_call(order_book, &calldata)
+            .await
+            .map_err(map_evm_rpc_error)?;
+        let Some(order) = decode_order_snapshot(&payload)? else {
+            continue;
+        };
+
+        if order.market_id != market_id {
+            continue;
+        }
+        if let Some(expected) = outcome_filter {
+            if order.is_yes != expected {
+                continue;
+            }
+        }
+        if order.price_bps == 0 || order.price_bps >= 10_000 {
+            continue;
+        }
+
+        let timestamp = if let Some(ts) = block_timestamp_cache.get(&block_number) {
+            *ts
+        } else {
+            let ts = state
+                .evm_rpc
+                .eth_get_block_timestamp(block_number)
+                .await
+                .map_err(map_evm_rpc_error)?;
+            block_timestamp_cache.insert(block_number, ts);
+            ts
+        };
+
+        let tx_hash = log.transaction_hash.unwrap_or_default();
+        let id = if tx_hash.is_empty() {
+            format!("base-{}-{}", order_id, log_index)
+        } else {
+            format!("base-{}-{}", tx_hash, log_index)
+        };
+
+        trades.push(PendingTrade {
+            id,
+            order_id,
+            block_number,
+            log_index,
+            tx_hash,
+            quantity: fill_size,
+            outcome: if order.is_yes {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            },
+            price_bps: order.price_bps,
+            created_at: unix_to_rfc3339(timestamp),
+        });
+    }
+
+    trades.sort_by(|a, b| {
+        b.block_number
+            .cmp(&a.block_number)
+            .then_with(|| b.log_index.cmp(&a.log_index))
+            .then_with(|| b.order_id.cmp(&a.order_id))
+    });
+
+    let total = trades.len() as u64;
+    if offset >= total {
+        return Ok(HttpResponse::Ok().json(BaseTradesResponse {
+            trades: vec![],
+            total,
+            limit,
+            offset,
+            has_more: false,
+            source: "order_book_contract".to_string(),
+            provider: "internal".to_string(),
+            chain_id: state.config.base_chain_id,
+            provider_market_ref: market_id.to_string(),
+            is_synthetic: false,
+        }));
+    }
+
+    let end = (offset + limit).min(total);
+    let mut page = Vec::new();
+    for entry in trades
+        .into_iter()
+        .skip(offset as usize)
+        .take((end - offset) as usize)
+    {
+        page.push(BaseTradeSnapshot {
+            id: entry.id,
+            market_id: market_id_raw.clone(),
+            outcome: entry.outcome,
+            price: (entry.price_bps as f64) / 10_000.0,
+            price_bps: entry.price_bps,
+            quantity: entry.quantity,
+            tx_hash: entry.tx_hash,
+            block_number: entry.block_number,
+            created_at: entry.created_at,
+        });
+    }
+
+    Ok(HttpResponse::Ok().json(BaseTradesResponse {
+        trades: page,
+        total,
+        limit,
+        offset,
+        has_more: end < total,
+        source: "order_book_contract".to_string(),
+        provider: "internal".to_string(),
+        chain_id: state.config.base_chain_id,
+        provider_market_ref: market_id.to_string(),
+        is_synthetic: false,
+    }))
+}
+
+pub async fn prepare_create_market_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareCreateMarketWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let market_core = configured_address(
+        &state.config.market_core_address,
+        "MARKET_CORE_ADDRESS_NOT_CONFIGURED",
+        "MARKET_CORE_ADDRESS must be configured for write operations",
+    )?;
+
+    let resolver = normalize_required_address(
+        body.resolver.as_str(),
+        "INVALID_RESOLVER",
+        "resolver must be a valid 0x EVM address",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    let question = body.question.trim();
+    if question.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_QUESTION",
+            "question must not be empty",
+        ));
+    }
+    if question.len() > MAX_MARKET_TEXT_LENGTH {
+        return Err(ApiError::bad_request(
+            "QUESTION_TOO_LONG",
+            "question exceeds max length",
+        ));
+    }
+
+    let description = body.description.as_deref().unwrap_or("").trim();
+    let category = body.category.as_deref().unwrap_or("").trim();
+    let resolution_source = body.resolution_source.as_deref().unwrap_or("").trim();
+    if description.len() > MAX_MARKET_TEXT_LENGTH
+        || category.len() > MAX_MARKET_TEXT_LENGTH
+        || resolution_source.len() > MAX_MARKET_TEXT_LENGTH
+    {
+        return Err(ApiError::bad_request(
+            "MARKET_TEXT_TOO_LONG",
+            "description/category/resolutionSource exceeds max length",
+        ));
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ApiError::internal("System time error"))?
+        .as_secs();
+    if body.close_time <= now {
+        return Err(ApiError::bad_request(
+            "INVALID_CLOSE_TIME",
+            "closeTime must be in the future",
+        ));
+    }
+
+    let data = encode_create_market_rich_calldata(
+        question,
+        description,
+        category,
+        resolution_source,
+        body.close_time,
+        &resolver,
+    )?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        market_core,
+        data,
+        "createMarketRich",
+    )))
+}
+
+pub async fn prepare_place_order_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PreparePlaceOrderWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    let is_yes = match body.outcome.as_str() {
+        "yes" => true,
+        "no" => false,
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_OUTCOME",
+                "outcome must be either 'yes' or 'no'",
+            ))
+        }
+    };
+
+    if body.price_bps == 0 || body.price_bps >= 10_000 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE_BPS",
+            "priceBps must be between 1 and 9999",
+        ));
+    }
+
+    let size = parse_u128_decimal(&body.size, "size")?;
+    if size == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_SIZE",
+            "size must be greater than zero",
+        ));
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ApiError::internal("System time error"))?
+        .as_secs();
+    if body.expiry <= now {
+        return Err(ApiError::bad_request(
+            "INVALID_EXPIRY",
+            "expiry must be in the future",
+        ));
+    }
+
+    let data = format!(
+        "{}{}{}{}{}{}",
+        ORDER_BOOK_PLACE_SELECTOR,
+        encode_u256_hex(body.market_id),
+        encode_bool_word(is_yes),
+        encode_u256_hex_u128(body.price_bps as u128),
+        encode_u256_hex_u128(size),
+        encode_u256_hex(body.expiry),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        order_book,
+        data,
+        "placeOrder",
+    )))
+}
+
+pub async fn prepare_cancel_order_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareCancelOrderWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    let data = format!(
+        "{}{}",
+        ORDER_BOOK_CANCEL_SELECTOR,
+        encode_u256_hex(body.order_id)
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        order_book,
+        data,
+        "cancelOrder",
+    )))
+}
