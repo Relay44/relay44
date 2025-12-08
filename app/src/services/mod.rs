@@ -1,0 +1,20 @@
+pub mod database;
+pub mod evm_indexer;
+pub mod evm_rpc;
+pub mod external;
+pub mod logging;
+pub mod metrics;
+pub mod orderbook;
+pub mod provider_rails;
+pub mod redis;
+pub mod websocket;
+pub mod x402;
+pub mod xmtp_swarm;
+
+pub use database::DatabaseService;
+pub use evm_indexer::EvmIndexerService;
+pub use evm_rpc::EvmRpcService;
+pub use metrics::{ComponentHealth, HealthChecks, HealthStatus, MetricsService, SystemHealth};
+pub use orderbook::OrderBookService;
+pub use redis::RedisService;
+pub use websocket::WebSocketHub;
