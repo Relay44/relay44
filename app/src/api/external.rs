@@ -2785,3 +2785,698 @@ async fn close_due_paper_position(
         .await
         .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+        record_paper_mark(
+            state,
+            position.id.as_str(),
+            agent,
+            fill.mark_price,
+            unrealized,
+            remaining_quantity * fill.mark_price,
+            &json!({
+                "reason": "partial_close",
+                "realizedPnlUsdc": realized
+            }),
+        )
+        .await?;
+
+        return Ok((
+            false,
+            json!({
+                "status": "holding",
+                "reason": "partial_close",
+                "positionId": position.id,
+                "closedQuantity": closed_quantity,
+                "remainingQuantity": remaining_quantity,
+                "exitPrice": fill.average_price,
+                "markPrice": fill.mark_price,
+                "realizedPnlUsdc": realized
+            }),
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE paper_positions
+         SET status = 'closed',
+             mark_price = $2,
+             fees_paid_usdc = $3,
+             realized_pnl_usdc = $4,
+             unrealized_pnl_usdc = 0,
+             closed_at = $5,
+             last_marked_at = $5,
+             updated_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(position.id.as_str())
+    .bind(fill.mark_price)
+    .bind(position.fees_paid_usdc + fill.fee_usdc)
+    .bind(realized)
+    .bind(now)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok((
+        true,
+        json!({
+            "status": "closed",
+            "positionId": position.id,
+            "closedQuantity": closed_quantity,
+            "exitPrice": fill.average_price,
+            "markPrice": fill.mark_price,
+            "realizedPnlUsdc": realized
+        }),
+    ))
+}
+
+async fn open_paper_position(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+    now: chrono::DateTime<Utc>,
+    market: &external::types::ExternalMarketSnapshot,
+    orderbook: &external::types::ExternalOrderBookSnapshot,
+) -> Result<AgentExecutionOutcome, ApiError> {
+    let fill = simulate_fill(
+        market,
+        orderbook,
+        agent.outcome.as_str(),
+        agent.side.as_str(),
+        agent.quantity,
+        state.config.paper_fee_bps,
+    );
+
+    if fill.filled_quantity <= 0.0 {
+        let run_id = Uuid::new_v4().to_string();
+        let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+        update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at).await?;
+        insert_external_agent_run(
+            state,
+            run_id.as_str(),
+            agent,
+            "paper_skipped",
+            None,
+            Some("no_fill_liquidity"),
+            &json!({
+                "mode": "paper",
+                "reason": "no_fill_liquidity",
+                "marketQuestion": market.question,
+                "markPrice": fill.mark_price
+            }),
+        )
+        .await?;
+
+        return Ok(AgentExecutionOutcome {
+            executed: false,
+            skip_reason: Some("no_fill_liquidity".to_string()),
+            run_status: "paper_skipped".to_string(),
+            run_id,
+            external_order_id: None,
+            provider_order_id: None,
+            next_execution_at,
+            response: json!({
+                "mode": "paper",
+                "status": "skipped",
+                "reason": "no_fill_liquidity",
+                "markPrice": fill.mark_price
+            }),
+        });
+    }
+
+    let order_id = Uuid::new_v4().to_string();
+    let position_id = Uuid::new_v4().to_string();
+    let run_id = Uuid::new_v4().to_string();
+    let hold_until = now + Duration::seconds(state.config.paper_hold_duration_seconds as i64);
+    let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+    let unrealized = unrealized_pnl(
+        agent.side.as_str(),
+        fill.average_price,
+        fill.mark_price,
+        fill.filled_quantity,
+    ) - fill.fee_usdc;
+
+    sqlx::query(
+        "INSERT INTO external_orders (
+            id, owner, provider, intent_id, market_id, provider_order_id, status,
+            request_payload, response_payload, error_message, created_at, updated_at
+        ) VALUES ($1,$2,$3,NULL,$4,'','paper_filled',$5,$6,NULL,$7,$7)",
+    )
+    .bind(order_id.as_str())
+    .bind(agent.owner.as_str())
+    .bind(agent.provider.as_str())
+    .bind(agent.market_id.as_str())
+    .bind(json!({
+        "mode": "paper",
+        "side": agent.side,
+        "outcome": agent.outcome,
+        "quantity": agent.quantity,
+        "price": agent.price
+    }))
+    .bind(json!({
+        "mode": "paper",
+        "positionId": position_id,
+        "fill": fill
+    }))
+    .bind(now)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    sqlx::query(
+        "INSERT INTO paper_positions (
+            id, agent_id, owner, provider, market_id, outcome, side, strategy, status,
+            entry_price, mark_price, requested_quantity, filled_quantity, notional_usdc,
+            fees_paid_usdc, realized_pnl_usdc, unrealized_pnl_usdc, hold_until, opened_at,
+            last_marked_at, metadata, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open',$9,$10,$11,$12,$13,$14,0,$15,$16,$17,$17,$18,$17,$17)",
+    )
+    .bind(position_id.as_str())
+    .bind(agent.id.as_str())
+    .bind(agent.owner.as_str())
+    .bind(agent.provider.as_str())
+    .bind(agent.market_id.as_str())
+    .bind(agent.outcome.as_str())
+    .bind(agent.side.as_str())
+    .bind(agent.strategy.as_str())
+    .bind(fill.average_price)
+    .bind(fill.mark_price)
+    .bind(fill.requested_quantity)
+    .bind(fill.filled_quantity)
+    .bind(fill.notional_usdc)
+    .bind(fill.fee_usdc)
+    .bind(unrealized)
+    .bind(hold_until)
+    .bind(now)
+    .bind(json!({
+        "agentName": agent.name,
+        "marketQuestion": market.question,
+        "partialFill": fill.partial_fill
+    }))
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    insert_external_agent_run(
+        state,
+        run_id.as_str(),
+        agent,
+        "paper_opened",
+        Some(order_id.as_str()),
+        None,
+        &json!({
+            "mode": "paper",
+            "positionId": position_id,
+            "holdUntil": hold_until.to_rfc3339(),
+            "fill": fill
+        }),
+    )
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO paper_fills (
+            id, run_id, position_id, agent_id, owner, provider, market_id, outcome, side, fill_type,
+            requested_quantity, filled_quantity, price, mark_price, notional_usdc, fee_usdc, metadata, created_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$11,$12,$13,$14,$15,$16,$17)",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(run_id.as_str())
+    .bind(position_id.as_str())
+    .bind(agent.id.as_str())
+    .bind(agent.owner.as_str())
+    .bind(agent.provider.as_str())
+    .bind(agent.market_id.as_str())
+    .bind(agent.outcome.as_str())
+    .bind(agent.side.as_str())
+    .bind(fill.requested_quantity)
+    .bind(fill.filled_quantity)
+    .bind(fill.average_price)
+    .bind(fill.mark_price)
+    .bind(fill.notional_usdc)
+    .bind(fill.fee_usdc)
+    .bind(json!({
+        "partialFill": fill.partial_fill,
+        "slippageBps": fill.slippage_bps,
+        "usedOrderbookDepth": fill.used_orderbook_depth
+    }))
+    .bind(now)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    record_paper_mark(
+        state,
+        position_id.as_str(),
+        agent,
+        fill.mark_price,
+        unrealized,
+        fill.filled_quantity * fill.mark_price,
+        &json!({
+            "reason": "opened",
+            "holdUntil": hold_until.to_rfc3339()
+        }),
+    )
+    .await?;
+
+    update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at).await?;
+
+    Ok(AgentExecutionOutcome {
+        executed: true,
+        skip_reason: None,
+        run_status: "paper_opened".to_string(),
+        run_id,
+        external_order_id: Some(order_id),
+        provider_order_id: None,
+        next_execution_at,
+        response: json!({
+            "mode": "paper",
+            "status": "opened",
+            "positionId": position_id,
+            "fill": fill,
+            "holdUntil": hold_until.to_rfc3339()
+        }),
+    })
+}
+
+fn market_is_closed_for_paper_entry(
+    market: &external::types::ExternalMarketSnapshot,
+    now: chrono::DateTime<Utc>,
+) -> bool {
+    if market.resolved {
+        return true;
+    }
+
+    if market.close_time > 0 && market.close_time as i64 <= now.timestamp() {
+        return true;
+    }
+
+    matches!(
+        market.status.trim().to_ascii_lowercase().as_str(),
+        "closed" | "expired" | "resolved"
+    )
+}
+
+async fn execute_paper_agent(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+) -> Result<AgentExecutionOutcome, ApiError> {
+    let now = Utc::now();
+    let market_id = ExternalMarketId::parse(agent.market_id.as_str())?;
+    let market = external::fetch_market_by_id(&state.config, &market_id).await?;
+    let market_closed = market_is_closed_for_paper_entry(&market, now);
+
+    if let Some(position) = load_open_paper_position(state, agent.id.as_str()).await? {
+        let orderbook = external::fetch_orderbook(
+            &state.config,
+            &state.redis,
+            &market_id,
+            agent.outcome.as_str(),
+            20,
+        )
+        .await?;
+
+        if !market_closed && now < position.hold_until {
+            let fill = simulate_fill(
+                &market,
+                &orderbook,
+                agent.outcome.as_str(),
+                agent.side.as_str(),
+                position.filled_quantity,
+                state.config.paper_fee_bps,
+            );
+            let unrealized = unrealized_pnl(
+                agent.side.as_str(),
+                position.entry_price,
+                fill.mark_price,
+                position.filled_quantity,
+            ) - position.fees_paid_usdc;
+            let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+
+            sqlx::query(
+                "UPDATE paper_positions
+                 SET mark_price = $2,
+                     unrealized_pnl_usdc = $3,
+                     last_marked_at = $4,
+                     updated_at = NOW()
+                 WHERE id = $1",
+            )
+            .bind(position.id.as_str())
+            .bind(fill.mark_price)
+            .bind(unrealized)
+            .bind(now)
+            .execute(state.db.pool())
+            .await
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+            record_paper_mark(
+                state,
+                position.id.as_str(),
+                agent,
+                fill.mark_price,
+                unrealized,
+                position.filled_quantity * fill.mark_price,
+                &json!({
+                    "reason": "holding_open_position",
+                    "holdUntil": position.hold_until.to_rfc3339()
+                }),
+            )
+            .await?;
+
+            update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at)
+                .await?;
+            let run_id = Uuid::new_v4().to_string();
+            insert_external_agent_run(
+                state,
+                run_id.as_str(),
+                agent,
+                "paper_skipped",
+                None,
+                Some("holding_open_position"),
+                &json!({
+                    "mode": "paper",
+                    "positionId": position.id,
+                    "markPrice": fill.mark_price,
+                    "unrealizedPnlUsdc": unrealized,
+                    "holdUntil": position.hold_until.to_rfc3339()
+                }),
+            )
+            .await?;
+
+            return Ok(AgentExecutionOutcome {
+                executed: false,
+                skip_reason: Some("holding_open_position".to_string()),
+                run_status: "paper_skipped".to_string(),
+                run_id,
+                external_order_id: None,
+                provider_order_id: None,
+                next_execution_at,
+                response: json!({
+                    "mode": "paper",
+                    "status": "holding",
+                    "positionId": position.id,
+                    "markPrice": fill.mark_price,
+                    "unrealizedPnlUsdc": unrealized
+                }),
+            });
+        }
+
+        let (fully_closed, close_response) =
+            close_due_paper_position(state, agent, &position, now, &market, &orderbook).await?;
+        if !fully_closed {
+            let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+            update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at)
+                .await?;
+            let run_id = Uuid::new_v4().to_string();
+            insert_external_agent_run(
+                state,
+                run_id.as_str(),
+                agent,
+                "paper_partial_close",
+                None,
+                Some(
+                    close_response
+                        .get("reason")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("partial_close"),
+                ),
+                &json!({
+                    "mode": "paper",
+                    "close": close_response
+                }),
+            )
+            .await?;
+
+            return Ok(AgentExecutionOutcome {
+                executed: true,
+                skip_reason: None,
+                run_status: "paper_partial_close".to_string(),
+                run_id,
+                external_order_id: None,
+                provider_order_id: None,
+                next_execution_at,
+                response: json!({
+                    "mode": "paper",
+                    "status": "partial_close",
+                    "close": close_response
+                }),
+            });
+        }
+
+        if market_closed {
+            deactivate_external_agent(state, agent.id.as_str(), now).await?;
+            let run_id = Uuid::new_v4().to_string();
+            insert_external_agent_run(
+                state,
+                run_id.as_str(),
+                agent,
+                "paper_closed",
+                None,
+                None,
+                &json!({
+                    "mode": "paper",
+                    "retired": true,
+                    "reason": "market_closed",
+                    "close": close_response
+                }),
+            )
+            .await?;
+
+            return Ok(AgentExecutionOutcome {
+                executed: true,
+                skip_reason: None,
+                run_status: "paper_closed".to_string(),
+                run_id,
+                external_order_id: None,
+                provider_order_id: None,
+                next_execution_at: now,
+                response: json!({
+                    "mode": "paper",
+                    "status": "closed",
+                    "retired": true,
+                    "reason": "market_closed",
+                    "close": close_response
+                }),
+            });
+        }
+    }
+
+    if market_closed {
+        let run_id = Uuid::new_v4().to_string();
+        deactivate_external_agent(state, agent.id.as_str(), now).await?;
+        insert_external_agent_run(
+            state,
+            run_id.as_str(),
+            agent,
+            "paper_retired",
+            None,
+            Some("market_closed"),
+            &json!({
+                "mode": "paper",
+                "retired": true,
+                "reason": "market_closed",
+                "marketQuestion": market.question,
+                "marketStatus": market.status,
+                "marketResolved": market.resolved,
+                "marketCloseTime": market.close_time
+            }),
+        )
+        .await?;
+
+        return Ok(AgentExecutionOutcome {
+            executed: false,
+            skip_reason: Some("market_closed".to_string()),
+            run_status: "paper_retired".to_string(),
+            run_id,
+            external_order_id: None,
+            provider_order_id: None,
+            next_execution_at: now,
+            response: json!({
+                "mode": "paper",
+                "status": "retired",
+                "retired": true,
+                "reason": "market_closed"
+            }),
+        });
+    }
+
+    let orderbook = external::fetch_orderbook(
+        &state.config,
+        &state.redis,
+        &market_id,
+        agent.outcome.as_str(),
+        20,
+    )
+    .await?;
+
+    open_paper_position(state, agent, now, &market, &orderbook).await
+}
+
+async fn execute_live_agent(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+    signed_order_override: Option<Value>,
+) -> Result<AgentExecutionOutcome, ApiError> {
+    let credential = load_credential(
+        state,
+        agent.owner.as_str(),
+        agent.provider,
+        agent.credential_id.as_deref(),
+    )
+    .await?;
+    ensure_provider_credential_ready(state, agent.provider, &credential).await?;
+
+    let signed_order = if let Some(order) = signed_order_override {
+        order
+    } else if let Some(default_order) = credential.payload.get("defaultSignedOrder") {
+        default_order.clone()
+    } else {
+        return Err(ApiError::bad_request(
+            "SIGNED_ORDER_REQUIRED",
+            "external agent execution requires signedOrder in request or credential.defaultSignedOrder",
+        ));
+    };
+
+    let submit_payload =
+        submit_to_provider(state, agent.provider, &credential, &signed_order).await?;
+    let provider_order_id = provider_order_id_from_payload(&submit_payload);
+    let now = Utc::now();
+    let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+    let order_id = Uuid::new_v4().to_string();
+    let run_id = Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO external_orders (
+            id, owner, provider, intent_id, market_id, provider_order_id, status,
+            request_payload, response_payload, error_message, created_at, updated_at
+        ) VALUES ($1,$2,$3,NULL,$4,$5,'submitted',$6,$7,NULL,$8,$8)",
+    )
+    .bind(order_id.as_str())
+    .bind(agent.owner.as_str())
+    .bind(agent.provider.as_str())
+    .bind(agent.market_id.as_str())
+    .bind(provider_order_id.as_str())
+    .bind(&signed_order)
+    .bind(&submit_payload)
+    .bind(now)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at).await?;
+    insert_external_agent_run(
+        state,
+        run_id.as_str(),
+        agent,
+        "submitted",
+        Some(order_id.as_str()),
+        None,
+        &json!({
+            "mode": "live",
+            "providerOrderId": provider_order_id,
+            "response": submit_payload
+        }),
+    )
+    .await?;
+
+    Ok(AgentExecutionOutcome {
+        executed: true,
+        skip_reason: None,
+        run_status: "submitted".to_string(),
+        run_id,
+        external_order_id: Some(order_id),
+        provider_order_id: Some(provider_order_id),
+        next_execution_at,
+        response: json!({
+            "mode": "live",
+            "response": submit_payload
+        }),
+    })
+}
+
+pub(crate) async fn execute_agent_record(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+    signed_order_override: Option<Value>,
+) -> Result<AgentExecutionOutcome, ApiError> {
+    match execution_mode(state) {
+        ExternalExecutionMode::Paper => execute_paper_agent(state, agent).await,
+        ExternalExecutionMode::Live => {
+            execute_live_agent(state, agent, signed_order_override).await
+        }
+    }
+}
+
+pub async fn list_external_credentials(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListExternalCredentialsQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+
+    let provider_filter = query
+        .provider
+        .as_ref()
+        .map(|value| normalize_provider(value))
+        .transpose()?;
+
+    let rows = if let Some(provider) = provider_filter {
+        sqlx::query(
+            "SELECT id, provider, label, encrypted_payload, key_id, created_at, updated_at
+             FROM external_credentials
+             WHERE owner = $1 AND provider = $2 AND revoked_at IS NULL
+             ORDER BY updated_at DESC",
+        )
+        .bind(user.wallet_address.as_str())
+        .bind(provider.as_str())
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+    } else {
+        sqlx::query(
+            "SELECT id, provider, label, encrypted_payload, key_id, created_at, updated_at
+             FROM external_credentials
+             WHERE owner = $1 AND revoked_at IS NULL
+             ORDER BY updated_at DESC",
+        )
+        .bind(user.wallet_address.as_str())
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+    };
+
+    let mut credentials = Vec::new();
+    for row in rows {
+        let encrypted_payload: String = row
+            .try_get("encrypted_payload")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key_id: String = row
+            .try_get("key_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let payload = decrypt_json(
+            state.config.external_credentials_master_key.as_str(),
+            key_id.as_str(),
+            encrypted_payload.as_str(),
+        )
+        .unwrap_or_else(|_| json!({}));
+
+        let created_at: chrono::DateTime<Utc> = row
+            .try_get("created_at")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let updated_at: chrono::DateTime<Utc> = row
+            .try_get("updated_at")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+        credentials.push(ExternalCredentialResponse {
+            id: row
+                .try_get("id")
+                .map_err(|err| ApiError::internal(&err.to_string()))?,
+            provider: row
+                .try_get("provider")
+                .map_err(|err| ApiError::internal(&err.to_string()))?,
+            label: row
+                .try_get("label")
+                .map_err(|err| ApiError::internal(&err.to_string()))?,
+            key_id,
+            created_at: created_at.to_rfc3339(),
+            updated_at: updated_at.to_rfc3339(),
+            credentials: mask_credentials(&payload),
+        });
+    }
