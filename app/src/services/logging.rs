@@ -97,3 +97,44 @@ fn escape_json(s: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_escape_json_basic() {
+        assert_eq!(escape_json("hello"), "hello");
+        assert_eq!(escape_json(""), "");
+    }
+
+    #[test]
+    fn test_escape_json_quotes() {
+        assert_eq!(escape_json(r#"say "hi""#), r#"say \"hi\""#);
+    }
+
+    #[test]
+    fn test_escape_json_backslash() {
+        assert_eq!(escape_json(r"path\to\file"), r"path\\to\\file");
+    }
+
+    #[test]
+    fn test_escape_json_newlines() {
+        assert_eq!(escape_json("line1\nline2"), "line1\\nline2");
+        assert_eq!(escape_json("cr\r"), "cr\\r");
+        assert_eq!(escape_json("tab\there"), "tab\\there");
+    }
+
+    #[test]
+    fn test_escape_json_control_chars() {
+        assert_eq!(escape_json("\x00"), "\\u0000");
+        assert_eq!(escape_json("\x1f"), "\\u001f");
+    }
+
+    #[test]
+    fn test_escape_json_unicode_passthrough() {
+        assert_eq!(escape_json("hello"), "hello");
+    }
+
+    #[test]
+    fn test_escape_json_complex() {
+        let input = "Error: \"file not found\"\npath: C:\\Users\\test";
+        let expected = "Error: \\\"file not found\\\"\\npath: C:\\\\Users\\\\test";
+        assert_eq!(escape_json(input), expected);
+    }
+}
