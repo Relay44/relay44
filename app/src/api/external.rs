@@ -3480,3 +3480,701 @@ pub async fn list_external_credentials(
             credentials: mask_credentials(&payload),
         });
     }
+
+    Ok(HttpResponse::Ok().json(ExternalCredentialsListResponse {
+        total: credentials.len() as u64,
+        credentials,
+    }))
+}
+
+pub async fn get_external_credential_status(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ExternalCredentialStatusQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+    let provider = normalize_provider(query.provider.as_str())?;
+    let credential = match load_credential(
+        &state,
+        user.wallet_address.as_str(),
+        provider,
+        query.credential_id.as_deref(),
+    )
+    .await
+    {
+        Ok(credential) => Some(credential),
+        Err(err) if err.status == 404 => None,
+        Err(err) => return Err(err),
+    };
+    let status = build_external_credential_status(&state, provider, credential.as_ref()).await?;
+    Ok(HttpResponse::Ok().json(status))
+}
+
+pub async fn bind_limitless_wallet(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<BindLimitlessWalletRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+    let base_wallet = normalize_evm_wallet(body.base_wallet.as_str())?;
+
+    let row = sqlx::query(
+        "SELECT id, encrypted_payload, key_id
+         FROM external_credentials
+         WHERE id = $1 AND owner = $2 AND provider = 'limitless' AND revoked_at IS NULL",
+    )
+    .bind(body.credential_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?
+    .ok_or_else(|| ApiError::not_found("Limitless credential"))?;
+
+    let encrypted_payload: String = row
+        .try_get("encrypted_payload")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let key_id: String = row
+        .try_get("key_id")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let mut payload = decrypt_json(
+        state.config.external_credentials_master_key.as_str(),
+        key_id.as_str(),
+        encrypted_payload.as_str(),
+    )?;
+
+    let payload_map = payload.as_object_mut().ok_or_else(|| {
+        ApiError::bad_request("INVALID_CREDENTIALS", "credentials must be an object")
+    })?;
+    payload_map.insert("baseWallet".to_string(), json!(base_wallet));
+
+    let encrypted_payload = encrypt_json(
+        state.config.external_credentials_master_key.as_str(),
+        state.config.external_credentials_key_id.as_str(),
+        &payload,
+    )?;
+
+    sqlx::query(
+        "UPDATE external_credentials
+         SET encrypted_payload = $1, key_id = $2, updated_at = NOW()
+         WHERE id = $3 AND owner = $4",
+    )
+    .bind(encrypted_payload)
+    .bind(state.config.external_credentials_key_id.as_str())
+    .bind(body.credential_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let credential = StoredCredential {
+        id: body.credential_id.clone(),
+        owner: user.wallet_address.clone(),
+        payload,
+    };
+    let status =
+        build_external_credential_status(&state, ExternalProvider::Limitless, Some(&credential))
+            .await?;
+    Ok(HttpResponse::Ok().json(status))
+}
+
+pub async fn upsert_external_credentials(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<UpsertExternalCredentialRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+
+    let provider = normalize_provider(body.provider.as_str())?;
+    let label = body
+        .label
+        .as_deref()
+        .unwrap_or("default")
+        .trim()
+        .to_ascii_lowercase();
+    if label.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_LABEL",
+            "label must not be empty",
+        ));
+    }
+
+    if !body.credentials.is_object() {
+        return Err(ApiError::bad_request(
+            "INVALID_CREDENTIALS",
+            "credentials must be an object",
+        ));
+    }
+
+    match provider {
+        ExternalProvider::Limitless => {
+            if payload_string(&body.credentials, &["apiKey", "api_key"]).is_none() {
+                return Err(ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "limitless credential must include apiKey",
+                ));
+            }
+            if let Some(base_wallet) =
+                payload_string(&body.credentials, &["baseWallet", "base_wallet"])
+            {
+                normalize_evm_wallet(base_wallet.as_str())?;
+            }
+        }
+        ExternalProvider::Polymarket => {
+            if payload_string(&body.credentials, &["apiKey", "api_key"]).is_none() {
+                return Err(ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "polymarket credential must include apiKey",
+                ));
+            }
+            if payload_string(&body.credentials, &["apiSecret", "api_secret"]).is_none() {
+                return Err(ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "polymarket credential must include apiSecret",
+                ));
+            }
+            if payload_string(&body.credentials, &["apiPassphrase", "api_passphrase"]).is_none() {
+                return Err(ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "polymarket credential must include apiPassphrase",
+                ));
+            }
+            let funder = payload_string(&body.credentials, &["funder"]).ok_or_else(|| {
+                ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "polymarket credential must include funder",
+                )
+            })?;
+            normalize_evm_wallet(funder.as_str())?;
+            polymarket_signature_type_from_payload(&body.credentials)?;
+        }
+    }
+
+    let encrypted_payload = encrypt_json(
+        state.config.external_credentials_master_key.as_str(),
+        state.config.external_credentials_key_id.as_str(),
+        &body.credentials,
+    )?;
+
+    let row = sqlx::query(
+        "INSERT INTO external_credentials (
+            id, owner, provider, label, encrypted_payload, key_id, created_at, updated_at, revoked_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), NULL)
+        ON CONFLICT (owner, provider, label)
+        DO UPDATE SET encrypted_payload = EXCLUDED.encrypted_payload,
+                      key_id = EXCLUDED.key_id,
+                      updated_at = NOW(),
+                      revoked_at = NULL
+        RETURNING id, provider, label, key_id, created_at, updated_at",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(user.wallet_address.as_str())
+    .bind(provider.as_str())
+    .bind(label)
+    .bind(encrypted_payload)
+    .bind(state.config.external_credentials_key_id.as_str())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let created_at: chrono::DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let updated_at: chrono::DateTime<Utc> = row
+        .try_get("updated_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(ExternalCredentialResponse {
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        provider: row
+            .try_get("provider")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        label: row
+            .try_get("label")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        key_id: row
+            .try_get("key_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        created_at: created_at.to_rfc3339(),
+        updated_at: updated_at.to_rfc3339(),
+        credentials: mask_credentials(&body.credentials),
+    }))
+}
+
+pub async fn delete_external_credentials(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    credential_id: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+
+    let result = sqlx::query(
+        "UPDATE external_credentials
+         SET revoked_at = NOW(), updated_at = NOW()
+         WHERE id = $1 AND owner = $2 AND revoked_at IS NULL",
+    )
+    .bind(credential_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found("External credential"));
+    }
+
+    Ok(HttpResponse::Ok().json(json!({ "ok": true })))
+}
+
+pub async fn create_external_order_intent(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateExternalOrderIntentRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_TRADING_DISABLED",
+            "external trading is disabled",
+        ));
+    }
+    ensure_live_write_mode(&state)?;
+
+    let user = extract_authenticated_user(&req, &state).await?;
+    let provider = normalize_provider(body.provider.as_str())?;
+    ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
+    let outcome = normalize_outcome(body.outcome.as_str())?;
+    let side = normalize_side(body.side.as_str())?;
+
+    if body.price <= 0.0 || body.price >= 1.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE",
+            "price must be between 0 and 1",
+        ));
+    }
+    if body.quantity <= 0.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_QUANTITY",
+            "quantity must be greater than zero",
+        ));
+    }
+
+    let namespaced_market_id = normalize_namespaced_market_id(provider, body.market_id.as_str());
+    let parsed_market_id = ExternalMarketId::parse(namespaced_market_id.as_str())?;
+    let market = external::fetch_market_by_id(&state.config, &parsed_market_id).await?;
+
+    if !market.execution_users {
+        return Err(ApiError::bad_request(
+            "MARKET_NOT_EXECUTABLE",
+            "market is not executable for users under current launch policy",
+        ));
+    }
+
+    let credential = load_credential(
+        &state,
+        user.wallet_address.as_str(),
+        provider,
+        body.credential_id.as_deref(),
+    )
+    .await?;
+    let credential_status = ensure_provider_credential_ready(&state, provider, &credential).await?;
+
+    let market_ref = if !market.provider_market_ref.is_empty() {
+        market.provider_market_ref.clone()
+    } else {
+        parsed_market_id.value.clone()
+    };
+
+    let provider_market_payload = match provider {
+        ExternalProvider::Limitless => {
+            let client = reqwest::Client::new();
+            match client
+                .get(format!(
+                    "{}/markets/{}",
+                    state.config.limitless_api_base.trim_end_matches('/'),
+                    parsed_market_id.value
+                ))
+                .send()
+                .await
+            {
+                Ok(response) => response.json::<Value>().await.unwrap_or_else(|_| json!({})),
+                Err(_) => json!({}),
+            }
+        }
+        ExternalProvider::Polymarket => {
+            let client = reqwest::Client::new();
+            match client
+                .get(format!(
+                    "{}/markets/{}",
+                    state.config.polymarket_gamma_api_base.trim_end_matches('/'),
+                    parsed_market_id.value
+                ))
+                .send()
+                .await
+            {
+                Ok(response) => response.json::<Value>().await.unwrap_or_else(|_| json!({})),
+                Err(_) => json!({}),
+            }
+        }
+    };
+
+    let mut preflight = build_preflight(provider, &provider_market_payload);
+    if let Some(preflight_map) = preflight.as_object_mut() {
+        preflight_map.insert(
+            "credentialReady".to_string(),
+            json!(credential_status.ready),
+        );
+        if let Some(base_wallet) = credential_status.base_wallet.as_ref() {
+            preflight_map.insert("baseWallet".to_string(), json!(base_wallet));
+        }
+        if let Some(profile_status) = credential_status.profile_status.as_ref() {
+            preflight_map.insert("profileStatus".to_string(), json!(profile_status));
+        }
+        preflight_map.insert(
+            "credentialChecks".to_string(),
+            json!(credential_status.checks),
+        );
+    }
+    let intent_for_signing = CreateExternalOrderIntentRequest {
+        provider: provider.as_str().to_string(),
+        market_id: namespaced_market_id.clone(),
+        outcome,
+        side,
+        price: body.price,
+        quantity: body.quantity,
+        credential_id: body.credential_id.clone(),
+    };
+    let fee_rate_bps = match provider {
+        ExternalProvider::Limitless => {
+            let api_key = api_key_from_payload(&credential.payload, &["apiKey", "api_key"])
+                .ok_or_else(|| {
+                    ApiError::bad_request(
+                        "INVALID_CREDENTIALS",
+                        "limitless credential must include apiKey",
+                    )
+                })?;
+            let base_wallet = payload_string(&credential.payload, &["baseWallet", "base_wallet"])
+                .ok_or_else(|| {
+                ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "limitless credential must include baseWallet",
+                )
+            })?;
+            let profile =
+                fetch_limitless_profile(&state, base_wallet.as_str(), api_key.as_str()).await?;
+            Some(profile.rank.map(|rank| rank.fee_rate_bps).unwrap_or(300))
+        }
+        ExternalProvider::Polymarket => None,
+    };
+    let typed_data = match provider {
+        ExternalProvider::Limitless => build_typed_data(
+            user.wallet_address.as_str(),
+            provider,
+            &intent_for_signing,
+            market_ref.as_str(),
+            &provider_market_payload,
+            fee_rate_bps,
+        )?,
+        ExternalProvider::Polymarket => {
+            build_polymarket_typed_data(
+                &state,
+                user.wallet_address.as_str(),
+                &credential,
+                &intent_for_signing,
+                &provider_market_payload,
+            )
+            .await?
+        }
+    };
+
+    let intent_id = Uuid::new_v4().to_string();
+    let expires_at = (Utc::now() + Duration::hours(2)).to_rfc3339();
+
+    sqlx::query(
+        "INSERT INTO external_order_intents (
+            id, owner, provider, market_id, provider_market_ref, outcome, side,
+            price, quantity, preflight, typed_data, status, credential_id, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'prepared',$12,NOW(),NOW())",
+    )
+    .bind(intent_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .bind(provider.as_str())
+    .bind(namespaced_market_id.as_str())
+    .bind(market_ref.as_str())
+    .bind(intent_for_signing.outcome.as_str())
+    .bind(intent_for_signing.side.as_str())
+    .bind(intent_for_signing.price)
+    .bind(intent_for_signing.quantity)
+    .bind(&preflight)
+    .bind(&typed_data)
+    .bind(credential.id.as_str())
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(ExternalOrderIntentResponse {
+        id: intent_id,
+        provider: provider.as_str().to_string(),
+        market_id: namespaced_market_id,
+        preflight,
+        typed_data,
+        status: "prepared".to_string(),
+        expires_at,
+    }))
+}
+
+pub async fn submit_external_order(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<SubmitExternalOrderRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_TRADING_DISABLED",
+            "external trading is disabled",
+        ));
+    }
+    ensure_live_write_mode(&state)?;
+
+    let user = extract_authenticated_user(&req, &state).await?;
+
+    let row = sqlx::query(
+        "SELECT id, provider, market_id, provider_market_ref, credential_id, typed_data, status
+         FROM external_order_intents
+         WHERE id = $1 AND owner = $2",
+    )
+    .bind(body.intent_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?
+    .ok_or_else(|| ApiError::not_found("External order intent"))?;
+
+    let provider_raw: String = row
+        .try_get("provider")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let provider = normalize_provider(provider_raw.as_str())?;
+    ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
+
+    let credential_id = body
+        .credential_id
+        .as_deref()
+        .map(ToOwned::to_owned)
+        .or_else(|| row.try_get::<String, _>("credential_id").ok());
+
+    let credential = load_credential(
+        &state,
+        user.wallet_address.as_str(),
+        provider,
+        credential_id.as_deref(),
+    )
+    .await?;
+    ensure_provider_credential_ready(&state, provider, &credential).await?;
+
+    let market_id: String = row
+        .try_get("market_id")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let provider_market_ref: String = row
+        .try_get("provider_market_ref")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let typed_data: Value = row
+        .try_get("typed_data")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let provider_payload = match provider {
+        ExternalProvider::Limitless => {
+            build_limitless_submit_payload(
+                &state,
+                &credential,
+                market_id.as_str(),
+                provider_market_ref.as_str(),
+                &typed_data,
+                &body.signed_order,
+            )
+            .await?
+        }
+        ExternalProvider::Polymarket => {
+            build_polymarket_submit_payload(&credential, &typed_data, &body.signed_order)?
+        }
+    };
+
+    let provider_response =
+        submit_to_provider(&state, provider, &credential, &provider_payload).await;
+    let now = Utc::now();
+    let order_id = Uuid::new_v4().to_string();
+
+    let (status, payload, error_message, provider_order_id) = match provider_response {
+        Ok(payload) => {
+            let provider_order_id = payload
+                .get("orderId")
+                .or_else(|| payload.get("id"))
+                .or_else(|| payload.get("order_id"))
+                .or_else(|| payload.get("order").and_then(|value| value.get("id")))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string();
+            ("submitted".to_string(), payload, None, provider_order_id)
+        }
+        Err(err) => (
+            "failed".to_string(),
+            json!({ "error": err.message }),
+            Some(err.message),
+            String::new(),
+        ),
+    };
+
+    sqlx::query(
+        "INSERT INTO external_orders (
+            id, owner, provider, intent_id, market_id, provider_order_id, status,
+            request_payload, response_payload, error_message, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    )
+    .bind(order_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .bind(provider.as_str())
+    .bind(body.intent_id.as_str())
+    .bind(market_id.as_str())
+    .bind(provider_order_id.as_str())
+    .bind(status.as_str())
+    .bind(&provider_payload)
+    .bind(&payload)
+    .bind(error_message.as_deref())
+    .bind(now)
+    .bind(now)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let next_intent_status = if status == "submitted" {
+        "submitted"
+    } else {
+        "failed"
+    };
+    sqlx::query("UPDATE external_order_intents SET status = $2, updated_at = NOW() WHERE id = $1")
+        .bind(body.intent_id.as_str())
+        .bind(next_intent_status)
+        .execute(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    if status != "submitted" {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_ORDER_SUBMIT_FAILED",
+            error_message
+                .as_deref()
+                .unwrap_or("external order submission failed"),
+        ));
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalOrderResponse {
+        id: order_id,
+        provider: provider.as_str().to_string(),
+        market_id: row
+            .try_get("market_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        provider_order_id,
+        status,
+        created_at: now.to_rfc3339(),
+        updated_at: now.to_rfc3339(),
+        response_payload: payload,
+        error_message: None,
+    }))
+}
+
+pub async fn cancel_external_order(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CancelExternalOrderRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_TRADING_DISABLED",
+            "external trading is disabled",
+        ));
+    }
+    ensure_live_write_mode(&state)?;
+
+    let user = extract_authenticated_user(&req, &state).await?;
+    let provider = normalize_provider(body.provider.as_str())?;
+    ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeClose)?;
+    let credential = load_credential(
+        &state,
+        user.wallet_address.as_str(),
+        provider,
+        body.credential_id.as_deref(),
+    )
+    .await?;
+    ensure_provider_credential_ready(&state, provider, &credential).await?;
+
+    let response_payload = cancel_on_provider(
+        &state,
+        provider,
+        &credential,
+        body.provider_order_id.as_str(),
+        body.payload.clone(),
+    )
+    .await?;
+
+    sqlx::query(
+        "UPDATE external_orders
+         SET status = 'cancelled', response_payload = $1, updated_at = NOW()
+         WHERE owner = $2 AND provider = $3 AND provider_order_id = $4",
+    )
+    .bind(&response_payload)
+    .bind(user.wallet_address.as_str())
+    .bind(provider.as_str())
+    .bind(body.provider_order_id.as_str())
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "ok": true,
+        "provider": provider.as_str(),
+        "providerOrderId": body.provider_order_id,
+        "response": response_payload,
+    })))
+}
+
+pub async fn list_external_orders(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListExternalOrdersQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+
+    let limit = query.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let rows = if let Some(provider_raw) = query.provider.as_ref() {
+        let provider = normalize_provider(provider_raw.as_str())?;
+        sqlx::query(
+            "SELECT id, provider, market_id, provider_order_id, status, response_payload, error_message, created_at, updated_at
+             FROM external_orders
+             WHERE owner = $1 AND provider = $2
+             ORDER BY created_at DESC
+             LIMIT $3 OFFSET $4",
+        )
+        .bind(user.wallet_address.as_str())
+        .bind(provider.as_str())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+    } else {
+        sqlx::query(
+            "SELECT id, provider, market_id, provider_order_id, status, response_payload, error_message, created_at, updated_at
+             FROM external_orders
+             WHERE owner = $1
+             ORDER BY created_at DESC
+             LIMIT $2 OFFSET $3",
+        )
