@@ -4178,3 +4178,704 @@ pub async fn list_external_orders(
              ORDER BY created_at DESC
              LIMIT $2 OFFSET $3",
         )
+        .bind(user.wallet_address.as_str())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+    };
+
+    let total_row = sqlx::query("SELECT COUNT(*) AS total FROM external_orders WHERE owner = $1")
+        .bind(user.wallet_address.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let total: i64 = total_row
+        .try_get("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut orders = Vec::new();
+    for row in rows {
+        orders.push(build_external_order_response(row)?);
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalOrdersListResponse {
+        orders,
+        total: total.max(0) as u64,
+        limit: limit as u64,
+        offset: offset as u64,
+    }))
+}
+
+pub async fn list_external_agents(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListExternalAgentsQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+
+    let limit = query.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let owner_filter =
+        resolve_external_agent_owner_scope(&user, query.scope.as_deref(), query.owner.as_deref())?;
+
+    let mut sql = QueryBuilder::<Postgres>::new(
+        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
+                strategy, credential_id, active, last_executed_at, next_execution_at, created_at, updated_at
+         FROM external_agents
+         WHERE TRUE",
+    );
+    let mut count_sql = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*) AS total
+         FROM external_agents
+         WHERE TRUE",
+    );
+
+    if let Some(owner) = owner_filter.as_deref() {
+        sql.push(" AND owner = ").push_bind(owner);
+        count_sql.push(" AND owner = ").push_bind(owner);
+    }
+
+    if let Some(provider_raw) = query.provider.as_ref() {
+        let provider = normalize_provider(provider_raw.as_str())?;
+        sql.push(" AND provider = ").push_bind(provider.as_str());
+        count_sql
+            .push(" AND provider = ")
+            .push_bind(provider.as_str());
+    }
+    if let Some(active) = query.active {
+        sql.push(" AND active = ").push_bind(active);
+        count_sql.push(" AND active = ").push_bind(active);
+    }
+
+    sql.push(" ORDER BY created_at DESC LIMIT ")
+        .push_bind(limit)
+        .push(" OFFSET ")
+        .push_bind(offset);
+
+    let rows = sql
+        .build()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let count_row = count_sql
+        .build()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let total: i64 = count_row
+        .try_get("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut agents = Vec::new();
+    for row in rows {
+        agents.push(parse_external_agent(row)?);
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalAgentsListResponse {
+        agents,
+        total: total.max(0) as u64,
+        limit: limit as u64,
+        offset: offset as u64,
+    }))
+}
+
+pub async fn create_external_agent(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateExternalAgentRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_agents_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_AGENTS_DISABLED",
+            "external agents are disabled",
+        ));
+    }
+
+    let user = extract_authenticated_user(&req, &state).await?;
+    let provider = normalize_provider(body.provider.as_str())?;
+    ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
+    let outcome = normalize_outcome(body.outcome.as_str())?;
+    let side = normalize_side(body.side.as_str())?;
+
+    if body.name.trim().is_empty() {
+        return Err(ApiError::bad_request("INVALID_NAME", "name is required"));
+    }
+    if body.cadence_seconds == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_CADENCE",
+            "cadenceSeconds must be greater than zero",
+        ));
+    }
+    if body.price <= 0.0 || body.price >= 1.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE",
+            "price must be between 0 and 1",
+        ));
+    }
+    if body.quantity <= 0.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_QUANTITY",
+            "quantity must be greater than zero",
+        ));
+    }
+
+    let namespaced_market_id = normalize_namespaced_market_id(provider, body.market_id.as_str());
+    let parsed_market_id = ExternalMarketId::parse(namespaced_market_id.as_str())?;
+    let market = external::fetch_market_by_id(&state.config, &parsed_market_id).await?;
+    if !market.execution_agents {
+        return Err(ApiError::bad_request(
+            "MARKET_NOT_EXECUTABLE",
+            "market is not executable for external agents",
+        ));
+    }
+
+    let credential_id = if requires_live_credentials(&state) || body.credential_id.is_some() {
+        let credential = load_credential(
+            &state,
+            user.wallet_address.as_str(),
+            provider,
+            body.credential_id.as_deref(),
+        )
+        .await?;
+        ensure_provider_credential_ready(&state, provider, &credential).await?;
+        Some(credential.id)
+    } else {
+        None
+    };
+
+    let id = Uuid::new_v4().to_string();
+    let row = sqlx::query(
+        "INSERT INTO external_agents (
+            id, owner, name, provider, market_id, provider_market_ref,
+            outcome, side, price, quantity, cadence_seconds, strategy,
+            credential_id, active, next_execution_at, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),NOW(),NOW())
+        RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
+                  cadence_seconds, strategy, credential_id, active, last_executed_at,
+                  next_execution_at, created_at, updated_at",
+    )
+    .bind(id.as_str())
+    .bind(user.wallet_address.as_str())
+    .bind(body.name.trim())
+    .bind(provider.as_str())
+    .bind(namespaced_market_id.as_str())
+    .bind(market.provider_market_ref)
+    .bind(outcome)
+    .bind(side)
+    .bind(body.price)
+    .bind(body.quantity)
+    .bind(body.cadence_seconds as i64)
+    .bind(body.strategy.trim())
+    .bind(credential_id.as_deref())
+    .bind(body.active.unwrap_or(true))
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(parse_external_agent(row)?))
+}
+
+pub async fn update_external_agent(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    body: web::Json<UpdateExternalAgentRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+
+    let agent_id = path.into_inner();
+    let current = if matches!(user.role, UserRole::Admin) {
+        sqlx::query(
+            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, credential_id, active
+             FROM external_agents
+             WHERE id = $1",
+        )
+        .bind(agent_id.as_str())
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .ok_or_else(|| ApiError::not_found("External agent"))?
+    } else {
+        sqlx::query(
+            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, credential_id, active
+             FROM external_agents
+             WHERE id = $1 AND owner = $2",
+        )
+        .bind(agent_id.as_str())
+        .bind(user.wallet_address.as_str())
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .ok_or_else(|| ApiError::not_found("External agent"))?
+    };
+
+    let provider_raw: String = current
+        .try_get("provider")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let provider = normalize_provider(provider_raw.as_str())?;
+    let owner: String = current
+        .try_get("owner")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let next_outcome = if let Some(outcome) = body.outcome.as_deref() {
+        normalize_outcome(outcome)?
+    } else {
+        current
+            .try_get("outcome")
+            .map_err(|err| ApiError::internal(&err.to_string()))?
+    };
+    let next_side = if let Some(side) = body.side.as_deref() {
+        normalize_side(side)?
+    } else {
+        current
+            .try_get("side")
+            .map_err(|err| ApiError::internal(&err.to_string()))?
+    };
+    let next_price = body
+        .price
+        .unwrap_or_else(|| current.try_get("price").unwrap_or(0.5));
+    let next_quantity = body
+        .quantity
+        .unwrap_or_else(|| current.try_get("quantity").unwrap_or(0.0));
+    let next_cadence = body
+        .cadence_seconds
+        .unwrap_or_else(|| current.try_get::<i64, _>("cadence_seconds").unwrap_or(60) as u64);
+    let next_strategy = body
+        .strategy
+        .as_deref()
+        .unwrap_or_else(|| current.try_get("strategy").unwrap_or("external"))
+        .trim()
+        .to_string();
+    let next_name = body.name.as_deref().unwrap_or("").trim().to_string();
+    let next_active = body
+        .active
+        .unwrap_or_else(|| current.try_get("active").unwrap_or(true));
+
+    let credential_id = if let Some(id) = body.credential_id.as_deref() {
+        let credential = load_credential(&state, owner.as_str(), provider, Some(id)).await?;
+        ensure_provider_credential_ready(&state, provider, &credential).await?;
+        Some(credential.id)
+    } else {
+        current.try_get::<String, _>("credential_id").ok()
+    };
+
+    let row = if matches!(user.role, UserRole::Admin) {
+        sqlx::query(
+            "UPDATE external_agents
+             SET name = COALESCE(NULLIF($2, ''), name),
+                 outcome = $3,
+                 side = $4,
+                 price = $5,
+                 quantity = $6,
+                 cadence_seconds = $7,
+                 strategy = $8,
+                 credential_id = $9,
+                 active = $10,
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
+                       cadence_seconds, strategy, credential_id, active, last_executed_at,
+                       next_execution_at, created_at, updated_at",
+        )
+        .bind(agent_id.as_str())
+        .bind(next_name)
+        .bind(next_outcome)
+        .bind(next_side)
+        .bind(next_price)
+        .bind(next_quantity)
+        .bind(next_cadence as i64)
+        .bind(next_strategy)
+        .bind(credential_id.as_deref())
+        .bind(next_active)
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+    } else {
+        sqlx::query(
+            "UPDATE external_agents
+             SET name = COALESCE(NULLIF($3, ''), name),
+                 outcome = $4,
+                 side = $5,
+                 price = $6,
+                 quantity = $7,
+                 cadence_seconds = $8,
+                 strategy = $9,
+                 credential_id = $10,
+                 active = $11,
+                 updated_at = NOW()
+             WHERE id = $1 AND owner = $2
+             RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
+                       cadence_seconds, strategy, credential_id, active, last_executed_at,
+                       next_execution_at, created_at, updated_at",
+        )
+        .bind(agent_id.as_str())
+        .bind(user.wallet_address.as_str())
+        .bind(next_name)
+        .bind(next_outcome)
+        .bind(next_side)
+        .bind(next_price)
+        .bind(next_quantity)
+        .bind(next_cadence as i64)
+        .bind(next_strategy)
+        .bind(credential_id.as_deref())
+        .bind(next_active)
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+    };
+
+    Ok(HttpResponse::Ok().json(parse_external_agent(row)?))
+}
+
+pub async fn execute_external_agent(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    body: web::Json<ExecuteExternalAgentRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_agents_enabled || !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_AGENT_EXECUTION_DISABLED",
+            "external agent execution is disabled",
+        ));
+    }
+
+    let user = extract_authenticated_user(&req, &state).await?;
+    let agent_id = path.into_inner();
+    let agent =
+        load_external_agent_for_owner(&state, agent_id.as_str(), user.wallet_address.as_str())
+            .await?;
+
+    if !agent.active {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_AGENT_INACTIVE",
+            "external agent is inactive",
+        ));
+    }
+
+    if !body.force.unwrap_or(false) && Utc::now() < agent.next_execution_at {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_AGENT_COOLDOWN",
+            "agent cannot execute yet",
+        ));
+    }
+
+    ensure_provider_action_allowed(&req, agent.provider, ProviderRailAction::TradeOpen)?;
+    let outcome = execute_agent_record(&state, &agent, body.signed_order.clone()).await?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "ok": outcome.executed,
+        "mode": execution_mode(&state).as_str(),
+        "agentId": agent_id,
+        "runId": outcome.run_id,
+        "externalOrderId": outcome.external_order_id,
+        "providerOrderId": outcome.provider_order_id,
+        "nextExecutionAt": outcome.next_execution_at.to_rfc3339(),
+        "status": outcome.run_status,
+        "skipReason": outcome.skip_reason,
+        "response": outcome.response,
+    })))
+}
+
+pub async fn run_external_agents_tick(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<RunnerTickRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_agents_enabled || !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_AGENT_EXECUTION_DISABLED",
+            "external agent execution is disabled",
+        ));
+    }
+
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let max_limit = state.config.paper_runner_scan_limit.max(1) as i64;
+    let limit = body.limit.unwrap_or(max_limit).clamp(1, max_limit);
+    let now = Utc::now();
+    let agents = load_due_external_agents(&state, limit).await?;
+    let mut agents_executed = 0_u64;
+    let mut skips_by_reason = BTreeMap::new();
+
+    for agent in &agents {
+        if now < agent.next_execution_at {
+            increment_skip_reason(&mut skips_by_reason, "not_due");
+            continue;
+        }
+
+        if let Err(err) =
+            ensure_provider_action_allowed(&req, agent.provider, ProviderRailAction::TradeOpen)
+        {
+            let reason = skip_reason_from_error(&err);
+            increment_skip_reason(&mut skips_by_reason, reason.as_str());
+            let run_id = Uuid::new_v4().to_string();
+            insert_external_agent_run(
+                &state,
+                run_id.as_str(),
+                agent,
+                "paper_skipped",
+                None,
+                Some(reason.as_str()),
+                &json!({
+                    "mode": execution_mode(&state).as_str(),
+                    "error": {
+                        "code": err.code,
+                        "message": err.message,
+                        "details": err.details
+                    }
+                }),
+            )
+            .await?;
+            continue;
+        }
+
+        match execute_agent_record(&state, agent, None).await {
+            Ok(outcome) => {
+                if outcome.executed {
+                    agents_executed += 1;
+                } else if let Some(reason) = outcome.skip_reason.as_deref() {
+                    increment_skip_reason(&mut skips_by_reason, reason);
+                }
+            }
+            Err(err) => {
+                let reason = skip_reason_from_error(&err);
+                let run_status = run_status_from_error(&err);
+                log::error!(
+                    "external runner failed agent_id={} provider={} market_id={} strategy={} side={} outcome={} code={} message={} details={}",
+                    agent.id,
+                    agent.provider.as_str(),
+                    agent.market_id,
+                    agent.strategy,
+                    agent.side,
+                    agent.outcome,
+                    err.code,
+                    err.message,
+                    err.details
+                        .as_ref()
+                        .map(Value::to_string)
+                        .unwrap_or_else(|| "null".to_string()),
+                );
+                increment_skip_reason(&mut skips_by_reason, reason.as_str());
+                let run_id = Uuid::new_v4().to_string();
+                insert_external_agent_run(
+                    &state,
+                    run_id.as_str(),
+                    agent,
+                    run_status,
+                    None,
+                    Some(reason.as_str()),
+                    &json!({
+                        "mode": execution_mode(&state).as_str(),
+                        "error": {
+                            "code": err.code,
+                            "message": err.message,
+                            "details": err.details
+                        }
+                    }),
+                )
+                .await?;
+            }
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(RunnerTickResponse {
+        executed: agents_executed > 0,
+        agents_scanned: agents.len() as u64,
+        agents_executed,
+        skips_by_reason,
+    }))
+}
+
+pub async fn get_external_agents_performance(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ExternalAgentPerformanceQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    let is_admin = matches!(user.role, UserRole::Admin);
+    let requested_owner = query
+        .owner
+        .as_ref()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    let scope = query
+        .scope
+        .as_deref()
+        .unwrap_or(if is_admin { "all" } else { "self" })
+        .trim()
+        .to_ascii_lowercase();
+
+    let owner_filter = match scope.as_str() {
+        "all" if is_admin => None,
+        "owner" if is_admin => requested_owner.clone(),
+        _ => Some(requested_owner.unwrap_or_else(|| user.wallet_address.to_ascii_lowercase())),
+    };
+
+    if !is_admin && query.owner.is_some() {
+        let requested = query
+            .owner
+            .as_ref()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if requested != user.wallet_address.to_ascii_lowercase() {
+            return Err(ApiError::forbidden("Insufficient permissions"));
+        }
+    }
+
+    let agents_row = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT COUNT(*) AS agents,
+                    COUNT(*) FILTER (WHERE active) AS active_agents
+             FROM external_agents
+             WHERE owner = $1",
+        )
+        .bind(owner.as_str())
+        .fetch_one(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT COUNT(*) AS agents,
+                    COUNT(*) FILTER (WHERE active) AS active_agents
+             FROM external_agents",
+        )
+        .fetch_one(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let positions_row = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT COUNT(*) FILTER (WHERE status = 'open') AS open_positions,
+                    COUNT(*) FILTER (WHERE status = 'closed') AS closed_positions,
+                    COALESCE(SUM(CASE WHEN status = 'open' THEN unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+             FROM paper_positions
+             WHERE owner = $1",
+        )
+        .bind(owner.as_str())
+        .fetch_one(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT COUNT(*) FILTER (WHERE status = 'open') AS open_positions,
+                    COUNT(*) FILTER (WHERE status = 'closed') AS closed_positions,
+                    COALESCE(SUM(CASE WHEN status = 'open' THEN unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+             FROM paper_positions",
+        )
+        .fetch_one(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let fills_row = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT COUNT(*) AS fills,
+                    COALESCE(SUM(notional_usdc), 0) AS volume_usdc,
+                    COALESCE(SUM(fee_usdc), 0) AS fees_usdc
+             FROM paper_fills
+             WHERE owner = $1",
+        )
+        .bind(owner.as_str())
+        .fetch_one(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT COUNT(*) AS fills,
+                    COALESCE(SUM(notional_usdc), 0) AS volume_usdc,
+                    COALESCE(SUM(fee_usdc), 0) AS fees_usdc
+             FROM paper_fills",
+        )
+        .fetch_one(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let outcomes_row = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT COALESCE(SUM(realized_pnl_usdc), 0) AS realized_pnl_usdc
+             FROM paper_outcomes
+             WHERE owner = $1",
+        )
+        .bind(owner.as_str())
+        .fetch_one(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT COALESCE(SUM(realized_pnl_usdc), 0) AS realized_pnl_usdc
+             FROM paper_outcomes",
+        )
+        .fetch_one(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let agents = agents_row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64;
+    let active_agents = agents_row
+        .try_get::<i64, _>("active_agents")
+        .unwrap_or(0)
+        .max(0) as u64;
+    let open_positions = positions_row
+        .try_get::<i64, _>("open_positions")
+        .unwrap_or(0)
+        .max(0) as u64;
+    let closed_positions = positions_row
+        .try_get::<i64, _>("closed_positions")
+        .unwrap_or(0)
+        .max(0) as u64;
+    let fills = fills_row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
+    let volume_usdc = fills_row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
+    let fees_usdc = fills_row.try_get::<f64, _>("fees_usdc").unwrap_or(0.0);
+    let realized_pnl_usdc = outcomes_row
+        .try_get::<f64, _>("realized_pnl_usdc")
+        .unwrap_or(0.0);
+    let unrealized_pnl_usdc = positions_row
+        .try_get::<f64, _>("unrealized_pnl_usdc")
+        .unwrap_or(0.0);
+
+    let strategy_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT strategy,
+                    COUNT(*) AS agents,
+                    COUNT(*) FILTER (WHERE active) AS active_agents
+             FROM external_agents
+             WHERE owner = $1
+             GROUP BY strategy
+             ORDER BY strategy ASC",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT strategy,
+                    COUNT(*) AS agents,
+                    COUNT(*) FILTER (WHERE active) AS active_agents
+             FROM external_agents
+             GROUP BY strategy
+             ORDER BY strategy ASC",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let position_strategy_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT strategy,
+                    COUNT(*) FILTER (WHERE status = 'open') AS open_positions,
+                    COUNT(*) FILTER (WHERE status = 'closed') AS closed_positions,
+                    COALESCE(SUM(CASE WHEN status = 'open' THEN unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+             FROM paper_positions
+             WHERE owner = $1
+             GROUP BY strategy",
+        )
