@@ -166,3 +166,74 @@ pub async fn create_market(
 
     Ok(HttpResponse::Created().json(market))
 }
+
+/// Get order book for a market
+pub async fn get_orderbook(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    query: web::Query<OrderBookQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_market_read_mode(&state)?;
+
+    let market_id = path.into_inner();
+    let outcome = match query.outcome.as_deref().unwrap_or("yes") {
+        "yes" => Outcome::Yes,
+        "no" => Outcome::No,
+        _ => Outcome::Yes,
+    };
+    let depth = query.depth.unwrap_or(20).min(100) as usize;
+
+    let (bids, asks) = state.orderbook.get_depth(&market_id, outcome, depth);
+
+    let best_bid = bids.first().map(|l| l.price).unwrap_or(0.0);
+    let best_ask = asks.first().map(|l| l.price).unwrap_or(1.0);
+    let spread = best_ask - best_bid;
+    let mid_price = (best_bid + best_ask) / 2.0;
+
+    Ok(HttpResponse::Ok().json(OrderBookResponse {
+        market_id,
+        outcome: match outcome {
+            Outcome::Yes => "yes".to_string(),
+            Outcome::No => "no".to_string(),
+        },
+        timestamp: Utc::now(),
+        bids,
+        asks,
+        spread,
+        mid_price,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct OrderBookQuery {
+    pub outcome: Option<String>,
+    pub depth: Option<i32>,
+}
+
+/// Get recent trades for a market
+pub async fn get_trades(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    query: web::Query<ListTradesQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_market_read_mode(&state)?;
+
+    let market_id = path.into_inner();
+    let outcome = query.outcome.as_ref().map(|o| match o.as_str() {
+        "yes" => Outcome::Yes,
+        "no" => Outcome::No,
+        _ => Outcome::Yes,
+    });
+    let limit = query.limit.unwrap_or(50).min(100);
+
+    let trades = state
+        .db
+        .get_trades(&market_id, outcome, limit, query.before.as_deref())
+        .await
+        .map_err(ApiError::from)?;
+
+    let cursor = trades.last().map(|t| t.id.clone());
+
+    Ok(HttpResponse::Ok().json(TradeListResponse { trades, cursor }))
+}
+
