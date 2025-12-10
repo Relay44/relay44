@@ -4879,3 +4879,690 @@ pub async fn get_external_agents_performance(
              WHERE owner = $1
              GROUP BY strategy",
         )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT strategy,
+                    COUNT(*) FILTER (WHERE status = 'open') AS open_positions,
+                    COUNT(*) FILTER (WHERE status = 'closed') AS closed_positions,
+                    COALESCE(SUM(CASE WHEN status = 'open' THEN unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+             FROM paper_positions
+             GROUP BY strategy",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let fill_strategy_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT strategy,
+                    COUNT(*) AS fills,
+                    COALESCE(SUM(notional_usdc), 0) AS volume_usdc,
+                    COALESCE(SUM(fee_usdc), 0) AS fees_usdc
+             FROM (
+                SELECT pf.*, ea.strategy
+                FROM paper_fills pf
+                JOIN external_agents ea ON ea.id = pf.agent_id
+                WHERE pf.owner = $1
+             ) AS scoped
+             GROUP BY strategy",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT strategy,
+                    COUNT(*) AS fills,
+                    COALESCE(SUM(notional_usdc), 0) AS volume_usdc,
+                    COALESCE(SUM(fee_usdc), 0) AS fees_usdc
+             FROM (
+                SELECT pf.*, ea.strategy
+                FROM paper_fills pf
+                JOIN external_agents ea ON ea.id = pf.agent_id
+             ) AS scoped
+             GROUP BY strategy",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let outcome_strategy_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT strategy,
+                    COALESCE(SUM(realized_pnl_usdc), 0) AS realized_pnl_usdc,
+                    COALESCE(AVG(CASE WHEN realized_pnl_usdc > 0 THEN 1.0 ELSE 0.0 END), 0) AS win_rate
+             FROM paper_outcomes
+             WHERE owner = $1
+             GROUP BY strategy",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT strategy,
+                    COALESCE(SUM(realized_pnl_usdc), 0) AS realized_pnl_usdc,
+                    COALESCE(AVG(CASE WHEN realized_pnl_usdc > 0 THEN 1.0 ELSE 0.0 END), 0) AS win_rate
+             FROM paper_outcomes
+             GROUP BY strategy",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut strategy_map = BTreeMap::new();
+    for row in strategy_rows {
+        let strategy = row
+            .try_get::<String, _>("strategy")
+            .unwrap_or_else(|_| "unclassified".to_string());
+        strategy_map.insert(
+            strategy.clone(),
+            ExternalAgentStrategyPerformance {
+                strategy,
+                agents: row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64,
+                active_agents: row.try_get::<i64, _>("active_agents").unwrap_or(0).max(0) as u64,
+                open_positions: 0,
+                closed_positions: 0,
+                fills: 0,
+                volume_usdc: 0.0,
+                fees_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+                win_rate: 0.0,
+            },
+        );
+    }
+
+    for row in position_strategy_rows {
+        let strategy = row
+            .try_get::<String, _>("strategy")
+            .unwrap_or_else(|_| "unclassified".to_string());
+        let entry =
+            strategy_map
+                .entry(strategy.clone())
+                .or_insert(ExternalAgentStrategyPerformance {
+                    strategy,
+                    agents: 0,
+                    active_agents: 0,
+                    open_positions: 0,
+                    closed_positions: 0,
+                    fills: 0,
+                    volume_usdc: 0.0,
+                    fees_usdc: 0.0,
+                    realized_pnl_usdc: 0.0,
+                    unrealized_pnl_usdc: 0.0,
+                    net_pnl_usdc: 0.0,
+                    win_rate: 0.0,
+                });
+        entry.open_positions = row.try_get::<i64, _>("open_positions").unwrap_or(0).max(0) as u64;
+        entry.closed_positions = row
+            .try_get::<i64, _>("closed_positions")
+            .unwrap_or(0)
+            .max(0) as u64;
+        entry.unrealized_pnl_usdc = row.try_get::<f64, _>("unrealized_pnl_usdc").unwrap_or(0.0);
+    }
+
+    for row in fill_strategy_rows {
+        let strategy = row
+            .try_get::<String, _>("strategy")
+            .unwrap_or_else(|_| "unclassified".to_string());
+        let entry =
+            strategy_map
+                .entry(strategy.clone())
+                .or_insert(ExternalAgentStrategyPerformance {
+                    strategy,
+                    agents: 0,
+                    active_agents: 0,
+                    open_positions: 0,
+                    closed_positions: 0,
+                    fills: 0,
+                    volume_usdc: 0.0,
+                    fees_usdc: 0.0,
+                    realized_pnl_usdc: 0.0,
+                    unrealized_pnl_usdc: 0.0,
+                    net_pnl_usdc: 0.0,
+                    win_rate: 0.0,
+                });
+        entry.fills = row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
+        entry.volume_usdc = row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
+        entry.fees_usdc = row.try_get::<f64, _>("fees_usdc").unwrap_or(0.0);
+    }
+
+    for row in outcome_strategy_rows {
+        let strategy = row
+            .try_get::<String, _>("strategy")
+            .unwrap_or_else(|_| "unclassified".to_string());
+        let entry =
+            strategy_map
+                .entry(strategy.clone())
+                .or_insert(ExternalAgentStrategyPerformance {
+                    strategy,
+                    agents: 0,
+                    active_agents: 0,
+                    open_positions: 0,
+                    closed_positions: 0,
+                    fills: 0,
+                    volume_usdc: 0.0,
+                    fees_usdc: 0.0,
+                    realized_pnl_usdc: 0.0,
+                    unrealized_pnl_usdc: 0.0,
+                    net_pnl_usdc: 0.0,
+                    win_rate: 0.0,
+                });
+        entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+        entry.win_rate = row.try_get::<f64, _>("win_rate").unwrap_or(0.0);
+    }
+
+    let mut strategies = strategy_map.into_values().collect::<Vec<_>>();
+    for entry in &mut strategies {
+        entry.net_pnl_usdc = entry.realized_pnl_usdc + entry.unrealized_pnl_usdc;
+    }
+
+    let volume_timeline_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT date_trunc('hour', created_at) AS bucket,
+                    COALESCE(SUM(notional_usdc), 0) AS volume_usdc
+             FROM paper_fills
+             WHERE owner = $1
+               AND created_at >= NOW() - INTERVAL '24 hours'
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT date_trunc('hour', created_at) AS bucket,
+                    COALESCE(SUM(notional_usdc), 0) AS volume_usdc
+             FROM paper_fills
+             WHERE created_at >= NOW() - INTERVAL '24 hours'
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let realized_timeline_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT date_trunc('hour', closed_at) AS bucket,
+                    COALESCE(SUM(realized_pnl_usdc), 0) AS realized_pnl_usdc
+             FROM paper_outcomes
+             WHERE owner = $1
+               AND closed_at >= NOW() - INTERVAL '24 hours'
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT date_trunc('hour', closed_at) AS bucket,
+                    COALESCE(SUM(realized_pnl_usdc), 0) AS realized_pnl_usdc
+             FROM paper_outcomes
+             WHERE closed_at >= NOW() - INTERVAL '24 hours'
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let unrealized_timeline_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT bucket, COALESCE(SUM(unrealized_pnl_usdc), 0) AS unrealized_pnl_usdc
+             FROM (
+                 SELECT DISTINCT ON (position_id, bucket)
+                        position_id,
+                        date_trunc('hour', created_at) AS bucket,
+                        unrealized_pnl_usdc
+                 FROM paper_marks
+                 WHERE owner = $1
+                   AND created_at >= NOW() - INTERVAL '24 hours'
+                 ORDER BY position_id, bucket, created_at DESC
+             ) AS scoped
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT bucket, COALESCE(SUM(unrealized_pnl_usdc), 0) AS unrealized_pnl_usdc
+             FROM (
+                 SELECT DISTINCT ON (position_id, bucket)
+                        position_id,
+                        date_trunc('hour', created_at) AS bucket,
+                        unrealized_pnl_usdc
+                 FROM paper_marks
+                 WHERE created_at >= NOW() - INTERVAL '24 hours'
+                 ORDER BY position_id, bucket, created_at DESC
+             ) AS scoped
+             GROUP BY bucket
+             ORDER BY bucket ASC",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut timeline_map: BTreeMap<String, ExternalAgentPerformancePoint> = BTreeMap::new();
+    for row in volume_timeline_rows {
+        let bucket: chrono::DateTime<Utc> = row
+            .try_get("bucket")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key = bucket.to_rfc3339();
+        timeline_map.insert(
+            key.clone(),
+            ExternalAgentPerformancePoint {
+                bucket: key,
+                volume_usdc: row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0),
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+            },
+        );
+    }
+
+    for row in realized_timeline_rows {
+        let bucket: chrono::DateTime<Utc> = row
+            .try_get("bucket")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key = bucket.to_rfc3339();
+        let entry = timeline_map
+            .entry(key.clone())
+            .or_insert(ExternalAgentPerformancePoint {
+                bucket: key,
+                volume_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+            });
+        entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+    }
+
+    for row in unrealized_timeline_rows {
+        let bucket: chrono::DateTime<Utc> = row
+            .try_get("bucket")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key = bucket.to_rfc3339();
+        let entry = timeline_map
+            .entry(key.clone())
+            .or_insert(ExternalAgentPerformancePoint {
+                bucket: key,
+                volume_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+            });
+        entry.unrealized_pnl_usdc = row.try_get::<f64, _>("unrealized_pnl_usdc").unwrap_or(0.0);
+    }
+
+    let mut cumulative_realized = 0.0;
+    let mut timeline = timeline_map.into_values().collect::<Vec<_>>();
+    for point in &mut timeline {
+        cumulative_realized += point.realized_pnl_usdc;
+        point.realized_pnl_usdc = cumulative_realized;
+        point.net_pnl_usdc = point.realized_pnl_usdc + point.unrealized_pnl_usdc;
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalAgentPerformanceResponse {
+        scope: if owner_filter.is_none() {
+            "all".to_string()
+        } else {
+            "owner".to_string()
+        },
+        owner: owner_filter,
+        totals: ExternalAgentPerformanceTotals {
+            agents,
+            active_agents,
+            open_positions,
+            closed_positions,
+            fills,
+            volume_usdc,
+            fees_usdc,
+            realized_pnl_usdc,
+            unrealized_pnl_usdc,
+            net_pnl_usdc: realized_pnl_usdc + unrealized_pnl_usdc,
+        },
+        strategies,
+        timeline,
+        updated_at: Utc::now().to_rfc3339(),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::external::types::ExternalOutcome;
+
+    fn sample_market() -> external::types::ExternalMarketSnapshot {
+        external::types::ExternalMarketSnapshot {
+            id: "limitless:test".to_string(),
+            question: "q".to_string(),
+            description: "d".to_string(),
+            category: "c".to_string(),
+            status: "active".to_string(),
+            close_time: 0,
+            resolved: false,
+            outcome: None,
+            yes_price: 0.6,
+            no_price: 0.4,
+            volume: 1000.0,
+            source: "external_limitless".to_string(),
+            provider: "limitless".to_string(),
+            is_external: true,
+            external_url: "https://example.com".to_string(),
+            chain_id: 8453,
+            requires_credentials: false,
+            execution_users: true,
+            execution_agents: true,
+            outcomes: vec![
+                ExternalOutcome {
+                    label: "Yes".to_string(),
+                    probability: 0.6,
+                },
+                ExternalOutcome {
+                    label: "No".to_string(),
+                    probability: 0.4,
+                },
+            ],
+            provider_market_ref: "ref".to_string(),
+        }
+    }
+
+    #[test]
+    fn market_is_closed_for_paper_entry_when_resolved() {
+        let mut market = sample_market();
+        market.resolved = true;
+
+        assert!(market_is_closed_for_paper_entry(&market, Utc::now()));
+    }
+
+    #[test]
+    fn market_is_closed_for_paper_entry_when_close_time_has_passed() {
+        let mut market = sample_market();
+        let now = Utc::now();
+        market.close_time = now.timestamp().saturating_sub(1) as u64;
+
+        assert!(market_is_closed_for_paper_entry(&market, now));
+    }
+
+    #[test]
+    fn market_is_not_closed_for_paper_entry_while_active() {
+        let mut market = sample_market();
+        let now = Utc::now();
+        market.close_time = now.timestamp().saturating_add(60) as u64;
+
+        assert!(!market_is_closed_for_paper_entry(&market, now));
+    }
+
+    #[test]
+    fn non_admin_agent_scope_stays_self() {
+        let user = AuthenticatedUserWithRole {
+            wallet_address: "0x1111111111111111111111111111111111111111".to_string(),
+            role: UserRole::User,
+        };
+
+        let scope = resolve_external_agent_owner_scope(
+            &user,
+            Some("all"),
+            Some("0x2222222222222222222222222222222222222222"),
+        );
+
+        assert!(scope.is_err());
+        assert_eq!(
+            resolve_external_agent_owner_scope(&user, None, None).unwrap(),
+            Some("0x1111111111111111111111111111111111111111".to_string())
+        );
+    }
+
+    #[test]
+    fn admin_agent_scope_supports_all_and_owner_filters() {
+        let user = AuthenticatedUserWithRole {
+            wallet_address: "0x1111111111111111111111111111111111111111".to_string(),
+            role: UserRole::Admin,
+        };
+
+        assert_eq!(
+            resolve_external_agent_owner_scope(&user, Some("all"), None).unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_external_agent_owner_scope(
+                &user,
+                Some("owner"),
+                Some("0x2222222222222222222222222222222222222222"),
+            )
+            .unwrap(),
+            Some("0x2222222222222222222222222222222222222222".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_evm_wallet_preserves_checksum() {
+        let wallet = "0xdCE731717296De1f68F88c6819a41fDbA9c8E8aB";
+
+        assert_eq!(normalize_evm_wallet(wallet).unwrap(), wallet);
+    }
+
+    #[test]
+    fn normalize_evm_wallet_upgrades_lowercase_input() {
+        let wallet = "0xdce731717296de1f68f88c6819a41fdba9c8e8ab";
+
+        assert_eq!(
+            normalize_evm_wallet(wallet).unwrap(),
+            "0xdCE731717296De1f68F88c6819a41fDbA9c8E8aB"
+        );
+    }
+
+    #[test]
+    fn build_typed_data_uses_checksummed_limitless_owner() {
+        let request = CreateExternalOrderIntentRequest {
+            provider: "limitless".to_string(),
+            market_id: "limitless:test-market".to_string(),
+            outcome: "yes".to_string(),
+            side: "buy".to_string(),
+            price: 0.5,
+            quantity: 1.0,
+            credential_id: None,
+        };
+        let market = json!({
+            "venue": {
+                "exchange": "0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5"
+            },
+            "tokens": {
+                "yes": "123",
+                "no": "456"
+            }
+        });
+
+        let typed_data = build_typed_data(
+            "0xdce731717296de1f68f88c6819a41fdba9c8e8ab",
+            ExternalProvider::Limitless,
+            &request,
+            "limitless:test-market",
+            &market,
+            Some(300),
+        )
+        .unwrap();
+        let message = typed_data
+            .get("message")
+            .and_then(|value| value.as_object())
+            .unwrap();
+
+        assert_eq!(
+            message
+                .get("maker")
+                .and_then(|value| value.as_str())
+                .unwrap(),
+            "0xdCE731717296De1f68F88c6819a41fDbA9c8E8aB"
+        );
+        assert_eq!(
+            message
+                .get("signer")
+                .and_then(|value| value.as_str())
+                .unwrap(),
+            "0xdCE731717296De1f68F88c6819a41fDbA9c8E8aB"
+        );
+    }
+
+    #[test]
+    fn build_polymarket_order_message_uses_funder_for_proxy_accounts() {
+        let credentials = PolymarketCredentials {
+            api_key: "00000000-0000-0000-0000-000000000000".to_string(),
+            api_secret: "secret".to_string(),
+            api_passphrase: "passphrase".to_string(),
+            funder: "0x2222222222222222222222222222222222222222".to_string(),
+            signature_type: 2,
+        };
+        let context = PolymarketOrderContext {
+            token_id: "123".to_string(),
+            fee_rate_bps: 10,
+            minimum_tick_size: 0.01,
+            neg_risk: false,
+        };
+
+        let message = build_polymarket_order_message(
+            "0x1111111111111111111111111111111111111111",
+            &credentials,
+            "buy",
+            0.34,
+            100.0,
+            &context,
+        )
+        .unwrap();
+
+        assert_eq!(
+            message.get("maker").and_then(|value| value.as_str()),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        assert_eq!(
+            message.get("signer").and_then(|value| value.as_str()),
+            Some("0x1111111111111111111111111111111111111111")
+        );
+        assert_eq!(
+            message.get("makerAmount").and_then(|value| value.as_str()),
+            Some("34000000")
+        );
+        assert_eq!(
+            message.get("takerAmount").and_then(|value| value.as_str()),
+            Some("100000000")
+        );
+        assert_eq!(
+            message.get("side").and_then(|value| value.as_u64()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn build_polymarket_submit_payload_uses_clob_shape() {
+        let credential = StoredCredential {
+            id: "cred-1".to_string(),
+            owner: "0x1111111111111111111111111111111111111111".to_string(),
+            payload: json!({
+                "apiKey": "00000000-0000-0000-0000-000000000000",
+                "apiSecret": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "apiPassphrase": "passphrase",
+                "funder": "0x2222222222222222222222222222222222222222",
+                "signatureType": 2
+            }),
+        };
+        let typed_data = json!({
+            "message": {
+                "salt": 123,
+                "maker": "0x2222222222222222222222222222222222222222",
+                "signer": "0x1111111111111111111111111111111111111111",
+                "taker": "0x0000000000000000000000000000000000000000",
+                "tokenId": "123",
+                "makerAmount": "34000000",
+                "takerAmount": "100000000",
+                "expiration": "0",
+                "nonce": "0",
+                "feeRateBps": "10",
+                "side": 0,
+                "signatureType": 2
+            }
+        });
+        let signed_order = json!({
+            "typedData": typed_data,
+            "signature": "0xabc"
+        });
+
+        let payload =
+            build_polymarket_submit_payload(&credential, &typed_data, &signed_order).unwrap();
+
+        assert_eq!(
+            payload.get("owner").and_then(|value| value.as_str()),
+            Some("00000000-0000-0000-0000-000000000000")
+        );
+        assert_eq!(
+            payload.get("orderType").and_then(|value| value.as_str()),
+            Some("GTC")
+        );
+        assert_eq!(
+            payload
+                .get("order")
+                .and_then(|value| value.get("side"))
+                .and_then(|value| value.as_str()),
+            Some("BUY")
+        );
+        assert_eq!(
+            payload
+                .get("order")
+                .and_then(|value| value.get("signature"))
+                .and_then(|value| value.as_str()),
+            Some("0xabc")
+        );
+    }
+
+    #[test]
+    fn polymarket_signature_type_accepts_supported_values() {
+        for value in [0_u64, 1, 2] {
+            let payload = json!({ "signatureType": value });
+            assert_eq!(
+                polymarket_signature_type_from_payload(&payload).unwrap(),
+                value as u8
+            );
+        }
+    }
+
+    #[test]
+    fn polymarket_signature_type_rejects_out_of_range_values() {
+        let payload = json!({ "signatureType": 3 });
+        assert!(polymarket_signature_type_from_payload(&payload).is_err());
+    }
+
+    #[test]
+    fn skip_reason_from_error_maps_provider_and_readiness_codes() {
+        assert_eq!(
+            skip_reason_from_error(&ApiError::bad_request("CREDENTIAL_NOT_READY", "x")),
+            "credential_not_ready"
+        );
+        assert_eq!(
+            skip_reason_from_error(&ApiError::bad_request(
+                "POLYMARKET_EXECUTION_NOT_IMPLEMENTED",
+                "x"
+            )),
+            "provider_not_ready"
+        );
+        assert_eq!(
+            run_status_from_error(&ApiError::bad_request("CREDENTIAL_NOT_READY", "x")),
+            "skipped"
+        );
+        assert_eq!(run_status_from_error(&ApiError::internal("boom")), "failed");
+    }
+}
+
