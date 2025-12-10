@@ -220,3 +220,108 @@ pub(crate) async fn create_notification(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    Ok(Some(id))
+}
+
+fn parse_notification_row(row: sqlx::postgres::PgRow) -> Result<NotificationRecord, ApiError> {
+    let created_at: DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(NotificationRecord {
+        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
+        kind: row.try_get("type").map_err(|err| ApiError::internal(&err.to_string()))?,
+        title: row.try_get("title").map_err(|err| ApiError::internal(&err.to_string()))?,
+        message: row.try_get("message").map_err(|err| ApiError::internal(&err.to_string()))?,
+        read: row
+            .try_get::<Option<DateTime<Utc>>, _>("read_at")
+            .map_err(|err| ApiError::internal(&err.to_string()))?
+            .is_some(),
+        market_id: row.try_get("market_id").ok(),
+        order_id: row.try_get("order_id").ok(),
+        decision_cell_id: row.try_get("decision_cell_id").ok(),
+        metadata: row
+            .try_get("metadata")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        created_at: created_at.to_rfc3339(),
+    })
+}
+
+pub async fn list_notifications(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListNotificationsQuery>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let owner = user.wallet_address;
+    let limit = query.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let mut builder = QueryBuilder::<Postgres>::new(
+        "SELECT id, type, title, message, market_id, order_id, decision_cell_id, metadata, read_at, created_at
+         FROM notifications WHERE owner = ",
+    );
+    builder.push_bind(owner.as_str());
+    if query.unread_only.unwrap_or(false) {
+        builder.push(" AND read_at IS NULL");
+    }
+    builder.push(" ORDER BY created_at DESC LIMIT ");
+    builder.push_bind(limit);
+    builder.push(" OFFSET ");
+    builder.push_bind(offset);
+
+    let rows = builder
+        .build()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut count_builder = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*)::BIGINT AS total FROM notifications WHERE owner = ",
+    );
+    count_builder.push_bind(owner.as_str());
+    if query.unread_only.unwrap_or(false) {
+        count_builder.push(" AND read_at IS NULL");
+    }
+
+    let total = count_builder
+        .build()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .try_get::<i64, _>("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .max(0) as u64;
+
+    let notifications = rows
+        .into_iter()
+        .map(parse_notification_row)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(HttpResponse::Ok().json(NotificationsListResponse {
+        data: notifications,
+        total,
+        limit: limit as u64,
+        offset: offset as u64,
+        has_more: (offset as u64 + limit as u64) < total,
+    }))
+}
+
+pub async fn get_unread_count(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let count = sqlx::query(
+        "SELECT COUNT(*)::BIGINT AS total FROM notifications WHERE owner = $1 AND read_at IS NULL",
+    )
+    .bind(user.wallet_address.as_str())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?
+    .try_get::<i64, _>("total")
+    .map_err(|err| ApiError::internal(&err.to_string()))?
+    .max(0);
+
+    Ok(HttpResponse::Ok().json(json!({ "count": count })))
+}
