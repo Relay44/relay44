@@ -325,3 +325,111 @@ pub async fn get_unread_count(
 
     Ok(HttpResponse::Ok().json(json!({ "count": count })))
 }
+
+pub async fn mark_notification_read(
+    req: HttpRequest,
+    path: web::Path<String>,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let notification_id = path.into_inner();
+    let result = sqlx::query(
+        "UPDATE notifications SET read_at = COALESCE(read_at, NOW()) WHERE id = $1 AND owner = $2",
+    )
+    .bind(notification_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::not_found("Notification"));
+    }
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
+pub async fn mark_all_notifications_read(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    sqlx::query("UPDATE notifications SET read_at = COALESCE(read_at, NOW()) WHERE owner = $1")
+        .bind(user.wallet_address.as_str())
+        .execute(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
+pub async fn get_notification_preferences(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let preferences = load_notification_preferences(&state, user.wallet_address.as_str()).await?;
+    Ok(HttpResponse::Ok().json(preferences))
+}
+
+pub async fn update_notification_preferences(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<UpdateNotificationPreferencesRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_authenticated_user(&req, &state).await?;
+    let current = load_notification_preferences(&state, user.wallet_address.as_str()).await?;
+    let next = NotificationPreferences {
+        order_fills: body.order_fills.unwrap_or(current.order_fills),
+        market_resolutions: body.market_resolutions.unwrap_or(current.market_resolutions),
+        price_alerts: body.price_alerts.unwrap_or(current.price_alerts),
+        system_announcements: body
+            .system_announcements
+            .unwrap_or(current.system_announcements),
+        decision_alerts: body.decision_alerts.unwrap_or(current.decision_alerts),
+        email_notifications: body.email_notifications.unwrap_or(current.email_notifications),
+        push_notifications: body.push_notifications.unwrap_or(current.push_notifications),
+    };
+
+    sqlx::query(
+        "UPDATE notification_preferences
+         SET order_fills = $2,
+             market_resolutions = $3,
+             price_alerts = $4,
+             system_announcements = $5,
+             decision_alerts = $6,
+             email_notifications = $7,
+             push_notifications = $8
+         WHERE owner = $1",
+    )
+    .bind(user.wallet_address.as_str())
+    .bind(next.order_fills)
+    .bind(next.market_resolutions)
+    .bind(next.price_alerts)
+    .bind(next.system_announcements)
+    .bind(next.decision_alerts)
+    .bind(next.email_notifications)
+    .bind(next.push_notifications)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(next))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decision_notifications_obey_decision_preference() {
+        let mut prefs = default_preferences();
+        prefs.decision_alerts = false;
+        assert!(!notification_allowed_by_preferences(
+            &NotificationType::DecisionThresholdCrossed,
+            &prefs,
+        ));
+        assert!(notification_allowed_by_preferences(&NotificationType::OrderFilled, &prefs));
+    }
+}
+
