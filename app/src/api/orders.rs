@@ -219,3 +219,96 @@ pub async fn place_order(
         updated_at: now,
         expires_at: body.expires_at,
     };
+
+    // Add to order book and attempt matching
+    let matches = state.orderbook.add_order(&order);
+
+    // Persist to database order book
+    if order.remaining_quantity > 0 {
+        state
+            .db
+            .add_orderbook_entry(
+                &order.id,
+                &order.market_id,
+                order.outcome,
+                order.side,
+                order.price_bps,
+                order.remaining_quantity,
+                &order.owner,
+            )
+            .await
+            .ok();
+    }
+
+    // Process matches
+    for matched_trade in &matches {
+        // Publish trade event via Redis
+        let outcome_str = match order.outcome {
+            Outcome::Yes => "yes",
+            Outcome::No => "no",
+        };
+        state
+            .redis
+            .publish_trade(
+                &order.market_id,
+                outcome_str,
+                matched_trade.fill_price_bps as f64 / 10000.0,
+                matched_trade.fill_quantity,
+            )
+            .await
+            .ok();
+
+        // Update persistent order book for matched orders
+        state
+            .db
+            .update_orderbook_entry_quantity(
+                &matched_trade.buy_order_id.to_string(),
+                0, // Buyer order filled
+            )
+            .await
+            .ok();
+    }
+
+    // Calculate filled amount
+    let total_filled: u64 = matches.iter().map(|m| m.fill_quantity).sum();
+    let remaining = body.quantity.saturating_sub(total_filled);
+
+    let final_status = if remaining == 0 {
+        OrderStatus::Filled
+    } else if total_filled > 0 {
+        OrderStatus::PartiallyFilled
+    } else {
+        OrderStatus::Open
+    };
+
+    // Update order with fill info
+    let mut final_order = order.clone();
+    final_order.filled_quantity = total_filled;
+    final_order.remaining_quantity = remaining;
+    final_order.status = final_status;
+
+    // Save to database
+    state
+        .db
+        .create_order(&final_order)
+        .await
+        .map_err(ApiError::from)?;
+
+    // Publish order book update
+    let outcome_str = match body.outcome {
+        Outcome::Yes => "yes",
+        Outcome::No => "no",
+    };
+    let side_str = match body.side {
+        OrderSide::Buy => "bid",
+        OrderSide::Sell => "ask",
+    };
+    state
+        .redis
+        .publish_orderbook_update(
+            &body.market_id,
+            outcome_str,
+            side_str,
+            body.price,
+            remaining,
+        )
