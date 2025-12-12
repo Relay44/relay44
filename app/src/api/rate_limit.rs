@@ -165,3 +165,65 @@ pub async fn check_market_create_rate_limit(
 ) -> Result<(), ApiError> {
     check_rate_limit_by_user(wallet, redis, RateLimitTier::MarketCreate).await
 }
+
+/// Helper to check claim rate limit (5/min per user)
+pub async fn check_claim_rate_limit(wallet: &str, redis: &RedisService) -> Result<(), ApiError> {
+    check_rate_limit_by_user(wallet, redis, RateLimitTier::Claim).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rate_limit_tier_limits() {
+        assert_eq!(RateLimitTier::Auth.limit(), 10);
+        assert_eq!(RateLimitTier::Order.limit(), 10);
+        assert_eq!(RateLimitTier::MarketCreate.limit(), 1);
+        assert_eq!(RateLimitTier::Claim.limit(), 5);
+        assert_eq!(RateLimitTier::Write.limit(), 30);
+        assert_eq!(RateLimitTier::Read.limit(), 120);
+    }
+
+    #[test]
+    fn test_rate_limit_tier_windows() {
+        assert_eq!(RateLimitTier::Auth.window_secs(), 60);
+        assert_eq!(RateLimitTier::Order.window_secs(), 60);
+        assert_eq!(RateLimitTier::MarketCreate.window_secs(), 3600);
+        assert_eq!(RateLimitTier::Claim.window_secs(), 60);
+        assert_eq!(RateLimitTier::Write.window_secs(), 60);
+        assert_eq!(RateLimitTier::Read.window_secs(), 60);
+    }
+
+    #[test]
+    fn test_rate_limit_tier_key_prefixes() {
+        assert_eq!(RateLimitTier::Auth.key_prefix(), "rl:auth");
+        assert_eq!(RateLimitTier::Order.key_prefix(), "rl:order");
+        assert_eq!(RateLimitTier::MarketCreate.key_prefix(), "rl:market");
+        assert_eq!(RateLimitTier::Claim.key_prefix(), "rl:claim");
+        assert_eq!(RateLimitTier::Write.key_prefix(), "rl:write");
+        assert_eq!(RateLimitTier::Read.key_prefix(), "rl:read");
+    }
+
+    #[test]
+    fn test_rate_limit_tier_all_unique_prefixes() {
+        use std::collections::HashSet;
+        let prefixes: HashSet<&str> = [
+            RateLimitTier::Auth,
+            RateLimitTier::Order,
+            RateLimitTier::MarketCreate,
+            RateLimitTier::Claim,
+            RateLimitTier::Write,
+            RateLimitTier::Read,
+        ]
+        .iter()
+        .map(|t| t.key_prefix())
+        .collect();
+        assert_eq!(
+            prefixes.len(),
+            6,
+            "All rate limit tiers should have unique key prefixes"
+        );
+    }
+}
+
