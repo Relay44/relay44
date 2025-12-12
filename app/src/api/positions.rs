@@ -220,3 +220,124 @@ fn parse_u64_calldata_word(word: &str) -> Option<u64> {
     }
     parse_u64_hex(word)
 }
+
+fn parse_address_calldata_word(word: &str) -> Option<String> {
+    if word.len() != 64 || !word.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let address = format!("0x{}", &word[24..]);
+    normalize_evm_address(address.as_str()).ok()
+}
+
+fn strip_0x(value: &str) -> &str {
+    value.strip_prefix("0x").unwrap_or(value)
+}
+
+fn is_zero_hex(value: &str) -> bool {
+    let trimmed = strip_0x(value).trim();
+    !trimmed.is_empty() && trimmed.chars().all(|c| c == '0')
+}
+
+fn topic_matches_market(topic: &str, market_id: u64) -> bool {
+    let word = strip_0x(topic);
+    parse_u64_calldata_word(word) == Some(market_id)
+}
+
+fn topic_matches_address(topic: &str, expected: &str) -> bool {
+    let word = strip_0x(topic);
+    parse_address_calldata_word(word).as_deref() == Some(expected)
+}
+
+async fn verify_claim_tx(
+    state: &AppState,
+    owner: &str,
+    market_id: u64,
+    tx_hash: &str,
+) -> Result<(), ApiError> {
+    let owner = normalize_evm_address(owner)?;
+    let order_book =
+        normalize_evm_address(state.config.order_book_address.as_str()).map_err(|_| {
+            ApiError::internal("ORDER_BOOK_ADDRESS is not configured as a valid EVM address")
+        })?;
+    let receipt = state
+        .evm_rpc
+        .eth_get_transaction_receipt(tx_hash)
+        .await
+        .map_err(|_| {
+            ApiError::bad_request(
+                "INVALID_TX_SIGNATURE",
+                "unable to fetch transaction receipt",
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction receipt not found")
+        })?;
+    let status = receipt
+        .status
+        .as_deref()
+        .and_then(parse_u64_hex)
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction status unavailable")
+        })?;
+    if status != 1 {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "transaction reverted onchain",
+        ));
+    }
+
+    let tx = state
+        .evm_rpc
+        .eth_get_transaction_by_hash(tx_hash)
+        .await
+        .map_err(|_| ApiError::bad_request("INVALID_TX_SIGNATURE", "unable to fetch transaction"))?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction not found"))?;
+    if tx.hash.trim().to_ascii_lowercase() != tx_hash.to_ascii_lowercase() {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "transaction hash mismatch",
+        ));
+    }
+    let sender = tx
+        .from
+        .as_deref()
+        .map(normalize_evm_address)
+        .transpose()?
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction sender unavailable")
+        })?;
+    let target = tx
+        .to
+        .as_deref()
+        .map(normalize_evm_address)
+        .transpose()?
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction target unavailable")
+        })?;
+    if target != order_book {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "transaction target does not match configured order book",
+        ));
+    }
+    if !is_zero_hex(tx.value.as_str()) {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "claim transaction must not transfer native value",
+        ));
+    }
+    if let (Some(tx_block), Some(receipt_block)) =
+        (tx.block_number.as_deref(), receipt.block_number.as_deref())
+    {
+        let tx_block = parse_u64_hex(tx_block).ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction block is invalid")
+        })?;
+        let receipt_block = parse_u64_hex(receipt_block).ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "receipt block is invalid")
+        })?;
+        if tx_block != receipt_block {
+            return Err(ApiError::bad_request(
+                "INVALID_TX_SIGNATURE",
+                "transaction and receipt block mismatch",
+            ));
+        }
