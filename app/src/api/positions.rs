@@ -341,3 +341,101 @@ async fn verify_claim_tx(
                 "transaction and receipt block mismatch",
             ));
         }
+    }
+
+    let calldata = strip_0x(tx.input.as_str());
+    if calldata.len() < 8 {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "transaction input is too short",
+        ));
+    }
+
+    let selector = &calldata[..8];
+    let args = &calldata[8..];
+    match selector {
+        ORDER_BOOK_CLAIM_SELECTOR => {
+            if sender != owner {
+                return Err(ApiError::forbidden(
+                    "claim transaction sender does not match authenticated wallet",
+                ));
+            }
+            if args.len() < 64 {
+                return Err(ApiError::bad_request(
+                    "INVALID_TX_SIGNATURE",
+                    "claim calldata missing market id",
+                ));
+            }
+            let tx_market_id = parse_u64_calldata_word(&args[..64]).ok_or_else(|| {
+                ApiError::bad_request("INVALID_TX_SIGNATURE", "unable to decode claim market id")
+            })?;
+            if tx_market_id != market_id {
+                return Err(ApiError::bad_request(
+                    "INVALID_TX_SIGNATURE",
+                    "claim transaction market id mismatch",
+                ));
+            }
+        }
+        ORDER_BOOK_CLAIM_FOR_SELECTOR => {
+            if args.len() < 128 {
+                return Err(ApiError::bad_request(
+                    "INVALID_TX_SIGNATURE",
+                    "claimFor calldata is malformed",
+                ));
+            }
+            let tx_owner = parse_address_calldata_word(&args[..64]).ok_or_else(|| {
+                ApiError::bad_request("INVALID_TX_SIGNATURE", "unable to decode claimFor owner")
+            })?;
+            if tx_owner != owner {
+                return Err(ApiError::forbidden(
+                    "claimFor owner does not match authenticated wallet",
+                ));
+            }
+            let tx_market_id = parse_u64_calldata_word(&args[64..128]).ok_or_else(|| {
+                ApiError::bad_request(
+                    "INVALID_TX_SIGNATURE",
+                    "unable to decode claimFor market id",
+                )
+            })?;
+            if tx_market_id != market_id {
+                return Err(ApiError::bad_request(
+                    "INVALID_TX_SIGNATURE",
+                    "claimFor transaction market id mismatch",
+                ));
+            }
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_TX_SIGNATURE",
+                "transaction is not an orderbook claim call",
+            ))
+        }
+    }
+
+    let has_claim_log = receipt.logs.iter().any(|log| {
+        let log_address = log
+            .address
+            .as_deref()
+            .and_then(|value| normalize_evm_address(value).ok());
+        if log_address.as_deref() != Some(order_book.as_str()) {
+            return false;
+        }
+        if log.topics.len() < 3 {
+            return false;
+        }
+        if log.topics[0].trim().to_ascii_lowercase() != ORDER_BOOK_CLAIMED_TOPIC {
+            return false;
+        }
+        topic_matches_market(log.topics[1].as_str(), market_id)
+            && topic_matches_address(log.topics[2].as_str(), owner.as_str())
+    });
+    if !has_claim_log {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "claim receipt missing expected Claimed event",
+        ));
+    }
+
+    Ok(())
+}
+
