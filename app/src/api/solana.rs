@@ -145,3 +145,59 @@ pub async fn relay_raw_transaction(
                 "skipPreflight": body.skip_preflight.unwrap_or(false),
                 "maxRetries": body.max_retries.unwrap_or(3)
             }
+        ]
+    });
+
+    let response = reqwest::Client::new()
+        .post(&state.config.solana_rpc_url)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|_| ApiError::internal("Failed to relay Solana transaction"))?;
+
+    if !response.status().is_success() {
+        return Err(ApiError::bad_request(
+            "SOLANA_RELAY_FAILED",
+            "Solana RPC relay returned non-success status",
+        ));
+    }
+
+    let rpc = response
+        .json::<SolanaSendTxResponse>()
+        .await
+        .map_err(|_| ApiError::internal("Failed to decode Solana relay response"))?;
+
+    if let Some(error) = rpc.error {
+        return Err(ApiError::bad_request(
+            "SOLANA_RELAY_FAILED",
+            &format!("RPC error: {}", error),
+        ));
+    }
+
+    let signature = rpc.result.ok_or_else(|| {
+        ApiError::bad_request(
+            "SOLANA_RELAY_FAILED",
+            "Solana relay response missing transaction signature",
+        )
+    })?;
+
+    Ok(HttpResponse::Ok().json(RelaySolanaTransactionResponse {
+        chain: "solana",
+        signature,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_base58_address;
+
+    #[test]
+    fn validates_base58_program_id() {
+        assert!(is_base58_address(
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ));
+        assert!(!is_base58_address("0xdeadbeef"));
+        assert!(!is_base58_address("invalid@@@"));
+    }
+}
+
