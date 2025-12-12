@@ -312,3 +312,102 @@ pub async fn place_order(
             body.price,
             remaining,
         )
+        .await
+        .ok();
+
+    let response = PlaceOrderResponse {
+        order_id,
+        market_id: body.market_id.clone(),
+        side: body.side,
+        outcome: body.outcome,
+        order_type: body.order_type,
+        price: body.price,
+        quantity: body.quantity,
+        filled_quantity: total_filled,
+        status: final_status,
+        created_at: now,
+        expires_at: body.expires_at,
+        tx_signature: None,
+    };
+
+    // Store idempotency key if provided
+    if let Some(ref key) = idempotency_key {
+        let full_key = format!("{}:{}", owner, key);
+        if let Ok(json) = serde_json::to_string(&response) {
+            state
+                .redis
+                .store_idempotency_key(&full_key, &json)
+                .await
+                .ok();
+        }
+        state.redis.release_idempotency_lock(&full_key).await.ok();
+    }
+
+    Ok(HttpResponse::Created().json(response))
+}
+
+/// Cancel an open order
+pub async fn cancel_order(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    ensure_order_write_mode(&state)?;
+
+    // SECURITY: Extract authenticated user from request
+    let user = require_auth!(&req, &state);
+
+    let order_id = path.into_inner();
+
+    // Get the order
+    let order = state
+        .db
+        .get_order(&order_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::not_found("Order"))?;
+
+    // SECURITY: Verify ownership - only order owner can cancel
+    if order.owner != user.wallet_address {
+        return Err(ApiError::forbidden("You can only cancel your own orders"));
+    }
+
+    // Check if order can be cancelled
+    if order.status == OrderStatus::Filled {
+        return Err(ApiError::bad_request(
+            "ORDER_FILLED",
+            "Cannot cancel a filled order",
+        ));
+    }
+    if order.status == OrderStatus::Cancelled {
+        return Err(ApiError::bad_request(
+            "ORDER_CANCELLED",
+            "Order is already cancelled",
+        ));
+    }
+
+    // Remove from order book
+    state
+        .orderbook
+        .remove_order(&order.market_id, order.outcome, order.side, &order_id);
+
+    // Remove from persistent order book
+    state.db.remove_orderbook_entry(&order_id).await.ok();
+
+    // Update database
+    state
+        .db
+        .update_order_status(&order_id, OrderStatus::Cancelled, order.filled_quantity, 0)
+        .await
+        .map_err(ApiError::from)?;
+
+    let now = Utc::now();
+
+    Ok(HttpResponse::Ok().json(CancelOrderResponse {
+        order_id,
+        status: OrderStatus::Cancelled,
+        cancelled_at: now,
+        tx_signature: None,
+    }))
+}
+
