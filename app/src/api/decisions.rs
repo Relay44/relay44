@@ -2828,4 +2828,3 @@ mod tests {
         assert_eq!(starters[0].1.get("wait").and_then(Value::as_str), Some(EFFECT_OPPOSE));
     }
 }
-
