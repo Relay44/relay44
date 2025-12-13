@@ -218,3 +218,111 @@ pub fn validate_tx_signature(signature: &str) -> Result<(), ApiError> {
             "Invalid signature format",
         ));
     }
+    Ok(())
+}
+
+fn contains_dangerous_chars(input: &str) -> bool {
+    let patterns = [
+        "<script",
+        "</script",
+        "javascript:",
+        "onerror=",
+        "onload=",
+        "onclick=",
+        "DROP TABLE",
+        "DELETE FROM",
+        "INSERT INTO",
+        "UPDATE ",
+        "UNION SELECT",
+        "--",
+        "/*",
+        "*/",
+    ];
+    let lower = input.to_lowercase();
+    patterns.iter().any(|p| lower.contains(&p.to_lowercase()))
+}
+
+pub fn sanitize_string(input: &str, max_length: usize) -> String {
+    input.trim().chars().take(max_length).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_wallet_address() {
+        // Valid addresses
+        assert!(validate_wallet_address("0x71C7656EC7ab88b098defB751B7401B5f6d8976F").is_ok());
+        assert!(validate_wallet_address("0xA0b86991c6218b36c1d19d4a2e9Eb0cE3606eb48").is_ok());
+
+        // Invalid addresses
+        assert!(validate_wallet_address("").is_err());
+        assert!(validate_wallet_address("short").is_err());
+        assert!(validate_wallet_address("0xInvalidEvmAddress").is_err());
+        assert!(validate_wallet_address("contains spaces here").is_err());
+    }
+
+    #[test]
+    fn test_validate_order_price() {
+        // Valid prices
+        assert!(validate_order_price(0.5).is_ok());
+        assert!(validate_order_price(0.0001).is_ok());
+        assert!(validate_order_price(0.9999).is_ok());
+
+        // Invalid prices
+        assert!(validate_order_price(0.0).is_err());
+        assert!(validate_order_price(1.0).is_err());
+        assert!(validate_order_price(-0.5).is_err());
+        assert!(validate_order_price(1.5).is_err());
+        assert!(validate_order_price(f64::NAN).is_err());
+        assert!(validate_order_price(f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_order_quantity() {
+        // Valid quantities
+        assert!(validate_order_quantity(1).is_ok());
+        assert!(validate_order_quantity(1000).is_ok());
+        assert!(validate_order_quantity(1_000_000_000).is_ok());
+
+        // Invalid quantities
+        assert!(validate_order_quantity(0).is_err());
+        assert!(validate_order_quantity(1_000_000_001).is_err());
+    }
+
+    #[test]
+    fn test_validate_market_question() {
+        // Valid questions
+        assert!(validate_market_question("Will BTC reach $100k by 2025?").is_ok());
+        assert!(validate_market_question("Simple question").is_ok());
+
+        // Invalid questions
+        assert!(validate_market_question("").is_err());
+        assert!(validate_market_question("   ").is_err());
+        assert!(validate_market_question("<script>alert('xss')</script>").is_err());
+        assert!(validate_market_question("DROP TABLE markets;").is_err());
+    }
+
+    #[test]
+    fn test_validate_pagination() {
+        // Valid pagination
+        assert!(validate_pagination(Some(50), Some(0)).is_ok());
+        assert!(validate_pagination(None, None).is_ok());
+        assert!(validate_pagination(Some(100), Some(100)).is_ok());
+
+        // Invalid pagination
+        assert!(validate_pagination(Some(0), None).is_err());
+        assert!(validate_pagination(Some(101), None).is_err());
+        assert!(validate_pagination(None, Some(-1)).is_err());
+    }
+
+    #[test]
+    fn test_contains_dangerous_chars() {
+        assert!(contains_dangerous_chars("<script>"));
+        assert!(contains_dangerous_chars("DROP TABLE users"));
+        assert!(contains_dangerous_chars("SELECT * FROM users--"));
+
+        assert!(!contains_dangerous_chars("Normal question about markets"));
+        assert!(!contains_dangerous_chars("Will ETH > $5000?"));
+    }
