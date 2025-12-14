@@ -326,3 +326,109 @@ mod tests {
         assert!(!contains_dangerous_chars("Normal question about markets"));
         assert!(!contains_dangerous_chars("Will ETH > $5000?"));
     }
+
+    #[test]
+    fn test_validate_market_id() {
+        // Valid market IDs
+        assert!(validate_market_id("market-123").is_ok());
+        assert!(validate_market_id("BTC_USD_2025").is_ok());
+        assert!(validate_market_id("a").is_ok());
+        assert!(validate_market_id("abcdefghij1234567890_-").is_ok());
+
+        // Invalid market IDs
+        assert!(validate_market_id("").is_err());
+        assert!(validate_market_id("market id with spaces").is_err());
+        assert!(validate_market_id("market!@#").is_err());
+    }
+
+    #[test]
+    fn test_validate_uuid() {
+        // Valid UUIDs
+        assert!(validate_uuid("550e8400-e29b-41d4-a716-446655440000", "order_id").is_ok());
+        assert!(validate_uuid("00000000-0000-0000-0000-000000000000", "id").is_ok());
+
+        // Invalid UUIDs
+        assert!(validate_uuid("not-a-uuid", "id").is_err());
+        assert!(validate_uuid("", "id").is_err());
+        assert!(validate_uuid("550e8400e29b41d4a716446655440000", "id").is_err());
+    }
+
+    #[test]
+    fn test_validate_description() {
+        // Valid descriptions
+        assert!(validate_description(None).is_ok());
+        assert!(validate_description(Some("A valid description")).is_ok());
+        assert!(validate_description(Some("")).is_ok());
+
+        // Invalid descriptions
+        assert!(validate_description(Some("<script>alert('xss')</script>")).is_err());
+        let long_desc = "a".repeat(limits::MAX_DESCRIPTION_LENGTH + 1);
+        assert!(validate_description(Some(&long_desc)).is_err());
+    }
+
+    #[test]
+    fn test_validate_fee_bps() {
+        // Valid fees
+        assert!(validate_fee_bps(0).is_ok());
+        assert!(validate_fee_bps(100).is_ok());
+        assert!(validate_fee_bps(limits::MAX_FEE_BPS).is_ok());
+
+        // Invalid fees
+        assert!(validate_fee_bps(limits::MAX_FEE_BPS + 1).is_err());
+    }
+
+    #[test]
+    fn test_validate_tx_signature() {
+        let valid_sig = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        assert!(validate_tx_signature(valid_sig).is_ok());
+
+        // Invalid signatures
+        assert!(validate_tx_signature("short").is_err());
+        assert!(validate_tx_signature("").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_string() {
+        assert_eq!(sanitize_string("  hello  ", 10), "hello");
+        assert_eq!(sanitize_string("hello world", 5), "hello");
+        assert_eq!(sanitize_string("", 10), "");
+        assert_eq!(sanitize_string("   ", 10), "");
+    }
+
+    #[test]
+    fn test_validate_price_precision() {
+        // Valid precisions (up to 4 decimal places)
+        assert!(validate_order_price(0.1234).is_ok());
+        assert!(validate_order_price(0.1).is_ok());
+
+        // Invalid precision (more than 4 decimal places)
+        assert!(validate_order_price(0.12345).is_err());
+    }
+
+    #[test]
+    fn test_limits_constants() {
+        // Verify limits are sensible
+        assert!(limits::MAX_ORDER_QUANTITY > limits::MIN_ORDER_QUANTITY);
+        assert!(limits::MAX_PAGE_LIMIT > 0);
+        assert!(limits::DEFAULT_PAGE_LIMIT <= limits::MAX_PAGE_LIMIT);
+        assert!(limits::MAX_FEE_BPS <= 10000); // Cannot exceed 100%
+        assert!(limits::MAX_TRADING_WINDOW_SECS > limits::MIN_TRADING_WINDOW_SECS);
+    }
+
+    #[test]
+    fn test_contains_dangerous_chars_case_insensitive() {
+        // Should catch regardless of case
+        assert!(contains_dangerous_chars("<SCRIPT>"));
+        assert!(contains_dangerous_chars("drop table"));
+        assert!(contains_dangerous_chars("DELETE FROM"));
+        assert!(contains_dangerous_chars("UNION SELECT"));
+    }
+
+    #[test]
+    fn test_contains_dangerous_chars_sql_comments() {
+        assert!(contains_dangerous_chars("SELECT * -- comment"));
+        assert!(contains_dangerous_chars("SELECT /* inline */"));
+        assert!(contains_dangerous_chars("end of comment */"));
+    }
+}
+
