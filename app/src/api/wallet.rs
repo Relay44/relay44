@@ -588,3 +588,155 @@ pub struct BlindpayWebhook {
     pub wallet_address: String,
     pub signature: String,
 }
+
+pub async fn blindfold_webhook(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<BlindpayWebhook>,
+) -> Result<impl Responder, ApiError> {
+    ensure_wallet_write_mode(&state)?;
+
+    let expected_sig = compute_blindfold_signature(&body, &state.config.blindfold_webhook_secret);
+    if body.signature != expected_sig {
+        return Err(ApiError::unauthorized("Invalid webhook signature"));
+    }
+
+    let wallet = body.wallet_address.to_ascii_lowercase();
+
+    match body.event.as_str() {
+        "payment.completed" => {
+            let tx_id = Uuid::new_v4().to_string();
+            record_transaction(
+                &state,
+                &tx_id,
+                &wallet,
+                TransactionType::Deposit,
+                body.amount,
+                None,
+                0,
+                Some(body.payment_id.clone()),
+                "confirmed",
+            )
+            .await?;
+        }
+        "payment.failed" => {
+            update_transaction_status(&state, &body.payment_id, "failed").await?;
+        }
+        _ => {}
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({"received": true})))
+}
+
+async fn get_locked_balance(state: &AppState, wallet: &str) -> Result<u64, ApiError> {
+    let (orders, _) = state
+        .db
+        .get_orders(
+            wallet,
+            None,
+            Some(crate::models::OrderStatus::Open),
+            1000,
+            0,
+        )
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let locked: u64 = orders
+        .iter()
+        .map(|o| {
+            let price = o.price_bps as u64;
+            let quantity = o.remaining_quantity;
+            (price * quantity) / 10000
+        })
+        .sum();
+
+    Ok(locked)
+}
+
+async fn get_settled_balance(state: &AppState, wallet: &str) -> Result<u64, ApiError> {
+    let (txs, _) = state
+        .db
+        .get_transactions(wallet, None, 1000, 0)
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let mut balance: i128 = 0;
+
+    for tx in txs.iter().filter(|tx| tx.status == "confirmed") {
+        let amount = tx.amount as i128;
+        match tx.tx_type {
+            TransactionType::Deposit
+            | TransactionType::Mint
+            | TransactionType::Claim
+            | TransactionType::Sell => balance += amount,
+            TransactionType::Withdraw | TransactionType::Buy | TransactionType::Redeem => {
+                balance -= amount
+            }
+        }
+    }
+
+    if balance <= 0 {
+        Ok(0)
+    } else {
+        Ok(balance as u64)
+    }
+}
+
+async fn get_pending_amounts(state: &AppState, wallet: &str) -> Result<(u64, u64), ApiError> {
+    let (txs, _) = state
+        .db
+        .get_transactions(wallet, None, 100, 0)
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let pending_deposits: u64 = txs
+        .iter()
+        .filter(|t| matches!(t.tx_type, TransactionType::Deposit) && t.status == "pending")
+        .map(|t| t.amount)
+        .sum();
+
+    let pending_withdrawals: u64 = txs
+        .iter()
+        .filter(|t| matches!(t.tx_type, TransactionType::Withdraw) && t.status == "pending")
+        .map(|t| t.amount)
+        .sum();
+
+    Ok((pending_deposits, pending_withdrawals))
+}
+
+async fn record_transaction(
+    state: &AppState,
+    id: &str,
+    owner: &str,
+    tx_type: TransactionType,
+    amount: u64,
+    market_id: Option<&str>,
+    fee: u64,
+    tx_signature: Option<String>,
+    status: &str,
+) -> Result<(), ApiError> {
+    let token = if state.config.usdc_mint.trim().is_empty() {
+        "USDC".to_string()
+    } else {
+        state.config.usdc_mint.to_ascii_lowercase()
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO transactions (id, owner, market_id, tx_type, amount, token, fee, tx_signature, status, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "#,
+    )
+    .bind(id)
+    .bind(owner)
+    .bind(market_id)
+    .bind(tx_type as i16)
+    .bind(amount as i64)
+    .bind(token)
+    .bind(fee as i64)
+    .bind(tx_signature)
+    .bind(status)
+    .bind(Utc::now())
+    .execute(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
