@@ -740,3 +740,149 @@ async fn record_transaction(
     .await
     .map_err(|e| ApiError::internal(&e.to_string()))?;
 
+    Ok(())
+}
+
+async fn update_transaction_status(
+    state: &AppState,
+    payment_id: &str,
+    status: &str,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE transactions SET status = $1 WHERE tx_signature = $2")
+        .bind(status)
+        .bind(payment_id)
+        .execute(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    Ok(())
+}
+
+fn is_valid_tx_hash(tx: &str) -> bool {
+    let hash = tx.strip_prefix("0x").unwrap_or(tx);
+    hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn is_valid_evm_address(address: &str) -> bool {
+    if address.len() != 42 || !address.starts_with("0x") {
+        return false;
+    }
+
+    address[2..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn normalize_evm_address(address: &str) -> Result<String, ApiError> {
+    let normalized = address.trim().to_ascii_lowercase();
+    if !is_valid_evm_address(normalized.as_str()) {
+        return Err(ApiError::bad_request(
+            "INVALID_ADDRESS",
+            "address must be a valid 0x EVM address",
+        ));
+    }
+    Ok(normalized)
+}
+
+fn parse_u64_hex(value: &str) -> Option<u64> {
+    let trimmed = value.trim().trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed.trim_start_matches('0');
+    if normalized.is_empty() {
+        return Some(0);
+    }
+    if normalized.len() > 16 {
+        return None;
+    }
+    u64::from_str_radix(normalized, 16).ok()
+}
+
+fn parse_u128_hex_word(word: &str) -> Option<u128> {
+    let trimmed = word.trim_start_matches('0');
+    if trimmed.is_empty() {
+        return Some(0);
+    }
+    if trimmed.len() > 32 {
+        return None;
+    }
+    u128::from_str_radix(trimmed, 16).ok()
+}
+
+async fn ensure_tx_signature_unused(state: &AppState, tx_signature: &str) -> Result<(), ApiError> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM transactions WHERE lower(tx_signature) = lower($1) AND status = 'confirmed')",
+    )
+    .bind(tx_signature)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&format!("failed to check tx_signature reuse: {}", e)))?;
+
+    if exists {
+        return Err(ApiError::conflict(
+            "DUPLICATE_TX_SIGNATURE",
+            "transaction hash has already been processed",
+        ));
+    }
+    Ok(())
+}
+
+fn compute_blindfold_signature(webhook: &BlindpayWebhook, secret: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let payload = format!(
+        "{}{}{}{}",
+        webhook.event, webhook.payment_id, webhook.amount, secret
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(payload.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+async fn get_vault_balances(
+    state: &AppState,
+    wallet: &str,
+) -> Result<(u64, u64, u64, u64), ApiError> {
+    if state.config.collateral_vault_address.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "COLLATERAL_VAULT_NOT_CONFIGURED",
+            "COLLATERAL_VAULT_ADDRESS must be configured",
+        ));
+    }
+
+    let normalized_wallet = normalize_evm_address(wallet)?;
+    let available_calldata = format!(
+        "{}{}",
+        COLLATERAL_AVAILABLE_SELECTOR,
+        encode_address_word(normalized_wallet.as_str())
+    );
+    let locked_calldata = format!(
+        "{}{}",
+        COLLATERAL_LOCKED_SELECTOR,
+        encode_address_word(normalized_wallet.as_str())
+    );
+    let available_hex = state
+        .evm_rpc
+        .eth_call(
+            state.config.collateral_vault_address.as_str(),
+            available_calldata.as_str(),
+        )
+        .await
+        .map_err(|err| ApiError::internal(&format!("failed to read available balance: {}", err)))?;
+    let locked_hex = state
+        .evm_rpc
+        .eth_call(
+            state.config.collateral_vault_address.as_str(),
+            locked_calldata.as_str(),
+        )
+        .await
+        .map_err(|err| ApiError::internal(&format!("failed to read locked balance: {}", err)))?;
+
+    let available = parse_u64_hex(&available_hex).ok_or_else(|| {
+        ApiError::internal("failed to decode available balance from collateral vault")
+    })?;
+    let locked = parse_u64_hex(&locked_hex).ok_or_else(|| {
+        ApiError::internal("failed to decode locked balance from collateral vault")
+    })?;
+    let claimable = get_claimable_balance(state, normalized_wallet.as_str()).await?;
+    let total = available.saturating_add(locked);
+    Ok((available, locked, claimable, total))
+}
