@@ -1036,3 +1036,139 @@ fn ensure_intent_owner(
             "intent does not belong to the authenticated wallet",
         ));
     }
+    if intent.action != action {
+        return Err(ApiError::bad_request(
+            "INTENT_ACTION_MISMATCH",
+            "intent action does not match request mode",
+        ));
+    }
+    if intent.amount != amount {
+        return Err(ApiError::bad_request(
+            "INTENT_AMOUNT_MISMATCH",
+            "intent amount does not match request amount",
+        ));
+    }
+    if intent.status == "confirmed" {
+        return Err(ApiError::conflict(
+            "INTENT_ALREADY_CONFIRMED",
+            "intent already confirmed",
+        ));
+    }
+    Ok(())
+}
+
+fn is_valid_hex_payload(value: &str) -> bool {
+    let payload = value.trim().trim_start_matches("0x");
+    !payload.is_empty()
+        && payload.len() % 2 == 0
+        && payload.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn decode_single_u256_calldata(input: &str, selector: &str) -> Option<u128> {
+    let payload = input.trim().trim_start_matches("0x").to_ascii_lowercase();
+    let selector = selector.trim_start_matches("0x").to_ascii_lowercase();
+    if payload.len() < 72 || !payload.starts_with(selector.as_str()) {
+        return None;
+    }
+    if !payload.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    parse_u128_hex_word(&payload[8..72])
+}
+
+fn decode_log_amount(log: &RpcLog) -> Option<u128> {
+    let payload = log.data.trim().trim_start_matches("0x");
+    if payload.len() < 64 || !payload.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    parse_u128_hex_word(&payload[0..64])
+}
+
+fn topic_address_matches(topic: &str, wallet: &str) -> bool {
+    let normalized_topic = topic.trim().trim_start_matches("0x").to_ascii_lowercase();
+    let normalized_wallet = wallet.trim().trim_start_matches("0x").to_ascii_lowercase();
+    normalized_topic.len() == 64 && normalized_topic.ends_with(normalized_wallet.as_str())
+}
+
+async fn verify_vault_intent_transaction(
+    state: &AppState,
+    intent: &WalletWriteIntent,
+    tx_hash: &str,
+    expected_selector: &str,
+    expected_event_topic: &str,
+) -> Result<(), ApiError> {
+    let expected_to = normalize_evm_address(state.config.collateral_vault_address.as_str())?;
+    let expected_topic = expected_event_topic.to_ascii_lowercase();
+    let expected_amount = intent.amount as u128;
+
+    let receipt = state
+        .evm_rpc
+        .eth_get_transaction_receipt(tx_hash)
+        .await
+        .map_err(|_| {
+            ApiError::bad_request(
+                "INVALID_TX_SIGNATURE",
+                "unable to fetch transaction receipt",
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction receipt not found")
+        })?;
+    let status = receipt
+        .status
+        .as_deref()
+        .and_then(parse_u64_hex)
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction status unavailable")
+        })?;
+    if status != 1 {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "transaction reverted onchain",
+        ));
+    }
+
+    let tx = state
+        .evm_rpc
+        .eth_get_transaction_by_hash(tx_hash)
+        .await
+        .map_err(|_| ApiError::bad_request("INVALID_TX_SIGNATURE", "unable to fetch transaction"))?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_SIGNATURE", "transaction not found"))?;
+    let direct_vault_call_matches = tx
+        .to
+        .as_deref()
+        .map(normalize_evm_address)
+        .transpose()?
+        .is_some_and(|target| target == expected_to)
+        && decode_single_u256_calldata(tx.input.as_str(), expected_selector)
+            .is_some_and(|amount| amount == expected_amount);
+
+    let event_found = receipt.logs.iter().any(|log| {
+        let Some(address) = log.address.as_deref() else {
+            return false;
+        };
+        let Ok(log_address) = normalize_evm_address(address) else {
+            return false;
+        };
+        if log_address != expected_to || log.topics.len() < 2 {
+            return false;
+        }
+        if log.topics[0].to_ascii_lowercase() != expected_topic {
+            return false;
+        }
+        if !topic_address_matches(log.topics[1].as_str(), intent.wallet.as_str()) {
+            return false;
+        }
+        decode_log_amount(log).is_some_and(|amount| amount >= expected_amount)
+    });
+
+    if !direct_vault_call_matches && !event_found {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_SIGNATURE",
+            "transaction did not prove the expected collateral vault write",
+        ));
+    }
+
+    Ok(())
+}
+
