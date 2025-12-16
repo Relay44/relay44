@@ -886,3 +886,153 @@ async fn get_vault_balances(
     let total = available.saturating_add(locked);
     Ok((available, locked, claimable, total))
 }
+
+async fn wait_for_available_balance_at_least(
+    state: &AppState,
+    wallet: &str,
+    minimum: u64,
+    message: &str,
+) -> Result<u64, ApiError> {
+    for attempt in 0..VAULT_BALANCE_POLL_ATTEMPTS {
+        let (available, _, _, _) = get_vault_balances(state, wallet).await?;
+        if available >= minimum {
+            return Ok(available);
+        }
+
+        if attempt + 1 < VAULT_BALANCE_POLL_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                VAULT_BALANCE_POLL_DELAY_MS,
+            ))
+            .await;
+        }
+    }
+
+    Err(ApiError::bad_request("VAULT_BALANCE_NOT_UPDATED", message))
+}
+
+async fn wait_for_available_balance_at_most(
+    state: &AppState,
+    wallet: &str,
+    maximum: u64,
+    message: &str,
+) -> Result<u64, ApiError> {
+    for attempt in 0..VAULT_BALANCE_POLL_ATTEMPTS {
+        let (available, _, _, _) = get_vault_balances(state, wallet).await?;
+        if available <= maximum {
+            return Ok(available);
+        }
+
+        if attempt + 1 < VAULT_BALANCE_POLL_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                VAULT_BALANCE_POLL_DELAY_MS,
+            ))
+            .await;
+        }
+    }
+
+    Err(ApiError::bad_request("VAULT_BALANCE_NOT_UPDATED", message))
+}
+
+async fn get_claimable_balance(state: &AppState, wallet: &str) -> Result<u64, ApiError> {
+    if state.config.order_book_address.trim().is_empty() {
+        return Ok(0);
+    }
+
+    let rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT DISTINCT market_id::bigint AS market_id
+        FROM positions
+        WHERE lower(owner) = lower($1)
+          AND market_id ~ '^[0-9]+$'
+        ORDER BY market_id DESC
+        LIMIT 500
+        "#,
+    )
+    .bind(wallet)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&format!("failed to query claimable markets: {}", err)))?;
+
+    let mut total_claimable: u64 = 0;
+    for market_id_raw in rows {
+        let Ok(market_id) = u64::try_from(market_id_raw) else {
+            continue;
+        };
+        let calldata = format!(
+            "{}{}{}",
+            ORDER_BOOK_CLAIMABLE_SELECTOR,
+            encode_u256_word(market_id),
+            encode_address_word(wallet),
+        );
+        let claimable_hex = state
+            .evm_rpc
+            .eth_call(state.config.order_book_address.as_str(), calldata.as_str())
+            .await
+            .unwrap_or_else(|_| "0x0".to_string());
+        if let Some(value) = parse_u64_hex(&claimable_hex) {
+            total_claimable = total_claimable.saturating_add(value);
+        }
+    }
+
+    Ok(total_claimable)
+}
+
+fn encode_address_word(address: &str) -> String {
+    format!("{:0>64}", address.trim_start_matches("0x"))
+}
+
+fn encode_u256_word(value: u64) -> String {
+    format!("{:064x}", value)
+}
+
+fn wallet_intent_key(intent_id: &str) -> String {
+    format!("wallet:intent:{}", intent_id)
+}
+
+async fn store_wallet_intent(state: &AppState, intent: &WalletWriteIntent) -> Result<(), ApiError> {
+    state
+        .redis
+        .set(
+            wallet_intent_key(intent.id.as_str()).as_str(),
+            intent,
+            Some(WALLET_INTENT_TTL_SECONDS),
+        )
+        .await
+        .map_err(|err| ApiError::internal(&format!("failed to persist wallet intent: {}", err)))
+}
+
+async fn load_wallet_intent(
+    state: &AppState,
+    intent_id: &str,
+) -> Result<WalletWriteIntent, ApiError> {
+    let normalized_intent = intent_id.trim();
+    if normalized_intent.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_INTENT_ID",
+            "intentId must be provided",
+        ));
+    }
+    state
+        .redis
+        .get::<WalletWriteIntent>(wallet_intent_key(normalized_intent).as_str())
+        .await
+        .map_err(|err| ApiError::internal(&format!("failed to read wallet intent: {}", err)))?
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "INTENT_NOT_FOUND",
+                "intentId is invalid or expired; restart from prepare",
+            )
+        })
+}
+
+fn ensure_intent_owner(
+    intent: &WalletWriteIntent,
+    wallet: &str,
+    action: &str,
+    amount: u64,
+) -> Result<(), ApiError> {
+    if intent.wallet != wallet {
+        return Err(ApiError::forbidden(
+            "intent does not belong to the authenticated wallet",
+        ));
+    }
