@@ -1280,3 +1280,260 @@ async fn handle_mcp_method(
                     "name": "relay44-mcp",
                     "version": "1.0.0"
                 }
+            }),
+        )),
+        "ping" => Ok(mcp_response_result(id, json!({ "ok": true }))),
+        "tools/list" => Ok(mcp_response_result(id, json!({ "tools": mcp_tools() }))),
+        "tools/call" => {
+            let params: McpToolCallParams =
+                serde_json::from_value(request.params.clone().ok_or_else(|| {
+                    ApiError::bad_request("INVALID_PARAMS", "tools/call requires params")
+                })?)
+                .map_err(|_| {
+                    ApiError::bad_request("INVALID_PARAMS", "tools/call params are invalid")
+                })?;
+
+            let result = handle_tool_call(state, api_base.as_str(), params).await?;
+            Ok(mcp_response_result(id, result))
+        }
+        "resources/list" => Ok(mcp_response_result(
+            id,
+            json!({
+                "resources": mcp_resources(api_base.as_str())
+            }),
+        )),
+        "resources/read" => {
+            let params: McpResourceReadParams =
+                serde_json::from_value(request.params.clone().ok_or_else(|| {
+                    ApiError::bad_request("INVALID_PARAMS", "resources/read requires params")
+                })?)
+                .map_err(|_| {
+                    ApiError::bad_request("INVALID_PARAMS", "resources/read params are invalid")
+                })?;
+
+            let resource_payload = match params.uri.as_str() {
+                "relay44://markets/live" => {
+                    let (_, payload) = call_internal_api(
+                        state,
+                        reqwest::Method::GET,
+                        "/evm/markets?source=all&limit=50",
+                        None,
+                        None,
+                    )
+                    .await?;
+                    payload
+                }
+                "relay44://agents/active" => {
+                    let (_, payload) = call_internal_api(
+                        state,
+                        reqwest::Method::GET,
+                        "/evm/agents?active=true&limit=50",
+                        None,
+                        None,
+                    )
+                    .await?;
+                    payload
+                }
+                "relay44://runtime/health" => {
+                    let (_, payload) = call_internal_api(
+                        state,
+                        reqwest::Method::GET,
+                        "/web4/runtime/health",
+                        None,
+                        None,
+                    )
+                    .await?;
+                    payload
+                }
+                "relay44://xmtp/health" => xmtp_swarm::health(state),
+                _ if params.uri.starts_with("http://") || params.uri.starts_with("https://") => {
+                    let url = reqwest::Url::parse(params.uri.as_str()).map_err(|_| {
+                        ApiError::bad_request("INVALID_RESOURCE_URI", "resource uri is invalid")
+                    })?;
+                    let relative = format!(
+                        "{}{}",
+                        url.path(),
+                        url.query().map(|v| format!("?{v}")).unwrap_or_default()
+                    );
+                    let (_, payload) = call_internal_api(
+                        state,
+                        reqwest::Method::GET,
+                        relative.as_str(),
+                        None,
+                        None,
+                    )
+                    .await?;
+                    payload
+                }
+                _ => {
+                    return Ok(mcp_response_error(
+                        id,
+                        -32602,
+                        "Unknown resource uri",
+                        Some(json!({ "uri": params.uri })),
+                    ))
+                }
+            };
+
+            Ok(mcp_response_result(
+                id,
+                json!({
+                    "contents": [
+                        {
+                            "uri": params.uri,
+                            "mimeType": "application/json",
+                            "text": serde_json::to_string_pretty(&resource_payload).unwrap_or_else(|_| resource_payload.to_string())
+                        }
+                    ]
+                }),
+            ))
+        }
+        "prompts/list" => Ok(mcp_response_result(id, json!({ "prompts": mcp_prompts() }))),
+        "prompts/get" => {
+            let params: McpPromptGetParams =
+                serde_json::from_value(request.params.clone().ok_or_else(|| {
+                    ApiError::bad_request("INVALID_PARAMS", "prompts/get requires params")
+                })?)
+                .map_err(|_| {
+                    ApiError::bad_request("INVALID_PARAMS", "prompts/get params are invalid")
+                })?;
+
+            let prompt_text = match params.name.as_str() {
+                "market-scan" => {
+                    let limit = params
+                        .arguments
+                        .get("limit")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(5);
+                    let source = params
+                        .arguments
+                        .get("source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("all");
+                    format!("Scan top {limit} active markets from source {source} and return ranked opportunities with: market_id, direction, confidence (0-100), expected edge, invalidation conditions, and execution notes.")
+                }
+                "market-analysis" => {
+                    let market_id = params
+                        .arguments
+                        .get("market_id")
+                        .and_then(|v| v.as_str().map(ToOwned::to_owned))
+                        .or_else(|| {
+                            params
+                                .arguments
+                                .get("market_id")
+                                .and_then(|v| v.as_u64())
+                                .map(|v| v.to_string())
+                        })
+                        .unwrap_or_else(|| "unknown".to_string());
+                    format!("Analyze market {market_id} using order book depth, recent trades, and agent execution windows. Return: thesis, confidence (0-100), risk factors, and execution plan.")
+                }
+                "agent-launch" => {
+                    let market_id = params
+                        .arguments
+                        .get("market_id")
+                        .and_then(|v| v.as_str().map(ToOwned::to_owned))
+                        .or_else(|| {
+                            params
+                                .arguments
+                                .get("market_id")
+                                .and_then(|v| v.as_u64())
+                                .map(|v| v.to_string())
+                        })
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let outcome = params
+                        .arguments
+                        .get("outcome")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("yes");
+                    let budget = params
+                        .arguments
+                        .get("budget_usdc")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("0");
+                    format!("Given market {market_id}, target side {outcome}, and budget {budget} USDC, propose createAgent params: priceBps, size, cadence, expiryWindow, and strategy rationale.")
+                }
+                "swarm-coordination" => {
+                    let swarm_id = params
+                        .arguments
+                        .get("swarm_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("default");
+                    let objective = params
+                        .arguments
+                        .get("objective")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("execute market ops");
+                    format!("Draft XMTP swarm message plan for swarm {swarm_id} to achieve objective: {objective}. Include role assignments, deadlines, and success criteria.")
+                }
+                _ => {
+                    return Ok(mcp_response_error(
+                        id,
+                        -32602,
+                        "Unknown prompt name",
+                        Some(json!({ "name": params.name })),
+                    ))
+                }
+            };
+
+            Ok(mcp_response_result(
+                id,
+                json!({
+                    "description": "Generated prompt",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": {
+                                "type": "text",
+                                "text": prompt_text
+                            }
+                        }
+                    ]
+                }),
+            ))
+        }
+        "notifications/initialized" => Ok(mcp_response_result(id, json!({ "ok": true }))),
+        _ => Ok(mcp_response_error(
+            id,
+            -32601,
+            "Method not found",
+            Some(json!({ "method": request.method })),
+        )),
+    }
+}
+
+pub async fn handle_mcp_jsonrpc(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<Value>,
+) -> impl Responder {
+    let payload = body.into_inner();
+    let mut responses = Vec::new();
+
+    let requests: Vec<Value> = if payload.is_array() {
+        payload.as_array().cloned().unwrap_or_default()
+    } else {
+        vec![payload]
+    };
+
+    if requests.is_empty() {
+        return HttpResponse::BadRequest().json(mcp_response_error(
+            Value::Null,
+            -32600,
+            "Invalid Request",
+            Some(json!({ "reason": "empty batch" })),
+        ));
+    }
+
+    for raw in requests {
+        let parsed = serde_json::from_value::<McpJsonRpcRequest>(raw.clone());
+        let request = match parsed {
+            Ok(req) => req,
+            Err(_) => {
+                responses.push(mcp_response_error(
+                    Value::Null,
+                    -32600,
+                    "Invalid Request",
+                    Some(json!({ "payload": raw })),
+                ));
+                continue;
+            }
