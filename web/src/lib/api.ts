@@ -921,3 +921,917 @@ class ApiClient {
     const query = this.buildQuery(filters || {});
     return this.request(`/orders${query}`);
   }
+
+  async getOrder(orderId: string): Promise<Order> {
+    return this.request(`/orders/${orderId}`);
+  }
+
+  async placeOrder(data: PlaceOrderRequest): Promise<PlaceOrderResponse> {
+    return this.request('/orders', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async cancelOrder(orderId: string): Promise<CancelOrderResponse> {
+    return this.request(`/orders/${orderId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Positions
+  async getPositions(): Promise<PaginatedResponse<Position>> {
+    return this.request<PaginatedResponse<Position>>('/positions');
+  }
+
+  async getPosition(marketId: string): Promise<Position> {
+    return this.request(`/positions/${marketId}`);
+  }
+
+  async claimWinnings(marketId: string, txSignature: string): Promise<ClaimWinningsResponse> {
+    return this.request(`/positions/${marketId}/claim`, {
+      method: 'POST',
+      body: JSON.stringify({ txSignature }),
+    });
+  }
+
+  // User
+  async getProfile(): Promise<User> {
+    return this.request('/user/profile');
+  }
+
+  async getTransactions(params?: {
+    limit?: number;
+    offset?: number;
+    txType?: string;
+  }): Promise<PaginatedResponse<Transaction>> {
+    const query = this.buildQuery(params || {});
+    const response = await this.request<{
+      transactions?: Record<string, unknown>[];
+      data?: Record<string, unknown>[];
+      total?: number;
+      limit?: number;
+      offset?: number;
+      hasMore?: boolean;
+    }>(`/user/transactions${query}`);
+
+    const data = (response.transactions ?? response.data ?? []).map((entry) =>
+      normalizeTransaction(entry)
+    );
+    const total = toNumber(response.total, data.length);
+    const limit = toNumber(response.limit, params?.limit ?? data.length);
+    const offset = toNumber(response.offset, params?.offset ?? 0);
+
+    return {
+      data,
+      total,
+      limit,
+      offset,
+      hasMore: response.hasMore ?? offset + data.length < total,
+    };
+  }
+
+  // Wallet
+  async getWalletBalance(): Promise<WalletBalance> {
+    return this.request('/wallet/balance');
+  }
+
+  async getWeb4Capabilities(): Promise<Web4Capabilities> {
+    const capabilities = await this.request<Web4Capabilities>('/web4/capabilities');
+    this.setCapabilities(capabilities);
+    return capabilities;
+  }
+
+  async getBaseMarkets(params?: {
+    limit?: number;
+    offset?: number;
+    source?: 'all' | 'internal' | 'limitless' | 'polymarket';
+    tradable?: 'all' | 'user' | 'agent';
+    includeLowLiquidity?: boolean;
+  }): Promise<PaginatedResponse<Market>> {
+    const query = this.buildQuery(params || {});
+    const response = await this.request<BaseMarketsResponse>(`/evm/markets${query}`);
+    return normalizeBaseMarketsResponse(response);
+  }
+
+  async getBaseOrderBook(
+    marketId: string,
+    outcome: Outcome,
+    depth = 20
+  ): Promise<OrderBook> {
+    const query = this.buildQuery({ outcome, depth });
+    const encodedMarketId = encodeURIComponent(marketId);
+    const response = await this.request<BaseOrderBookResponse>(
+      `/evm/markets/${encodedMarketId}/orderbook${query}`
+    );
+
+    return {
+      marketId: response.market_id,
+      outcome: response.outcome,
+      bids: response.bids ?? [],
+      asks: response.asks ?? [],
+      lastUpdated: toIsoString(response.last_updated),
+    };
+  }
+
+  async getBaseTrades(
+    marketId: string,
+    params?: { outcome?: Outcome; limit?: number; before?: string; offset?: number }
+  ): Promise<PaginatedResponse<Trade>> {
+    const query = this.buildQuery({
+      outcome: params?.outcome,
+      limit: params?.limit,
+      offset: params?.offset,
+    });
+    const encodedMarketId = encodeURIComponent(marketId);
+    const response = await this.request<BaseTradesResponse>(
+      `/evm/markets/${encodedMarketId}/trades${query}`
+    );
+    const data = (response.trades ?? []).map(mapBaseTradeToTrade);
+    const total = toNumber(response.total, data.length);
+    const limit = toNumber(response.limit, params?.limit ?? data.length);
+    const offset = toNumber(response.offset, params?.offset ?? 0);
+
+    return {
+      data,
+      total,
+      limit,
+      offset,
+      hasMore: response.has_more ?? offset + limit < total,
+    };
+  }
+
+  async getBaseMarket(id: string): Promise<Market> {
+    const response = await this.request<BaseMarketSnapshot>(`/evm/markets/${encodeURIComponent(id)}`);
+    return mapBaseSnapshotToMarket(response);
+  }
+
+  async getBaseAgents(filters?: AgentFilters): Promise<PaginatedResponse<Agent>> {
+    const query = this.buildQuery({
+      limit: filters?.limit,
+      offset: filters?.offset,
+      owner: filters?.owner,
+      market_id: filters?.marketId,
+      active: filters?.active,
+    });
+    const response = await this.request<BaseAgentsResponse>(`/evm/agents${query}`);
+    const data = (response.agents ?? []).map(mapBaseAgentToAgent);
+    const total = toNumber(response.total, data.length);
+    const limit = toNumber(response.limit, filters?.limit ?? data.length);
+    const offset = toNumber(response.offset, filters?.offset ?? 0);
+
+    return {
+      data,
+      total,
+      limit,
+      offset,
+      hasMore: offset + limit < total,
+    };
+  }
+
+  async getBaseAgent(id: string): Promise<Agent> {
+    const parsedId = Number(id);
+    if (!Number.isInteger(parsedId) || parsedId < 1) {
+      throw new ApiError(404, 'Agent not found');
+    }
+    const response = await this.request<BaseAgentSnapshot>(`/evm/agents/${parsedId}`);
+    return mapBaseAgentToAgent(response);
+  }
+
+  async getBaseTokenState(): Promise<BaseTokenState> {
+    return this.request('/evm/token/state');
+  }
+
+  async getBaseValidationStatus(requestHash: string): Promise<BaseValidationStatus> {
+    return this.request(`/evm/validation/${encodeURIComponent(requestHash)}`);
+  }
+
+  async getExternalCredentials(provider?: 'limitless' | 'polymarket'): Promise<ExternalCredential[]> {
+    const query = this.buildQuery({ provider });
+    const response = await this.request<ExternalCredentialsListResponse>(`/external/credentials${query}`);
+    return response.credentials ?? [];
+  }
+
+  async getExternalCredentialStatus(
+    provider: 'limitless' | 'polymarket',
+    credentialId?: string
+  ): Promise<ExternalCredentialStatus> {
+    const query = this.buildQuery({ provider, credentialId });
+    return this.request(`/external/credentials/status${query}`);
+  }
+
+  async upsertExternalCredential(data: {
+    provider: 'limitless' | 'polymarket';
+    label?: string;
+    credentials: Record<string, unknown>;
+  }): Promise<ExternalCredential> {
+    return this.request('/external/credentials', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteExternalCredential(credentialId: string): Promise<{ ok: boolean }> {
+    return this.request(`/external/credentials/${credentialId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async bindLimitlessWallet(data: {
+    credentialId: string;
+    baseWallet: string;
+  }): Promise<ExternalCredentialStatus> {
+    return this.request('/external/credentials/limitless/wallet-bind', {
+      method: 'POST',
+      body: JSON.stringify({
+        credentialId: data.credentialId,
+        baseWallet: data.baseWallet,
+      }),
+    });
+  }
+
+  async createExternalOrderIntent(data: {
+    provider: 'limitless' | 'polymarket';
+    marketId: string;
+    outcome: 'yes' | 'no';
+    side: 'buy' | 'sell';
+    price: number;
+    quantity: number;
+    credentialId?: string;
+  }): Promise<ExternalOrderIntent> {
+    return this.request('/external/orders/intent', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: data.provider,
+        marketId: data.marketId,
+        outcome: data.outcome,
+        side: data.side,
+        price: data.price,
+        quantity: data.quantity,
+        credentialId: data.credentialId,
+      }),
+    });
+  }
+
+  async submitExternalOrder(data: {
+    intentId: string;
+    signedOrder: Record<string, unknown>;
+    credentialId?: string;
+  }): Promise<ExternalOrderRecord> {
+    return this.request('/external/orders/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        intentId: data.intentId,
+        signedOrder: data.signedOrder,
+        credentialId: data.credentialId,
+      }),
+    });
+  }
+
+  async cancelExternalOrder(data: {
+    provider: 'limitless' | 'polymarket';
+    providerOrderId: string;
+    credentialId?: string;
+    payload?: Record<string, unknown>;
+  }): Promise<{ ok: boolean }> {
+    return this.request('/external/orders/cancel', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: data.provider,
+        providerOrderId: data.providerOrderId,
+        credentialId: data.credentialId,
+        payload: data.payload,
+      }),
+    });
+  }
+
+  async listExternalOrders(params?: {
+    provider?: 'limitless' | 'polymarket';
+    limit?: number;
+    offset?: number;
+  }): Promise<ExternalOrdersListResponse> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/external/orders${query}`);
+  }
+
+  async listExternalAgents(params?: {
+    provider?: 'limitless' | 'polymarket';
+    active?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExternalAgentsListResponse> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/external/agents${query}`);
+  }
+
+  async createExternalAgent(data: {
+    name: string;
+    provider: 'limitless' | 'polymarket';
+    marketId: string;
+    outcome: 'yes' | 'no';
+    side: 'buy' | 'sell';
+    price: number;
+    quantity: number;
+    cadenceSeconds: number;
+    strategy: string;
+    credentialId?: string;
+    active?: boolean;
+  }): Promise<ExternalAgentRecord> {
+    return this.request('/external/agents', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: data.name,
+        provider: data.provider,
+        marketId: data.marketId,
+        outcome: data.outcome,
+        side: data.side,
+        price: data.price,
+        quantity: data.quantity,
+        cadenceSeconds: data.cadenceSeconds,
+        strategy: data.strategy,
+        credentialId: data.credentialId,
+        active: data.active,
+      }),
+    });
+  }
+
+  async updateExternalAgent(
+    agentId: string,
+    data: Partial<{
+      name: string;
+      outcome: 'yes' | 'no';
+      side: 'buy' | 'sell';
+      price: number;
+      quantity: number;
+      cadenceSeconds: number;
+      strategy: string;
+      credentialId: string;
+      active: boolean;
+    }>,
+  ): Promise<ExternalAgentRecord> {
+    return this.request(`/external/agents/${agentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async executeExternalAgent(
+    agentId: string,
+    data?: { force?: boolean; signedOrder?: Record<string, unknown> },
+  ): Promise<Record<string, unknown>> {
+    return this.request(`/external/agents/${agentId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+  }
+
+  async listDecisionCells(params?: {
+    limit?: number;
+    offset?: number;
+    status?: string;
+  }): Promise<PaginatedResponse<DecisionCellListItem>> {
+    const query = this.buildQuery(params || {});
+    const response = await this.request<DecisionCellsListResponse>(`/decisions${query}`);
+    return {
+      data: response.data,
+      total: response.total,
+      limit: response.limit,
+      offset: response.offset,
+      hasMore: response.has_more,
+    };
+  }
+
+  async createDecisionCell(data: CreateDecisionCellRequest): Promise<DecisionCell> {
+    return this.request('/decisions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getDecisionCell(cellId: string): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}`);
+  }
+
+  async updateDecisionCell(cellId: string, data: UpdateDecisionCellRequest): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async addDecisionAction(cellId: string, label: string): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/actions`, {
+      method: 'POST',
+      body: JSON.stringify({ label }),
+    });
+  }
+
+  async addDecisionNode(cellId: string, data: CreateDecisionNodeRequest): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/nodes`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDecisionNode(
+    cellId: string,
+    nodeId: string,
+    data: UpdateDecisionNodeRequest,
+  ): Promise<DecisionCell> {
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async attachDecisionMarket(
+    cellId: string,
+    nodeId: string,
+    data: {
+      sourceType: DecisionNodeSourceType;
+      sourceRef: string;
+    },
+  ): Promise<DecisionCell> {
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}/attach-market`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async attachDecisionAgent(
+    cellId: string,
+    nodeId: string,
+    data: {
+      externalAgentId: string;
+      triggerMode: DecisionTriggerMode;
+      active?: boolean;
+    },
+  ): Promise<DecisionCell> {
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}/attach-agent`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async recalculateDecisionCell(cellId: string): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/recalculate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async updateDecisionAutomation(
+    cellId: string,
+    data: UpdateDecisionAutomationRequest,
+  ): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/automation`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async upsertDecisionAlert(
+    cellId: string,
+    data: {
+      kind: string;
+      threshold?: Record<string, unknown>;
+      active?: boolean;
+    },
+  ): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/alerts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getDecisionEvents(cellId: string): Promise<DecisionCell['events']> {
+    const response = await this.request<DecisionEventsResponse>(
+      `/decisions/${encodeURIComponent(cellId)}/events`,
+    );
+    return response.data;
+  }
+
+  async prepareBaseCreateMarket(data: {
+    from?: string;
+    question: string;
+    description?: string;
+    category?: string;
+    resolutionSource?: string;
+    closeTime: number;
+    resolver: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/markets/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBasePlaceOrder(data: {
+    from?: string;
+    marketId: number;
+    outcome: Outcome;
+    priceBps: number;
+    size: string;
+    expiry: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/orders/place', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseCancelOrder(data: {
+    from?: string;
+    orderId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/orders/cancel', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseClaim(data: {
+    from?: string;
+    marketId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/positions/claim', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseClaimFor(data: {
+    from?: string;
+    user: string;
+    marketId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/positions/claim-for', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseMatchOrders(data: {
+    from?: string;
+    firstOrderId: number;
+    secondOrderId: number;
+    fillSize: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/orders/match', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseCreateAgent(data: {
+    from?: string;
+    marketId: number;
+    isYes: boolean;
+    priceBps: number;
+    size: string;
+    cadence: number;
+    expiryWindow: number;
+    strategy: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/agents/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseExecuteAgent(data: {
+    from?: string;
+    agentId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/agents/execute', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseRegisterIdentity(data: {
+    from?: string;
+    wallet: string;
+    tier: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/identity/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSetIdentityTier(data: {
+    from?: string;
+    wallet: string;
+    tier: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/identity/tier', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSetIdentityActive(data: {
+    from?: string;
+    wallet: string;
+    active: boolean;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/identity/active', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSubmitReputationOutcome(data: {
+    from?: string;
+    wallet: string;
+    success: boolean;
+    notionalMicrousdc: string;
+    confidenceWeightBps: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/reputation/outcome', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseValidationRequest(data: {
+    from?: string;
+    validator: string;
+    agentId: string;
+    requestUri: string;
+    requestHash?: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/validation/request', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseValidationResponse(data: {
+    from?: string;
+    requestHash: string;
+    response: number;
+    responseUri: string;
+    responseHash: string;
+    tag: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/validation/response', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async relayBaseRawTransaction(rawTx: string): Promise<RelayRawTxResponse> {
+    return this.request('/evm/write/relay', {
+      method: 'POST',
+      body: JSON.stringify({ rawTx }),
+    });
+  }
+
+  async getDepositAddress(): Promise<DepositAddress> {
+    return this.request('/wallet/deposit/address');
+  }
+
+  async deposit(data: DepositRequest): Promise<DepositResponse> {
+    return this.request('/wallet/deposit', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async withdraw(data: WithdrawRequest): Promise<WithdrawResponse> {
+    return this.request('/wallet/withdraw', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Auth
+  async getNonce(): Promise<string> {
+    return this.getSiweNonce();
+  }
+
+  async getSiweNonce(): Promise<string> {
+    const res = await this.request<{ nonce: string }>('/auth/siwe/nonce', {}, true);
+    return res.nonce;
+  }
+
+  async getSolanaNonce(): Promise<string> {
+    const res = await this.request<{ nonce: string }>('/auth/solana/nonce', {}, true);
+    return res.nonce;
+  }
+
+  async getFarcasterNonce(): Promise<string> {
+    const res = await this.request<{ nonce: string }>('/auth/farcaster/nonce', {}, true);
+    return res.nonce;
+  }
+
+  async login(
+    wallet: string,
+    signature: string,
+    message: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    return this.loginSiwe(wallet, signature, message);
+  }
+
+  async loginSiwe(
+    wallet: string,
+    signature: string,
+    message: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet, signature, message, flow: 'siwe' }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new ApiError(res.status, data.error || 'SIWE login failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async loginSolana(
+    wallet: string,
+    signature: string,
+    message: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet, signature, message, flow: 'solana' }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new ApiError(res.status, data.error || 'Solana login failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async loginFarcaster(
+    message: string,
+    signature: string,
+    nonce: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, signature, nonce, flow: 'farcaster' }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new ApiError(res.status, data.error || 'Farcaster login failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async post<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
+    const res = await fetch(`${PRIMARY_API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, (data as Record<string, string>).error || 'Request failed');
+    }
+
+    return res.json();
+  }
+
+  async refresh(): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', { method: 'PUT' });
+
+    if (!res.ok) {
+      this.clearAccessToken();
+      throw new ApiError(res.status, 'Token refresh failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+    } finally {
+      this.clearAccessToken();
+    }
+  }
+
+  // Restore session on page load (if refresh token exists)
+  async restoreSession(): Promise<boolean> {
+    const hasToken = await this.checkSession();
+    if (hasToken) {
+      try {
+        await this.refresh();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Notifications
+  async getNotifications(params?: {
+    limit?: number;
+    offset?: number;
+    unreadOnly?: boolean;
+  }): Promise<PaginatedResponse<Notification>> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/notifications${query}`);
+  }
+
+  async getUnreadCount(): Promise<{ count: number }> {
+    return this.request('/notifications/unread-count');
+  }
+
+  async markAsRead(notificationId: string): Promise<void> {
+    return this.request(`/notifications/${notificationId}/read`, {
+      method: 'PUT',
+    });
+  }
+
+  async markAllAsRead(): Promise<void> {
+    return this.request('/notifications/read-all', {
+      method: 'PUT',
+    });
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    return this.request('/notifications/preferences');
+  }
+
+  async updateNotificationPreferences(
+    prefs: Partial<NotificationPreferences>
+  ): Promise<NotificationPreferences> {
+    return this.request('/notifications/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(prefs),
+    });
+  }
+
+  // Leaderboards
+  async getLeaderboard(
+    period: LeaderboardPeriod = 'weekly',
+    metric: LeaderboardMetric = 'pnl',
+    limit = 100
+  ): Promise<Leaderboard> {
+    return this.request(`/leaderboard?period=${period}&metric=${metric}&limit=${limit}`);
+  }
+
+  async getUserRank(
+    wallet: string,
+    period: LeaderboardPeriod = 'weekly',
+    metric: LeaderboardMetric = 'pnl'
+  ): Promise<{ rank: number; value: number }> {
+    return this.request(`/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`);
+  }
+
+  // Public profiles
+  async getPublicProfile(wallet: string): Promise<PublicProfile> {
+    return this.request(`/profiles/${wallet}`);
+  }
+
+  async getProfileActivity(
+    wallet: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<PaginatedResponse<ProfileActivity>> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/profiles/${wallet}/activity${query}`);
+  }
+
+  async getProfilePositions(wallet: string): Promise<PaginatedResponse<Position>> {
+    return this.request(`/profiles/${wallet}/positions`);
+  }
+}
+
+export const api = new ApiClient();
