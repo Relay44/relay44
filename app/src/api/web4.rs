@@ -1537,3 +1537,257 @@ pub async fn handle_mcp_jsonrpc(
                 ));
                 continue;
             }
+        };
+
+        if request.jsonrpc != "2.0" {
+            responses.push(mcp_response_error(
+                request.id.unwrap_or(Value::Null),
+                -32600,
+                "Invalid Request: jsonrpc must be '2.0'",
+                None,
+            ));
+            continue;
+        }
+
+        if request.id.is_none() {
+            if let Err(err) = enforce_mcp_policy(&state, &req, &request).await {
+                let _ = mcp_response_error(
+                    Value::Null,
+                    -32000,
+                    "MCP request rejected by policy",
+                    Some(json!({
+                        "status": err.status,
+                        "error": api_error_as_web4_payload(&err)
+                    })),
+                );
+                continue;
+            }
+            let _ = handle_mcp_method(&state, &req, &request).await;
+            continue;
+        }
+
+        if let Err(err) = enforce_mcp_policy(&state, &req, &request).await {
+            responses.push(mcp_response_error(
+                request.id.unwrap_or(Value::Null),
+                -32000,
+                "MCP request rejected by policy",
+                Some(json!({
+                    "status": err.status,
+                    "error": api_error_as_web4_payload(&err)
+                })),
+            ));
+            continue;
+        }
+
+        match handle_mcp_method(&state, &req, &request).await {
+            Ok(response) => responses.push(response),
+            Err(err) => responses.push(mcp_response_error(
+                request.id.unwrap_or(Value::Null),
+                -32000,
+                "MCP method failed",
+                Some(json!({
+                    "status": err.status,
+                    "error": api_error_as_web4_payload(&err)
+                })),
+            )),
+        }
+    }
+
+    if responses.is_empty() {
+        HttpResponse::NoContent().finish()
+    } else if responses.len() == 1 {
+        HttpResponse::Ok().json(responses.remove(0))
+    } else {
+        HttpResponse::Ok().json(responses)
+    }
+}
+
+pub async fn get_web4_capabilities(state: web::Data<Arc<AppState>>) -> impl Responder {
+    let api_base = infer_api_base_url(&state);
+    let chains = configured_chains(&state);
+    let limitless_trading_ready = state.config.limitless_enabled
+        && state.config.external_trading_enabled
+        && !state.config.limitless_api_key.trim().is_empty();
+    let polymarket_trading_ready = false;
+    let beta = (state.config.limitless_enabled && !limitless_trading_ready)
+        || (state.config.polymarket_enabled && !polymarket_trading_ready);
+    let erc8004_ready = is_hex_address(state.config.erc8004_identity_registry_address.as_str())
+        && is_hex_address(state.config.erc8004_reputation_registry_address.as_str())
+        && is_hex_address(state.config.erc8004_validation_registry_address.as_str());
+    let x402_status = if state.config.x402_enabled {
+        "implemented"
+    } else {
+        "disabled"
+    };
+    let x402_description = if state.config.x402_enabled {
+        "Facilitator-backed x402 premium gating for orderbook, trades, and MCP premium calls."
+    } else {
+        "x402 is disabled by config."
+    };
+    let (xmtp_status, xmtp_description) = if !state.config.xmtp_swarm_enabled {
+        ("disabled", "XMTP swarm messaging is disabled by config.")
+    } else if state.config.xmtp_swarm_transport == "xmtp_http" {
+        (
+            "implemented",
+            "XMTP swarm transport routed to XMTP HTTP bridge.",
+        )
+    } else {
+        (
+            "partial",
+            "Redis relay mode enabled; full XMTP network bridge is not active.",
+        )
+    };
+
+    HttpResponse::Ok().json(json!({
+        "project": "relay44",
+        "mode": "web4-agent-market-network",
+        "chain_mode": state.config.chain_mode,
+        "chains": chains,
+        "api_base": api_base,
+        "runtime": {
+            "market_core_configured": !state.config.market_core_address.trim().is_empty(),
+            "order_book_configured": !state.config.order_book_address.trim().is_empty(),
+            "agent_runtime_configured": !state.config.agent_runtime_address.trim().is_empty(),
+            "solana_programs_configured": !state.config.solana_market_program_id.trim().is_empty() && !state.config.solana_orderbook_program_id.trim().is_empty(),
+            "evm_reads_enabled": state.config.evm_reads_enabled,
+            "evm_writes_enabled": state.config.evm_writes_enabled,
+            "solana_reads_enabled": state.config.solana_reads_enabled,
+            "solana_writes_enabled": state.config.solana_writes_enabled,
+            "external_markets_enabled": state.config.external_markets_enabled,
+            "external_trading_enabled": state.config.external_trading_enabled,
+            "external_agents_enabled": state.config.external_agents_enabled,
+            "limitless_enabled": state.config.limitless_enabled,
+            "polymarket_enabled": state.config.polymarket_enabled
+        },
+        "wallet": {
+            "read_enabled": (state.config.evm_enabled && state.config.evm_reads_enabled)
+                || (state.config.solana_enabled && state.config.solana_reads_enabled),
+            "deposit_enabled": state.config.evm_enabled && state.config.evm_writes_enabled,
+            "withdraw_enabled": state.config.evm_enabled && state.config.evm_writes_enabled,
+            "claim_enabled": state.config.evm_enabled && state.config.evm_writes_enabled,
+            "deposit_mode": if state.config.evm_enabled && state.config.evm_writes_enabled {
+                "chain"
+            } else {
+                "disabled"
+            },
+            "withdraw_mode": if state.config.evm_enabled && state.config.evm_writes_enabled {
+                "chain"
+            } else {
+                "disabled"
+            }
+        },
+        "launch": {
+            "beta": beta,
+            "limitless_trading_ready": limitless_trading_ready,
+            "polymarket_trading_ready": polymarket_trading_ready
+        },
+        "policy": {
+            "mcp_method_rate_window_seconds": MCP_METHOD_WINDOW_SECONDS,
+            "mcp_tool_rate_window_seconds": MCP_TOOL_WINDOW_SECONDS,
+            "mcp_method_limits_per_window": {
+                "default": MCP_DEFAULT_METHOD_LIMIT_PER_WINDOW,
+                "query": MCP_QUERY_METHOD_LIMIT_PER_WINDOW,
+                "tools_call": MCP_TOOL_CALL_METHOD_LIMIT_PER_WINDOW
+            },
+            "mcp_tool_limits_per_window": {
+                "default": MCP_DEFAULT_TOOL_LIMIT_PER_WINDOW,
+                "write_tools": MCP_WRITE_TOOL_LIMIT_PER_WINDOW,
+                "swarm_tools": MCP_SWARM_TOOL_LIMIT_PER_WINDOW
+            },
+            "error_envelope": {
+                "fields": ["code", "reason", "retryable", "quote"]
+            }
+        },
+        "protocols": [
+            {
+                "id": "agents-md",
+                "status": "implemented",
+                "description": "Machine-readable project interface at repository root."
+            },
+            {
+                "id": "mcp-jsonrpc-server",
+                "status": "implemented",
+                "description": "MCP JSON-RPC server with tools/resources/prompts over HTTP and stdio process transport.",
+                "endpoint": "/v1/web4/mcp",
+                "stdio_command": "npm run mcp:server"
+            },
+            {
+                "id": "a2a-agent-card",
+                "status": "implemented",
+                "description": "Cross-agent discovery card for external orchestration systems.",
+                "endpoint": "/v1/web4/agent-card"
+            },
+            {
+                "id": "erc-8004-identity",
+                "status": if erc8004_ready { "implemented" } else { "partial" },
+                "description": if erc8004_ready {
+                    "Onchain ERC-8004 identity, reputation, and validation registries integrated into runtime and write-prep flows."
+                } else {
+                    "ERC-8004 integration is present, but one or more registry addresses are not configured."
+                }
+            },
+            {
+                "id": "x402-agent-payments",
+                "status": x402_status,
+                "description": x402_description
+            },
+            {
+                "id": "xmtp-swarm",
+                "status": xmtp_status,
+                "description": xmtp_description
+            },
+            {
+                "id": "external-venues",
+                "status": if state.config.external_markets_enabled { "implemented" } else { "disabled" },
+                "description": "Unified market aggregation and external execution surface for Limitless and Polymarket."
+            }
+        ]
+    }))
+}
+
+pub async fn get_mcp_manifest(req: HttpRequest, state: web::Data<Arc<AppState>>) -> impl Responder {
+    let api_base = format!(
+        "{}/v1",
+        api_origin_from_request(&state, &req).trim_end_matches('/')
+    );
+
+    HttpResponse::Ok().json(json!({
+        "name": "relay44",
+        "version": "1.0.0",
+        "description": "MCP JSON-RPC server for relay44 dual-chain (Base + Solana) agent market network.",
+        "transport": {
+            "type": "http+jsonrpc",
+            "endpoint": format!("{}/web4/mcp", api_base)
+        },
+        "transports": [
+            {
+                "type": "http+jsonrpc",
+                "endpoint": format!("{}/web4/mcp", api_base)
+            },
+            {
+                "type": "stdio",
+                "command": "npm",
+                "args": ["run", "mcp:server"],
+                "env": {
+                    "RELAY44_API_BASE_URL": api_base
+                }
+            }
+        ],
+        "jsonrpc": {
+            "version": "2.0",
+            "supported_methods": [
+                "initialize",
+                "ping",
+                "tools/list",
+                "tools/call",
+                "resources/list",
+                "resources/read",
+                "prompts/list",
+                "prompts/get"
+            ]
+        },
+        "tools": mcp_tools(),
+        "resources": mcp_resources(api_base.as_str()),
+        "prompts": mcp_prompts()
+    }))
+}
