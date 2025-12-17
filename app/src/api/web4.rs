@@ -1024,3 +1024,259 @@ async fn handle_tool_call(
                     web4_error_from_downstream(status, &payload),
                 ));
             }
+            Ok(tool_result_payload(payload, false))
+        }
+        "executeExternalAgent" => {
+            let agent_id = args
+                .get("agent_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ApiError::bad_request("INVALID_ARGS", "agent_id is required"))?;
+
+            let mut payload = args.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.remove("agent_id");
+            }
+
+            let (status, response_payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                format!("/external/agents/{}/execute", agent_id).as_str(),
+                Some(payload),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &response_payload),
+                ));
+            }
+            Ok(tool_result_payload(response_payload, false))
+        }
+        "prepareCreateAgentTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/agents/create",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareExecuteAgentTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/agents/execute",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareRegisterIdentityTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/identity/register",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareSetIdentityTierTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/identity/tier",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareSetIdentityActiveTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/identity/active",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareSubmitReputationOutcomeTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/reputation/outcome",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareValidationRequestTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/validation/request",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "prepareValidationResponseTx" => {
+            let (status, payload) = call_internal_api(
+                state,
+                reqwest::Method::POST,
+                "/evm/write/validation/response",
+                Some(args),
+                None,
+            )
+            .await?;
+            if status >= 400 {
+                return Ok(tool_error_payload(
+                    status,
+                    web4_error_from_downstream(status, &payload),
+                ));
+            }
+            Ok(tool_result_payload(payload, false))
+        }
+        "getX402Quote" => {
+            let resource = match args.get("resource").and_then(|v| v.as_str()) {
+                Some("orderbook") => X402Resource::OrderBook,
+                Some("trades") => X402Resource::Trades,
+                Some("mcp_tool_call") => X402Resource::McpToolCall,
+                _ => {
+                    return Ok(tool_error_payload(
+                        400,
+                        web4_error_payload(
+                            "INVALID_X402_RESOURCE",
+                            "resource must be one of: orderbook, trades, mcp_tool_call",
+                            false,
+                            None,
+                            None,
+                        ),
+                    ))
+                }
+            };
+            let origin = api_base.trim_end_matches("/v1");
+            Ok(tool_result_payload(
+                json!(build_quote_for_origin(state, origin, resource)),
+                false,
+            ))
+        }
+        "sendSwarmMessage" => {
+            let payload: SwarmSendRequest = serde_json::from_value(args).map_err(|_| {
+                ApiError::bad_request("INVALID_SWARM_MESSAGE", "swarm message payload is invalid")
+            })?;
+            match xmtp_swarm::send_message(state, payload).await {
+                Ok(envelope) => Ok(tool_result_payload(json!(envelope), false)),
+                Err(err) => Ok(tool_error_payload(
+                    err.status,
+                    api_error_as_web4_payload(&err),
+                )),
+            }
+        }
+        "listSwarmMessages" => {
+            let swarm_id = args
+                .get("swarm_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ApiError::bad_request("INVALID_ARGS", "swarm_id is required"))?;
+            let query = SwarmListQuery {
+                limit: args.get("limit").and_then(|v| v.as_u64()),
+                offset: args.get("offset").and_then(|v| v.as_u64()),
+            };
+            match xmtp_swarm::list_messages(state, swarm_id, query).await {
+                Ok(data) => Ok(tool_result_payload(json!(data), false)),
+                Err(err) => Ok(tool_error_payload(
+                    err.status,
+                    api_error_as_web4_payload(&err),
+                )),
+            }
+        }
+        _ => Ok(tool_error_payload(
+            404,
+            web4_error_payload(
+                "UNKNOWN_TOOL",
+                format!("Unknown tool: {}", params.name).as_str(),
+                false,
+                None,
+                None,
+            ),
+        )),
+    }
+}
+
+async fn handle_mcp_method(
+    state: &AppState,
+    req: &HttpRequest,
+    request: &McpJsonRpcRequest,
+) -> Result<Value, ApiError> {
+    let id = request.id.clone().unwrap_or(Value::Null);
+    let api_base = format!(
+        "{}/v1",
+        api_origin_from_request(state, req).trim_end_matches('/')
+    );
+
+    match request.method.as_str() {
+        "initialize" => Ok(mcp_response_result(
+            id,
+            json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": { "listChanged": false },
+                    "resources": { "subscribe": false, "listChanged": false },
+                    "prompts": { "listChanged": false }
+                },
+                "serverInfo": {
+                    "name": "relay44-mcp",
+                    "version": "1.0.0"
+                }
