@@ -103,3 +103,48 @@ export const CURATED_MARKETS_BY_ID: Record<number, CuratedMarketDefinition> = {
     outcomes: 'Yes | No',
     rationale:
       'AI changing malware landscape, with agents finding 77% of software vulnerabilities.',
+    category: 'Tech & Science',
+  },
+  15: {
+    question: 'Which celebrity will be linked to an Epstein scandal in new file releases by July 2026?',
+    outcomes: 'Named figure | None',
+    rationale:
+      'Epstein files triggering arrests and muted US response vs. European fallout.',
+    category: 'Politics',
+  },
+  16: {
+    question: 'Will ZachXBT expose a romance scam using AI voices/videos targeting seniors?',
+    outcomes: 'Yes | No',
+    rationale:
+      'Romance scams with AI fakes up 20% in 2025, affecting 1 in 10 adults over 50.',
+    category: 'Culture',
+  },
+  17: {
+    question: 'Which tech firm will face a class-action over non-consensual AI imagery generation?',
+    outcomes: 'xAI (Grok) | Other firm | None by date',
+    rationale:
+      'Grok controversy with 6,700 sexualized images per hour, sparking global scrutiny.',
+    category: 'Tech & Science',
+  },
+  18: {
+    question: 'Will a grand jury indict more Democrats in Trump administration probes by mid-2026?',
+    outcomes: 'Yes | No',
+    rationale:
+      'Recent rejections of indictments over videos advising against illegal orders.',
+    category: 'Politics',
+  },
+  19: {
+    question: 'Which offshore exchange will be dismantled for scam facilitation next?',
+    outcomes: 'TradeOgre | Other exchange | None',
+    rationale:
+      'RCMP action on TradeOgre for links to scams and darknet markets.',
+    category: 'Crypto',
+  },
+  20: {
+    question: 'Will Coffeezilla reveal a pyramid scheme disguised as a crypto investment club?',
+    outcomes: 'Yes | No',
+    rationale:
+      'Pyramid/Ponzi schemes prominent in 2025 fraud, converging with investment tactics.',
+    category: 'Financials',
+  },
+};
