@@ -125,3 +125,56 @@ impl WebSocketHub {
         // Also send to global channel
         let _ = self.global_tx.send(msg);
     }
+
+    /// Broadcast trade update
+    pub async fn broadcast_trade(&self, update: TradeUpdate) {
+        let market_id = update.market_id.clone();
+        let msg = WsMessage::Trade(update);
+
+        if let Some(tx) = self.market_channels.read().await.get(&market_id) {
+            let _ = tx.send(msg.clone());
+        }
+
+        let _ = self.global_tx.send(msg);
+    }
+
+    /// Broadcast position update (targeted to specific user)
+    pub async fn broadcast_position(&self, update: PositionUpdate) {
+        let market_id = update.market_id.clone();
+        let msg = WsMessage::Position(update);
+
+        if let Some(tx) = self.market_channels.read().await.get(&market_id) {
+            let _ = tx.send(msg.clone());
+        }
+    }
+
+    /// Broadcast market status update
+    pub async fn broadcast_market(&self, update: MarketUpdate) {
+        let market_id = update.market_id.clone();
+        let msg = WsMessage::Market(update);
+
+        if let Some(tx) = self.market_channels.read().await.get(&market_id) {
+            let _ = tx.send(msg.clone());
+        }
+
+        let _ = self.global_tx.send(msg);
+    }
+
+    /// Clean up channels with no subscribers
+    pub async fn cleanup_empty_channels(&self) {
+        let mut channels = self.market_channels.write().await;
+        channels.retain(|market_id, tx| {
+            let has_receivers = tx.receiver_count() > 0;
+            if !has_receivers {
+                info!("Cleaning up empty channel for market: {}", market_id);
+            }
+            has_receivers
+        });
+    }
+}
+
+impl Default for WebSocketHub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
