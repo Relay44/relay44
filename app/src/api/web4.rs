@@ -1791,3 +1791,255 @@ pub async fn get_mcp_manifest(req: HttpRequest, state: web::Data<Arc<AppState>>)
         "prompts": mcp_prompts()
     }))
 }
+
+pub async fn get_agent_card(req: HttpRequest, state: web::Data<Arc<AppState>>) -> impl Responder {
+    let api_base = format!(
+        "{}/v1",
+        api_origin_from_request(&state, &req).trim_end_matches('/')
+    );
+    let chains = configured_chains(&state);
+    let auth = if state.config.chain_mode == "solana" {
+        json!({
+            "type": "solana-signin+jwt",
+            "nonce_endpoint": format!("{}/auth/solana/nonce", api_base),
+            "login_endpoint": format!("{}/auth/solana/login", api_base)
+        })
+    } else if state.config.chain_mode == "dual" {
+        json!({
+            "type": "multiwallet+jwt",
+            "flows": [
+                {
+                    "wallet": "evm",
+                    "type": "siwe+jwt",
+                    "nonce_endpoint": format!("{}/auth/siwe/nonce", api_base),
+                    "login_endpoint": format!("{}/auth/siwe/login", api_base)
+                },
+                {
+                    "wallet": "solana",
+                    "type": "solana-signin+jwt",
+                    "nonce_endpoint": format!("{}/auth/solana/nonce", api_base),
+                    "login_endpoint": format!("{}/auth/solana/login", api_base)
+                }
+            ]
+        })
+    } else {
+        json!({
+            "type": "siwe+jwt",
+            "nonce_endpoint": format!("{}/auth/siwe/nonce", api_base),
+            "login_endpoint": format!("{}/auth/siwe/login", api_base)
+        })
+    };
+
+    HttpResponse::Ok().json(json!({
+        "schema": "a2a-agent-card/v1",
+        "name": "relay44 agent network",
+        "description": "Agent-executable prediction market infrastructure on Base and Solana.",
+        "network": {
+            "chain_mode": state.config.chain_mode,
+            "chains": chains
+        },
+        "auth": auth,
+        "capabilities": [
+            {
+                "id": "market-data",
+                "description": "Query markets, orderbooks and fills from configured chains."
+            },
+            {
+                "id": "agent-runtime",
+                "description": "Discover, launch and execute autonomous market agents."
+            },
+            {
+                "id": "mcp-jsonrpc",
+                "description": "MCP tools/resources/prompts via JSON-RPC."
+            },
+            {
+                "id": "x402-payments",
+                "description": "x402 payment-gated premium data routes."
+            },
+            {
+                "id": "xmtp-swarm",
+                "description": "Signed swarm coordination channels."
+            }
+        ],
+        "actions": [
+            {
+                "name": "mcp_jsonrpc",
+                "method": "POST",
+                "url": format!("{}/web4/mcp", api_base)
+            },
+            {
+                "name": "list_markets",
+                "method": "GET",
+                "url": format!("{}/evm/markets", api_base)
+            },
+            {
+                "name": "get_solana_programs",
+                "method": "GET",
+                "url": format!("{}/solana/programs", api_base)
+            },
+            {
+                "name": "list_agents",
+                "method": "GET",
+                "url": format!("{}/evm/agents?active=true", api_base)
+            },
+            {
+                "name": "prepare_create_agent",
+                "method": "POST",
+                "url": format!("{}/evm/write/agents/create", api_base)
+            },
+            {
+                "name": "prepare_execute_agent",
+                "method": "POST",
+                "url": format!("{}/evm/write/agents/execute", api_base)
+            },
+            {
+                "name": "prepare_validation_request",
+                "method": "POST",
+                "url": format!("{}/evm/write/validation/request", api_base)
+            },
+            {
+                "name": "prepare_validation_response",
+                "method": "POST",
+                "url": format!("{}/evm/write/validation/response", api_base)
+            },
+            {
+                "name": "relay_solana_tx",
+                "method": "POST",
+                "url": format!("{}/solana/write/relay", api_base)
+            },
+            {
+                "name": "send_swarm_message",
+                "method": "POST",
+                "url": format!("{}/web4/xmtp/swarm/send", api_base)
+            }
+        ]
+    }))
+}
+
+pub async fn get_xmtp_swarm_health(state: web::Data<Arc<AppState>>) -> impl Responder {
+    HttpResponse::Ok().json(xmtp_swarm::health(&state))
+}
+
+pub async fn get_web4_runtime_health(state: web::Data<Arc<AppState>>) -> impl Responder {
+    let x402_receiver_valid = is_hex_address(state.config.x402_receiver_address.as_str());
+    let x402_facilitator_configured = !state.config.x402_facilitator_url.trim().is_empty();
+    let x402_facilitator_reachable = if state.config.x402_enabled && x402_facilitator_configured {
+        let url = format!(
+            "{}/health",
+            state
+                .config
+                .x402_facilitator_url
+                .trim()
+                .trim_end_matches('/')
+        );
+        reqwest::Client::new()
+            .get(url)
+            .bearer_auth(state.config.x402_facilitator_token.as_str())
+            .send()
+            .await
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+    let x402_ready = state.config.x402_enabled
+        && x402_receiver_valid
+        && x402_facilitator_configured
+        && x402_facilitator_reachable;
+
+    let mcp_ready = true;
+
+    let xmtp_transport = state.config.xmtp_swarm_transport.as_str();
+    let xmtp_transport_http = xmtp_transport == "xmtp_http";
+    let xmtp_transport_redis = xmtp_transport == "redis";
+    let xmtp_bridge_configured = !state.config.xmtp_swarm_bridge_url.trim().is_empty();
+    let xmtp_bridge_reachable =
+        if state.config.xmtp_swarm_enabled && xmtp_transport_http && xmtp_bridge_configured {
+            let url = format!(
+                "{}/health",
+                state
+                    .config
+                    .xmtp_swarm_bridge_url
+                    .trim()
+                    .trim_end_matches('/')
+            );
+            reqwest::Client::new()
+                .get(url)
+                .send()
+                .await
+                .map(|response| response.status().is_success())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+    let xmtp_ready = state.config.xmtp_swarm_enabled
+        && if xmtp_transport_http {
+            xmtp_bridge_configured && xmtp_bridge_reachable
+        } else if xmtp_transport_redis {
+            true
+        } else {
+            false
+        };
+    let full_web4_ready = mcp_ready && x402_ready && xmtp_ready;
+
+    let status = if full_web4_ready {
+        "healthy"
+    } else if mcp_ready {
+        "degraded"
+    } else {
+        "unhealthy"
+    };
+
+    HttpResponse::Ok().json(json!({
+        "status": status,
+        "components": {
+            "mcp": {
+                "ready": mcp_ready,
+                "transport": ["http+jsonrpc", "stdio"],
+                "requiredForFullWeb4": true
+            },
+            "x402": {
+                "ready": x402_ready,
+                "enabled": state.config.x402_enabled,
+                "requiredForFullWeb4": true,
+                "config": {
+                    "receiverAddressValid": x402_receiver_valid,
+                    "facilitatorConfigured": x402_facilitator_configured,
+                    "facilitatorReachable": x402_facilitator_reachable
+                }
+            },
+            "xmtp": {
+                "ready": xmtp_ready,
+                "enabled": state.config.xmtp_swarm_enabled,
+                "requiredForFullWeb4": true,
+                "transport": state.config.xmtp_swarm_transport,
+                "config": {
+                    "transportHttp": xmtp_transport_http,
+                    "transportRedis": xmtp_transport_redis,
+                    "bridgeConfigured": xmtp_bridge_configured,
+                    "bridgeReachable": xmtp_bridge_reachable
+                }
+            }
+        },
+        "fullWeb4Ready": full_web4_ready
+    }))
+}
+
+pub async fn send_xmtp_swarm_message(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<SwarmSendRequest>,
+) -> Result<impl Responder, ApiError> {
+    let message = xmtp_swarm::send_message(&state, body.into_inner()).await?;
+    Ok(HttpResponse::Created().json(message))
+}
+
+pub async fn list_xmtp_swarm_messages(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    query: web::Query<SwarmListQuery>,
+) -> Result<impl Responder, ApiError> {
+    let response = xmtp_swarm::list_messages(&state, path.as_str(), query.into_inner()).await?;
+    Ok(HttpResponse::Ok().json(response))
+}
+
