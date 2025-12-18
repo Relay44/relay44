@@ -297,3 +297,83 @@ pub async fn ws_handler(
                     "message": "Invalid or expired token"
                 })));
             }
+        };
+
+        // Rate limit WebSocket connections per user
+        if check_rate_limit_by_user(&claims.sub, &state.redis, RateLimitTier::Auth)
+            .await
+            .is_err()
+        {
+            warn!("WebSocket rate limit exceeded for user: {}", claims.sub);
+            return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
+                "error": "RATE_LIMITED",
+                "message": "Too many connection attempts"
+            })));
+        }
+
+        let session = WsSession::authenticated(state.get_ref().clone(), claims.sub, claims.role);
+        return ws::start(session, &req, stream);
+    }
+
+    // No token in query - allow connection but require auth as first message
+    // Rate limit by IP for unauthenticated connections
+    let ip = extract_client_ip(&req);
+    if check_rate_limit_by_ip(&ip, &state.redis).await.is_err() {
+        warn!("WebSocket rate limit exceeded for IP: {}", ip);
+        return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
+            "error": "RATE_LIMITED",
+            "message": "Too many connection attempts"
+        })));
+    }
+
+    let session = WsSession::pending_auth(state.get_ref().clone());
+    ws::start(session, &req, stream)
+}
+
+/// Extract client IP from request headers (supports proxies)
+fn extract_client_ip(req: &HttpRequest) -> String {
+    // Check X-Forwarded-For first (behind reverse proxy)
+    if let Some(forwarded) = req.headers().get("X-Forwarded-For") {
+        if let Ok(value) = forwarded.to_str() {
+            // Take first IP (original client)
+            if let Some(ip) = value.split(',').next() {
+                return ip.trim().to_string();
+            }
+        }
+    }
+
+    // Check X-Real-IP
+    if let Some(real_ip) = req.headers().get("X-Real-IP") {
+        if let Ok(value) = real_ip.to_str() {
+            return value.trim().to_string();
+        }
+    }
+
+    // Fall back to peer address
+    req.peer_addr()
+        .map(|addr| addr.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Rate limit by IP for unauthenticated WebSocket connections
+async fn check_rate_limit_by_ip(ip: &str, redis: &crate::services::RedisService) -> Result<(), ()> {
+    // 5 unauthenticated connection attempts per minute per IP
+    let key = format!("ws_rate:ip:{}", ip);
+    match redis.increment_with_ttl(&key, 60).await {
+        Ok(count) if count <= 5 => Ok(()),
+        Ok(_) => Err(()),
+        Err(e) => {
+            warn!("Redis rate limit check failed: {}", e);
+            // Fail open on Redis errors to avoid blocking legitimate users
+            Ok(())
+        }
+    }
+}
+
+/// Query parameters for WebSocket authentication
+#[derive(serde::Deserialize, Default)]
+pub struct WsAuthQuery {
+    /// JWT token for authentication (optional - can authenticate via first message)
+    pub token: Option<String>,
+}
+
