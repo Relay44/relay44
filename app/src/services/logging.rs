@@ -138,3 +138,4 @@ mod tests {
         assert_eq!(escape_json(input), expected);
     }
 }
+
