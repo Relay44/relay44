@@ -960,3 +960,169 @@ impl DatabaseService {
                 total_trades = positions.total_trades + 1
             "#,
         )
+        .bind(&trade.market_id)
+        .bind(&trade.seller)
+        .bind(seller_yes_delta)
+        .bind(seller_no_delta)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn create_trade(&self, trade: &Trade) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO trades (
+                id, market_id, buy_order_id, sell_order_id, outcome,
+                price, price_bps, quantity, collateral_amount,
+                buyer, seller, tx_signature, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#,
+        )
+        .bind(&trade.id)
+        .bind(&trade.market_id)
+        .bind(&trade.buy_order_id)
+        .bind(&trade.sell_order_id)
+        .bind(trade.outcome as i16)
+        .bind(trade.price)
+        .bind(trade.price_bps as i16)
+        .bind(trade.quantity as i64)
+        .bind(trade.collateral_amount as i64)
+        .bind(&trade.buyer)
+        .bind(&trade.seller)
+        .bind(&trade.tx_signature)
+        .bind(trade.created_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    fn row_to_trade(&self, row: &sqlx::postgres::PgRow) -> Trade {
+        Trade {
+            id: row.get("id"),
+            market_id: row.get("market_id"),
+            buy_order_id: row.get("buy_order_id"),
+            sell_order_id: row.get("sell_order_id"),
+            outcome: Outcome::from(row.get::<i16, _>("outcome") as u8),
+            price: row.get("price"),
+            price_bps: row.get::<i16, _>("price_bps") as u16,
+            quantity: row.get::<i64, _>("quantity") as u64,
+            collateral_amount: row.get::<i64, _>("collateral_amount") as u64,
+            buyer: row.get("buyer"),
+            seller: row.get("seller"),
+            tx_signature: row
+                .try_get("tx_signature")
+                .unwrap_or_else(|_| String::new()),
+            created_at: row.get("created_at"),
+        }
+    }
+
+    pub async fn get_trades(
+        &self,
+        market_id: &str,
+        outcome: Option<Outcome>,
+        limit: i64,
+        before: Option<&str>,
+    ) -> Result<Vec<Trade>> {
+        let rows = match (outcome, before) {
+            (Some(o), Some(b)) => {
+                sqlx::query("SELECT * FROM trades WHERE market_id = $1 AND outcome = $2 AND id < $3 ORDER BY created_at DESC LIMIT $4")
+                    .bind(market_id).bind(o as i16).bind(b).bind(limit).fetch_all(&self.pool).await?
+            }
+            (Some(o), None) => {
+                sqlx::query("SELECT * FROM trades WHERE market_id = $1 AND outcome = $2 ORDER BY created_at DESC LIMIT $3")
+                    .bind(market_id).bind(o as i16).bind(limit).fetch_all(&self.pool).await?
+            }
+            (None, Some(b)) => {
+                sqlx::query("SELECT * FROM trades WHERE market_id = $1 AND id < $2 ORDER BY created_at DESC LIMIT $3")
+                    .bind(market_id).bind(b).bind(limit).fetch_all(&self.pool).await?
+            }
+            (None, None) => {
+                sqlx::query("SELECT * FROM trades WHERE market_id = $1 ORDER BY created_at DESC LIMIT $2")
+                    .bind(market_id).bind(limit).fetch_all(&self.pool).await?
+            }
+        };
+
+        let trades = rows.iter().map(|row| self.row_to_trade(row)).collect();
+        Ok(trades)
+    }
+
+    // Transactions
+    pub async fn get_transactions(
+        &self,
+        owner: &str,
+        tx_type: Option<TransactionType>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<ModelTransaction>, i64)> {
+        let rows = match tx_type {
+            Some(t) => {
+                sqlx::query("SELECT * FROM transactions WHERE owner = $1 AND tx_type = $2 ORDER BY created_at DESC LIMIT $3 OFFSET $4")
+                    .bind(owner).bind(t as i16).bind(limit).bind(offset).fetch_all(&self.pool).await?
+            }
+            None => {
+                sqlx::query("SELECT * FROM transactions WHERE owner = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3")
+                    .bind(owner).bind(limit).bind(offset).fetch_all(&self.pool).await?
+            }
+        };
+
+        let total: i64 = match tx_type {
+            Some(t) => {
+                sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM transactions WHERE owner = $1 AND tx_type = $2",
+                )
+                .bind(owner)
+                .bind(t as i16)
+                .fetch_one(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_scalar("SELECT COUNT(*) FROM transactions WHERE owner = $1")
+                    .bind(owner)
+                    .fetch_one(&self.pool)
+                    .await?
+            }
+        };
+
+        let transactions = rows
+            .iter()
+            .map(|row| ModelTransaction {
+                id: row.get("id"),
+                owner: row.get("owner"),
+                market_id: row.try_get("market_id").ok(),
+                tx_type: TransactionType::from(row.get::<i16, _>("tx_type") as u8),
+                amount: row.get::<i64, _>("amount") as u64,
+                fee: row.try_get::<i64, _>("fee").map(|v| v as u64).unwrap_or(0),
+                tx_signature: row.try_get::<String, _>("tx_signature").ok(),
+                status: row
+                    .try_get("status")
+                    .unwrap_or_else(|_| "pending".to_string()),
+                created_at: row.get("created_at"),
+            })
+            .collect();
+
+        Ok((transactions, total))
+    }
+
+    // Order Book Persistence
+    /// Add order to persistent order book
+    pub async fn add_orderbook_entry(
+        &self,
+        order_id: &str,
+        market_id: &str,
+        outcome: Outcome,
+        side: OrderSide,
+        price_bps: u16,
+        remaining_quantity: u64,
+        owner: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO orderbook_entries (market_id, order_id, outcome, side, price_bps, remaining_quantity, owner)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (order_id) DO UPDATE SET remaining_quantity = $6
+            "#,
+        )
