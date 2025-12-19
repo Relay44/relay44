@@ -802,3 +802,161 @@ impl DatabaseService {
             FROM payout_jobs
             "#,
         )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(PayoutBacklogSummary {
+            pending: row.get::<i64, _>("pending").max(0) as u64,
+            processing: row.get::<i64, _>("processing").max(0) as u64,
+            retry: row.get::<i64, _>("retry").max(0) as u64,
+            failed: row.get::<i64, _>("failed").max(0) as u64,
+            oldest_pending_seconds: row.get::<i64, _>("oldest_pending_seconds").max(0) as u64,
+        })
+    }
+
+    pub async fn get_chain_sync_cursor(&self, key: &str) -> Result<Option<ChainSyncCursor>> {
+        let row = sqlx::query(
+            r#"
+            SELECT key, last_block, meta, updated_at
+            FROM chain_sync_cursors
+            WHERE key = $1
+            "#,
+        )
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| ChainSyncCursor {
+            key: row.get("key"),
+            last_block: row.get::<i64, _>("last_block").max(0) as u64,
+            meta: row
+                .try_get("meta")
+                .unwrap_or_else(|_| Value::Object(Default::default())),
+            updated_at: row
+                .get::<chrono::DateTime<Utc>, _>("updated_at")
+                .to_rfc3339(),
+        }))
+    }
+
+    pub async fn upsert_chain_sync_cursor(
+        &self,
+        key: &str,
+        last_block: u64,
+        meta: Value,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO chain_sync_cursors (key, last_block, meta)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (key) DO UPDATE SET
+                last_block = EXCLUDED.last_block,
+                meta = EXCLUDED.meta,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(key)
+        .bind(last_block as i64)
+        .bind(meta)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn record_compliance_decision(
+        &self,
+        entry: &ComplianceDecisionEntry<'_>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO compliance_decisions (
+                request_id, wallet, country_code, action, route, method,
+                decision, reason_code, metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+        )
+        .bind(entry.request_id)
+        .bind(entry.wallet)
+        .bind(entry.country_code)
+        .bind(entry.action)
+        .bind(entry.route)
+        .bind(entry.method)
+        .bind(entry.decision)
+        .bind(entry.reason_code)
+        .bind(&entry.metadata)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    // Trades
+
+    /// Create trade with position updates in a single transaction
+    /// HIGH-024: Transaction boundaries for atomicity
+    pub async fn create_trade_with_positions(
+        &self,
+        trade: &Trade,
+        buyer_yes_delta: i64,
+        buyer_no_delta: i64,
+        seller_yes_delta: i64,
+        seller_no_delta: i64,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Insert trade
+        sqlx::query(
+            r#"
+            INSERT INTO trades (
+                id, market_id, buy_order_id, sell_order_id, outcome,
+                price, price_bps, quantity, collateral_amount,
+                buyer, seller, tx_signature, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#,
+        )
+        .bind(&trade.id)
+        .bind(&trade.market_id)
+        .bind(&trade.buy_order_id)
+        .bind(&trade.sell_order_id)
+        .bind(trade.outcome as i16)
+        .bind(trade.price)
+        .bind(trade.price_bps as i16)
+        .bind(trade.quantity as i64)
+        .bind(trade.collateral_amount as i64)
+        .bind(&trade.buyer)
+        .bind(&trade.seller)
+        .bind(&trade.tx_signature)
+        .bind(trade.created_at)
+        .execute(&mut *tx)
+        .await?;
+
+        // Update buyer position
+        sqlx::query(
+            r#"
+            INSERT INTO positions (market_id, owner, yes_balance, no_balance, total_trades)
+            VALUES ($1, $2, $3, $4, 1)
+            ON CONFLICT (market_id, owner) DO UPDATE SET
+                yes_balance = positions.yes_balance + $3,
+                no_balance = positions.no_balance + $4,
+                total_trades = positions.total_trades + 1
+            "#,
+        )
+        .bind(&trade.market_id)
+        .bind(&trade.buyer)
+        .bind(buyer_yes_delta)
+        .bind(buyer_no_delta)
+        .execute(&mut *tx)
+        .await?;
+
+        // Update seller position
+        sqlx::query(
+            r#"
+            INSERT INTO positions (market_id, owner, yes_balance, no_balance, total_trades)
+            VALUES ($1, $2, $3, $4, 1)
+            ON CONFLICT (market_id, owner) DO UPDATE SET
+                yes_balance = positions.yes_balance + $3,
+                no_balance = positions.no_balance + $4,
+                total_trades = positions.total_trades + 1
+            "#,
+        )
