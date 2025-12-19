@@ -640,3 +640,165 @@ impl DatabaseService {
             })
             .collect())
     }
+
+    pub async fn seed_payout_jobs_from_positions(&self, limit: i64) -> Result<u64> {
+        let safe_limit = limit.clamp(1, 10_000);
+        let rows_affected = sqlx::query(
+            r#"
+            INSERT INTO payout_jobs (market_id, wallet, status, attempts)
+            SELECT DISTINCT p.market_id::bigint, lower(p.owner), 'pending', 0
+            FROM positions p
+            JOIN markets m ON m.id = p.market_id
+            WHERE m.resolved_outcome IS NOT NULL
+              AND p.market_id ~ '^[0-9]+$'
+              AND p.owner ~* '^0x[0-9a-f]{40}$'
+              AND (p.yes_balance > 0 OR p.no_balance > 0)
+            ORDER BY p.market_id::bigint, lower(p.owner)
+            LIMIT $1
+            ON CONFLICT (market_id, wallet) DO NOTHING
+            "#,
+        )
+        .bind(safe_limit)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        Ok(rows_affected)
+    }
+
+    pub async fn list_payout_jobs(
+        &self,
+        status: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<PayoutJobRecord>, i64)> {
+        let safe_limit = limit.clamp(1, 1_000);
+        let safe_offset = offset.max(0);
+        let status = status.map(|value| value.trim().to_ascii_lowercase());
+
+        let rows = if let Some(status) = status.as_ref() {
+            sqlx::query(
+                r#"
+                SELECT market_id, wallet, status, last_tx, attempts, last_error,
+                       next_retry_at, updated_at
+                FROM payout_jobs
+                WHERE lower(status) = $1
+                ORDER BY updated_at DESC, market_id DESC, wallet ASC
+                LIMIT $2 OFFSET $3
+                "#,
+            )
+            .bind(status)
+            .bind(safe_limit)
+            .bind(safe_offset)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT market_id, wallet, status, last_tx, attempts, last_error,
+                       next_retry_at, updated_at
+                FROM payout_jobs
+                ORDER BY updated_at DESC, market_id DESC, wallet ASC
+                LIMIT $1 OFFSET $2
+                "#,
+            )
+            .bind(safe_limit)
+            .bind(safe_offset)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        let total: i64 = if let Some(status) = status.as_ref() {
+            sqlx::query_scalar("SELECT COUNT(*) FROM payout_jobs WHERE lower(status) = $1")
+                .bind(status)
+                .fetch_one(&self.pool)
+                .await?
+        } else {
+            sqlx::query_scalar("SELECT COUNT(*) FROM payout_jobs")
+                .fetch_one(&self.pool)
+                .await?
+        };
+
+        let jobs = rows
+            .iter()
+            .map(|row| PayoutJobRecord {
+                market_id: row.get::<i64, _>("market_id") as u64,
+                wallet: row.get("wallet"),
+                status: row.get("status"),
+                last_tx: row.try_get("last_tx").ok(),
+                attempts: row.get::<i32, _>("attempts").max(0) as u32,
+                last_error: row.try_get("last_error").ok(),
+                next_retry_at: row
+                    .try_get::<chrono::DateTime<Utc>, _>("next_retry_at")
+                    .ok()
+                    .map(|ts| ts.to_rfc3339()),
+                updated_at: row
+                    .get::<chrono::DateTime<Utc>, _>("updated_at")
+                    .to_rfc3339(),
+            })
+            .collect();
+
+        Ok((jobs, total))
+    }
+
+    pub async fn update_payout_job_result(
+        &self,
+        market_id: u64,
+        wallet: &str,
+        status: &str,
+        last_tx: Option<&str>,
+        last_error: Option<&str>,
+        next_retry_after_seconds: Option<i64>,
+    ) -> Result<()> {
+        let normalized_wallet = wallet.trim().to_ascii_lowercase();
+        let normalized_status = status.trim().to_ascii_lowercase();
+        let retry_at = next_retry_after_seconds
+            .map(|seconds| Utc::now() + chrono::Duration::seconds(seconds.max(0)));
+
+        sqlx::query(
+            r#"
+            INSERT INTO payout_jobs (market_id, wallet, status, last_tx, attempts, last_error, next_retry_at)
+            VALUES ($1, $2, $3, $4, CASE WHEN $3 = 'paid' THEN 0 ELSE 1 END, $5, $6)
+            ON CONFLICT (market_id, wallet) DO UPDATE SET
+                status = EXCLUDED.status,
+                last_tx = EXCLUDED.last_tx,
+                last_error = EXCLUDED.last_error,
+                next_retry_at = EXCLUDED.next_retry_at,
+                attempts = CASE
+                    WHEN EXCLUDED.status = 'paid' THEN payout_jobs.attempts
+                    ELSE payout_jobs.attempts + 1
+                END,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(market_id as i64)
+        .bind(normalized_wallet)
+        .bind(normalized_status)
+        .bind(last_tx)
+        .bind(last_error)
+        .bind(retry_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn payout_backlog_summary(&self) -> Result<PayoutBacklogSummary> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+              COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0) AS processing,
+              COALESCE(SUM(CASE WHEN status = 'retry' THEN 1 ELSE 0 END), 0) AS retry,
+              COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+              COALESCE(
+                EXTRACT(
+                  EPOCH FROM (
+                    NOW() - MIN(CASE WHEN status IN ('pending', 'retry') THEN updated_at END)
+                  )
+                ),
+                0
+              )::bigint AS oldest_pending_seconds
+            FROM payout_jobs
+            "#,
+        )
