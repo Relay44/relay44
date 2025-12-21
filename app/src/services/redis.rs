@@ -183,3 +183,98 @@ impl RedisService {
             .await
     }
 
+    // =========================================================================
+    // Token Revocation List
+    // =========================================================================
+
+    /// Revoke a JWT token by its JTI (token ID)
+    /// TTL is set to match the token's remaining lifetime
+    pub async fn revoke_token(&self, jti: &str, expires_at: i64) -> Result<()> {
+        let key = format!("revoked_token:{}", jti);
+        let now = chrono::Utc::now().timestamp();
+        let ttl = (expires_at - now).max(1) as u64;
+
+        // Store the revocation with TTL matching token expiration
+        // After token expires, we don't need to track it anymore
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let _: () = conn.set_ex(&key, "1", ttl).await?;
+
+        info!("Token {} revoked, TTL: {}s", jti, ttl);
+        Ok(())
+    }
+
+    /// Check if a token has been revoked
+    pub async fn is_token_revoked(&self, jti: &str) -> Result<bool> {
+        let key = format!("revoked_token:{}", jti);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let exists: bool = conn.exists(&key).await?;
+        Ok(exists)
+    }
+
+    /// Revoke all tokens for a specific user (logout from all devices)
+    /// This uses a user-specific generation counter
+    pub async fn revoke_all_user_tokens(&self, wallet_address: &str) -> Result<()> {
+        let key = format!("user_token_gen:{}", wallet_address);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+
+        // Increment the generation counter
+        let _: i64 = conn.incr(&key, 1i64).await?;
+
+        info!("All tokens revoked for user {}", wallet_address);
+        Ok(())
+    }
+
+    /// Get the current token generation for a user
+    pub async fn get_user_token_generation(&self, wallet_address: &str) -> Result<i64> {
+        let key = format!("user_token_gen:{}", wallet_address);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let gen: Option<i64> = conn.get(&key).await?;
+        Ok(gen.unwrap_or(0))
+    }
+
+    /// Store user token generation in the token claims for validation
+    pub async fn set_user_token_generation(
+        &self,
+        wallet_address: &str,
+        generation: i64,
+    ) -> Result<()> {
+        let key = format!("user_token_gen:{}", wallet_address);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        // 30 days TTL for generation counter
+        let _: () = conn.set_ex(&key, generation, 30 * 24 * 3600).await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Rate Limiting Support
+    // =========================================================================
+
+    /// Increment a counter with TTL, returns new count
+    /// Used for simple rate limiting (e.g., WebSocket connections by IP)
+    pub async fn increment_with_ttl(&self, key: &str, ttl_secs: u64) -> Result<i64> {
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+
+        // Increment counter
+        let count: i64 = conn.incr(key, 1i64).await?;
+
+        // Set expiry if this is the first request in the window
+        if count == 1 {
+            let _: () = conn.expire(key, ttl_secs as i64).await?;
+        }
+
+        Ok(count)
+    }
+
+    /// Increment rate limit counter for an IP/user
+    /// Returns the current count and remaining TTL
+    pub async fn increment_rate_limit(&self, key: &str, window_secs: u64) -> Result<(i64, i64)> {
+        let rate_key = format!("rate_limit:{}", key);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+
+        // Increment counter
+        let count: i64 = conn.incr(&rate_key, 1i64).await?;
+
+        // Set expiry if this is the first request in the window
+        if count == 1 {
+            let _: () = conn.expire(&rate_key, window_secs as i64).await?;
+        }
