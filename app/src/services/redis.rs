@@ -278,3 +278,91 @@ impl RedisService {
         if count == 1 {
             let _: () = conn.expire(&rate_key, window_secs as i64).await?;
         }
+
+        // Get TTL
+        let ttl: i64 = conn.ttl(&rate_key).await?;
+
+        Ok((count, ttl))
+    }
+
+    /// Check rate limit without incrementing
+    pub async fn get_rate_limit_count(&self, key: &str) -> Result<i64> {
+        let rate_key = format!("rate_limit:{}", key);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let count: Option<i64> = conn.get(&rate_key).await?;
+        Ok(count.unwrap_or(0))
+    }
+
+    // =========================================================================
+    // Nonce Storage for Replay Protection
+    // =========================================================================
+
+    /// Check if a nonce has been used and record it
+    /// Returns Ok(false) if nonce was already used, Ok(true) if newly recorded
+    pub async fn check_and_record_nonce(&self, nonce: &str, ttl_secs: u64) -> Result<bool> {
+        let key = format!("auth_nonce:{}", nonce);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+
+        // Use SETNX (SET if Not eXists) for atomic check-and-set
+        let was_set: bool = conn.set_nx(&key, "1").await?;
+
+        if was_set {
+            // Set expiration for automatic cleanup
+            let _: () = conn.expire(&key, ttl_secs as i64).await?;
+        }
+
+        Ok(was_set)
+    }
+
+    /// Check if a nonce has been used without recording
+    pub async fn is_nonce_used(&self, nonce: &str) -> Result<bool> {
+        let key = format!("auth_nonce:{}", nonce);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let exists: bool = conn.exists(&key).await?;
+        Ok(exists)
+    }
+
+    // =========================================================================
+    // Idempotency Keys
+    // =========================================================================
+
+    /// Check idempotency key and return cached response if exists.
+    /// Returns None if key is new, Some(response) if duplicate request.
+    pub async fn check_idempotency_key(&self, key: &str) -> Result<Option<String>> {
+        let idem_key = format!("idempotency:{}", key);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let value: Option<String> = conn.get(&idem_key).await?;
+        Ok(value)
+    }
+
+    /// Store idempotency key with response. TTL: 24 hours.
+    pub async fn store_idempotency_key(&self, key: &str, response: &str) -> Result<()> {
+        let idem_key = format!("idempotency:{}", key);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        // 24 hour TTL
+        let _: () = conn.set_ex(&idem_key, response, 86400).await?;
+        Ok(())
+    }
+
+    /// Acquire lock for idempotency key (to handle concurrent requests).
+    /// Returns true if lock acquired, false if already processing.
+    pub async fn acquire_idempotency_lock(&self, key: &str) -> Result<bool> {
+        let lock_key = format!("idempotency_lock:{}", key);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        // Lock with 30 second TTL to handle crashes
+        let acquired: bool = conn.set_nx(&lock_key, "1").await?;
+        if acquired {
+            let _: () = conn.expire(&lock_key, 30).await?;
+        }
+        Ok(acquired)
+    }
+
+    /// Release idempotency lock
+    pub async fn release_idempotency_lock(&self, key: &str) -> Result<()> {
+        let lock_key = format!("idempotency_lock:{}", key);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let _: () = conn.del(&lock_key).await?;
+        Ok(())
+    }
+}
+
