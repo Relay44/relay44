@@ -318,3 +318,74 @@ impl MetricsService {
             "Database query duration in milliseconds",
         ));
 
+        output
+    }
+}
+
+impl Default for MetricsService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Application metrics snapshot
+#[derive(Debug, Clone, Serialize)]
+pub struct AppMetrics {
+    pub uptime_seconds: u64,
+    pub requests: RequestMetrics,
+    pub orders: OrderMetrics,
+    pub trades: TradeMetrics,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RequestMetrics {
+    pub total: u64,
+    pub success: u64,
+    pub error: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OrderMetrics {
+    pub placed: u64,
+    pub cancelled: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TradeMetrics {
+    pub executed: u64,
+    pub total_volume: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LatencyMetrics {
+    pub request: HistogramStats,
+    pub order: HistogramStats,
+    pub trade: HistogramStats,
+    pub database: HistogramStats,
+}
+
+/// System health information
+#[derive(Debug, Clone, Serialize)]
+pub struct SystemHealth {
+    pub status: HealthStatus,
+    pub version: &'static str,
+    pub uptime_seconds: u64,
+    pub checks: HealthChecks,
+}
+
+/// Health check results for all components
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthChecks {
+    pub database: ComponentHealth,
+    pub redis: ComponentHealth,
+    pub base: ComponentHealth,
+    pub solana: ComponentHealth,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ComponentHealth {
+    pub status: HealthStatus,
+    pub latency_ms: Option<u64>,
+    pub message: Option<String>,
+}
+
