@@ -389,3 +389,82 @@ pub struct ComponentHealth {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthStatus {
+    Healthy,
+    Degraded,
+    Unhealthy,
+}
+
+impl ComponentHealth {
+    pub fn healthy(latency_ms: u64) -> Self {
+        Self {
+            status: HealthStatus::Healthy,
+            latency_ms: Some(latency_ms),
+            message: None,
+        }
+    }
+
+    pub fn degraded(latency_ms: u64, message: &str) -> Self {
+        Self {
+            status: HealthStatus::Degraded,
+            latency_ms: Some(latency_ms),
+            message: Some(message.to_string()),
+        }
+    }
+
+    pub fn unhealthy(message: &str) -> Self {
+        Self {
+            status: HealthStatus::Unhealthy,
+            latency_ms: None,
+            message: Some(message.to_string()),
+        }
+    }
+
+    pub fn disabled(message: &str) -> Self {
+        Self {
+            status: HealthStatus::Healthy,
+            latency_ms: None,
+            message: Some(message.to_string()),
+        }
+    }
+}
+
+/// Request timing helper
+#[allow(dead_code)]
+pub struct RequestTimer {
+    start: Instant,
+}
+
+#[allow(dead_code)]
+impl RequestTimer {
+    pub fn start() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+
+    pub fn elapsed_ms(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metrics_increment() {
+        let metrics = MetricsService::new();
+
+        metrics.record_request();
+        metrics.record_request();
+        metrics.record_success();
+        metrics.record_error();
+
+        let snapshot = metrics.get_metrics();
+        assert_eq!(snapshot.requests.total, 2);
+        assert_eq!(snapshot.requests.success, 1);
+        assert_eq!(snapshot.requests.error, 1);
+    }
