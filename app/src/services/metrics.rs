@@ -468,3 +468,81 @@ mod tests {
         assert_eq!(snapshot.requests.success, 1);
         assert_eq!(snapshot.requests.error, 1);
     }
+
+    #[test]
+    fn test_trade_volume() {
+        let metrics = MetricsService::new();
+
+        metrics.record_trade(1000);
+        metrics.record_trade(2000);
+
+        let snapshot = metrics.get_metrics();
+        assert_eq!(snapshot.trades.executed, 2);
+        assert_eq!(snapshot.trades.total_volume, 3000);
+    }
+
+    #[test]
+    fn test_prometheus_export() {
+        let metrics = MetricsService::new();
+        metrics.record_request();
+        metrics.record_success();
+
+        let output = metrics.export_prometheus();
+        assert!(output.contains("relay44_requests_total"));
+        assert!(output.contains("relay44_uptime_seconds"));
+    }
+
+    #[test]
+    fn test_histogram_observe() {
+        let histogram = Histogram::new();
+
+        histogram.observe(5.0);
+        histogram.observe(15.0);
+        histogram.observe(150.0);
+
+        let stats = histogram.get_stats();
+        assert_eq!(stats.count, 3);
+        assert!(stats.sum_ms > 0.0);
+    }
+
+    #[test]
+    fn test_histogram_buckets() {
+        let histogram = Histogram::new();
+
+        // Add values to different buckets
+        histogram.observe(0.5); // <= 1ms bucket
+        histogram.observe(3.0); // <= 5ms bucket
+        histogram.observe(8.0); // <= 10ms bucket
+        histogram.observe(20.0); // <= 25ms bucket
+
+        let stats = histogram.get_stats();
+        assert_eq!(stats.count, 4);
+
+        // Check cumulative buckets
+        assert!(
+            stats
+                .buckets
+                .iter()
+                .find(|(le, _)| *le == 1.0)
+                .map(|(_, c)| *c)
+                .unwrap_or(0)
+                >= 1
+        );
+        assert!(
+            stats
+                .buckets
+                .iter()
+                .find(|(le, _)| *le == 5.0)
+                .map(|(_, c)| *c)
+                .unwrap_or(0)
+                >= 2
+        );
+        assert!(
+            stats
+                .buckets
+                .iter()
+                .find(|(le, _)| *le == 10.0)
+                .map(|(_, c)| *c)
+                .unwrap_or(0)
+                >= 3
+        );
