@@ -546,3 +546,80 @@ mod tests {
                 .unwrap_or(0)
                 >= 3
         );
+        assert!(
+            stats
+                .buckets
+                .iter()
+                .find(|(le, _)| *le == 25.0)
+                .map(|(_, c)| *c)
+                .unwrap_or(0)
+                >= 4
+        );
+    }
+
+    #[test]
+    fn test_histogram_percentile() {
+        let histogram = Histogram::new();
+
+        // Add 100 values spread across buckets
+        for i in 0..100 {
+            histogram.observe(i as f64);
+        }
+
+        let stats = histogram.get_stats();
+        assert_eq!(stats.count, 100);
+
+        // p50 should be around middle values
+        let p50 = stats.percentile(50.0);
+        assert!(p50 > 0.0);
+
+        // p99 should be higher
+        let p99 = stats.percentile(99.0);
+        assert!(p99 >= p50);
+    }
+
+    #[test]
+    fn test_latency_metrics() {
+        let metrics = MetricsService::new();
+
+        metrics.observe_request_latency(10.0);
+        metrics.observe_request_latency(20.0);
+        metrics.observe_order_latency(5.0);
+        metrics.observe_trade_latency(100.0);
+        metrics.observe_database_latency(2.0);
+
+        let latency = metrics.get_latency_stats();
+        assert_eq!(latency.request.count, 2);
+        assert_eq!(latency.order.count, 1);
+        assert_eq!(latency.trade.count, 1);
+        assert_eq!(latency.database.count, 1);
+    }
+
+    #[test]
+    fn test_histogram_prometheus_export() {
+        let histogram = Histogram::new();
+        histogram.observe(10.0);
+        histogram.observe(50.0);
+
+        let output = histogram.export_prometheus("test_metric", "Test metric description");
+        assert!(output.contains("# HELP test_metric Test metric description"));
+        assert!(output.contains("# TYPE test_metric histogram"));
+        assert!(output.contains("test_metric_bucket"));
+        assert!(output.contains("test_metric_sum"));
+        assert!(output.contains("test_metric_count"));
+    }
+
+    #[test]
+    fn test_histogram_avg() {
+        let histogram = Histogram::new();
+
+        histogram.observe(10.0);
+        histogram.observe(20.0);
+        histogram.observe(30.0);
+
+        let stats = histogram.get_stats();
+        let avg = stats.avg_ms();
+        assert!((avg - 20.0).abs() < 0.1);
+    }
+}
+
