@@ -114,3 +114,51 @@ impl EvmIndexerService {
 
         Ok(state.logs.len())
     }
+
+    pub async fn set_last_synced_block(&self, block: u64) {
+        let mut state = self.state.write().await;
+        state.last_synced_block = block;
+    }
+
+    pub async fn last_synced_block(&self) -> u64 {
+        let state = self.state.read().await;
+        state.last_synced_block
+    }
+
+    pub async fn logs_by_topic(&self, topic0: &str) -> Vec<RpcLog> {
+        let state = self.state.read().await;
+        state
+            .logs
+            .iter()
+            .filter(|item| item.topic0.eq_ignore_ascii_case(topic0))
+            .map(|item| item.log.clone())
+            .collect()
+    }
+
+    async fn fetch_indexed_logs(
+        &self,
+        address: &str,
+        topic0: &str,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<IndexedEvmLog>> {
+        if address.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let logs = self
+            .rpc
+            .eth_get_logs(address, topic0, from_block, to_block)
+            .await?;
+        let _observed_at = Utc::now().to_rfc3339();
+
+        Ok(logs
+            .into_iter()
+            .map(|log| IndexedEvmLog {
+                topic0: topic0.to_string(),
+                log,
+            })
+            .collect())
+    }
+}
+
