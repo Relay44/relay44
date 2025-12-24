@@ -1,0 +1,65 @@
+'use client';
+
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+
+type Theme = 'dark' | 'light' | 'system';
+
+interface ThemeContextValue {
+  theme: Theme;
+  resolvedTheme: 'dark' | 'light';
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
+  mounted: boolean;
+}
+
+const defaultContext: ThemeContextValue = {
+  theme: 'light',
+  resolvedTheme: 'light',
+  setTheme: () => {},
+  toggleTheme: () => {},
+  mounted: false,
+};
+
+const ThemeContext = createContext<ThemeContextValue>(defaultContext);
+
+const STORAGE_KEY = 'relay44-theme';
+
+function getSystemTheme(): 'dark' | 'light' {
+  if (typeof window === 'undefined') return 'light';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setThemeState] = useState<Theme>('light');
+  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('light');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
+    if (stored && ['dark', 'light', 'system'].includes(stored)) {
+      setThemeState(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    const resolved = theme === 'system' ? getSystemTheme() : theme;
+    setResolvedTheme(resolved);
+
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+
+    if (resolved === 'dark') {
+      root.classList.add('dark');
+    }
+  }, [theme, mounted]);
+
+  useEffect(() => {
+    if (!mounted || theme !== 'system') return;
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => {
+      setResolvedTheme(e.matches ? 'dark' : 'light');
+    };
