@@ -255,3 +255,88 @@ impl EvmRpcService {
             .await
             .map_err(|e| anyhow!("Failed to decode Base RPC response: {}", e))?;
 
+        if let Some(error) = payload.error {
+            return Err(anyhow!("Base RPC error: {}", error.message));
+        }
+
+        payload
+            .result
+            .ok_or_else(|| anyhow!("Base RPC response missing result"))
+    }
+}
+
+fn is_retryable_rpc_error(message: &str) -> bool {
+    let message = message.trim().to_ascii_lowercase();
+    message.contains("429")
+        || message.contains("403")
+        || message.contains("forbidden")
+        || message.contains("401")
+        || message.contains("unauthorized")
+        || message.contains("too many requests")
+        || message.contains("timeout")
+        || message.contains("connection")
+        || message.contains("bad gateway")
+        || message.contains("service unavailable")
+        || message.contains("gateway timeout")
+        || message.contains("temporarily unavailable")
+}
+
+pub fn quantity_hex(value: u64) -> String {
+    format!("0x{:x}", value)
+}
+
+pub fn parse_u64_hex(value: &str) -> Result<u64> {
+    let trimmed = value.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return Err(anyhow!("Invalid RPC hex value"));
+    }
+
+    let normalized = trimmed.trim_start_matches('0');
+    if normalized.is_empty() {
+        return Ok(0);
+    }
+    if normalized.len() > 16 {
+        return Err(anyhow!("RPC value out of range for u64"));
+    }
+
+    u64::from_str_radix(normalized, 16).map_err(|_| anyhow!("Invalid RPC hex value"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evm_rpc_service_deduplicates_fallback_endpoints() {
+        let service = EvmRpcService::new(
+            "https://primary.example",
+            &[
+                "https://backup-a.example".to_string(),
+                "https://primary.example".to_string(),
+                "https://backup-b.example".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            service.read_urls,
+            vec![
+                "https://primary.example".to_string(),
+                "https://backup-a.example".to_string(),
+                "https://backup-b.example".to_string()
+            ]
+        );
+        assert_eq!(service.primary_url, "https://primary.example");
+    }
+
+    #[test]
+    fn retryable_rpc_errors_cover_rate_limits_and_transport_failures() {
+        assert!(is_retryable_rpc_error("429 Too Many Requests"));
+        assert!(is_retryable_rpc_error(
+            "Base RPC request failed: connection reset"
+        ));
+        assert!(!is_retryable_rpc_error(
+            "Base RPC error: execution reverted"
+        ));
+    }
+}
+
