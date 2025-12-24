@@ -174,3 +174,84 @@ impl EvmRpcService {
         if value.is_null() {
             return Ok(None);
         }
+
+        let receipt = serde_json::from_value(value)
+            .map_err(|e| anyhow!("Invalid eth_getTransactionReceipt payload: {}", e))?;
+        Ok(Some(receipt))
+    }
+
+    async fn rpc_value_call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let allow_failover = method != "eth_sendRawTransaction";
+        let mut last_err = None;
+
+        let endpoints: Vec<&str> = if allow_failover {
+            self.read_urls.iter().map(String::as_str).collect()
+        } else {
+            vec![self.primary_url.as_str()]
+        };
+
+        for (index, url) in endpoints.iter().enumerate() {
+            match self
+                .rpc_value_call_to_url(url, method, params.clone())
+                .await
+            {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    let should_retry = allow_failover
+                        && index + 1 < endpoints.len()
+                        && is_retryable_rpc_error(err.to_string().as_str());
+                    if should_retry {
+                        warn!(
+                            "Base RPC {} failed on endpoint {}: {}",
+                            method,
+                            index + 1,
+                            err
+                        );
+                        last_err = Some(err);
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow!("Base RPC response missing result")))
+    }
+
+    async fn rpc_value_call_to_url(
+        &self,
+        rpc_url: &str,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        });
+
+        let response = self
+            .client
+            .post(rpc_url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Base RPC request failed: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Base RPC returned non-success status: {}",
+                response.status()
+            ));
+        }
+
+        let payload: JsonRpcResponse = response
+            .json()
+            .await
+            .map_err(|e| anyhow!("Failed to decode Base RPC response: {}", e))?;
+
