@@ -384,3 +384,76 @@ pub async fn fetch_markets(
                 limit.max(1),
                 offset,
             )
+        })
+        .await?;
+        let fetched = fetched
+            .into_iter()
+            .filter(|entry| include_market(tradable_filter, entry))
+            .collect::<Vec<_>>();
+        let filtered =
+            filter_limitless_liquidity(&client, config, fetched, request.include_low_liquidity)
+                .await;
+        markets.extend(filtered);
+    }
+
+    if matches!(
+        source,
+        ExternalMarketSource::All | ExternalMarketSource::Polymarket
+    ) && config.polymarket_enabled
+        && request.allow_polymarket
+    {
+        let fetched = with_retries(|| {
+            polymarket::fetch_active_markets(
+                &client,
+                config.polymarket_gamma_api_base.as_str(),
+                limit.max(1),
+                offset,
+            )
+        })
+        .await?;
+        markets.extend(
+            fetched
+                .into_iter()
+                .filter(|entry| include_market(tradable_filter, entry)),
+        );
+    }
+
+    markets.sort_by(|a, b| {
+        b.close_time
+            .cmp(&a.close_time)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let _ = redis
+        .set(&cache_key, &markets, Some(MARKET_CACHE_TTL_SECONDS))
+        .await;
+
+    Ok(markets)
+}
+
+pub async fn fetch_market_by_id(
+    config: &AppConfig,
+    market_id: &ExternalMarketId,
+) -> Result<ExternalMarketSnapshot, ApiError> {
+    if !config.external_markets_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_MARKETS_DISABLED",
+            "external market integration is disabled",
+        ));
+    }
+
+    let client = http_client()?;
+    match market_id.provider {
+        ExternalProvider::Limitless => {
+            if !config.limitless_enabled {
+                return Err(ApiError::bad_request(
+                    "LIMITLESS_DISABLED",
+                    "Limitless integration is disabled",
+                ));
+            }
+            with_retries(|| {
+                limitless::fetch_market_by_slug(
+                    &client,
+                    config.limitless_api_base.as_str(),
+                    market_id.value.as_str(),
+                )
