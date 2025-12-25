@@ -301,3 +301,86 @@ mod tests {
 
         assert!((orderbook_depth_usdc(&snapshot) - 800.0).abs() < f64::EPSILON);
     }
+}
+
+fn with_retries<T, F, Fut>(mut action: F) -> impl std::future::Future<Output = Result<T, ApiError>>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, ApiError>>,
+{
+    async move {
+        let mut last_error: Option<ApiError> = None;
+        for attempt in 0..3 {
+            match action().await {
+                Ok(value) => return Ok(value),
+                Err(err) => {
+                    last_error = Some(err);
+                    if attempt < 2 {
+                        tokio::time::sleep(std::time::Duration::from_millis(
+                            200 * (attempt + 1) as u64,
+                        ))
+                        .await;
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| ApiError::internal("external provider request failed")))
+    }
+}
+
+pub async fn fetch_markets(
+    config: &AppConfig,
+    redis: &RedisService,
+    source: ExternalMarketSource,
+    tradable_filter: TradableFilter,
+    limit: u64,
+    offset: u64,
+    request: ExternalMarketsRequest,
+) -> Result<Vec<ExternalMarketSnapshot>, ApiError> {
+    if !config.external_markets_enabled {
+        return Ok(Vec::new());
+    }
+
+    let cache_key = format!(
+        "external:markets:{}:{}:{}:{}:{}",
+        match source {
+            ExternalMarketSource::All => "all",
+            ExternalMarketSource::Internal => "internal",
+            ExternalMarketSource::Limitless => "limitless",
+            ExternalMarketSource::Polymarket => "polymarket",
+        },
+        match tradable_filter {
+            TradableFilter::All => "all",
+            TradableFilter::User => "user",
+            TradableFilter::Agent => "agent",
+        },
+        limit,
+        offset,
+        if request.include_low_liquidity {
+            "include_low_liquidity"
+        } else {
+            "liquidity_filtered"
+        }
+    );
+
+    if let Ok(Some(cached)) = redis.get::<Vec<ExternalMarketSnapshot>>(&cache_key).await {
+        return Ok(cached);
+    }
+
+    let client = http_client()?;
+    let mut markets = Vec::new();
+
+    if matches!(
+        source,
+        ExternalMarketSource::All | ExternalMarketSource::Limitless
+    ) && config.limitless_enabled
+        && request.allow_limitless
+    {
+        let fetched = with_retries(|| {
+            limitless::fetch_active_markets(
+                &client,
+                config.limitless_api_base.as_str(),
+                limit.max(1),
+                offset,
+            )
