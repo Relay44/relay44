@@ -457,3 +457,76 @@ pub async fn fetch_market_by_id(
                     config.limitless_api_base.as_str(),
                     market_id.value.as_str(),
                 )
+            })
+            .await
+        }
+        ExternalProvider::Polymarket => {
+            if !config.polymarket_enabled {
+                return Err(ApiError::bad_request(
+                    "POLYMARKET_DISABLED",
+                    "Polymarket integration is disabled",
+                ));
+            }
+            with_retries(|| {
+                polymarket::fetch_market_by_id(
+                    &client,
+                    config.polymarket_gamma_api_base.as_str(),
+                    market_id.value.as_str(),
+                )
+            })
+            .await
+        }
+    }
+}
+
+pub async fn fetch_orderbook(
+    config: &AppConfig,
+    redis: &RedisService,
+    market_id: &ExternalMarketId,
+    outcome: &str,
+    depth: u64,
+) -> Result<ExternalOrderBookSnapshot, ApiError> {
+    if !config.external_markets_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_MARKETS_DISABLED",
+            "external market integration is disabled",
+        ));
+    }
+
+    let cache_key = format!(
+        "external:orderbook:{}:{}:{}",
+        market_id.full_id(),
+        outcome,
+        depth
+    );
+    if let Ok(Some(cached)) = redis.get::<ExternalOrderBookSnapshot>(&cache_key).await {
+        return Ok(cached);
+    }
+
+    let client = http_client()?;
+    let value = match market_id.provider {
+        ExternalProvider::Limitless => {
+            with_retries(|| {
+                limitless::fetch_orderbook(
+                    &client,
+                    config.limitless_api_base.as_str(),
+                    market_id.value.as_str(),
+                    outcome,
+                    depth,
+                )
+            })
+            .await?
+        }
+        ExternalProvider::Polymarket => {
+            with_retries(|| {
+                polymarket::fetch_orderbook(
+                    &client,
+                    config.polymarket_gamma_api_base.as_str(),
+                    config.polymarket_clob_api_base.as_str(),
+                    market_id.value.as_str(),
+                    outcome,
+                    depth,
+                )
+            })
+            .await?
+        }
