@@ -78,3 +78,32 @@ pub fn decrypt_json(
             "credential payload length is invalid",
         ));
     }
+
+    let (nonce_raw, ciphertext) = raw.split_at(NONCE_BYTES);
+    let key = derive_key(master_key, key_id);
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|err| ApiError::internal(&format!("credential cipher init failed: {}", err)))?;
+
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(nonce_raw), ciphertext)
+        .map_err(|_| ApiError::unauthorized("unable to decrypt credential payload"))?;
+
+    serde_json::from_slice(&plaintext).map_err(|err| {
+        ApiError::bad_request(
+            "INVALID_CREDENTIAL_PAYLOAD",
+            &format!("credential payload JSON is invalid: {}", err),
+        )
+    })
+}
+
+pub fn mask_secret(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= 8 {
+        return "****".to_string();
+    }
+
+    let prefix = &trimmed[..4];
+    let suffix = &trimmed[trimmed.len() - 4..];
+    format!("{}****{}", prefix, suffix)
+}
+
