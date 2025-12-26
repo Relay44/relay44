@@ -243,3 +243,65 @@ mod tests {
             provider_market_ref: "ref".to_string(),
             is_synthetic: false,
         }
+    }
+
+    #[test]
+    fn simulate_fill_uses_asks_for_buy_orders() {
+        let fill = simulate_fill(&sample_market(), &sample_orderbook(), "yes", "buy", 4.0, 30);
+
+        assert_eq!(fill.filled_quantity, 4.0);
+        assert!((fill.average_price - 0.6375).abs() < 0.0001);
+        assert!(fill.used_orderbook_depth);
+    }
+
+    #[test]
+    fn simulate_fill_uses_bids_for_sell_orders() {
+        let fill = simulate_fill(
+            &sample_market(),
+            &sample_orderbook(),
+            "yes",
+            "sell",
+            5.0,
+            30,
+        );
+
+        assert_eq!(fill.filled_quantity, 5.0);
+        assert!((fill.average_price - 0.596).abs() < 0.0001);
+        assert!(fill.used_orderbook_depth);
+    }
+
+    #[test]
+    fn simulate_fill_falls_back_to_quote_without_depth() {
+        let mut orderbook = sample_orderbook();
+        orderbook.asks.clear();
+        orderbook.bids.clear();
+
+        let fill = simulate_fill(&sample_market(), &orderbook, "yes", "buy", 2.0, 30);
+
+        assert_eq!(fill.filled_quantity, 2.0);
+        assert!((fill.average_price - 0.62).abs() < 0.0001);
+        assert!(!fill.used_orderbook_depth);
+    }
+
+    #[test]
+    fn simulate_fill_returns_partial_when_depth_runs_out() {
+        let fill = simulate_fill(
+            &sample_market(),
+            &sample_orderbook(),
+            "yes",
+            "buy",
+            20.0,
+            30,
+        );
+
+        assert_eq!(fill.filled_quantity, 8.0);
+        assert!(fill.partial_fill);
+    }
+
+    #[test]
+    fn realized_pnl_respects_side_direction() {
+        assert!((realized_pnl("buy", 0.50, 0.60, 10.0, 0.2) - 0.8).abs() < 0.0001);
+        assert!((realized_pnl("sell", 0.60, 0.50, 10.0, 0.2) - 0.8).abs() < 0.0001);
+    }
+}
+
