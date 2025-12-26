@@ -530,3 +530,76 @@ pub async fn fetch_orderbook(
             })
             .await?
         }
+    };
+
+    let _ = redis
+        .set(&cache_key, &value, Some(ORDERBOOK_CACHE_TTL_SECONDS))
+        .await;
+
+    Ok(value)
+}
+
+pub async fn fetch_trades(
+    config: &AppConfig,
+    redis: &RedisService,
+    market_id: &ExternalMarketId,
+    outcome: Option<&str>,
+    limit: u64,
+    offset: u64,
+) -> Result<ExternalTradesSnapshot, ApiError> {
+    if !config.external_markets_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_MARKETS_DISABLED",
+            "external market integration is disabled",
+        ));
+    }
+
+    let cache_key = format!(
+        "external:trades:{}:{}:{}:{}",
+        market_id.full_id(),
+        outcome.unwrap_or("all"),
+        limit,
+        offset
+    );
+    if let Ok(Some(cached)) = redis.get::<ExternalTradesSnapshot>(&cache_key).await {
+        return Ok(cached);
+    }
+
+    let client = http_client()?;
+    let value = match market_id.provider {
+        ExternalProvider::Limitless => {
+            with_retries(|| {
+                limitless::fetch_trades(
+                    &client,
+                    config.limitless_api_base.as_str(),
+                    market_id.value.as_str(),
+                    outcome,
+                    limit,
+                    offset,
+                )
+            })
+            .await?
+        }
+        ExternalProvider::Polymarket => {
+            with_retries(|| {
+                polymarket::fetch_trades(
+                    &client,
+                    config.polymarket_gamma_api_base.as_str(),
+                    config.polymarket_clob_api_base.as_str(),
+                    market_id.value.as_str(),
+                    outcome,
+                    limit,
+                    offset,
+                )
+            })
+            .await?
+        }
+    };
+
+    let _ = redis
+        .set(&cache_key, &value, Some(TRADES_CACHE_TTL_SECONDS))
+        .await;
+
+    Ok(value)
+}
+
