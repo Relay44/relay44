@@ -156,3 +156,90 @@ pub fn unrealized_pnl(side: &str, entry_price: f64, mark_price: f64, quantity: f
     } else {
         0.0
     }
+}
+
+pub fn realized_pnl(
+    side: &str,
+    entry_price: f64,
+    exit_price: f64,
+    quantity: f64,
+    total_fees_usdc: f64,
+) -> f64 {
+    unrealized_pnl(side, entry_price, exit_price, quantity) - total_fees_usdc.max(0.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::external::types::{now_rfc3339, ExternalOutcome};
+
+    fn sample_market() -> ExternalMarketSnapshot {
+        ExternalMarketSnapshot {
+            id: "limitless:test".to_string(),
+            question: "q".to_string(),
+            description: "d".to_string(),
+            category: "c".to_string(),
+            status: "active".to_string(),
+            close_time: 0,
+            resolved: false,
+            outcome: None,
+            yes_price: 0.62,
+            no_price: 0.38,
+            volume: 1000.0,
+            source: "external_limitless".to_string(),
+            provider: "limitless".to_string(),
+            is_external: true,
+            external_url: "https://example.com".to_string(),
+            chain_id: 8453,
+            requires_credentials: false,
+            execution_users: true,
+            execution_agents: true,
+            outcomes: vec![
+                ExternalOutcome {
+                    label: "Yes".to_string(),
+                    probability: 0.62,
+                },
+                ExternalOutcome {
+                    label: "No".to_string(),
+                    probability: 0.38,
+                },
+            ],
+            provider_market_ref: "ref".to_string(),
+        }
+    }
+
+    fn sample_orderbook() -> ExternalOrderBookSnapshot {
+        ExternalOrderBookSnapshot {
+            market_id: "limitless:test".to_string(),
+            outcome: "yes".to_string(),
+            bids: vec![
+                ExternalOrderBookLevel {
+                    price: 0.60,
+                    quantity: 4.0,
+                    orders: 1,
+                },
+                ExternalOrderBookLevel {
+                    price: 0.58,
+                    quantity: 10.0,
+                    orders: 1,
+                },
+            ],
+            asks: vec![
+                ExternalOrderBookLevel {
+                    price: 0.63,
+                    quantity: 3.0,
+                    orders: 1,
+                },
+                ExternalOrderBookLevel {
+                    price: 0.66,
+                    quantity: 5.0,
+                    orders: 1,
+                },
+            ],
+            last_updated: now_rfc3339(),
+            source: "external_limitless".to_string(),
+            provider: "limitless".to_string(),
+            chain_id: 8453,
+            provider_market_ref: "ref".to_string(),
+            is_synthetic: false,
+        }
