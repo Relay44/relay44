@@ -64,3 +64,30 @@ export async function proxyApiRequest(request: NextRequest, path: string) {
     return NextResponse.json({ error: 'API proxy target is not configured' }, { status: 500 });
   }
 
+  const target = new URL(`${API_PROXY_TARGET}/${path}`);
+  request.nextUrl.searchParams.forEach((value, key) => {
+    target.searchParams.append(key, value);
+  });
+
+  const method = request.method.toUpperCase();
+  const body =
+    method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer();
+
+  const response = await fetch(target, {
+    method,
+    headers: buildProxyHeaders(request),
+    body: body && body.byteLength > 0 ? body : undefined,
+    cache: 'no-store',
+    redirect: 'manual',
+  });
+
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.delete('content-encoding');
+  responseHeaders.delete('content-length');
+
+  return new NextResponse(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
+  });
+}
