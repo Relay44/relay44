@@ -412,3 +412,85 @@ pub async fn fetch_orderbook(
         api_base.trim_end_matches('/'),
         slug.trim()
     );
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|err| api_error("limitless orderbook request failed", err))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| api_error("limitless orderbook response failed", err))?;
+
+    if !status.is_success() {
+        let payload = serde_json::from_str::<Value>(&body).ok();
+        if is_amm_orderbook_response(status, payload.as_ref()) {
+            return Ok(empty_orderbook_snapshot(slug, outcome));
+        }
+
+        let detail = payload
+            .as_ref()
+            .and_then(|value| value.get("message"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| body.trim());
+
+        return Err(api_error(
+            "limitless orderbook response failed",
+            format!("{} for url ({url}): {detail}", status),
+        ));
+    }
+
+    let payload = serde_json::from_str::<Value>(&body)
+        .map_err(|err| api_error("limitless orderbook payload invalid", err))?;
+
+    let mut bids = parse_orderbook_levels(payload.get("bids"));
+    let mut asks = parse_orderbook_levels(payload.get("asks"));
+    bids.truncate(depth as usize);
+    asks.truncate(depth as usize);
+
+    Ok(ExternalOrderBookSnapshot {
+        market_id: format!("limitless:{}", slug),
+        outcome: outcome.to_string(),
+        bids,
+        asks,
+        last_updated: now_rfc3339(),
+        source: "external_limitless".to_string(),
+        provider: "limitless".to_string(),
+        chain_id: 8453,
+        provider_market_ref: parse_string(payload.get("tokenId")),
+        is_synthetic: false,
+    })
+}
+
+pub async fn fetch_trades(
+    client: &Client,
+    api_base: &str,
+    slug: &str,
+    outcome_filter: Option<&str>,
+    limit: u64,
+    offset: u64,
+) -> Result<ExternalTradesSnapshot, ApiError> {
+    let safe_limit = limit.clamp(1, 200);
+    let page = (offset / safe_limit) + 1;
+    let url = format!(
+        "{}/markets/{}/events?limit={}&page={}",
+        api_base.trim_end_matches('/'),
+        slug.trim(),
+        safe_limit,
+        page
+    );
+
+    let payload = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| api_error("limitless events request failed", err))?
+        .error_for_status()
+        .map_err(|err| api_error("limitless events response failed", err))?
+        .json::<Value>()
+        .await
+        .map_err(|err| api_error("limitless events payload invalid", err))?;
+
