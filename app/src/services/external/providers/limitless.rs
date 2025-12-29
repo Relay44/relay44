@@ -494,3 +494,80 @@ pub async fn fetch_trades(
         .await
         .map_err(|err| api_error("limitless events payload invalid", err))?;
 
+    let mut trades = Vec::new();
+    if let Some(events) = payload.get("events").and_then(|value| value.as_array()) {
+        for (index, event) in events.iter().enumerate() {
+            let side = event
+                .get("side")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0);
+            let inferred_outcome = if side == 1 { "no" } else { "yes" };
+            if let Some(filter) = outcome_filter {
+                if filter != inferred_outcome {
+                    continue;
+                }
+            }
+
+            let price = clamp_probability(parse_f64(event.get("price")));
+            let quantity_raw = parse_f64(event.get("matchedSize")).max(0.0);
+            let quantity = quantity_raw.round().clamp(0.0, u64::MAX as f64) as u64;
+            let id = parse_string(event.get("id"));
+
+            trades.push(ExternalTradeSnapshot {
+                id: if id.is_empty() {
+                    format!("limitless:{}:{}", slug, index)
+                } else {
+                    format!("limitless:{}", id)
+                },
+                market_id: format!("limitless:{}", slug),
+                outcome: inferred_outcome.to_string(),
+                price,
+                price_bps: price_to_bps(price),
+                quantity,
+                tx_hash: parse_string(event.get("transactionHash")),
+                block_number: parse_u64(event.get("blockNumber")),
+                created_at: parse_string(event.get("createdAt")),
+            });
+        }
+    }
+
+    let total = trades.len() as u64;
+    let has_more = total >= safe_limit;
+
+    Ok(ExternalTradesSnapshot {
+        trades,
+        total,
+        limit: safe_limit,
+        offset,
+        has_more,
+        source: "external_limitless".to_string(),
+        provider: "limitless".to_string(),
+        chain_id: 8453,
+        provider_market_ref: slug.to_string(),
+        is_synthetic: false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_limitless_market_uses_slug_when_title_missing() {
+        let payload = json!({
+            "slug": "btc-above-100k",
+            "description": "",
+            "categories": ["crypto"],
+            "expirationTimestamp": 1893456000000u64,
+            "status": "active",
+            "prices": [0.61, 0.39],
+            "volume": 51234.0
+        });
+
+        let market = parse_limitless_market(&payload).expect("market");
+        assert_eq!(market.question, "btc above 100k");
+        assert!(market
+            .description
+            .contains("Binary prediction market on Limitless"));
+    }
