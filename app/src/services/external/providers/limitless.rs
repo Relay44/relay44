@@ -571,3 +571,78 @@ mod tests {
             .description
             .contains("Binary prediction market on Limitless"));
     }
+
+    #[test]
+    fn parse_limitless_market_discards_generic_description() {
+        let payload = json!({
+            "slug": "eth-new-ath",
+            "title": "ETH new ATH",
+            "description": "ETH new ATH",
+            "proxyTitle": "ETH new ATH",
+            "categories": ["crypto"],
+            "expirationTimestamp": 1893456000000u64,
+            "status": "active",
+            "prices": [0.4, 0.6],
+            "volume": 12000.0
+        });
+
+        let market = parse_limitless_market(&payload).expect("market");
+        assert_ne!(market.description, "ETH new ATH");
+        assert!(market
+            .description
+            .contains("Binary prediction market on Limitless"));
+    }
+
+    #[test]
+    fn parse_limitless_market_keeps_first_sentence_only() {
+        let payload = json!({
+            "slug": "sol-through-300",
+            "title": "SOL through 300",
+            "description": "First sentence. Second sentence should not be present.",
+            "categories": ["crypto"],
+            "expirationTimestamp": 1893456000000u64,
+            "status": "active",
+            "prices": [0.5, 0.5],
+            "volume": 9999.0
+        });
+
+        let market = parse_limitless_market(&payload).expect("market");
+        assert_eq!(market.description, "First sentence.");
+    }
+
+    #[test]
+    fn parse_limitless_market_uses_winning_outcome_prices() {
+        let payload = json!({
+            "slug": "sol-through-300",
+            "title": "SOL through 300",
+            "categories": ["crypto"],
+            "expirationTimestamp": 1893456000000u64,
+            "status": "resolved",
+            "winningOutcomeIndex": 1u64,
+            "volume": 9999.0
+        });
+
+        let market = parse_limitless_market(&payload).expect("market");
+        assert!(market.resolved);
+        assert_eq!(market.outcome.as_deref(), Some("no"));
+        assert_eq!(market.yes_price, 0.0);
+        assert_eq!(market.no_price, 1.0);
+    }
+
+    #[test]
+    fn identifies_amm_orderbook_response() {
+        let payload = json!({
+            "message": "Market does not support orderbook (AMM market)"
+        });
+
+        assert!(is_amm_orderbook_response(
+            StatusCode::BAD_REQUEST,
+            Some(&payload)
+        ));
+        assert!(!is_amm_orderbook_response(
+            StatusCode::NOT_FOUND,
+            Some(&payload)
+        ));
+    }
+}
+
