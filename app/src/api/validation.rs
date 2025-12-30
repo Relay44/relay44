@@ -431,4 +431,3 @@ mod tests {
         assert!(contains_dangerous_chars("end of comment */"));
     }
 }
-
