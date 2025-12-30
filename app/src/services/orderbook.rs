@@ -842,3 +842,147 @@ mod tests {
         let orders = book.get_all_orders("market1");
         assert_eq!(orders.len(), 3);
     }
+
+    #[test]
+    fn test_default_trait() {
+        let book = OrderBookService::default();
+        // Should create empty book
+        let (bids, asks) = book.get_depth("any_market", Outcome::Yes, 10);
+        assert!(bids.is_empty());
+        assert!(asks.is_empty());
+    }
+
+    #[test]
+    fn test_restore_from_entries() {
+        let book = OrderBookService::new();
+
+        let entries = vec![
+            OrderBookEntry {
+                order_id: "order1".to_string(),
+                on_chain_id: 1,
+                market_id: "market1".to_string(),
+                owner: "owner1".to_string(),
+                outcome: Outcome::Yes,
+                side: OrderSide::Buy,
+                price_bps: 5000,
+                remaining_quantity: 100,
+            },
+            OrderBookEntry {
+                order_id: "order2".to_string(),
+                on_chain_id: 2,
+                market_id: "market1".to_string(),
+                owner: "owner2".to_string(),
+                outcome: Outcome::Yes,
+                side: OrderSide::Sell,
+                price_bps: 6000,
+                remaining_quantity: 50,
+            },
+        ];
+
+        book.restore_from_entries(entries);
+
+        let (bids, asks) = book.get_depth("market1", Outcome::Yes, 10);
+        assert_eq!(bids.len(), 1);
+        assert_eq!(bids[0].quantity, 100);
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].quantity, 50);
+    }
+
+    #[test]
+    fn test_multiple_markets_isolated() {
+        let book = OrderBookService::new();
+
+        let order1 = make_order(
+            "o1",
+            1,
+            "market1",
+            "owner",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        let order2 = make_order(
+            "o2",
+            2,
+            "market2",
+            "owner",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            200,
+        );
+
+        book.add_order(&order1);
+        book.add_order(&order2);
+
+        let (bids1, _) = book.get_depth("market1", Outcome::Yes, 10);
+        let (bids2, _) = book.get_depth("market2", Outcome::Yes, 10);
+
+        assert_eq!(bids1.len(), 1);
+        assert_eq!(bids1[0].quantity, 100);
+        assert_eq!(bids2.len(), 1);
+        assert_eq!(bids2[0].quantity, 200);
+    }
+
+    #[test]
+    fn test_self_trade_not_prevented() {
+        // Note: Self-trade prevention should be done at a higher level
+        let book = OrderBookService::new();
+
+        let sell = make_order(
+            "sell1",
+            1,
+            "market1",
+            "same_owner",
+            OrderSide::Sell,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        book.add_order(&sell);
+
+        let buy = make_order(
+            "buy1",
+            2,
+            "market1",
+            "same_owner",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        let matches = book.add_order(&buy);
+
+        // At the orderbook level, self-trades are allowed
+        assert_eq!(matches.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_order() {
+        let book = OrderBookService::new();
+        // Should not panic
+        book.remove_order(
+            "nonexistent_market",
+            Outcome::Yes,
+            OrderSide::Buy,
+            "nonexistent_order",
+        );
+    }
+
+    #[test]
+    fn test_depth_limit() {
+        let book = OrderBookService::new();
+
+        // Add 15 buy orders at different prices
+        for i in 0..15 {
+            let order = make_order(
+                &format!("buy{}", i),
+                i as u64,
+                "market1",
+                "buyer",
+                OrderSide::Buy,
+                Outcome::Yes,
+                4000 + (i * 100) as u16,
+                10,
+            );
