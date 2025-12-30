@@ -702,3 +702,143 @@ mod tests {
     fn test_different_outcomes_isolated() {
         let book = OrderBookService::new();
 
+        // Add YES buy
+        let yes_buy = make_order(
+            "yes1",
+            1,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        book.add_order(&yes_buy);
+
+        // Add NO buy
+        let no_buy = make_order(
+            "no1",
+            2,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::No,
+            5000,
+            100,
+        );
+        book.add_order(&no_buy);
+
+        // Verify isolation
+        let (yes_bids, _) = book.get_depth("market1", Outcome::Yes, 10);
+        let (no_bids, _) = book.get_depth("market1", Outcome::No, 10);
+
+        assert_eq!(yes_bids.len(), 1);
+        assert_eq!(no_bids.len(), 1);
+    }
+
+    #[test]
+    fn test_multiple_fills_time_priority() {
+        let book = OrderBookService::new();
+
+        // Add two sells at same price
+        let sell1 = make_order(
+            "sell1",
+            1,
+            "market1",
+            "seller1",
+            OrderSide::Sell,
+            Outcome::Yes,
+            5000,
+            50,
+        );
+        book.add_order(&sell1);
+
+        let sell2 = make_order(
+            "sell2",
+            2,
+            "market1",
+            "seller2",
+            OrderSide::Sell,
+            Outcome::Yes,
+            5000,
+            50,
+        );
+        book.add_order(&sell2);
+
+        // Buy 75 units - should fill first seller entirely, second partially
+        let buy = make_order(
+            "buy1",
+            3,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            75,
+        );
+        let matches = book.add_order(&buy);
+
+        assert_eq!(matches.len(), 2);
+        // First order filled entirely (time priority)
+        assert_eq!(matches[0].fill_quantity, 50);
+        assert_eq!(matches[0].sell_order_id, 1);
+        // Second order partial fill
+        assert_eq!(matches[1].fill_quantity, 25);
+        assert_eq!(matches[1].sell_order_id, 2);
+    }
+
+    #[test]
+    fn test_empty_book() {
+        let book = OrderBookService::new();
+
+        let (bids, asks) = book.get_depth("nonexistent", Outcome::Yes, 10);
+        assert!(bids.is_empty());
+        assert!(asks.is_empty());
+
+        assert_eq!(book.best_bid("nonexistent", Outcome::Yes), None);
+        assert_eq!(book.best_ask("nonexistent", Outcome::Yes), None);
+        assert_eq!(book.mid_price("nonexistent", Outcome::Yes), None);
+    }
+
+    #[test]
+    fn test_get_all_orders() {
+        let book = OrderBookService::new();
+
+        let buy1 = make_order(
+            "buy1",
+            1,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        let buy2 = make_order(
+            "buy2",
+            2,
+            "market1",
+            "buyer2",
+            OrderSide::Buy,
+            Outcome::No,
+            4000,
+            50,
+        );
+        let sell1 = make_order(
+            "sell1",
+            3,
+            "market1",
+            "seller1",
+            OrderSide::Sell,
+            Outcome::Yes,
+            6000,
+            75,
+        );
+
+        book.add_order(&buy1);
+        book.add_order(&buy2);
+        book.add_order(&sell1);
+
+        let orders = book.get_all_orders("market1");
+        assert_eq!(orders.len(), 3);
+    }
