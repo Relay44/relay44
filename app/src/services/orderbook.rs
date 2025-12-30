@@ -569,3 +569,136 @@ mod tests {
             6000,
             100,
         );
+        book.add_order(&sell);
+
+        // Buy at 50 cents - should not match
+        let buy = make_order(
+            "buy1",
+            2,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        let matches = book.add_order(&buy);
+
+        assert!(matches.is_empty());
+
+        // Both orders should be in book
+        let (bids, asks) = book.get_depth("market1", Outcome::Yes, 10);
+        assert_eq!(bids.len(), 1);
+        assert_eq!(asks.len(), 1);
+    }
+
+    #[test]
+    fn test_sell_against_buy() {
+        let book = OrderBookService::new();
+
+        // Add buy order at 50 cents
+        let buy = make_order(
+            "buy1",
+            1,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        book.add_order(&buy);
+
+        // Add sell order at 50 cents
+        let sell = make_order(
+            "sell1",
+            2,
+            "market1",
+            "seller1",
+            OrderSide::Sell,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        let matches = book.add_order(&sell);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].fill_quantity, 100);
+        assert_eq!(matches[0].buy_order_id, 1);
+        assert_eq!(matches[0].sell_order_id, 2);
+    }
+
+    #[test]
+    fn test_remove_order() {
+        let book = OrderBookService::new();
+
+        let order = make_order(
+            "order1",
+            1,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        book.add_order(&order);
+
+        // Verify order is in book
+        let (bids, _) = book.get_depth("market1", Outcome::Yes, 10);
+        assert_eq!(bids.len(), 1);
+
+        // Remove order
+        book.remove_order("market1", Outcome::Yes, OrderSide::Buy, "order1");
+
+        // Verify order is removed
+        let (bids, _) = book.get_depth("market1", Outcome::Yes, 10);
+        assert!(bids.is_empty());
+    }
+
+    #[test]
+    fn test_best_bid_ask() {
+        let book = OrderBookService::new();
+
+        // Add bids at different prices
+        for (id, price) in [(1, 4000), (2, 5000), (3, 4500)] {
+            let buy = make_order(
+                &format!("buy{}", id),
+                id,
+                "market1",
+                "buyer",
+                OrderSide::Buy,
+                Outcome::Yes,
+                price,
+                100,
+            );
+            book.add_order(&buy);
+        }
+
+        // Add asks at different prices
+        for (id, price) in [(4, 6000), (5, 5500), (6, 7000)] {
+            let sell = make_order(
+                &format!("sell{}", id),
+                id,
+                "market1",
+                "seller",
+                OrderSide::Sell,
+                Outcome::Yes,
+                price,
+                100,
+            );
+            book.add_order(&sell);
+        }
+
+        // Best bid should be highest (5000)
+        assert_eq!(book.best_bid("market1", Outcome::Yes), Some(0.5));
+        // Best ask should be lowest (5500)
+        assert_eq!(book.best_ask("market1", Outcome::Yes), Some(0.55));
+        // Mid price should be average
+        assert_eq!(book.mid_price("market1", Outcome::Yes), Some(0.525));
+    }
+
+    #[test]
+    fn test_different_outcomes_isolated() {
+        let book = OrderBookService::new();
+
