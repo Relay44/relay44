@@ -258,3 +258,85 @@ fn close_only_capabilities() -> ProviderCapabilities {
         trade_close: true,
         legacy_close_only: true,
     }
+}
+
+fn restrictions_apply(context: &RegionPolicyContext, provider: RailProvider) -> bool {
+    match provider {
+        RailProvider::Limitless => context.limitless_restricted,
+        RailProvider::Polymarket => false,
+    }
+}
+
+fn capabilities_for_provider(
+    context: &RegionPolicyContext,
+    provider: RailProvider,
+) -> ProviderCapabilities {
+    if context.mode == RegionRoutingMode::Disabled {
+        return open_capabilities();
+    }
+
+    if context.region_class == RegionClass::Unknown
+        && context.unknown_policy == RegionUnknownPolicy::HardBlock
+    {
+        return hard_block_capabilities();
+    }
+
+    if restrictions_apply(context, provider) {
+        return close_only_capabilities();
+    }
+
+    open_capabilities()
+}
+
+fn action_allowed(capabilities: &ProviderCapabilities, action: ProviderRailAction) -> bool {
+    match action {
+        ProviderRailAction::Feed => capabilities.feed,
+        ProviderRailAction::MarketData => capabilities.market_data,
+        ProviderRailAction::TradeOpen => capabilities.trade_open,
+        ProviderRailAction::TradeClose => capabilities.trade_close,
+    }
+}
+
+pub fn resolve_region_policy_context(req: &HttpRequest) -> RegionPolicyContext {
+    let mode = parse_routing_mode();
+    let unknown_policy = parse_unknown_policy(std::env::var("REGION_UNKNOWN_POLICY").ok());
+    let country = read_country(req);
+    let region_class = to_region_class(country.as_deref());
+    let unknown_restricted =
+        country.is_none() && unknown_policy == RegionUnknownPolicy::SafeFallback;
+    let restricted = build_limitless_restricted_set();
+    let limitless_restricted = match country.as_deref() {
+        Some(value) => restricted.contains(value),
+        None => unknown_restricted,
+    };
+
+    RegionPolicyContext {
+        country,
+        region_class,
+        mode,
+        unknown_policy,
+        safe_fallback_restriction: unknown_restricted,
+        limitless_restricted: mode != RegionRoutingMode::Disabled && limitless_restricted,
+    }
+}
+
+pub fn build_compliance_profile(req: &HttpRequest) -> ComplianceRailsProfile {
+    let context = resolve_region_policy_context(req);
+    let mut rails = BTreeMap::new();
+    rails.insert(
+        RailProvider::Limitless.as_str().to_string(),
+        capabilities_for_provider(&context, RailProvider::Limitless),
+    );
+    rails.insert(
+        RailProvider::Polymarket.as_str().to_string(),
+        capabilities_for_provider(&context, RailProvider::Polymarket),
+    );
+    let legacy_close_only = rails.values().any(|entry| entry.legacy_close_only);
+
+    ComplianceRailsProfile {
+        country: context.country,
+        region_class: context.region_class.as_str().to_string(),
+        mode: context.mode.as_str().to_string(),
+        rails,
+        legacy_close_only,
+    }
