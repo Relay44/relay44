@@ -425,3 +425,85 @@ mod tests {
                 .insert_header(("cf-ipcountry", "US"))
                 .to_http_request();
 
+            let feed =
+                evaluate_provider_access(&req, RailProvider::Limitless, ProviderRailAction::Feed);
+            let open = evaluate_provider_access(
+                &req,
+                RailProvider::Limitless,
+                ProviderRailAction::TradeOpen,
+            );
+            let close = evaluate_provider_access(
+                &req,
+                RailProvider::Limitless,
+                ProviderRailAction::TradeClose,
+            );
+
+            assert!(feed.allowed);
+            assert!(!open.allowed);
+            assert!(close.allowed);
+        });
+    }
+
+    #[test]
+    fn observe_mode_never_blocks_requests() {
+        with_env(|| {
+            std::env::set_var("REGION_ROUTING_ENABLED", "1");
+            std::env::set_var("REGION_ROUTING_MODE", "observe");
+            std::env::set_var("LIMITLESS_RESTRICTED_COUNTRIES", "US");
+
+            let req = TestRequest::default()
+                .insert_header(("cf-ipcountry", "US"))
+                .to_http_request();
+            let decision = evaluate_provider_access(
+                &req,
+                RailProvider::Limitless,
+                ProviderRailAction::TradeOpen,
+            );
+
+            assert!(decision.allowed);
+            assert!(decision.would_block);
+        });
+    }
+
+    #[test]
+    fn unknown_policy_allow_all_keeps_limitless_open() {
+        with_env(|| {
+            std::env::set_var("REGION_ROUTING_ENABLED", "true");
+            std::env::set_var("REGION_ROUTING_MODE", "enforce");
+            std::env::set_var("REGION_UNKNOWN_POLICY", "allow_all");
+
+            let req = TestRequest::default().to_http_request();
+            let decision = evaluate_provider_access(
+                &req,
+                RailProvider::Limitless,
+                ProviderRailAction::TradeOpen,
+            );
+            assert!(decision.allowed);
+            assert!(!decision.would_block);
+        });
+    }
+
+    #[test]
+    fn unknown_policy_hard_block_blocks_all_actions() {
+        with_env(|| {
+            std::env::set_var("REGION_ROUTING_ENABLED", "true");
+            std::env::set_var("REGION_ROUTING_MODE", "enforce");
+            std::env::set_var("REGION_UNKNOWN_POLICY", "hard_block");
+
+            let req = TestRequest::default().to_http_request();
+
+            for provider in [RailProvider::Limitless, RailProvider::Polymarket] {
+                for action in [
+                    ProviderRailAction::Feed,
+                    ProviderRailAction::MarketData,
+                    ProviderRailAction::TradeOpen,
+                    ProviderRailAction::TradeClose,
+                ] {
+                    let decision = evaluate_provider_access(&req, provider, action);
+                    assert!(!decision.allowed);
+                }
+            }
+        });
+    }
+}
+
