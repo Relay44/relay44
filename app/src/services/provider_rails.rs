@@ -340,3 +340,88 @@ pub fn build_compliance_profile(req: &HttpRequest) -> ComplianceRailsProfile {
         rails,
         legacy_close_only,
     }
+}
+
+pub fn evaluate_provider_access(
+    req: &HttpRequest,
+    provider: RailProvider,
+    action: ProviderRailAction,
+) -> ProviderAccessDecision {
+    let context = resolve_region_policy_context(req);
+    let capabilities = capabilities_for_provider(&context, provider);
+    let would_block = !action_allowed(&capabilities, action);
+    let allowed = if context.mode == RegionRoutingMode::Enforce {
+        !would_block
+    } else {
+        true
+    };
+    let reason = if would_block {
+        Some(format!(
+            "{} is unavailable for {} in this region",
+            provider.as_str(),
+            action.as_str()
+        ))
+    } else {
+        None
+    };
+
+    ProviderAccessDecision {
+        allowed,
+        would_block,
+        reason,
+        legacy_close_only: capabilities.legacy_close_only,
+        country: context.country,
+        region_class: context.region_class,
+        mode: context.mode,
+        safe_fallback_restriction: context.safe_fallback_restriction,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::test::TestRequest;
+    use std::sync::Mutex;
+
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn with_env<F: FnOnce()>(f: F) {
+        let _guard = TEST_MUTEX.lock().expect("lock");
+        let keys = [
+            "REGION_ROUTING_ENABLED",
+            "REGION_ROUTING_MODE",
+            "REGION_UNKNOWN_POLICY",
+            "REGION_COUNTRY_HEADER_PRIORITY",
+            "LIMITLESS_RESTRICTED_COUNTRIES",
+        ];
+        let saved: Vec<(String, Option<String>)> = keys
+            .iter()
+            .map(|key| (key.to_string(), std::env::var(key).ok()))
+            .collect();
+
+        for key in keys {
+            std::env::remove_var(key);
+        }
+
+        f();
+
+        for (key, value) in saved {
+            if let Some(raw) = value {
+                std::env::set_var(key, raw);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+    }
+
+    #[test]
+    fn enforce_mode_blocks_limitless_open_trades_for_restricted_country() {
+        with_env(|| {
+            std::env::set_var("REGION_ROUTING_ENABLED", "true");
+            std::env::set_var("REGION_ROUTING_MODE", "enforce");
+            std::env::set_var("LIMITLESS_RESTRICTED_COUNTRIES", "US");
+
+            let req = TestRequest::default()
+                .insert_header(("cf-ipcountry", "US"))
+                .to_http_request();
+
