@@ -244,3 +244,76 @@ fn requirement_for_resource(
         }],
         extensions: None,
     }
+}
+
+pub fn build_quote_for_origin(
+    state: &AppState,
+    origin: &str,
+    resource: X402Resource,
+) -> X402PaymentRequired {
+    requirement_for_resource(state, resource, resource_url_for_quote(origin, resource))
+}
+
+pub fn build_quote_for_request(
+    state: &AppState,
+    resource: X402Resource,
+    req: &HttpRequest,
+) -> X402PaymentRequired {
+    let origin = api_origin_from_request(state, req);
+    build_quote_for_origin(state, origin.as_str(), resource)
+}
+
+fn encode_payment_required_header(payment_required: &X402PaymentRequired) -> String {
+    BASE64.encode(serde_json::to_vec(payment_required).unwrap_or_default())
+}
+
+pub fn encode_payment_signature_header(payment_payload: &X402PaymentPayload) -> Result<String, ApiError> {
+    serde_json::to_vec(payment_payload)
+        .map(|bytes| BASE64.encode(bytes))
+        .map_err(|_| ApiError::bad_request("INVALID_X402_PAYMENT", "payment payload is invalid"))
+}
+
+fn decode_payment_signature_header(header: &str) -> Result<X402PaymentPayload, ApiError> {
+    let decoded = BASE64.decode(header).map_err(|_| {
+        ApiError::bad_request(
+            "INVALID_X402_PAYMENT_HEADER",
+            "payment-signature must be base64 encoded JSON",
+        )
+    })?;
+
+    serde_json::from_slice::<X402PaymentPayload>(&decoded).map_err(|_| {
+        ApiError::bad_request(
+            "INVALID_X402_PAYMENT_HEADER",
+            "payment-signature payload is invalid",
+        )
+    })
+}
+
+fn payment_required_error(
+    state: &AppState,
+    resource: X402Resource,
+    resource_url: String,
+    message: &str,
+    extra: Option<Value>,
+) -> ApiError {
+    let payment_required = requirement_for_resource(state, resource, resource_url);
+    let encoded = encode_payment_required_header(&payment_required);
+    let mut details = json!({
+        "paymentRequired": payment_required,
+    });
+
+    if let Some(extra) = extra {
+        details["context"] = extra;
+    }
+
+    ApiError::payment_required_with_headers(message, None::<Value>, vec![
+        ("PAYMENT-REQUIRED".to_string(), encoded),
+        (
+            "WWW-Authenticate".to_string(),
+            "X402 realm=\"relay44\", scheme=\"exact\"".to_string(),
+        ),
+        ("Cache-Control".to_string(), "no-store".to_string()),
+    ])
+    .with_details(Some(details))
+}
+
