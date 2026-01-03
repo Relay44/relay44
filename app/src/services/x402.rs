@@ -317,3 +317,88 @@ fn payment_required_error(
     .with_details(Some(details))
 }
 
+async fn facilitator_request<T: DeserializeOwned>(
+    state: &AppState,
+    path: &str,
+    envelope: &X402FacilitatorEnvelope,
+) -> Result<(StatusCode, T), ApiError> {
+    let url = format!(
+        "{}/{}",
+        state.config.x402_facilitator_url.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
+
+    let client = reqwest::Client::new();
+    let mut request = client.post(url).json(envelope);
+    if !state.config.x402_facilitator_token.trim().is_empty() {
+        request = request.bearer_auth(state.config.x402_facilitator_token.as_str());
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|_| ApiError::internal("Failed to reach x402 facilitator"))?;
+    let status = response.status();
+    let payload = response
+        .json::<T>()
+        .await
+        .map_err(|_| ApiError::internal("Invalid x402 facilitator response"))?;
+    Ok((status, payload))
+}
+
+fn build_envelope(
+    state: &AppState,
+    resource: X402Resource,
+    payment_payload: X402PaymentPayload,
+    resource_url: String,
+) -> X402FacilitatorEnvelope {
+    X402FacilitatorEnvelope {
+        x402_version: 2,
+        payment_requirements: requirement_for_resource(state, resource, resource_url)
+            .accepts
+            .into_iter()
+            .next()
+            .unwrap(),
+        payment_payload,
+    }
+}
+
+pub async fn ensure_payment_for_request(
+    state: &AppState,
+    req: &HttpRequest,
+    resource: X402Resource,
+) -> Result<(), ApiError> {
+    if !state.config.x402_enabled {
+        return Ok(());
+    }
+
+    let resource_url = resource_url_from_request(state, req);
+    let header = req
+        .headers()
+        .get("payment-signature")
+        .or_else(|| req.headers().get("PAYMENT-SIGNATURE"))
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| payment_required_error(state, resource, resource_url.clone(), "x402 payment required", None))?;
+
+    let payment_payload = decode_payment_signature_header(header).map_err(|_| {
+        payment_required_error(
+            state,
+            resource,
+            resource_url.clone(),
+            "x402 payment-signature header is invalid",
+            None,
+        )
+    })?;
+
+    ensure_payment_from_payload(state, payment_payload, resource, Some(resource_url)).await
+}
+
+pub async fn ensure_payment_from_payload(
+    state: &AppState,
+    payment_payload: X402PaymentPayload,
+    resource: X402Resource,
+    resource_url: Option<String>,
+) -> Result<(), ApiError> {
+    if !state.config.x402_enabled {
+        return Ok(());
+    }
