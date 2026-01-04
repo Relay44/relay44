@@ -92,3 +92,42 @@ export async function fetchAllSeoMarkets(limit = 100, maxPages = 10): Promise<Ma
     offset += page.limit || limit;
   }
 
+  return markets;
+}
+
+export async function fetchSeoMarket(id: string): Promise<Market | null> {
+  const payload = await fetchJsonFromBases<BaseMarketSnapshot>(
+    `/evm/markets/${encodeURIComponent(id)}`
+  );
+
+  if (!payload || typeof payload.id !== 'string') {
+    return null;
+  }
+
+  return mapBaseSnapshotToMarket(payload);
+}
+
+export async function fetchSeoLeaderboard(limit = 25): Promise<LeaderboardEntry[]> {
+  const query = new URLSearchParams({
+    period: 'weekly',
+    metric: 'pnl',
+    limit: String(limit),
+  });
+  const payload = await fetchJsonFromBases<Leaderboard>(`/leaderboard?${query.toString()}`);
+
+  if (!payload || !Array.isArray(payload.entries)) {
+    return [];
+  }
+
+  return payload.entries;
+}
+
+export async function fetchSeoProfile(wallet: string): Promise<PublicProfile | null> {
+  const payload = await fetchJsonFromBases<PublicProfile>(`/profiles/${encodeURIComponent(wallet)}`);
+
+  if (!payload || typeof payload.wallet !== 'string') {
+    return null;
+  }
+
+  return payload;
+}
