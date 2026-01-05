@@ -402,3 +402,76 @@ pub async fn ensure_payment_from_payload(
     if !state.config.x402_enabled {
         return Ok(());
     }
+
+    let resource_url = resource_url.unwrap_or_else(|| {
+        let origin = primary_origin(state);
+        resource_url_for_quote(origin.as_str(), resource)
+    });
+    let envelope = build_envelope(state, resource, payment_payload.clone(), resource_url.clone());
+
+    let (verify_status, verify_response) =
+        facilitator_request::<X402VerifyResponse>(state, "/verify", &envelope).await?;
+    if !verify_status.is_success() || !verify_response.is_valid {
+        return Err(payment_required_error(
+            state,
+            resource,
+            resource_url.clone(),
+            verify_response
+                .invalid_message
+                .as_deref()
+                .unwrap_or("x402 payment verification failed"),
+            Some(json!({ "verify": verify_response })),
+        ));
+    }
+
+    let (settle_status, settle_response) =
+        facilitator_request::<X402SettleResponse>(state, "/settle", &envelope).await?;
+    if !settle_status.is_success() || !settle_response.success {
+        return Err(payment_required_error(
+            state,
+            resource,
+            resource_url,
+            settle_response
+                .error_message
+                .as_deref()
+                .unwrap_or("x402 payment settlement failed"),
+            Some(json!({ "settle": settle_response })),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_payment_signature_roundtrip() {
+        let payload = X402PaymentPayload {
+            x402_version: 2,
+            resource: Some(X402ResourceInfo {
+                url: "https://example.com/v1/evm/markets/1/orderbook".to_string(),
+                description: Some("Order book".to_string()),
+                mime_type: Some("application/json".to_string()),
+            }),
+            accepted: X402PaymentRequirement {
+                scheme: "exact".to_string(),
+                network: "eip155:8453".to_string(),
+                amount: "2500".to_string(),
+                asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
+                pay_to: "0x1111111111111111111111111111111111111111".to_string(),
+                max_timeout_seconds: 300,
+                extra: Some(json!({ "name": "USD Coin", "version": "2" })),
+            },
+            payload: json!({ "authorization": { "from": "0x1" } }),
+            extensions: None,
+        };
+
+        let encoded = encode_payment_signature_header(&payload).unwrap();
+        let decoded = decode_payment_signature_header(encoded.as_str()).unwrap();
+        assert_eq!(decoded.x402_version, 2);
+        assert_eq!(decoded.accepted.network, "eip155:8453");
+    }
+}
+
