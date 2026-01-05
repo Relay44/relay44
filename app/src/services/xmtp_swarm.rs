@@ -229,3 +229,106 @@ pub async fn send_message(
             "message must not be empty",
         ));
     }
+    if message.as_bytes().len() > state.config.xmtp_swarm_max_message_bytes as usize {
+        return Err(ApiError::bad_request(
+            "MESSAGE_TOO_LARGE",
+            "message exceeds XMTP swarm max payload size",
+        ));
+    }
+
+    let canonical_legacy = build_payload_legacy(&SwarmSendRequest {
+        swarm_id: swarm_id.clone(),
+        sender: sender.clone(),
+        message: message.clone(),
+        signature: request.signature.clone(),
+        nonce: request.nonce.clone(),
+        expires_at: request.expires_at,
+        metadata: request.metadata.clone(),
+    });
+    let expected_legacy_signature = sign_payload(
+        state.config.xmtp_swarm_signing_key.as_str(),
+        canonical_legacy.as_str(),
+    );
+    let mut v2_verified = false;
+    let mut validated_nonce = None::<String>;
+    let mut validated_expires_at = None::<u64>;
+
+    if let (Some(nonce), Some(expires_at)) = (request.nonce.as_ref(), request.expires_at) {
+        let nonce = validate_nonce(nonce)?;
+        let canonical_v2 = build_payload_v2(
+            &SwarmSendRequest {
+                swarm_id: swarm_id.clone(),
+                sender: sender.clone(),
+                message: message.clone(),
+                signature: request.signature.clone(),
+                nonce: Some(nonce.clone()),
+                expires_at: Some(expires_at),
+                metadata: request.metadata.clone(),
+            },
+            nonce.as_str(),
+            expires_at,
+        );
+        let expected_v2_signature = sign_payload(
+            state.config.xmtp_swarm_signing_key.as_str(),
+            canonical_v2.as_str(),
+        );
+        if expected_v2_signature.eq_ignore_ascii_case(request.signature.trim()) {
+            let now = Utc::now().timestamp().max(0) as u64;
+            if now > expires_at {
+                return Err(ApiError::bad_request(
+                    "SWARM_MESSAGE_EXPIRED",
+                    "xmtp swarm message signature has expired",
+                ));
+            }
+
+            let ttl = expires_at.saturating_sub(now).max(1);
+            let nonce_key = format!("xmtp:swarm:{}:nonce:{}", swarm_id, nonce);
+            let newly_recorded = state
+                .redis
+                .check_and_record_nonce(nonce_key.as_str(), ttl)
+                .await
+                .map_err(|_| ApiError::internal("Failed to validate XMTP swarm nonce"))?;
+            if !newly_recorded {
+                return Err(ApiError::conflict(
+                    "SWARM_NONCE_REPLAYED",
+                    "xmtp swarm nonce has already been used",
+                ));
+            }
+
+            v2_verified = true;
+            validated_nonce = Some(nonce);
+            validated_expires_at = Some(expires_at);
+        }
+    }
+
+    if !v2_verified && !expected_legacy_signature.eq_ignore_ascii_case(request.signature.trim()) {
+        return Err(ApiError::unauthorized("Invalid XMTP swarm signature"));
+    }
+
+    if state.config.xmtp_swarm_transport == "xmtp_http" {
+        let bridged = SwarmSendRequest {
+            swarm_id,
+            sender,
+            message,
+            signature: request.signature,
+            nonce: validated_nonce,
+            expires_at: validated_expires_at,
+            metadata: request.metadata,
+        };
+        return send_message_via_bridge(state, &bridged).await;
+    }
+
+    let unix_ms = Utc::now().timestamp_millis();
+    let created_at = Utc::now().to_rfc3339();
+    let envelope = SwarmMessage {
+        id: format!("xmtp_{}", Uuid::new_v4()),
+        swarm_id: swarm_id.clone(),
+        topic: topic(state, swarm_id.as_str()),
+        sender,
+        message,
+        signature: request.signature,
+        metadata: request.metadata,
+        created_at,
+        unix_ms,
+    };
+
