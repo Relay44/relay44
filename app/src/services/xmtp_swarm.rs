@@ -332,3 +332,114 @@ pub async fn send_message(
         unix_ms,
     };
 
+    let raw = serde_json::to_string(&envelope)
+        .map_err(|_| ApiError::internal("Failed to serialize XMTP envelope"))?;
+    state
+        .redis
+        .list_push_with_trim(
+            message_key(swarm_id.as_str()).as_str(),
+            raw.as_str(),
+            state.config.xmtp_swarm_max_messages.max(10),
+        )
+        .await
+        .map_err(|_| ApiError::internal("Failed to persist XMTP swarm message"))?;
+    state
+        .redis
+        .publish(envelope.topic.as_str(), raw.as_str())
+        .await
+        .map_err(|_| ApiError::internal("Failed to publish XMTP swarm message"))?;
+
+    Ok(envelope)
+}
+
+pub async fn list_messages(
+    state: &AppState,
+    swarm_id: &str,
+    query: SwarmListQuery,
+) -> Result<SwarmMessagesResponse, ApiError> {
+    if !state.config.xmtp_swarm_enabled {
+        return Err(ApiError::bad_request(
+            "XMTP_SWARM_DISABLED",
+            "XMTP swarm messaging is disabled",
+        ));
+    }
+
+    let validated_swarm_id = validate_swarm_id(swarm_id)?;
+    let limit = query.limit.unwrap_or(50).min(200);
+    let offset = query.offset.unwrap_or(0);
+    if state.config.xmtp_swarm_transport == "xmtp_http" {
+        return list_messages_via_bridge(state, validated_swarm_id.as_str(), limit, offset).await;
+    }
+    let end = offset.saturating_add(limit).saturating_sub(1);
+    let raw_values = state
+        .redis
+        .list_range_raw(
+            message_key(validated_swarm_id.as_str()).as_str(),
+            offset,
+            end,
+        )
+        .await
+        .map_err(|_| ApiError::internal("Failed to load XMTP swarm messages"))?;
+
+    let mut data = Vec::with_capacity(raw_values.len());
+    for raw in raw_values {
+        if let Ok(entry) = serde_json::from_str::<SwarmMessage>(raw.as_str()) {
+            data.push(entry);
+        }
+    }
+
+    Ok(SwarmMessagesResponse {
+        total_returned: data.len(),
+        limit,
+        offset,
+        topic: topic(state, validated_swarm_id.as_str()),
+        data,
+    })
+}
+
+pub fn health(state: &AppState) -> Value {
+    serde_json::json!({
+        "enabled": state.config.xmtp_swarm_enabled,
+        "transport": state.config.xmtp_swarm_transport,
+        "bridge_url_configured": !state.config.xmtp_swarm_bridge_url.trim().is_empty(),
+        "topic_prefix": state.config.xmtp_swarm_topic_prefix,
+        "max_messages": state.config.xmtp_swarm_max_messages,
+        "max_message_bytes": state.config.xmtp_swarm_max_message_bytes
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_nonce_accepts_safe_charset() {
+        let nonce = validate_nonce("alpha-01:beta_02").expect("nonce should be valid");
+        assert_eq!(nonce, "alpha-01:beta_02");
+    }
+
+    #[test]
+    fn test_validate_nonce_rejects_invalid_chars() {
+        let err = validate_nonce("nonce with spaces").expect_err("nonce should be rejected");
+        assert_eq!(err.code, "INVALID_SWARM_NONCE");
+    }
+
+    #[test]
+    fn test_payload_v2_is_stable() {
+        let request = SwarmSendRequest {
+            swarm_id: "alpha".to_string(),
+            sender: "0x1111111111111111111111111111111111111111".to_string(),
+            message: "rebalance".to_string(),
+            signature: String::new(),
+            nonce: Some("alpha-1".to_string()),
+            expires_at: Some(1_900_000_000),
+            metadata: None,
+        };
+        let payload = build_payload_v2(&request, "alpha-1", 1_900_000_000);
+        assert_eq!(
+            payload,
+            "swarm_id=alpha;sender=0x1111111111111111111111111111111111111111;message=rebalance;nonce=alpha-1;expires_at=1900000000"
+        );
+    }
+}
+
