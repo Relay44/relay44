@@ -474,4 +474,3 @@ mod tests {
         assert_eq!(decoded.accepted.network, "eip155:8453");
     }
 }
-
