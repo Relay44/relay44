@@ -62,3 +62,25 @@ BEFORE UPDATE ON orders
 FOR EACH ROW
 EXECUTE FUNCTION cleanup_orderbook_entry_before();
 
+
+-- HIGH-026: Add fee tracking table
+CREATE TABLE IF NOT EXISTS fee_ledger (
+    id SERIAL PRIMARY KEY,
+    market_id VARCHAR(64) NOT NULL REFERENCES markets(id) ON DELETE RESTRICT,
+    tx_type VARCHAR(16) NOT NULL, -- 'collection', 'protocol_withdrawal', 'creator_withdrawal'
+    amount BIGINT NOT NULL,
+    recipient VARCHAR(44),
+    tx_signature VARCHAR(88),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_fee_ledger_market ON fee_ledger(market_id);
+CREATE INDEX idx_fee_ledger_type ON fee_ledger(tx_type);
+
+COMMENT ON TABLE fee_ledger IS 'Tracks fee collection and withdrawals per market';
+
+
+-- Additional index for reconciliation queries
+CREATE INDEX IF NOT EXISTS idx_markets_address ON markets(address);
+CREATE INDEX IF NOT EXISTS idx_orders_tx_signature ON orders(tx_signature) WHERE tx_signature IS NOT NULL;
+
