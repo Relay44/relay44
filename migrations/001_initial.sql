@@ -113,3 +113,43 @@ CREATE TABLE IF NOT EXISTS users (
     notifications_enabled BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Transactions table
+CREATE TABLE IF NOT EXISTS transactions (
+    id VARCHAR(64) PRIMARY KEY,
+    owner VARCHAR(44) NOT NULL,
+    tx_type SMALLINT NOT NULL,
+    market_id VARCHAR(64) REFERENCES markets(id),
+    amount BIGINT NOT NULL,
+    token VARCHAR(44) NOT NULL,
+    tx_signature VARCHAR(88) NOT NULL,
+    status SMALLINT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_transactions_owner ON transactions(owner, created_at DESC);
+CREATE INDEX idx_transactions_type ON transactions(tx_type);
+
+-- Private accounts table (for privacy layer)
+CREATE TABLE IF NOT EXISTS private_accounts (
+    id SERIAL PRIMARY KEY,
+    owner VARCHAR(44) NOT NULL UNIQUE,
+    elgamal_pubkey BYTEA NOT NULL,
+    encrypted_balance BYTEA,
+    plaintext_balance BIGINT DEFAULT 0,
+    total_deposited BIGINT DEFAULT 0,
+    total_withdrawn BIGINT DEFAULT 0,
+    private_order_count BIGINT DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_private_accounts_owner ON private_accounts(owner);
+
+-- Comments for documentation
+COMMENT ON TABLE markets IS 'Prediction markets';
+COMMENT ON TABLE orders IS 'Order book entries';
+COMMENT ON TABLE trades IS 'Executed trades';
+COMMENT ON TABLE positions IS 'User positions per market';
+COMMENT ON TABLE private_accounts IS 'Confidential trading accounts';
+
