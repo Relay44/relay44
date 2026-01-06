@@ -90,3 +90,42 @@ CREATE TABLE IF NOT EXISTS paper_marks (
     CONSTRAINT fk_paper_marks_agent
         FOREIGN KEY (agent_id) REFERENCES external_agents(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_paper_marks_position
+    ON paper_marks(position_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_paper_marks_owner
+    ON paper_marks(owner, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS paper_outcomes (
+    id VARCHAR(64) PRIMARY KEY,
+    position_id VARCHAR(64) NOT NULL,
+    agent_id VARCHAR(64) NOT NULL,
+    owner VARCHAR(64) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    market_id VARCHAR(128) NOT NULL,
+    outcome VARCHAR(16) NOT NULL,
+    side VARCHAR(16) NOT NULL,
+    strategy TEXT NOT NULL,
+    entry_price DOUBLE PRECISION NOT NULL,
+    exit_price DOUBLE PRECISION NOT NULL,
+    quantity DOUBLE PRECISION NOT NULL,
+    gross_pnl_usdc DOUBLE PRECISION NOT NULL DEFAULT 0,
+    fee_usdc DOUBLE PRECISION NOT NULL DEFAULT 0,
+    realized_pnl_usdc DOUBLE PRECISION NOT NULL DEFAULT 0,
+    hold_seconds BIGINT NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    closed_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT fk_paper_outcomes_position
+        FOREIGN KEY (position_id) REFERENCES paper_positions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_paper_outcomes_agent
+        FOREIGN KEY (agent_id) REFERENCES external_agents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_outcomes_owner
+    ON paper_outcomes(owner, closed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_paper_outcomes_strategy
+    ON paper_outcomes(strategy, closed_at DESC);
+
