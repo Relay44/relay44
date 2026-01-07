@@ -438,4 +438,3 @@ async fn verify_claim_tx(
 
     Ok(())
 }
-
