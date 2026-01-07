@@ -83,4 +83,3 @@ COMMENT ON TABLE fee_ledger IS 'Tracks fee collection and withdrawals per market
 -- Additional index for reconciliation queries
 CREATE INDEX IF NOT EXISTS idx_markets_address ON markets(address);
 CREATE INDEX IF NOT EXISTS idx_orders_tx_signature ON orders(tx_signature) WHERE tx_signature IS NOT NULL;
-
