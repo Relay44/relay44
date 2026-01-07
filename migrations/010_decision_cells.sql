@@ -114,3 +114,38 @@ CREATE TABLE IF NOT EXISTS decision_automation_policies (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS decision_node_agents (
+    id VARCHAR(64) PRIMARY KEY,
+    cell_id VARCHAR(64) NOT NULL REFERENCES decision_cells(id) ON DELETE CASCADE,
+    node_id VARCHAR(64) NOT NULL REFERENCES decision_nodes(id) ON DELETE CASCADE,
+    external_agent_id VARCHAR(64) NOT NULL REFERENCES external_agents(id) ON DELETE CASCADE,
+    trigger_mode VARCHAR(48) NOT NULL DEFAULT 'on_threshold_cross',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(cell_id, node_id, external_agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_decision_node_agents_cell
+    ON decision_node_agents(cell_id, active);
+
+DROP TRIGGER IF EXISTS update_notification_preferences_updated_at ON notification_preferences;
+CREATE TRIGGER update_notification_preferences_updated_at
+    BEFORE UPDATE ON notification_preferences
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_decision_cells_updated_at ON decision_cells;
+CREATE TRIGGER update_decision_cells_updated_at
+    BEFORE UPDATE ON decision_cells
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_decision_nodes_updated_at ON decision_nodes;
+CREATE TRIGGER update_decision_nodes_updated_at
+    BEFORE UPDATE ON decision_nodes
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_decision_automation_policies_updated_at ON decision_automation_policies;
+CREATE TRIGGER update_decision_automation_policies_updated_at
+    BEFORE UPDATE ON decision_automation_policies
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
