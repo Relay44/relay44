@@ -164,3 +164,90 @@
   --space-12: 48px;
   --space-16: 64px;
 
+  /* ========================================
+     TYPOGRAPHY
+     ======================================== */
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+
+  --font-sans:
+    "Anonymous Pro", "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+  --font-display:
+    "Anonymous Pro", "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+  --font-mono:
+    "Anonymous Pro", "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
+
+  /* ========================================
+     BORDER RADIUS
+     ======================================== */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-full: 0;
+
+  /* ========================================
+     SHADOWS
+     ======================================== */
+  --shadow-xs: 1px 1px 0 rgba(0, 0, 0, 0.18);
+  --shadow-sm: 2px 2px 0 rgba(0, 0, 0, 0.22);
+  --shadow-md: 3px 3px 0 rgba(0, 0, 0, 0.26);
+  --shadow-lg: 4px 4px 0 rgba(0, 0, 0, 0.3);
+  --shadow-xl: 6px 6px 0 rgba(0, 0, 0, 0.34);
+
+  --shadow-glow: var(--shadow-md);
+  --shadow-glow-success: var(--shadow-md);
+  --shadow-glow-danger: var(--shadow-md);
+
+  /* ========================================
+     ANIMATION
+     ======================================== */
+  --duration-instant: 50ms;
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ========================================
+     Z-INDEX SCALE
+     ======================================== */
+  --z-dropdown: 50;
+  --z-sticky: 100;
+  --z-modal: 200;
+  --z-popover: 300;
+  --z-tooltip: 400;
+  --z-toast: 500;
+
+  /* ========================================
+     GLASS
+     ======================================== */
+  --glass-bg: rgba(255, 255, 255, 0.94);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --backdrop-blur: none;
+}
+
+/* ========================================
+   DARK MODE OVERRIDES
+   ======================================== */
+.dark {
+  --color-bg-base: #090909;
+  --color-bg-primary: #111111;
+  --color-bg-secondary: #181818;
+  --color-bg-tertiary: #222222;
+  --color-bg-elevated: #2b2b2b;
+  --color-bg-hover: rgba(255, 255, 255, 0.05);
+
