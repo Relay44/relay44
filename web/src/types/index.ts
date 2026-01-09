@@ -278,3 +278,97 @@ export interface DepositAddress {
   network: string;
   minimumAmount: number;
 }
+
+export interface DepositRequest {
+  amount: number;
+  mode?: WalletWriteMode;
+  intentId?: string;
+  rawTx?: string;
+  txSignature?: string;
+  source?: DepositSource;
+}
+
+export interface DepositResponse {
+  transactionId: string;
+  status: string;
+  phase: string;
+  amount: number;
+  depositAddress?: string;
+  intentId?: string;
+  preparedTransactions?: PreparedWalletTransaction[];
+  txSignature?: string;
+}
+
+export interface WithdrawRequest {
+  amount: number;
+  mode?: WalletWriteMode;
+  intentId?: string;
+  rawTx?: string;
+  destination?: string;
+  txSignature?: string;
+}
+
+export interface WithdrawResponse {
+  transactionId: string;
+  status: string;
+  phase: string;
+  amount: number;
+  fee: number;
+  netAmount: number;
+  estimatedCompletion: string;
+  intentId?: string;
+  preparedTransactions?: PreparedWalletTransaction[];
+  txSignature?: string;
+}
+
+// Notification types
+export type NotificationType =
+  | 'order_filled'
+  | 'order_cancelled'
+  | 'market_resolved'
+  | 'position_liquidated'
+  | 'deposit_confirmed'
+  | 'withdrawal_completed'
+  | 'price_alert'
+  | 'decision_recommendation_changed'
+  | 'decision_threshold_crossed'
+  | 'decision_confidence_dropped'
+  | 'system';
+
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  marketId?: string;
+  orderId?: string;
+  decisionCellId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface NotificationPreferences {
+  orderFills: boolean;
+  marketResolutions: boolean;
+  priceAlerts: boolean;
+  systemAnnouncements: boolean;
+  decisionAlerts: boolean;
+  emailNotifications: boolean;
+  pushNotifications: boolean;
+}
+
+export type DecisionType = 'timing' | 'choice' | 'hedge' | 'allocation';
+export type DecisionNodeSourceType = 'internal_market' | 'external_market' | 'draft_market';
+export type DecisionNodeEffect = 'support' | 'oppose' | 'neutral';
+export type DecisionTriggerMode =
+  | 'on_recommendation_gain'
+  | 'on_threshold_cross'
+  | 'on_confidence_gain';
+
+export interface DecisionActionScore {
+  actionId: string;
+  label: string;
+  rank: number;
+  scoreBps: number;
+}
