@@ -251,3 +251,75 @@
   --color-bg-elevated: #2b2b2b;
   --color-bg-hover: rgba(255, 255, 255, 0.05);
 
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-hover: rgba(255, 255, 255, 0.16);
+  --color-border-strong: rgba(255, 255, 255, 0.22);
+  --color-border-accent: rgba(228, 71, 11, 0.42);
+
+  --color-text-primary: #f5f5f4;
+  --color-text-secondary: #d6d3d1;
+  --color-text-muted: #a8a29e;
+  --color-text-inverse: #090909;
+
+  --color-accent: #e4470b;
+  --color-accent-hover: #e96c3c;
+  --color-accent-muted: rgba(228, 71, 11, 0.18);
+  --color-accent-border: rgba(228, 71, 11, 0.42);
+
+  --color-yes: #e96c3c;
+  --color-yes-hover: #ed8760;
+  --color-yes-muted: rgba(233, 108, 60, 0.2);
+  --color-yes-border: rgba(233, 108, 60, 0.38);
+  --color-yes-glow: rgba(233, 108, 60, 0.28);
+
+  --color-no: #d6d3d1;
+  --color-no-hover: #e7e5e4;
+  --color-no-muted: rgba(214, 211, 209, 0.12);
+  --color-no-border: rgba(214, 211, 209, 0.28);
+  --color-no-glow: rgba(214, 211, 209, 0.18);
+
+  --color-bid: var(--color-yes);
+  --color-bid-hover: var(--color-yes-hover);
+  --color-bid-muted: var(--color-yes-muted);
+  --color-bid-border: var(--color-yes-border);
+  --color-bid-glow: var(--color-yes-glow);
+
+  --color-ask: var(--color-no);
+  --color-ask-hover: var(--color-no-hover);
+  --color-ask-muted: var(--color-no-muted);
+  --color-ask-border: var(--color-no-border);
+  --color-ask-glow: var(--color-no-glow);
+
+  --color-success: var(--color-accent);
+  --color-success-muted: var(--color-accent-muted);
+  --color-success-border: var(--color-accent-border);
+
+  --color-danger: #fb923c;
+  --color-danger-muted: rgba(251, 146, 60, 0.16);
+  --color-danger-border: rgba(251, 146, 60, 0.35);
+
+  --color-warning: var(--amber-500);
+  --color-warning-muted: rgba(245, 158, 11, 0.14);
+  --color-warning-border: rgba(245, 158, 11, 0.3);
+
+  --color-info: var(--blue-500);
+  --color-info-muted: rgba(59, 130, 246, 0.14);
+  --color-info-border: rgba(59, 130, 246, 0.3);
+
+  --color-highlight: #f2a385;
+  --color-highlight-muted: rgba(242, 163, 133, 0.2);
+
+  --shadow-xs: 1px 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-sm: 2px 2px 0 rgba(0, 0, 0, 0.45);
+  --shadow-md: 3px 3px 0 rgba(0, 0, 0, 0.5);
+  --shadow-lg: 4px 4px 0 rgba(0, 0, 0, 0.56);
+  --shadow-xl: 6px 6px 0 rgba(0, 0, 0, 0.62);
+
+  --shadow-glow: var(--shadow-md);
+  --shadow-glow-success: var(--shadow-md);
+  --shadow-glow-danger: var(--shadow-md);
+
+  --glass-bg: rgba(17, 17, 17, 0.92);
+  --glass-border: rgba(255, 255, 255, 0.1);
+}
+
