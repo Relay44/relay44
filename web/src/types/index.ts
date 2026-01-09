@@ -372,3 +372,98 @@ export interface DecisionActionScore {
   rank: number;
   scoreBps: number;
 }
+
+export interface DecisionContributor {
+  nodeId: string;
+  label: string;
+  actionLabel: string;
+  scoreBps: number;
+  probabilityBps: number;
+  deltaBps?: number;
+  sourceRef?: string;
+}
+
+export interface DecisionRecommendation {
+  state: string;
+  confidenceBps: number;
+  whyChanged: string;
+  liveNodes: number;
+  totalNodes: number;
+  topActionLeadBps: number;
+  actionScores: DecisionActionScore[];
+  topContributors: DecisionContributor[];
+  lastChangedNode?: DecisionContributor;
+}
+
+export interface DecisionAction {
+  id: string;
+  label: string;
+  rank: number;
+  scoreBps: number;
+}
+
+export interface DecisionNodeAgent {
+  id: string;
+  externalAgentId: string;
+  triggerMode: DecisionTriggerMode;
+  active: boolean;
+  name?: string;
+  provider?: 'limitless' | 'polymarket';
+  agentActive?: boolean;
+}
+
+export interface DecisionNode {
+  id: string;
+  label: string;
+  description: string;
+  weightBps: number;
+  sourceType: DecisionNodeSourceType;
+  sourceRef?: string;
+  status: string;
+  lastProbabilityBps?: number;
+  lastMarketSnapshot: Record<string, unknown>;
+  actionEffects: Record<string, DecisionNodeEffect>;
+  createdAt: string;
+  updatedAt: string;
+  agents: DecisionNodeAgent[];
+}
+
+export interface DecisionAlert {
+  id: string;
+  kind: string;
+  threshold: Record<string, unknown>;
+  active: boolean;
+  lastTriggeredAt?: string;
+}
+
+export interface DecisionAutomationPolicy {
+  automationEnabled: boolean;
+  maxAgentNotionalUsdc: number;
+  maxTriggersPerDay: number;
+  minTriggerIntervalSeconds: number;
+  allowedProvider?: 'limitless' | 'polymarket';
+  requireConfidenceBps: number;
+  active: boolean;
+}
+
+export interface DecisionEvent {
+  id: string;
+  nodeId?: string;
+  kind: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface DecisionCellListItem {
+  id: string;
+  title: string;
+  statement: string;
+  decisionType: DecisionType;
+  horizonAt?: string;
+  status: string;
+  automationEnabled: boolean;
+  linkedMarketRefs: string[];
+  recommendation: DecisionRecommendation;
+  createdAt: string;
+  updatedAt: string;
+}
