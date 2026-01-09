@@ -467,3 +467,86 @@ export interface DecisionCellListItem {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface DecisionCell {
+  id: string;
+  owner: string;
+  title: string;
+  statement: string;
+  decisionType: DecisionType;
+  horizonAt?: string;
+  status: string;
+  automationEnabled: boolean;
+  recommendation: DecisionRecommendation;
+  actions: DecisionAction[];
+  nodes: DecisionNode[];
+  alerts: DecisionAlert[];
+  automationPolicy: DecisionAutomationPolicy;
+  events: DecisionEvent[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Leaderboard types
+export type LeaderboardPeriod = 'daily' | 'weekly' | 'monthly' | 'all_time';
+export type LeaderboardMetric = 'pnl' | 'volume' | 'trades' | 'win_rate';
+
+export interface LeaderboardEntry {
+  rank: number;
+  wallet: string;
+  username?: string;
+  value: number;
+  change?: number;
+  previousRank?: number;
+}
+
+export interface Leaderboard {
+  period: LeaderboardPeriod;
+  metric: LeaderboardMetric;
+  entries: LeaderboardEntry[];
+  updatedAt: string;
+}
+
+// Public profile types
+export interface PublicProfile {
+  wallet: string;
+  username?: string;
+  bio?: string;
+  avatarUrl?: string;
+  joinedAt: string;
+  stats: PublicProfileStats;
+  badges: ProfileBadge[];
+}
+
+export interface PublicProfileStats {
+  totalTrades: number;
+  totalVolume: number;
+  winRate: number;
+  pnl30d: number;
+  pnlAllTime: number;
+  marketsTraded: number;
+  bestTrade: number;
+  worstTrade: number;
+  currentStreak: number;
+  longestStreak: number;
+}
+
+export interface ProfileBadge {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  earnedAt: string;
+}
+
+export interface ProfileActivity {
+  id: string;
+  type: 'trade' | 'position_opened' | 'position_closed' | 'market_resolved';
+  marketId: string;
+  marketQuestion: string;
+  outcome?: Outcome;
+  amount?: number;
+  pnl?: number;
+  createdAt: string;
+}
+
