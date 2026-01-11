@@ -80,3 +80,26 @@ export function formatTimeAgo(date: string | Date): string {
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
 
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return 'just now';
+}
+
+// Address formatting
+export function truncateAddress(address: string, chars = 4): string {
+  if (!address) return '';
+  return `${address.slice(0, chars)}...${address.slice(-chars)}`;
+}
+
+// DateTime formatting
+export function formatDateTime(date: string | Date): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
