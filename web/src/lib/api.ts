@@ -1149,3 +1149,234 @@ class ApiClient {
       }),
     });
   }
+
+  async createExternalOrderIntent(data: {
+    provider: 'limitless' | 'polymarket';
+    marketId: string;
+    outcome: 'yes' | 'no';
+    side: 'buy' | 'sell';
+    price: number;
+    quantity: number;
+    credentialId?: string;
+  }): Promise<ExternalOrderIntent> {
+    return this.request('/external/orders/intent', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: data.provider,
+        marketId: data.marketId,
+        outcome: data.outcome,
+        side: data.side,
+        price: data.price,
+        quantity: data.quantity,
+        credentialId: data.credentialId,
+      }),
+    });
+  }
+
+  async submitExternalOrder(data: {
+    intentId: string;
+    signedOrder: Record<string, unknown>;
+    credentialId?: string;
+  }): Promise<ExternalOrderRecord> {
+    return this.request('/external/orders/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        intentId: data.intentId,
+        signedOrder: data.signedOrder,
+        credentialId: data.credentialId,
+      }),
+    });
+  }
+
+  async cancelExternalOrder(data: {
+    provider: 'limitless' | 'polymarket';
+    providerOrderId: string;
+    credentialId?: string;
+    payload?: Record<string, unknown>;
+  }): Promise<{ ok: boolean }> {
+    return this.request('/external/orders/cancel', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: data.provider,
+        providerOrderId: data.providerOrderId,
+        credentialId: data.credentialId,
+        payload: data.payload,
+      }),
+    });
+  }
+
+  async listExternalOrders(params?: {
+    provider?: 'limitless' | 'polymarket';
+    limit?: number;
+    offset?: number;
+  }): Promise<ExternalOrdersListResponse> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/external/orders${query}`);
+  }
+
+  async listExternalAgents(params?: {
+    provider?: 'limitless' | 'polymarket';
+    active?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExternalAgentsListResponse> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/external/agents${query}`);
+  }
+
+  async createExternalAgent(data: {
+    name: string;
+    provider: 'limitless' | 'polymarket';
+    marketId: string;
+    outcome: 'yes' | 'no';
+    side: 'buy' | 'sell';
+    price: number;
+    quantity: number;
+    cadenceSeconds: number;
+    strategy: string;
+    credentialId?: string;
+    active?: boolean;
+  }): Promise<ExternalAgentRecord> {
+    return this.request('/external/agents', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: data.name,
+        provider: data.provider,
+        marketId: data.marketId,
+        outcome: data.outcome,
+        side: data.side,
+        price: data.price,
+        quantity: data.quantity,
+        cadenceSeconds: data.cadenceSeconds,
+        strategy: data.strategy,
+        credentialId: data.credentialId,
+        active: data.active,
+      }),
+    });
+  }
+
+  async updateExternalAgent(
+    agentId: string,
+    data: Partial<{
+      name: string;
+      outcome: 'yes' | 'no';
+      side: 'buy' | 'sell';
+      price: number;
+      quantity: number;
+      cadenceSeconds: number;
+      strategy: string;
+      credentialId: string;
+      active: boolean;
+    }>,
+  ): Promise<ExternalAgentRecord> {
+    return this.request(`/external/agents/${agentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async executeExternalAgent(
+    agentId: string,
+    data?: { force?: boolean; signedOrder?: Record<string, unknown> },
+  ): Promise<Record<string, unknown>> {
+    return this.request(`/external/agents/${agentId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+  }
+
+  async listDecisionCells(params?: {
+    limit?: number;
+    offset?: number;
+    status?: string;
+  }): Promise<PaginatedResponse<DecisionCellListItem>> {
+    const query = this.buildQuery(params || {});
+    const response = await this.request<DecisionCellsListResponse>(`/decisions${query}`);
+    return {
+      data: response.data,
+      total: response.total,
+      limit: response.limit,
+      offset: response.offset,
+      hasMore: response.has_more,
+    };
+  }
+
+  async createDecisionCell(data: CreateDecisionCellRequest): Promise<DecisionCell> {
+    return this.request('/decisions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getDecisionCell(cellId: string): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}`);
+  }
+
+  async updateDecisionCell(cellId: string, data: UpdateDecisionCellRequest): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async addDecisionAction(cellId: string, label: string): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/actions`, {
+      method: 'POST',
+      body: JSON.stringify({ label }),
+    });
+  }
+
+  async addDecisionNode(cellId: string, data: CreateDecisionNodeRequest): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/nodes`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateDecisionNode(
+    cellId: string,
+    nodeId: string,
+    data: UpdateDecisionNodeRequest,
+  ): Promise<DecisionCell> {
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async attachDecisionMarket(
+    cellId: string,
+    nodeId: string,
+    data: {
+      sourceType: DecisionNodeSourceType;
+      sourceRef: string;
+    },
+  ): Promise<DecisionCell> {
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}/attach-market`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
+  }
+
+  async attachDecisionAgent(
+    cellId: string,
+    nodeId: string,
+    data: {
+      externalAgentId: string;
+      triggerMode: DecisionTriggerMode;
+      active?: boolean;
+    },
+  ): Promise<DecisionCell> {
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}/attach-agent`,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    );
