@@ -1608,3 +1608,231 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  async withdraw(data: WithdrawRequest): Promise<WithdrawResponse> {
+    return this.request('/wallet/withdraw', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Auth
+  async getNonce(): Promise<string> {
+    return this.getSiweNonce();
+  }
+
+  async getSiweNonce(): Promise<string> {
+    const res = await this.request<{ nonce: string }>('/auth/siwe/nonce', {}, true);
+    return res.nonce;
+  }
+
+  async getSolanaNonce(): Promise<string> {
+    const res = await this.request<{ nonce: string }>('/auth/solana/nonce', {}, true);
+    return res.nonce;
+  }
+
+  async getFarcasterNonce(): Promise<string> {
+    const res = await this.request<{ nonce: string }>('/auth/farcaster/nonce', {}, true);
+    return res.nonce;
+  }
+
+  async login(
+    wallet: string,
+    signature: string,
+    message: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    return this.loginSiwe(wallet, signature, message);
+  }
+
+  async loginSiwe(
+    wallet: string,
+    signature: string,
+    message: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet, signature, message, flow: 'siwe' }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new ApiError(res.status, data.error || 'SIWE login failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async loginSolana(
+    wallet: string,
+    signature: string,
+    message: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet, signature, message, flow: 'solana' }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new ApiError(res.status, data.error || 'Solana login failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async loginFarcaster(
+    message: string,
+    signature: string,
+    nonce: string
+  ): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, signature, nonce, flow: 'farcaster' }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new ApiError(res.status, data.error || 'Farcaster login failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async post<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
+    const res = await fetch(`${PRIMARY_API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, (data as Record<string, string>).error || 'Request failed');
+    }
+
+    return res.json();
+  }
+
+  async refresh(): Promise<{ accessToken: string; expiresAt: number }> {
+    const res = await fetch('/api/auth', { method: 'PUT' });
+
+    if (!res.ok) {
+      this.clearAccessToken();
+      throw new ApiError(res.status, 'Token refresh failed');
+    }
+
+    const data = await res.json();
+    this.setAccessToken(data.accessToken, data.expiresAt);
+    return data;
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+    } finally {
+      this.clearAccessToken();
+    }
+  }
+
+  // Restore session on page load (if refresh token exists)
+  async restoreSession(): Promise<boolean> {
+    const hasToken = await this.checkSession();
+    if (hasToken) {
+      try {
+        await this.refresh();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // Notifications
+  async getNotifications(params?: {
+    limit?: number;
+    offset?: number;
+    unreadOnly?: boolean;
+  }): Promise<PaginatedResponse<Notification>> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/notifications${query}`);
+  }
+
+  async getUnreadCount(): Promise<{ count: number }> {
+    return this.request('/notifications/unread-count');
+  }
+
+  async markAsRead(notificationId: string): Promise<void> {
+    return this.request(`/notifications/${notificationId}/read`, {
+      method: 'PUT',
+    });
+  }
+
+  async markAllAsRead(): Promise<void> {
+    return this.request('/notifications/read-all', {
+      method: 'PUT',
+    });
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    return this.request('/notifications/preferences');
+  }
+
+  async updateNotificationPreferences(
+    prefs: Partial<NotificationPreferences>
+  ): Promise<NotificationPreferences> {
+    return this.request('/notifications/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(prefs),
+    });
+  }
+
+  // Leaderboards
+  async getLeaderboard(
+    period: LeaderboardPeriod = 'weekly',
+    metric: LeaderboardMetric = 'pnl',
+    limit = 100
+  ): Promise<Leaderboard> {
+    return this.request(`/leaderboard?period=${period}&metric=${metric}&limit=${limit}`);
+  }
+
+  async getUserRank(
+    wallet: string,
+    period: LeaderboardPeriod = 'weekly',
+    metric: LeaderboardMetric = 'pnl'
+  ): Promise<{ rank: number; value: number }> {
+    return this.request(`/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`);
+  }
+
+  // Public profiles
+  async getPublicProfile(wallet: string): Promise<PublicProfile> {
+    return this.request(`/profiles/${wallet}`);
+  }
+
+  async getProfileActivity(
+    wallet: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<PaginatedResponse<ProfileActivity>> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/profiles/${wallet}/activity${query}`);
+  }
+
+  async getProfilePositions(wallet: string): Promise<PaginatedResponse<Position>> {
+    return this.request(`/profiles/${wallet}/positions`);
+  }
+}
+
+export const api = new ApiClient();
+
