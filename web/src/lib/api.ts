@@ -1380,3 +1380,231 @@ class ApiClient {
         body: JSON.stringify(data),
       },
     );
+  }
+
+  async recalculateDecisionCell(cellId: string): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/recalculate`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+  }
+
+  async updateDecisionAutomation(
+    cellId: string,
+    data: UpdateDecisionAutomationRequest,
+  ): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/automation`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async upsertDecisionAlert(
+    cellId: string,
+    data: {
+      kind: string;
+      threshold?: Record<string, unknown>;
+      active?: boolean;
+    },
+  ): Promise<DecisionCell> {
+    return this.request(`/decisions/${encodeURIComponent(cellId)}/alerts`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getDecisionEvents(cellId: string): Promise<DecisionCell['events']> {
+    const response = await this.request<DecisionEventsResponse>(
+      `/decisions/${encodeURIComponent(cellId)}/events`,
+    );
+    return response.data;
+  }
+
+  async prepareBaseCreateMarket(data: {
+    from?: string;
+    question: string;
+    description?: string;
+    category?: string;
+    resolutionSource?: string;
+    closeTime: number;
+    resolver: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/markets/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBasePlaceOrder(data: {
+    from?: string;
+    marketId: number;
+    outcome: Outcome;
+    priceBps: number;
+    size: string;
+    expiry: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/orders/place', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseCancelOrder(data: {
+    from?: string;
+    orderId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/orders/cancel', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseClaim(data: {
+    from?: string;
+    marketId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/positions/claim', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseClaimFor(data: {
+    from?: string;
+    user: string;
+    marketId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/positions/claim-for', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseMatchOrders(data: {
+    from?: string;
+    firstOrderId: number;
+    secondOrderId: number;
+    fillSize: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/orders/match', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseCreateAgent(data: {
+    from?: string;
+    marketId: number;
+    isYes: boolean;
+    priceBps: number;
+    size: string;
+    cadence: number;
+    expiryWindow: number;
+    strategy: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/agents/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseExecuteAgent(data: {
+    from?: string;
+    agentId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/agents/execute', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseRegisterIdentity(data: {
+    from?: string;
+    wallet: string;
+    tier: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/identity/register', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSetIdentityTier(data: {
+    from?: string;
+    wallet: string;
+    tier: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/identity/tier', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSetIdentityActive(data: {
+    from?: string;
+    wallet: string;
+    active: boolean;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/identity/active', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSubmitReputationOutcome(data: {
+    from?: string;
+    wallet: string;
+    success: boolean;
+    notionalMicrousdc: string;
+    confidenceWeightBps: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/reputation/outcome', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseValidationRequest(data: {
+    from?: string;
+    validator: string;
+    agentId: string;
+    requestUri: string;
+    requestHash?: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/validation/request', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseValidationResponse(data: {
+    from?: string;
+    requestHash: string;
+    response: number;
+    responseUri: string;
+    responseHash: string;
+    tag: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/validation/response', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async relayBaseRawTransaction(rawTx: string): Promise<RelayRawTxResponse> {
+    return this.request('/evm/write/relay', {
+      method: 'POST',
+      body: JSON.stringify({ rawTx }),
+    });
+  }
+
+  async getDepositAddress(): Promise<DepositAddress> {
+    return this.request('/wallet/deposit/address');
+  }
+
+  async deposit(data: DepositRequest): Promise<DepositResponse> {
+    return this.request('/wallet/deposit', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
