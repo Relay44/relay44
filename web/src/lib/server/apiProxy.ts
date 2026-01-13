@@ -91,4 +91,3 @@ export async function proxyApiRequest(request: NextRequest, path: string) {
     headers: responseHeaders,
   });
 }
-
