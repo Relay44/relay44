@@ -131,3 +131,61 @@ export const ORDER_BOOK_ABI = [
       { name: 'marketId', type: 'uint256' },
       { name: 'isYes', type: 'bool' },
       { name: 'priceBps', type: 'uint128' },
+      { name: 'size', type: 'uint128' },
+      { name: 'remaining', type: 'uint128' },
+      { name: 'expiry', type: 'uint64' },
+      { name: 'canceled', type: 'bool' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'positions',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'marketId', type: 'uint256' },
+      { name: 'user', type: 'address' },
+    ],
+    outputs: [
+      { name: 'yesShares', type: 'uint128' },
+      { name: 'noShares', type: 'uint128' },
+      { name: 'claimed', type: 'bool' },
+    ],
+  },
+] as const;
+
+export const ORDER_PLACED_EVENT_ABI = [
+  {
+    type: 'event',
+    name: 'OrderPlaced',
+    inputs: [
+      { indexed: true, name: 'orderId', type: 'uint256' },
+      { indexed: true, name: 'maker', type: 'address' },
+      { indexed: true, name: 'marketId', type: 'uint256' },
+      { indexed: false, name: 'isYes', type: 'bool' },
+      { indexed: false, name: 'priceBps', type: 'uint128' },
+      { indexed: false, name: 'size', type: 'uint128' },
+      { indexed: false, name: 'expiry', type: 'uint64' },
+    ],
+  },
+] as const;
+
+export const MARKET_CREATED_EVENT_ABI = [
+  {
+    type: 'event',
+    name: 'MarketCreated',
+    inputs: [
+      { indexed: true, name: 'marketId', type: 'uint256' },
+      { indexed: true, name: 'questionHash', type: 'bytes32' },
+      { indexed: false, name: 'closeTime', type: 'uint64' },
+      { indexed: false, name: 'resolver', type: 'address' },
+    ],
+  },
+] as const;
+
+export function assertContractAddress(address: string, envName: string): `0x${string}` {
+  if (!address || !isAddress(address)) {
+    throw new Error(`${envName} is not configured as a valid Base address`);
+  }
+  return address as `0x${string}`;
+}
+
