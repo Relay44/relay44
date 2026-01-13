@@ -294,3 +294,99 @@ export async function readBaseMarkets(searchParams: URLSearchParams) {
       offset,
       source: 'market_core',
     };
+  }
+
+  const end = Math.min(total, offset + limit);
+  const markets = [];
+
+  for (let index = offset + 1; index <= end; index += 1) {
+    const tuple = (await client.readContract({
+      address: config.marketCore,
+      abi: MARKET_CORE_ABI,
+      functionName: 'markets',
+      args: [BigInt(index)],
+    })) as BaseMarketTuple;
+
+    const [questionHash, closeTime, resolveTime, resolver, resolved, outcome] = tuple;
+    markets.push({
+      id: String(index),
+      question_hash: questionHash,
+      resolver: resolver.toLowerCase(),
+      close_time: asNumber(closeTime),
+      resolve_time: asNumber(resolveTime),
+      resolved,
+      outcome: resolved ? (outcome ? 'yes' : 'no') : null,
+      status: formatMarketStatus(closeTime, resolved),
+    });
+  }
+
+  return {
+    markets,
+    total,
+    limit,
+    offset,
+    source: 'market_core',
+  };
+}
+
+export async function readBaseOrderbook(marketIdRaw: string, searchParams: URLSearchParams) {
+  const marketId = parseMarketId(marketIdRaw);
+  const outcome = parseOutcome(searchParams.get('outcome')) as 'yes' | 'no';
+  const depth = Math.min(parseIntegerQuery(searchParams.get('depth'), 20), MAX_ORDERBOOK_DEPTH);
+
+  const config = getBaseConfig();
+  const client = buildClient(config);
+
+  const totalOrders = (await client.readContract({
+    address: config.orderBook,
+    abi: ORDER_BOOK_ABI,
+    functionName: 'orderCount',
+  })) as bigint;
+
+  if (totalOrders === BigInt(0)) {
+    return {
+      market_id: marketIdRaw,
+      outcome,
+      bids: [],
+      asks: [],
+      last_updated: new Date().toISOString(),
+      source: 'order_book_contract',
+    };
+  }
+
+  const startOrderId =
+    totalOrders > ORDERBOOK_SCAN_WINDOW
+      ? totalOrders - ORDERBOOK_SCAN_WINDOW + BigInt(1)
+      : BigInt(1);
+  const now = nowUnix();
+  const outcomeIsYes = outcome === 'yes';
+
+  const bids = new Map<number, { quantity: number; orders: number }>();
+  const asks = new Map<number, { quantity: number; orders: number }>();
+
+  let orderId = totalOrders;
+  while (orderId >= startOrderId) {
+    const order = await fetchOrder(client, config.orderBook, orderId);
+
+    if (
+      order &&
+      order.marketId === marketId &&
+      !order.canceled &&
+      order.remaining > 0 &&
+      order.expiry >= now &&
+      order.priceBps > 0 &&
+      order.priceBps < PRICE_SCALE
+    ) {
+      if (order.isYes === outcomeIsYes) {
+        const level = bids.get(order.priceBps) ?? { quantity: 0, orders: 0 };
+        level.quantity += order.remaining;
+        level.orders += 1;
+        bids.set(order.priceBps, level);
+      } else {
+        const askPrice = PRICE_SCALE - order.priceBps;
+        if (askPrice > 0 && askPrice < PRICE_SCALE) {
+          const level = asks.get(askPrice) ?? { quantity: 0, orders: 0 };
+          level.quantity += order.remaining;
+          level.orders += 1;
+          asks.set(askPrice, level);
+        }
