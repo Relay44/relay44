@@ -390,3 +390,92 @@ export async function readBaseOrderbook(marketIdRaw: string, searchParams: URLSe
           level.orders += 1;
           asks.set(askPrice, level);
         }
+      }
+    }
+
+    if (orderId === BigInt(1)) {
+      break;
+    }
+    orderId -= BigInt(1);
+  }
+
+  const bidLevels = Array.from(bids.entries())
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, depth)
+    .map(([priceBps, level]) => ({
+      price: priceBps / PRICE_SCALE,
+      quantity: level.quantity,
+      orders: level.orders,
+    }));
+
+  const askLevels = Array.from(asks.entries())
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, depth)
+    .map(([priceBps, level]) => ({
+      price: priceBps / PRICE_SCALE,
+      quantity: level.quantity,
+      orders: level.orders,
+    }));
+
+  return {
+    market_id: marketIdRaw,
+    outcome,
+    bids: bidLevels,
+    asks: askLevels,
+    last_updated: new Date().toISOString(),
+    source: 'order_book_contract',
+  };
+}
+
+export async function readBaseTrades(marketIdRaw: string, searchParams: URLSearchParams) {
+  const marketId = parseMarketId(marketIdRaw);
+  const outcomeFilter = parseOutcome(searchParams.get('outcome'), true);
+  const limit = Math.min(parseIntegerQuery(searchParams.get('limit'), 50), MAX_TRADES_PAGE_SIZE);
+  const offset = parseIntegerQuery(searchParams.get('offset'), 0);
+
+  const config = getBaseConfig();
+  const client = buildClient(config);
+
+  const latestBlock = await client.getBlockNumber();
+  const fromBlock =
+    latestBlock > TRADES_BLOCK_SCAN_WINDOW ? latestBlock - TRADES_BLOCK_SCAN_WINDOW : BigInt(0);
+
+  const logs = await client.getLogs({
+    address: config.orderBook,
+    event: ORDER_FILLED_EVENT_ABI[0],
+    fromBlock,
+    toBlock: latestBlock,
+    strict: false,
+  });
+
+  const blockTimestampCache = new Map<string, bigint>();
+  const orderCache = new Map<string, OrderSnapshot | null>();
+  const trades: TradeSnapshot[] = [];
+
+  for (const log of logs) {
+    const orderIdBigInt = log.args.orderId;
+    const fillSizeBigInt = log.args.fillSize;
+
+    if (orderIdBigInt === undefined || fillSizeBigInt === undefined) {
+      continue;
+    }
+
+    const fillSize = asNumber(fillSizeBigInt);
+    if (fillSize <= 0) {
+      continue;
+    }
+
+    const orderKey = orderIdBigInt.toString();
+    let order = orderCache.get(orderKey);
+    if (order === undefined) {
+      order = await fetchOrder(client, config.orderBook, orderIdBigInt);
+      orderCache.set(orderKey, order);
+    }
+    if (!order || order.marketId !== marketId || order.priceBps <= 0 || order.priceBps >= PRICE_SCALE) {
+      continue;
+    }
+
+    const outcome = order.isYes ? 'yes' : 'no';
+    if (outcomeFilter && outcome !== outcomeFilter) {
+      continue;
+    }
