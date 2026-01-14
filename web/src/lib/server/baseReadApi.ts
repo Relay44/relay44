@@ -479,3 +479,99 @@ export async function readBaseTrades(marketIdRaw: string, searchParams: URLSearc
     if (outcomeFilter && outcome !== outcomeFilter) {
       continue;
     }
+
+    const blockNumber = log.blockNumber ?? BigInt(0);
+    const blockKey = blockNumber.toString();
+    let timestamp = blockTimestampCache.get(blockKey);
+    if (timestamp === undefined) {
+      const block = await client.getBlock({ blockNumber });
+      timestamp = block.timestamp;
+      blockTimestampCache.set(blockKey, timestamp);
+    }
+
+    const txHash = log.transactionHash ?? '';
+    const logIndex = Number(log.logIndex ?? BigInt(0));
+    const id = txHash ? `base-${txHash}-${logIndex}` : `base-${orderKey}-${logIndex}`;
+
+    trades.push({
+      id,
+      market_id: marketIdRaw,
+      outcome,
+      price: order.priceBps / PRICE_SCALE,
+      price_bps: order.priceBps,
+      quantity: fillSize,
+      tx_hash: txHash,
+      block_number: Number(blockNumber),
+      created_at: toIso(timestamp),
+    });
+  }
+
+  trades.sort((a, b) => {
+    if (b.block_number !== a.block_number) return b.block_number - a.block_number;
+
+    const aLog = Number(a.id.split('-').at(-1) ?? '0');
+    const bLog = Number(b.id.split('-').at(-1) ?? '0');
+    return bLog - aLog;
+  });
+
+  const total = trades.length;
+  const page = offset >= total ? [] : trades.slice(offset, offset + limit);
+
+  return {
+    trades: page,
+    total,
+    limit,
+    offset,
+    has_more: offset + limit < total,
+    source: 'order_book_contract',
+  };
+}
+
+export async function readBaseTokenState() {
+  const chainId = parseChainId();
+  const rpcUrl = resolveRpcUrl(chainId);
+  const tokenAddressRaw =
+    process.env.NEXT_PUBLIC_R44_TOKEN_ADDRESS ||
+    process.env.R44_TOKEN_ADDRESS ||
+    process.env.NEXT_PUBLIC_COLLATERAL_TOKEN_ADDRESS ||
+    '';
+
+  const tokenAddress = parseAddress('R44_TOKEN_ADDRESS', tokenAddressRaw);
+  const client = createPublicClient({
+    chain: chainId === 8453 ? base : baseSepolia,
+    transport: http(rpcUrl, { timeout: 15_000 }),
+  });
+
+  const totalSupply = (await client.readContract({
+    address: tokenAddress,
+    abi: ERC20_STATE_ABI,
+    functionName: 'totalSupply',
+  })) as bigint;
+  const decimals = (await client.readContract({
+    address: tokenAddress,
+    abi: ERC20_STATE_ABI,
+    functionName: 'decimals',
+  })) as number;
+
+  return {
+    chain_id: chainId,
+    token_address: tokenAddress.toLowerCase(),
+    total_supply_hex: `0x${totalSupply.toString(16)}`,
+    decimals,
+  };
+}
+
+export function toApiErrorPayload(error: unknown) {
+  if (error instanceof BaseApiError) {
+    return {
+      status: error.status,
+      payload: { code: error.code, error: error.message },
+    };
+  }
+
+  return {
+    status: 500,
+    payload: { code: 'INTERNAL_ERROR', error: error instanceof Error ? error.message : 'Internal error' },
+  };
+}
+
