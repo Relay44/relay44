@@ -538,3 +538,105 @@ function cleanHeadline(title: string, source: string): string {
   }
   return clean;
 }
+
+function parseFeedStories(xml: string, feed: RssFeedConfig): FeedStory[] {
+  const items = [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)];
+
+  return items
+    .map((match) => {
+      const item = match[1];
+      const title = cleanHeadline(extractTag(item, 'title'), feed.source);
+      const description = cleanXmlText(
+        extractTag(item, 'description') || extractTag(item, 'content:encoded')
+      );
+      const link = cleanXmlText(extractTag(item, 'link'));
+      const publishedAt = parsePublishedAt(cleanXmlText(extractTag(item, 'pubDate')));
+
+      if (!title || !link) {
+        return null;
+      }
+
+      return {
+        title,
+        description,
+        link,
+        source: feed.source,
+        section: feed.section,
+        publishedAt,
+        weight: feed.weight,
+      };
+    })
+    .filter((story): story is FeedStory => Boolean(story));
+}
+
+async function fetchFeedStories(feed: RssFeedConfig): Promise<FeedStory[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(feed.url, {
+      headers: {
+        Accept: 'application/rss+xml, application/xml, text/xml;q=0.9',
+        'User-Agent': 'relay44-web/1.0',
+      },
+      signal: controller.signal,
+      next: { revalidate: 900 },
+      cache: 'force-cache',
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const xml = await response.text();
+    return parseFeedStories(xml, feed);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function scoreStory(story: FeedStory): number {
+  const text = `${story.title} ${story.description}`.toLowerCase();
+  const ageHours = story.publishedAt
+    ? Math.max(0, (Date.now() - story.publishedAt.getTime()) / 3_600_000)
+    : 24;
+
+  let score = story.weight * 10;
+  score += Math.max(0, 48 - ageHours) * 1.4;
+  score += Math.min(story.title.length / 18, 6);
+  score += Math.min(story.description.length / 45, 5);
+
+  for (const [pattern, weight] of IMPACT_PATTERNS) {
+    if (pattern.test(text)) {
+      score += weight;
+    }
+  }
+
+  if (/live updates?/i.test(story.title)) {
+    score += 6;
+  }
+
+  return score;
+}
+
+function buildNewsSlide(story: FeedStory): NewsSlide {
+  const headline = trimSentence(story.title, 108);
+  const description = story.description || `${story.source} moved this story into the live desk.`;
+  const body = description.replace(/\s+/g, ' ').trim();
+  const relativeTime = formatRelativeTime(story.publishedAt);
+
+  return {
+    id: normalizeTitle(headline).slice(0, 64).replace(/\s+/g, '-'),
+    kicker: `${story.source.toUpperCase()} // ${story.section.toUpperCase()}`,
+    headline,
+    body,
+    lines: [
+      trimSentence(body, 120),
+      `${story.source} ${story.section.toLowerCase()} desk pushed this ${relativeTime}.`,
+      'Outcome angle: price whether this narrative intensifies, resolves, or fades over the next 7 days.',
+    ],
+    sourceUrl: story.link,
+    marketDrafts: buildMarketDrafts(story, headline),
+  };
