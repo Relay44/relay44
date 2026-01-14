@@ -359,3 +359,102 @@ function decodeHtmlEntities(value: string): string {
     )
     .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (match) => entityMap[match] || match);
 }
+
+function stripTags(value: string): string {
+  return value.replace(/<[^>]*>/g, ' ');
+}
+
+function sanitizeCopy(value: string): string {
+  return value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2022\u2028\u2029]/g, ' ')
+    .replace(/\u00a0/g, ' ');
+}
+
+function cleanXmlText(value: string): string {
+  return sanitizeCopy(stripTags(decodeHtmlEntities(value))).replace(/\s+/g, ' ').trim();
+}
+
+function extractTag(itemXml: string, tagName: string): string {
+  const escaped = tagName.replace(':', '\\:');
+  const match = itemXml.match(new RegExp(`<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)</${escaped}>`, 'i'));
+  return match?.[1] ?? '';
+}
+
+function parsePublishedAt(value: string): Date | null {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatRelativeTime(value: Date | null): string {
+  if (!value) {
+    return 'just now';
+  }
+
+  const diffMs = Date.now() - value.getTime();
+  const diffMinutes = Math.max(1, Math.round(diffMs / 60_000));
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 48) {
+    return `${diffHours}h ago`;
+  }
+
+  return `${Math.round(diffHours / 24)}d ago`;
+}
+
+function isMarketSafeStory(story: FeedStory): boolean {
+  const text = `${story.title} ${story.description}`.toLowerCase();
+  return !SENSITIVE_TRAGEDY_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function inferCategory(story: FeedStory): string {
+  const text = `${story.title} ${story.description} ${story.section}`.toLowerCase();
+
+  if (story.section === 'Technology' || /\b(ai|openai|chip|chips|model|software|tech)\b/.test(text)) {
+    return 'tech';
+  }
+
+  if (story.section === 'Business' || /\b(oil|gas|energy|rates?|market|stocks?|economy|inflation|bank)\b/.test(text)) {
+    return 'finance';
+  }
+
+  if (/\b(war|strike|ceasefire|election|policy|court|government|president|minister|iran|ukraine|israel|china|russia)\b/.test(text)) {
+    return 'politics';
+  }
+
+  return 'other';
+}
+
+function buildDraftDeadline(publishedAt: Date | null): Date {
+  const base = publishedAt ? new Date(publishedAt) : new Date();
+  const deadline = new Date(base);
+  deadline.setUTCDate(deadline.getUTCDate() + 7);
+  deadline.setUTCHours(23, 59, 0, 0);
+  return deadline;
+}
+
+function formatQuestionDate(value: Date): string {
+  return value.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function formatLongDeadline(value: Date): string {
+  return value.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  }) + ' UTC';
+}
