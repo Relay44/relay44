@@ -458,3 +458,83 @@ function formatLongDeadline(value: Date): string {
     timeZone: 'UTC',
   }) + ' UTC';
 }
+
+function draftHeadlineTopic(value: string): string {
+  return trimSentence(value.replace(/["]+/g, ''), 72);
+}
+
+function buildDraftQuestion(prefix: string, headline: string, deadline: Date): string {
+  const topic = draftHeadlineTopic(headline);
+  return trimSentence(`${prefix} "${topic}" by ${formatQuestionDate(deadline)}?`, 180);
+}
+
+function buildMarketDrafts(story: FeedStory, headline: string): MarketDraftOption[] {
+  const deadline = buildDraftDeadline(story.publishedAt);
+  const deadlineLabel = formatLongDeadline(deadline);
+  const category = inferCategory(story);
+  const sourceLabel = `${story.source} ${story.section.toLowerCase()} feed`;
+  const drafts: MarketDraftOption[] = [
+    {
+      id: 'official-confirmation',
+      label: 'Official confirmation',
+      summary: 'An official source confirms the core claim behind the story.',
+      question: buildDraftQuestion(
+        'Will an official source materially confirm the core claim behind',
+        headline,
+        deadline
+      ),
+      description:
+        `AI-drafted from live news. Resolve YES if a government, company, court, or institutional source materially confirms the core claim behind "${headline}" by ${deadlineLabel}. ` +
+        `Resolve NO otherwise. Primary resolution source: official statements, filings, or institutional releases. Seed source: ${story.link}`,
+      resolutionSource: 'official',
+      tradingEnd: deadline.toISOString(),
+      category,
+    },
+    {
+      id: 'major-outlet-follow-up',
+      label: 'Major outlet follow-up',
+      summary: 'A top-tier outlet advances the story with substantive new reporting.',
+      question: buildDraftQuestion(
+        'Will Reuters, BBC, AP, or NYT publish a substantive follow-up on',
+        headline,
+        deadline
+      ),
+      description:
+        `AI-drafted from live news. Resolve YES if Reuters, BBC, AP, or The New York Times publishes a new follow-up article that materially advances this story by ${deadlineLabel}. ` +
+        `Resolve NO otherwise. Primary resolution source: named outlet coverage and archived article URLs. Seed source: ${story.link}`,
+      resolutionSource: 'news',
+      tradingEnd: deadline.toISOString(),
+      category,
+    },
+    {
+      id: 'official-reversal',
+      label: 'Official reversal',
+      summary: 'An official source denies, reverses, or materially contradicts the claim.',
+      question: buildDraftQuestion(
+        'Will an official source materially deny or reverse the core claim behind',
+        headline,
+        deadline
+      ),
+      description:
+        `AI-drafted from live news. Resolve YES if an official source materially denies, reverses, or contradicts the core claim behind "${headline}" by ${deadlineLabel}. ` +
+        `Resolve NO otherwise. Primary resolution source: official statements, filings, or institutional releases. Seed source: ${story.link}`,
+      resolutionSource: 'official',
+      tradingEnd: deadline.toISOString(),
+      category,
+    },
+  ];
+
+  return drafts.map((draft) => ({
+    ...draft,
+    description: `${draft.description} Draft context: ${sourceLabel}.`,
+  }));
+}
+
+function cleanHeadline(title: string, source: string): string {
+  const clean = cleanXmlText(title);
+  const sourceSuffix = ` - ${source}`;
+  if (clean.endsWith(sourceSuffix)) {
+    return clean.slice(0, -sourceSuffix.length).trim();
+  }
+  return clean;
+}
