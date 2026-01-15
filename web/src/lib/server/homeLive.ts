@@ -640,3 +640,80 @@ function buildNewsSlide(story: FeedStory): NewsSlide {
     sourceUrl: story.link,
     marketDrafts: buildMarketDrafts(story, headline),
   };
+}
+
+function buildFallbackSlide(id: string, headline: string, note: string): NewsSlide {
+  const fallbackStory: FeedStory = {
+    title: headline,
+    description: note,
+    link: '#',
+    source: 'Desk',
+    section: 'Fallback',
+    publishedAt: null,
+    weight: 0,
+  };
+
+  return {
+    id,
+    kicker: 'WORLD DESK // FALLBACK',
+    headline,
+    body:
+      `${note} The desk keeps fallback copy live so the homepage still carries a usable narrative layer while upstream feeds recover.`,
+    lines: [
+      note,
+      'The desk keeps a stable fallback so the homepage never collapses into empty chrome.',
+      'Outcome angle: turn the prevailing narrative into a concrete market question.',
+    ],
+    sourceUrl: '#',
+    marketDrafts: buildMarketDrafts(fallbackStory, headline),
+  };
+}
+
+async function fetchWorldDeskNews(): Promise<NewsSlide[]> {
+  if (newsCache && newsCache.expiresAt > Date.now()) {
+    return newsCache.value;
+  }
+
+  const results = await Promise.allSettled(RSS_FEEDS.map((feed) => fetchFeedStories(feed)));
+  const stories = results.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+  const seen = new Set<string>();
+  const rankedSlides = stories
+    .filter((story) => isMarketSafeStory(story))
+    .sort((left, right) => scoreStory(right) - scoreStory(left))
+    .filter((story) => {
+      const key = normalizeTitle(story.title);
+      if (!key || seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 6)
+    .map((story) => buildNewsSlide(story));
+
+  const value =
+    rankedSlides.length === 6
+      ? rankedSlides
+      : [...rankedSlides, ...NEWS_FALLBACKS].slice(0, 6);
+
+  newsCache = {
+    value,
+    expiresAt: Date.now() + NEWS_CACHE_TTL_MS,
+  };
+
+  return value;
+}
+
+export async function getHomeLiveFeed(): Promise<HomeLiveFeed> {
+  const [news, signal] = await Promise.all([
+    fetchWorldDeskNews(),
+    fetchSignalSnapshot(),
+  ]);
+
+  return {
+    news,
+    signal,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
