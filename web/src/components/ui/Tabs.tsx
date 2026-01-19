@@ -77,3 +77,25 @@ const SimpleTabs = ({ tabs, value, onChange, className, disabled }: TabsProps) =
     </TabsList>
   </Tabs>
 );
+
+export interface TabPanelProps {
+  value: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+const TabPanel = ({ value, children, className }: TabPanelProps) => (
+  <TabsContent value={value} className={className}>
+    {children}
+  </TabsContent>
+);
+
+export {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  SimpleTabs,
+  TabPanel,
+}
+
