@@ -182,3 +182,78 @@ contract ERC8004ValidationRegistry is AccessControl, Pausable {
     function getValidatorRequests(address validatorAddress) external view returns (bytes32[] memory requestHashes) {
         return _validatorRequests[validatorAddress];
     }
+
+    function tierToResponse(uint8 tier) public pure returns (uint8) {
+        if (tier >= 4) return 95;
+        if (tier == 3) return 80;
+        if (tier == 2) return 60;
+        if (tier == 1) return 40;
+        return 20;
+    }
+
+    function responseToTier(uint8 response) public pure returns (uint8) {
+        if (response >= 90) return 4;
+        if (response >= 75) return 3;
+        if (response >= 50) return 2;
+        if (response >= 25) return 1;
+        return 0;
+    }
+
+    function addValidator(address validator) external onlyRole(VALIDATOR_MANAGER_ROLE) {
+        if (validator == address(0)) revert ZeroAddress();
+        if (!isValidator[validator]) {
+            isValidator[validator] = true;
+            _validators.push(validator);
+            emit ValidatorAdded(validator);
+        }
+    }
+
+    function removeValidator(address validator) external onlyRole(VALIDATOR_MANAGER_ROLE) {
+        if (isValidator[validator]) {
+            isValidator[validator] = false;
+            emit ValidatorRemoved(validator);
+        }
+    }
+
+    function getValidators() external view returns (address[] memory) {
+        return _validators;
+    }
+
+    function getActiveValidatorCount() external view returns (uint256 count) {
+        for (uint256 i = 0; i < _validators.length; i++) {
+            if (isValidator[_validators[i]]) {
+                count++;
+            }
+        }
+    }
+
+    function setIdentityRegistry(address identityRegistryAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (identityRegistryAddress == address(0)) revert ZeroAddress();
+        identityRegistry = IERC8004IdentityValidationRead(identityRegistryAddress);
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+
+    function _agentExists(uint256 agentId) internal view returns (bool) {
+        try identityRegistry.ownerOfIdentity(agentId) returns (address owner) {
+            return owner != address(0);
+        } catch {
+            return false;
+        }
+    }
+
+    function _isListedValidator(address validator, address[] calldata validatorAddresses) internal pure returns (bool) {
+        for (uint256 i = 0; i < validatorAddresses.length; i++) {
+            if (validatorAddresses[i] == validator) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
