@@ -62,3 +62,23 @@ function PositionCardSkeleton() {
       </div>
     </div>
   );
+}
+
+function StatCardSkeleton() {
+  return (
+    <div className="bg-bg-primary border border-[var(--color-border)]  p-4">
+      <Skeleton className="h-4 w-20 mb-2" />
+      <Skeleton className="h-8 w-28" />
+    </div>
+  );
+}
+
+export {
+  Skeleton,
+  MarketCardSkeleton,
+  MarketListSkeleton,
+  OrderBookSkeleton,
+  PositionCardSkeleton,
+  StatCardSkeleton,
+}
+
