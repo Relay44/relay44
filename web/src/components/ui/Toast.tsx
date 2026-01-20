@@ -71,3 +71,32 @@ interface ToastItemProps {
   toast: Toast;
   onClose: () => void;
 }
+
+function ToastItem({ toast, onClose }: ToastItemProps) {
+  const bgColor = {
+    success: 'bg-accent',
+    error: 'bg-bg-tertiary',
+    info: 'bg-accent',
+  }[toast.type];
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-3 px-4 py-3  text-white shadow-lg animate-slide-in',
+        bgColor
+      )}
+    >
+      <span className="flex-1">{toast.message}</span>
+      <button
+        onClick={onClose}
+        className="p-1 hover:opacity-70 transition-opacity"
+        aria-label="Close"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
