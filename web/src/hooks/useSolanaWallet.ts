@@ -85,3 +85,35 @@ export function useSolanaWallet() {
     if (!provider) {
       return;
     }
+    await provider.disconnect();
+    setAddress(undefined);
+    setIsConnected(false);
+  }, [provider]);
+
+  const signMessage = useCallback(async (message: string) => {
+    if (!provider) {
+      throw new Error('No Solana wallet provider available');
+    }
+
+    const encoded = new TextEncoder().encode(message);
+    const signed = await provider.signMessage(encoded, 'utf8');
+    return toBase64(signed.signature);
+  }, [provider]);
+
+  const walletType = useMemo(() => {
+    if (!provider) return 'none';
+    if (provider.isPhantom) return 'phantom';
+    return 'solana';
+  }, [provider]);
+
+  return {
+    enabled: !!provider,
+    walletType,
+    address,
+    isConnected,
+    isConnecting,
+    connect,
+    disconnect,
+    signMessage,
+  };
+}
