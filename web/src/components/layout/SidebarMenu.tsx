@@ -175,3 +175,80 @@ export function SidebarMenu() {
               })}
             </div>
 
+            <div className="mt-6 border-t border-border pt-6">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                external
+              </p>
+              <div className="mt-3 space-y-2">
+                {externalLinks.map(({ href, label, note, icon: Icon }) => (
+                  <a
+                    key={href}
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block border border-border px-4 py-3 text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <span className="inline-flex items-center gap-3 text-sm font-medium uppercase tracking-[0.12em]">
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </span>
+                      <SquareArrowOutUpRight className="h-4 w-4 opacity-40" />
+                    </div>
+                    <p className="mt-2 text-xs uppercase tracking-[0.14em] text-text-muted">
+                      {note}
+                    </p>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </nav>
+
+          <div className="border-t border-border px-5 py-5">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((current) => !current)}
+              className="flex w-full items-center justify-between border border-border px-4 py-3 text-left text-sm font-medium uppercase tracking-[0.14em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              aria-expanded={settingsOpen}
+            >
+              <span className="inline-flex items-center gap-2">
+                <Settings2 className="h-4 w-4" />
+                Settings
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 transition-transform",
+                  settingsOpen && "rotate-180",
+                )}
+              />
+            </button>
+
+            <div
+              className={cn(
+                "overflow-hidden transition-[max-height,opacity,margin] duration-normal",
+                settingsOpen
+                  ? "mt-3 max-h-40 opacity-100"
+                  : "max-h-0 opacity-0",
+              )}
+            >
+              <div className="border border-border bg-bg-secondary px-4 py-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
+                      Appearance
+                    </p>
+                    <p className="mt-1 text-sm text-text-primary">
+                      Night / day switch
+                    </p>
+                  </div>
+                  <ThemeToggle iconless className="bg-transparent" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </>
+  );
+}
+
