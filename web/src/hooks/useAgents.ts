@@ -141,3 +141,64 @@ export function useExecuteAgent() {
   });
 }
 
+export function useExternalAgents(filters?: {
+  provider?: 'limitless' | 'polymarket';
+  active?: boolean;
+  limit?: number;
+  offset?: number;
+  enabled?: boolean;
+}) {
+  const enabled = filters?.enabled ?? true;
+  const requestFilters = {
+    provider: filters?.provider,
+    active: filters?.active,
+    limit: filters?.limit,
+    offset: filters?.offset,
+  };
+
+  return useQuery({
+    queryKey: ['external-agents', requestFilters, enabled],
+    enabled,
+    queryFn: async () => {
+      const response = await api.listExternalAgents(requestFilters);
+      return {
+        data: response.agents,
+        total: response.total,
+        limit: response.limit,
+        offset: response.offset,
+        hasMore: response.offset + response.limit < response.total,
+      };
+    },
+    refetchInterval: 10000,
+  });
+}
+
+export function useCreateExternalAgent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: Parameters<typeof api.createExternalAgent>[0]) => {
+      assertWritesEnabled('External agent launch');
+      return api.createExternalAgent(data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['external-agents'] });
+    },
+  });
+}
+
+export function useExecuteExternalAgent() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: { agentId: string; force?: boolean }) => {
+      assertWritesEnabled('External agent execution');
+      return api.executeExternalAgent(params.agentId, { force: params.force ?? false });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['external-agents'] });
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+    },
+  });
+}
+
