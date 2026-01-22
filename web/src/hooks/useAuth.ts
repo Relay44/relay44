@@ -98,3 +98,43 @@ export function useAuth() {
       } else {
         throw new Error('Connect a wallet before logging in');
       }
+
+      setIsAuthenticated(true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Authentication failed';
+      setError(msg);
+      console.error('Login error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activeFlow, baseWallet, signMessageAsync, solanaWallet]);
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Ignore logout errors
+    }
+
+    setIsAuthenticated(false);
+    baseWallet.disconnect();
+    if (solanaWallet.isConnected) {
+      solanaWallet.disconnect().catch(() => {
+      });
+    }
+  }, [baseWallet, solanaWallet]);
+
+  return {
+    isAuthenticated,
+    isLoading,
+    error,
+    login,
+    logout,
+    walletConnected,
+    walletAddress,
+    activeFlow,
+    baseWalletConnected: baseWallet.isConnected,
+    solanaWalletConnected: solanaWallet.isConnected,
+  };
+}
+
