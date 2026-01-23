@@ -97,3 +97,45 @@ export function useAttachDecisionMarket(cellId: string, nodeId: string) {
     onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
   });
 }
+
+export function useAttachDecisionAgent(cellId: string, nodeId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      externalAgentId: string;
+      triggerMode: 'on_recommendation_gain' | 'on_threshold_cross' | 'on_confidence_gain';
+      active?: boolean;
+    }) => api.attachDecisionAgent(cellId, nodeId, data),
+    onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
+  });
+}
+
+export function useRecalculateDecisionCell(cellId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => api.recalculateDecisionCell(cellId),
+    onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
+  });
+}
+
+export function useUpdateDecisionAutomation(cellId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: UpdateDecisionAutomationRequest) =>
+      api.updateDecisionAutomation(cellId, data),
+    onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
+  });
+}
+
+export function useUpsertDecisionAlert(cellId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      kind: string;
+      threshold?: Record<string, unknown>;
+      active?: boolean;
+    }) => api.upsertDecisionAlert(cellId, data),
+    onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
+  });
+}
+
