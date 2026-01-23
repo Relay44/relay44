@@ -1,0 +1,271 @@
+//! Dispute Resolution State
+//!
+//! Multi-oracle dispute resolution for market outcomes.
+//! Based on quality-based arbitration with stake-backed accountability.
+
+use anchor_lang::prelude::*;
+
+/// Dispute bond required to file a dispute (0.1 SOL)
+pub const DISPUTE_BOND: u64 = 100_000_000;
+
+/// Minimum oracles required for consensus
+pub const MIN_CONSENSUS_ORACLES: u8 = 3;
+
+/// Maximum oracles that can vote on a dispute
+pub const MAX_DISPUTE_ORACLES: usize = 7;
+
+/// Reveal delay after first oracle submission (5 minutes)
+pub const ORACLE_REVEAL_DELAY: i64 = 300;
+
+/// Dispute window after resolution (7 days)
+pub const DISPUTE_WINDOW: i64 = 7 * 24 * 60 * 60;
+
+/// Maximum score deviation for consensus (15 points)
+pub const MAX_SCORE_DEVIATION: u8 = 15;
+
+/// Oracle reward percentage of dispute bond (split among oracles)
+pub const ORACLE_REWARD_PERCENT: u8 = 50;
+
+/// A dispute against a market resolution
+#[account]
+#[derive(InitSpace)]
+pub struct Dispute {
+    /// Market being disputed
+    pub market: Pubkey,
+
+    /// Who filed the dispute
+    pub disputer: Pubkey,
+
+    /// Original oracle that resolved the market
+    pub original_oracle: Pubkey,
+
+    /// Original resolved outcome (1 = Yes, 2 = No)
+    pub original_outcome: u8,
+
+    /// Dispute status
+    pub status: DisputeStatus,
+
+    /// Bond amount locked
+    pub bond_amount: u64,
+
+    /// Dispute reason/evidence hash
+    #[max_len(64)]
+    pub reason_hash: String,
+
+    /// Oracle submissions for this dispute
+    #[max_len(7)]
+    pub oracle_submissions: Vec<DisputeOracleSubmission>,
+
+    /// Final consensus outcome (if resolved)
+    pub consensus_outcome: Option<u8>,
+
+    /// Final consensus score
+    pub consensus_score: Option<u8>,
+
+    /// Created timestamp
+    pub created_at: i64,
+
+    /// First oracle submission timestamp (for reveal delay)
+    pub first_submission_at: Option<i64>,
+
+    /// Resolution timestamp
+    pub resolved_at: Option<i64>,
+
+    /// Bump seed
+    pub bump: u8,
+}
+
+impl Dispute {
+    pub const SEED_PREFIX: &'static [u8] = b"dispute";
+
+    /// Check if enough oracles have submitted
+    pub fn has_minimum_consensus(&self) -> bool {
+        self.oracle_submissions.len() >= MIN_CONSENSUS_ORACLES as usize
+    }
+
+    /// Check if reveal delay has passed
+    pub fn reveal_delay_passed(&self, current_time: i64) -> bool {
+        match self.first_submission_at {
+            Some(first) => current_time >= first + ORACLE_REVEAL_DELAY,
+            None => false,
+        }
+    }
+}
+
+/// Oracle submission for a dispute
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, InitSpace)]
+pub struct DisputeOracleSubmission {
+    /// Oracle that submitted
+    pub oracle: Pubkey,
+
+    /// Outcome vote (1 = Yes, 2 = No, 3 = Invalid/Cancel)
+    pub outcome_vote: u8,
+
+    /// Confidence score (0-100)
+    pub confidence_score: u8,
+
+    /// Submission timestamp
+    pub submitted_at: i64,
+}
+
+/// Status of a dispute
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, InitSpace, Default)]
+pub enum DisputeStatus {
+    /// Dispute filed, awaiting oracle votes
+    #[default]
+    Pending,
+
+    /// Oracle voting in progress
+    Voting,
+
+    /// Dispute upheld - original resolution overturned
+    Upheld,
+
+    /// Dispute rejected - original resolution stands
+    Rejected,
+
+    /// Dispute resulted in market cancellation
+    Cancelled,
+
+    /// Expired without resolution
+    Expired,
+}
+
+/// Calculate weighted consensus from oracle submissions
+pub fn calculate_dispute_consensus(
+    submissions: &[DisputeOracleSubmission],
+    oracle_weights: &[(Pubkey, u16)],
+    max_deviation: u8,
+) -> Result<(u8, u8)> {
+    if submissions.is_empty() {
+        return Err(error!(DisputeError::NoOracleSubmissions));
+    }
+
+    // Calculate weighted outcome votes
+    let mut yes_weight: u64 = 0;
+    let mut no_weight: u64 = 0;
+    let mut cancel_weight: u64 = 0;
+    let mut total_weight: u64 = 0;
+    let mut confidence_sum: u64 = 0;
+
+    for submission in submissions {
+        let weight = oracle_weights
+            .iter()
+            .find(|(pk, _)| *pk == submission.oracle)
+            .map(|(_, w)| *w as u64)
+            .unwrap_or(100);
+
+        match submission.outcome_vote {
+            1 => yes_weight += weight,
+            2 => no_weight += weight,
+            3 => cancel_weight += weight,
+            _ => {}
+        }
+        total_weight += weight;
+        confidence_sum += submission.confidence_score as u64 * weight;
+    }
+
+    if total_weight == 0 {
+        return Err(error!(DisputeError::NoConsensusReached));
+    }
+
+    // Determine winning outcome (needs > 50% of weighted votes)
+    let threshold = total_weight / 2;
+    let (outcome, winning_weight) = if yes_weight > threshold {
+        (1u8, yes_weight)
+    } else if no_weight > threshold {
+        (2u8, no_weight)
+    } else if cancel_weight > threshold {
+        (3u8, cancel_weight)
+    } else {
+        return Err(error!(DisputeError::NoConsensusReached));
+    };
+
+    // Calculate average confidence (weighted)
+    let avg_confidence = (confidence_sum / total_weight) as u8;
+
+    // Check confidence deviation
+    let mut max_diff = 0u8;
+    for submission in submissions {
+        let diff = if submission.confidence_score > avg_confidence {
+            submission.confidence_score - avg_confidence
+        } else {
+            avg_confidence - submission.confidence_score
+        };
+        if diff > max_diff {
+            max_diff = diff;
+        }
+    }
+
+    if max_diff > max_deviation {
+        return Err(error!(DisputeError::ExcessiveScoreDeviation));
+    }
+
+    Ok((outcome, avg_confidence))
+}
+
+#[error_code]
+pub enum DisputeError {
+    #[msg("No oracle submissions")]
+    NoOracleSubmissions,
+
+    #[msg("No consensus reached")]
+    NoConsensusReached,
+
+    #[msg("Excessive score deviation among oracles")]
+    ExcessiveScoreDeviation,
+
+    #[msg("Dispute window expired")]
+    DisputeWindowExpired,
+
+    #[msg("Dispute not in valid state")]
+    InvalidDisputeStatus,
+
+    #[msg("Reveal delay not met")]
+    RevealDelayNotMet,
+
+    #[msg("Insufficient dispute bond")]
+    InsufficientBond,
+
+    #[msg("Duplicate oracle submission")]
+    DuplicateSubmission,
+
+    #[msg("Maximum oracles reached")]
+    MaxOraclesReached,
+
+    #[msg("Oracle not registered")]
+    OracleNotRegistered,
+
+    #[msg("Market not in disputed state")]
+    MarketNotDisputed,
+
+    #[msg("Original outcome matches consensus")]
+    OutcomeUnchanged,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_submission(oracle: [u8; 32], outcome: u8, score: u8) -> DisputeOracleSubmission {
+        DisputeOracleSubmission {
+            oracle: Pubkey::new_from_array(oracle),
+            outcome_vote: outcome,
+            confidence_score: score,
+            submitted_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_consensus_yes_majority() {
+        let submissions = vec![
+            make_submission([1; 32], 1, 80), // Yes
+            make_submission([2; 32], 1, 85), // Yes
+            make_submission([3; 32], 2, 70), // No
+        ];
+        let weights = vec![
+            (Pubkey::new_from_array([1; 32]), 100),
+            (Pubkey::new_from_array([2; 32]), 100),
+            (Pubkey::new_from_array([3; 32]), 100),
+        ];
+
