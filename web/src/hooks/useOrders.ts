@@ -192,3 +192,85 @@ export function usePlaceOrder() {
       const size = toBaseUnits(data.quantity);
       const expiry = Math.floor(Date.now() / 1000) + (data.expiresIn || DEFAULT_EXPIRY_SECONDS);
 
+      const prepared = await api.prepareBasePlaceOrder({
+        from: baseWallet.address,
+        marketId,
+        outcome: data.outcome,
+        priceBps,
+        size: size.toString(),
+        expiry,
+      });
+      const hash = await walletClient.sendTransaction({
+        account: baseWallet.address as `0x${string}`,
+        to: prepared.to as `0x${string}`,
+        data: prepared.data,
+        value: BigInt(prepared.value),
+      });
+
+      const receipt = await waitForTransactionReceipt(config, { hash });
+      const [event] = parseEventLogs({
+        abi: ORDER_PLACED_EVENT_ABI,
+        eventName: 'OrderPlaced',
+        logs: receipt.logs,
+      });
+
+      return {
+        orderId: event?.args.orderId?.toString() || hash,
+        status: 'open',
+        txSignature: hash,
+      };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      queryClient.invalidateQueries({ queryKey: ['orderbook'] });
+      queryClient.invalidateQueries({ queryKey: ['trades'] });
+    },
+  });
+}
+
+export function useCancelOrder() {
+  const queryClient = useQueryClient();
+  const baseWallet = useBaseWallet();
+  const config = useConfig();
+  const { data: walletClient } = useWalletClient();
+
+  return useMutation({
+    mutationFn: async (orderId: string) => {
+      assertWritesEnabled('Order cancellation');
+
+      if (!baseWallet.address || !baseWallet.isConnected) {
+        throw new Error('Connect your wallet before cancelling an order');
+      }
+      if (!walletClient) {
+        throw new Error('Wallet client unavailable');
+      }
+
+      await baseWallet.ensureBaseChain();
+
+      const parsedOrderId = Number(orderId);
+      if (!Number.isInteger(parsedOrderId) || parsedOrderId < 1) {
+        throw new Error('Invalid order id');
+      }
+
+      const prepared = await api.prepareBaseCancelOrder({
+        from: baseWallet.address,
+        orderId: parsedOrderId,
+      });
+      const hash = await walletClient.sendTransaction({
+        account: baseWallet.address as `0x${string}`,
+        to: prepared.to as `0x${string}`,
+        data: prepared.data,
+        value: BigInt(prepared.value),
+      });
+
+      await waitForTransactionReceipt(config, { hash });
+      return { success: true, txSignature: hash };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      queryClient.invalidateQueries({ queryKey: ['orderbook'] });
+    },
+  });
+}
+
