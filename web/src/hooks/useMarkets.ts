@@ -80,3 +80,26 @@ export function useOrderBook(marketId: string, outcome: Outcome) {
       if (error instanceof ApiError && error.status === 402) {
         return false;
       }
+      return failureCount < 1;
+    },
+    refetchInterval: (query) => {
+      const error = query.state.error;
+      if (error instanceof ApiError && error.status === 402) {
+        return false;
+      }
+      return 5000;
+    },
+  });
+}
+
+export function useTrades(
+  marketId: string,
+  params?: { outcome?: Outcome; limit?: number }
+) {
+  return useQuery({
+    queryKey: ['trades', marketId, params, 'base-api'],
+    queryFn: async () => api.getBaseTrades(marketId, params),
+    enabled: !!marketId,
+  });
+}
+
