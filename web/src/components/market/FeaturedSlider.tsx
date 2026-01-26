@@ -114,3 +114,51 @@ export function FeaturedSlider({ markets, title }: FeaturedSliderProps) {
     );
   }
 
+  return (
+    <div className="relative">
+      {/* Header */}
+      {title && (
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+          <div className="flex gap-1">
+            <button
+              onClick={() => scroll('left')}
+              className={cn(
+                'p-1.5 ',
+                'bg-bg-secondary hover:bg-bg-tertiary',
+                'text-text-secondary hover:text-text-primary',
+                'transition-colors cursor-pointer'
+              )}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => scroll('right')}
+              className={cn(
+                'p-1.5 ',
+                'bg-bg-secondary hover:bg-bg-tertiary',
+                'text-text-secondary hover:text-text-primary',
+                'transition-colors cursor-pointer'
+              )}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Slider */}
+      <div
+        ref={scrollRef}
+        className="flex gap-4 overflow-x-auto scrollbar-hide -mx-4 px-4 pb-2"
+        style={{ scrollSnapType: 'x mandatory' }}
+      >
+        {markets.map((market) => (
+          <div key={market.id} style={{ scrollSnapAlign: 'start' }}>
+            <FeaturedCard market={market} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
