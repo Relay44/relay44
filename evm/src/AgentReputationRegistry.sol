@@ -183,3 +183,67 @@ contract AgentReputationRegistry is AccessControl, Pausable {
                 });
                 outIdx++;
             }
+        }
+    }
+
+    function updateMetrics(
+        uint256 agentId,
+        int128 roiBps,
+        uint128 totalVolume,
+        uint64 tradeCount,
+        uint64 winCount,
+        uint64 lossCount,
+        uint16 maxDrawdownBps
+    ) external onlyRole(ORACLE_ROLE) whenNotPaused {
+        _requireAgentOwner(agentId);
+
+        metrics[agentId] = AgentMetrics({
+            roiBps: roiBps,
+            totalVolume: totalVolume,
+            tradeCount: tradeCount,
+            winCount: winCount,
+            lossCount: lossCount,
+            maxDrawdownBps: maxDrawdownBps,
+            updatedAt: uint64(block.timestamp)
+        });
+
+        emit MetricsUpdated(agentId, roiBps, totalVolume, tradeCount, winCount, lossCount, maxDrawdownBps);
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+
+    function _requireAgentOwner(uint256 agentId) internal view returns (address owner) {
+        try identityRegistry.ownerOf(agentId) returns (address foundOwner) {
+            return foundOwner;
+        } catch {
+            revert AgentNotFound();
+        }
+    }
+
+    function _assertFeedbackAuthorAllowed(uint256 agentId, address author) internal view {
+        address owner = _requireAgentOwner(agentId);
+        address approved = identityRegistry.getApproved(agentId);
+        if (author == owner || author == approved || identityRegistry.isApprovedForAll(owner, author)) {
+            revert SelfOrOperatorFeedbackForbidden();
+        }
+    }
+
+    function _storeFeedback(uint256 agentId, address client, uint64 index, FeedbackInput calldata input) internal {
+        Feedback storage feedback = feedbackByClient[agentId][client][index];
+        feedback.value = input.value;
+        feedback.valueDecimals = input.valueDecimals;
+        feedback.createdAt = uint64(block.timestamp);
+        feedback.revoked = false;
+        feedback.category = input.category;
+        feedback.comment = input.comment;
+        feedback.endpoint = input.endpoint;
+        feedback.feedbackURI = input.feedbackURI;
+        feedback.feedbackHash = input.feedbackHash;
+    }
+}
