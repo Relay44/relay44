@@ -123,3 +123,51 @@ export function usePosition(marketId: string) {
     },
   });
 }
+
+export function useClaimWinnings() {
+  const queryClient = useQueryClient();
+  const baseWallet = useBaseWallet();
+  const config = useConfig();
+  const { data: walletClient } = useWalletClient();
+
+  return useMutation({
+    mutationFn: async (marketId: string) => {
+      assertWritesEnabled('Claiming winnings');
+
+      if (!baseWallet.address || !baseWallet.isConnected) {
+        throw new Error('Connect your wallet before claiming');
+      }
+      if (!walletClient) {
+        throw new Error('Wallet client unavailable');
+      }
+
+      const parsedMarketId = Number(marketId);
+      if (!Number.isInteger(parsedMarketId) || parsedMarketId < 1) {
+        throw new Error('Invalid market id');
+      }
+
+      await baseWallet.ensureBaseChain();
+      const prepared = await api.prepareBaseClaim({
+        from: baseWallet.address,
+        marketId: parsedMarketId,
+      });
+      const hash = await walletClient.sendTransaction({
+        account: baseWallet.address as `0x${string}`,
+        to: prepared.to as `0x${string}`,
+        data: prepared.data,
+        value: BigInt(prepared.value),
+      });
+
+      const receipt = await waitForTransactionReceipt(config, { hash });
+      return {
+        amount: 0,
+        txSignature: receipt.transactionHash,
+      };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
