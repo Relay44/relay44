@@ -114,3 +114,51 @@ export function useOrderBookSubscription(marketId: string, outcome: Outcome) {
     };
   }, [isConnected, marketId, outcome, subscribe, send, queryClient]);
 }
+
+export function useTradeSubscription(marketId: string) {
+  const queryClient = useQueryClient();
+  const { subscribe, send, isConnected } = useWebSocket();
+
+  useEffect(() => {
+    if (!isConnected || !marketId) return;
+
+    send('subscribe', { channel: 'trades', marketId });
+
+    const unsubscribe = subscribe('trade', (data) => {
+      const trade = data as { marketId: string };
+      if (trade.marketId === marketId) {
+        queryClient.invalidateQueries({ queryKey: ['trades', marketId] });
+        queryClient.invalidateQueries({ queryKey: ['market', marketId] });
+      }
+    });
+
+    return () => {
+      send('unsubscribe', { channel: 'trades', marketId });
+      unsubscribe();
+    };
+  }, [isConnected, marketId, subscribe, send, queryClient]);
+}
+
+export function usePriceSubscription(marketId: string) {
+  const queryClient = useQueryClient();
+  const { subscribe, send, isConnected } = useWebSocket();
+
+  useEffect(() => {
+    if (!isConnected || !marketId) return;
+
+    send('subscribe', { channel: 'prices', marketId });
+
+    const unsubscribe = subscribe('price_update', (data) => {
+      const update = data as { marketId: string };
+      if (update.marketId === marketId) {
+        queryClient.invalidateQueries({ queryKey: ['market', marketId] });
+      }
+    });
+
+    return () => {
+      send('unsubscribe', { channel: 'prices', marketId });
+      unsubscribe();
+    };
+  }, [isConnected, marketId, subscribe, send, queryClient]);
+}
+
