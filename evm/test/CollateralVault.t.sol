@@ -81,3 +81,37 @@ contract CollateralVaultTest is Test {
         vm.prank(alice);
         vault.deposit(150e6);
 
+        vm.prank(operator);
+        vault.transferAvailable(alice, bob, 55e6);
+
+        assertEq(vault.availableBalance(alice), 95e6);
+        assertEq(vault.availableBalance(bob), 55e6);
+    }
+
+    function test_onlyOperatorCanLock() external {
+        vm.prank(alice);
+        vault.deposit(100e6);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        vault.lock(alice, 10e6);
+    }
+
+    function test_withdrawFailsWhenInsufficientAvailable() external {
+        vm.prank(alice);
+        vault.deposit(25e6);
+
+        vm.prank(alice);
+        vm.expectRevert(CollateralVault.InsufficientAvailable.selector);
+        vault.withdraw(30e6);
+    }
+
+    function test_pauseBlocksStateChanges() external {
+        vm.prank(admin);
+        vault.pause();
+
+        vm.prank(alice);
+        vm.expectRevert();
+        vault.deposit(1e6);
+    }
+}
