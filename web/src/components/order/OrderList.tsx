@@ -94,3 +94,18 @@ function OrderRow({ order, readOnly }: OrderRowProps) {
           </div>
         </div>
 
+        {order.status === 'open' || order.status === 'partially_filled' ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full sm:w-auto"
+            onClick={() => cancelOrder.mutate(order.id)}
+            disabled={readOnly || cancelOrder.isPending}
+          >
+            {readOnly ? 'Read-only' : 'Cancel'}
+          </Button>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
