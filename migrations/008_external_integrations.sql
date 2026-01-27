@@ -114,4 +114,3 @@ CREATE TABLE IF NOT EXISTS external_market_cache (
 );
 
 CREATE INDEX IF NOT EXISTS idx_external_market_cache_expires ON external_market_cache(expires_at);
-
