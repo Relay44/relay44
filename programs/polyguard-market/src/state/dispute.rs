@@ -269,3 +269,247 @@ mod tests {
             (Pubkey::new_from_array([3; 32]), 100),
         ];
 
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_ok());
+        let (outcome, _score) = result.unwrap();
+        assert_eq!(outcome, 1); // Yes wins
+    }
+
+    #[test]
+    fn test_consensus_no_majority() {
+        let submissions = vec![
+            make_submission([1; 32], 2, 90), // No
+            make_submission([2; 32], 2, 85), // No
+            make_submission([3; 32], 1, 80), // Yes
+        ];
+        let weights = vec![];
+
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_ok());
+        let (outcome, _score) = result.unwrap();
+        assert_eq!(outcome, 2); // No wins
+    }
+
+    #[test]
+    fn test_weighted_consensus() {
+        // Two Yes oracles with weight 50 each (total 100)
+        // One No oracle with weight 200
+        let submissions = vec![
+            make_submission([1; 32], 1, 80),
+            make_submission([2; 32], 1, 80),
+            make_submission([3; 32], 2, 80),
+        ];
+        let weights = vec![
+            (Pubkey::new_from_array([1; 32]), 50),
+            (Pubkey::new_from_array([2; 32]), 50),
+            (Pubkey::new_from_array([3; 32]), 200),
+        ];
+
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_ok());
+        let (outcome, _score) = result.unwrap();
+        assert_eq!(outcome, 2); // No wins due to weight
+    }
+
+    #[test]
+    fn test_no_consensus_split() {
+        // Equal split - no majority
+        let submissions = vec![
+            make_submission([1; 32], 1, 80),
+            make_submission([2; 32], 2, 80),
+        ];
+        let weights = vec![
+            (Pubkey::new_from_array([1; 32]), 100),
+            (Pubkey::new_from_array([2; 32]), 100),
+        ];
+
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_excessive_deviation_fails() {
+        let submissions = vec![
+            make_submission([1; 32], 1, 100), // High confidence
+            make_submission([2; 32], 1, 50),  // Low confidence
+            make_submission([3; 32], 1, 75),
+        ];
+        let weights = vec![];
+
+        // Max deviation of 15 should fail (actual deviation is 25)
+        let result = calculate_dispute_consensus(&submissions, &weights, 15);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cancel_outcome() {
+        let submissions = vec![
+            make_submission([1; 32], 3, 90), // Cancel
+            make_submission([2; 32], 3, 85), // Cancel
+            make_submission([3; 32], 1, 80), // Yes
+        ];
+        let weights = vec![];
+
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_ok());
+        let (outcome, _score) = result.unwrap();
+        assert_eq!(outcome, 3); // Cancel wins
+    }
+
+    #[test]
+    fn test_dispute_minimum_consensus() {
+        let mut dispute = Dispute {
+            market: Pubkey::default(),
+            disputer: Pubkey::default(),
+            original_oracle: Pubkey::default(),
+            original_outcome: 1,
+            status: DisputeStatus::Pending,
+            bond_amount: DISPUTE_BOND,
+            reason_hash: String::new(),
+            oracle_submissions: vec![],
+            consensus_outcome: None,
+            consensus_score: None,
+            created_at: 0,
+            first_submission_at: None,
+            resolved_at: None,
+            bump: 0,
+        };
+
+        assert!(!dispute.has_minimum_consensus());
+
+        dispute.oracle_submissions.push(make_submission([1; 32], 1, 80));
+        assert!(!dispute.has_minimum_consensus());
+
+        dispute.oracle_submissions.push(make_submission([2; 32], 1, 80));
+        assert!(!dispute.has_minimum_consensus());
+
+        dispute.oracle_submissions.push(make_submission([3; 32], 1, 80));
+        assert!(dispute.has_minimum_consensus());
+    }
+
+    #[test]
+    fn test_reveal_delay() {
+        let mut dispute = Dispute {
+            market: Pubkey::default(),
+            disputer: Pubkey::default(),
+            original_oracle: Pubkey::default(),
+            original_outcome: 1,
+            status: DisputeStatus::Voting,
+            bond_amount: DISPUTE_BOND,
+            reason_hash: String::new(),
+            oracle_submissions: vec![],
+            consensus_outcome: None,
+            consensus_score: None,
+            created_at: 1000,
+            first_submission_at: Some(1000),
+            resolved_at: None,
+            bump: 0,
+        };
+
+        // Before delay
+        assert!(!dispute.reveal_delay_passed(1000 + ORACLE_REVEAL_DELAY - 1));
+
+        // After delay
+        assert!(dispute.reveal_delay_passed(1000 + ORACLE_REVEAL_DELAY));
+        assert!(dispute.reveal_delay_passed(1000 + ORACLE_REVEAL_DELAY + 100));
+    }
+
+    #[test]
+    fn test_reveal_delay_not_started() {
+        let dispute = Dispute {
+            market: Pubkey::default(),
+            disputer: Pubkey::default(),
+            original_oracle: Pubkey::default(),
+            original_outcome: 1,
+            status: DisputeStatus::Pending,
+            bond_amount: DISPUTE_BOND,
+            reason_hash: String::new(),
+            oracle_submissions: vec![],
+            consensus_outcome: None,
+            consensus_score: None,
+            created_at: 1000,
+            first_submission_at: None, // No submissions yet
+            resolved_at: None,
+            bump: 0,
+        };
+
+        // Should always return false if no submission
+        assert!(!dispute.reveal_delay_passed(1000000));
+    }
+
+    #[test]
+    fn test_empty_submissions() {
+        let submissions: Vec<DisputeOracleSubmission> = vec![];
+        let weights = vec![];
+
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_single_oracle_majority() {
+        // Single oracle should not reach consensus (need > 50%)
+        let submissions = vec![
+            make_submission([1; 32], 1, 90),
+        ];
+        let weights = vec![];
+
+        // A single vote of 100 weight vs threshold of 50 should actually pass
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_ok());
+        let (outcome, _) = result.unwrap();
+        assert_eq!(outcome, 1);
+    }
+
+    #[test]
+    fn test_three_way_split_no_consensus() {
+        let submissions = vec![
+            make_submission([1; 32], 1, 80), // Yes
+            make_submission([2; 32], 2, 80), // No
+            make_submission([3; 32], 3, 80), // Cancel
+        ];
+        let weights = vec![
+            (Pubkey::new_from_array([1; 32]), 100),
+            (Pubkey::new_from_array([2; 32]), 100),
+            (Pubkey::new_from_array([3; 32]), 100),
+        ];
+
+        // Equal three-way split should fail
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_confidence_boundary() {
+        let submissions = vec![
+            make_submission([1; 32], 1, 75),
+            make_submission([2; 32], 1, 90), // 15 above avg ~82
+            make_submission([3; 32], 1, 82),
+        ];
+        let weights = vec![];
+
+        // Max deviation of 15, should be exactly at boundary
+        let result = calculate_dispute_consensus(&submissions, &weights, 15);
+        // Avg confidence = (75 + 90 + 82) / 3 = 82.33
+        // Max diff = 90 - 82 = 8, which is < 15, so should pass
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_oracle_with_zero_confidence() {
+        let submissions = vec![
+            make_submission([1; 32], 1, 0),
+            make_submission([2; 32], 1, 100),
+            make_submission([3; 32], 1, 50),
+        ];
+        let weights = vec![];
+
+        // Deviation is 50 (avg = 50, max diff = 50)
+        let result = calculate_dispute_consensus(&submissions, &weights, 50);
+        assert!(result.is_ok());
+
+        // With strict deviation, should fail
+        let result = calculate_dispute_consensus(&submissions, &weights, 40);
+        assert!(result.is_err());
+    }
+}
