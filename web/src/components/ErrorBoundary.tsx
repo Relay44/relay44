@@ -58,3 +58,30 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
               <h1 className="text-2xl font-display font-bold text-text-primary mb-2">
                 Something went wrong
+              </h1>
+              <p className="text-text-secondary mb-4">
+                An unexpected error occurred. Please try again.
+              </p>
+              {process.env.NODE_ENV === 'development' && this.state.error && (
+                <pre className="text-left text-xs bg-bg-secondary p-3  overflow-auto max-h-32 mb-4">
+                  {this.state.error.message}
+                </pre>
+              )}
+            </div>
+            <div className="flex gap-3 justify-center">
+              <Button onClick={this.handleReset} variant="secondary">
+                Try Again
+              </Button>
+              <Button onClick={() => window.location.reload()} variant="primary">
+                Reload Page
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
