@@ -138,4 +138,3 @@ export function useUpsertDecisionAlert(cellId: string) {
     onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
   });
 }
-
