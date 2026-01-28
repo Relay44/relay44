@@ -114,3 +114,48 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       setNotifications(previousNotifications);
       setUnreadCount(previousCount);
     }
+  }, [notifications, readOnly, unreadCount]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    if (!sessionRestored) {
+      return () => {
+        isMountedRef.current = false;
+      };
+    }
+
+    fetchNotifications();
+
+    const interval = setInterval(fetchNotifications, POLL_INTERVAL);
+
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+      abortControllerRef.current?.abort();
+    };
+  }, [fetchNotifications, sessionRestored]);
+
+  return (
+    <NotificationContext.Provider
+      value={{
+        notifications,
+        unreadCount,
+        loading,
+        error,
+        fetchNotifications,
+        markAsRead,
+        markAllAsRead,
+      }}
+    >
+      {children}
+    </NotificationContext.Provider>
+  );
+}
+
+export function useNotifications() {
+  const context = useContext(NotificationContext);
+  if (!context) {
+    throw new Error('useNotifications must be used within NotificationProvider');
+  }
+  return context;
+}
