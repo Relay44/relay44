@@ -1,0 +1,308 @@
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, MintTo, Burn};
+
+use crate::state::{
+    CopyTradingVault, CopyVaultDeposit, FollowRelation, SocialError, TraderProfile,
+};
+
+// ============ Profile Instructions ============
+
+#[derive(Accounts)]
+#[instruction(name: String)]
+pub struct CreateProfile<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + TraderProfile::INIT_SPACE,
+        seeds = [TraderProfile::SEED_PREFIX, owner.key().as_ref()],
+        bump,
+    )]
+    pub profile: Account<'info, TraderProfile>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handler_create_profile(
+    ctx: Context<CreateProfile>,
+    name: String,
+    bio: String,
+) -> Result<()> {
+    let profile = &mut ctx.accounts.profile;
+    let clock = Clock::get()?;
+
+    profile.owner = ctx.accounts.owner.key();
+    profile.display_name = name;
+    profile.bio = bio;
+    profile.bump = ctx.bumps.profile;
+    profile.is_public = true;
+    profile.allow_copy_trading = false;
+    profile._padding = [0; 1];
+    profile.tier = 0;
+    profile.total_pnl = 0;
+    profile.total_volume = 0;
+    profile.trades_count = 0;
+    profile.win_count = 0;
+    profile.best_trade = 0;
+    profile.worst_trade = 0;
+    profile.max_drawdown_bps = 0;
+    profile._padding2 = [0; 6];
+    profile.follower_count = 0;
+    profile.copy_trader_count = 0;
+    profile.copy_aum = 0;
+    profile.created_at = clock.unix_timestamp;
+    profile.last_trade_at = 0;
+    profile.updated_at = clock.unix_timestamp;
+    profile._reserved = [0; 32];
+
+    emit!(ProfileCreated {
+        profile: profile.key(),
+        owner: profile.owner,
+        name: profile.display_name.clone(),
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct UpdateProfile<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [TraderProfile::SEED_PREFIX, owner.key().as_ref()],
+        bump = profile.bump,
+    )]
+    pub profile: Account<'info, TraderProfile>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct UpdateProfileParams {
+    pub display_name: Option<String>,
+    pub bio: Option<String>,
+    pub is_public: Option<bool>,
+    pub allow_copy_trading: Option<bool>,
+}
+
+pub fn handler_update_profile(
+    ctx: Context<UpdateProfile>,
+    params: UpdateProfileParams,
+) -> Result<()> {
+    let profile = &mut ctx.accounts.profile;
+
+    if let Some(name) = params.display_name {
+        profile.display_name = name;
+    }
+    if let Some(bio) = params.bio {
+        profile.bio = bio;
+    }
+    if let Some(is_public) = params.is_public {
+        profile.is_public = is_public;
+    }
+    if let Some(allow_copy) = params.allow_copy_trading {
+        profile.allow_copy_trading = allow_copy;
+    }
+
+    profile.updated_at = Clock::get()?.unix_timestamp;
+
+    Ok(())
+}
+
+// ============ Follow Instructions ============
+
+#[derive(Accounts)]
+pub struct FollowTrader<'info> {
+    #[account(mut)]
+    pub follower: Signer<'info>,
+
+    #[account(
+        seeds = [TraderProfile::SEED_PREFIX, follower.key().as_ref()],
+        bump = follower_profile.bump,
+    )]
+    pub follower_profile: Account<'info, TraderProfile>,
+
+    #[account(
+        mut,
+        seeds = [TraderProfile::SEED_PREFIX, leader_profile.owner.as_ref()],
+        bump = leader_profile.bump,
+        constraint = leader_profile.is_public @ SocialError::ProfileNotPublic,
+    )]
+    pub leader_profile: Account<'info, TraderProfile>,
+
+    #[account(
+        init,
+        payer = follower,
+        space = 8 + FollowRelation::INIT_SPACE,
+        seeds = [FollowRelation::SEED_PREFIX, follower.key().as_ref(), leader_profile.owner.as_ref()],
+        bump,
+    )]
+    pub follow_relation: Account<'info, FollowRelation>,
+
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handler_follow_trader(ctx: Context<FollowTrader>) -> Result<()> {
+    let follow = &mut ctx.accounts.follow_relation;
+    let leader = &mut ctx.accounts.leader_profile;
+    let clock = Clock::get()?;
+
+    follow.follower = ctx.accounts.follower.key();
+    follow.leader = leader.owner;
+    follow.followed_at = clock.unix_timestamp;
+    follow.bump = ctx.bumps.follow_relation;
+    follow._padding = [0; 7];
+
+    leader.follower_count = leader.follower_count.saturating_add(1);
+
+    emit!(TraderFollowed {
+        follower: follow.follower,
+        leader: follow.leader,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct UnfollowTrader<'info> {
+    #[account(mut)]
+    pub follower: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [TraderProfile::SEED_PREFIX, leader_profile.owner.as_ref()],
+        bump = leader_profile.bump,
+    )]
+    pub leader_profile: Account<'info, TraderProfile>,
+
+    #[account(
+        mut,
+        close = follower,
+        seeds = [FollowRelation::SEED_PREFIX, follower.key().as_ref(), leader_profile.owner.as_ref()],
+        bump = follow_relation.bump,
+    )]
+    pub follow_relation: Account<'info, FollowRelation>,
+}
+
+pub fn handler_unfollow_trader(ctx: Context<UnfollowTrader>) -> Result<()> {
+    let leader = &mut ctx.accounts.leader_profile;
+
+    leader.follower_count = leader.follower_count.saturating_sub(1);
+
+    emit!(TraderUnfollowed {
+        follower: ctx.accounts.follower.key(),
+        leader: leader.owner,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+// ============ Copy Trading Instructions ============
+
+#[derive(Accounts)]
+pub struct CreateCopyVault<'info> {
+    #[account(mut)]
+    pub leader: Signer<'info>,
+
+    #[account(
+        seeds = [TraderProfile::SEED_PREFIX, leader.key().as_ref()],
+        bump = leader_profile.bump,
+        constraint = leader_profile.allow_copy_trading @ SocialError::CopyTradingNotAllowed,
+    )]
+    pub leader_profile: Account<'info, TraderProfile>,
+
+    #[account(
+        init,
+        payer = leader,
+        space = 8 + CopyTradingVault::INIT_SPACE,
+        seeds = [CopyTradingVault::SEED_PREFIX, leader.key().as_ref()],
+        bump,
+    )]
+    pub vault: Account<'info, CopyTradingVault>,
+
+    pub collateral_mint: Account<'info, Mint>,
+
+    #[account(
+        init,
+        payer = leader,
+        token::mint = collateral_mint,
+        token::authority = vault,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
+
+    #[account(
+        init,
+        payer = leader,
+        mint::decimals = 6,
+        mint::authority = vault,
+    )]
+    pub share_mint: Account<'info, Mint>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct CreateVaultParams {
+    pub management_fee_bps: u16,
+    pub performance_fee_bps: u16,
+    pub min_deposit: u64,
+    pub max_deposits: u64,
+}
+
+pub fn handler_create_copy_vault(
+    ctx: Context<CreateCopyVault>,
+    params: CreateVaultParams,
+) -> Result<()> {
+    let vault = &mut ctx.accounts.vault;
+    let clock = Clock::get()?;
+
+    vault.authority = vault.key();
+    vault.leader = ctx.accounts.leader.key();
+    vault.collateral_mint = ctx.accounts.collateral_mint.key();
+    vault.vault = ctx.accounts.vault_token.key();
+    vault.share_mint = ctx.accounts.share_mint.key();
+    vault.bump = ctx.bumps.vault;
+    vault.is_active = true;
+    vault._padding = [0; 2];
+    vault.management_fee_bps = params.management_fee_bps;
+    vault.performance_fee_bps = params.performance_fee_bps;
+    vault.min_deposit = params.min_deposit;
+    vault.max_deposits = params.max_deposits;
+    vault.total_deposits = 0;
+    vault.total_shares = 0;
+    vault.high_water_mark = 0;
+    vault.fees_collected = 0;
+    vault.depositor_count = 0;
+    vault.total_pnl = 0;
+    vault._padding2 = [0; 4];
+    vault.created_at = clock.unix_timestamp;
+    vault.last_action_at = clock.unix_timestamp;
+    vault.last_fee_at = clock.unix_timestamp;
+    vault._reserved = [0; 32];
+
+    emit!(CopyVaultCreated {
+        vault: vault.key(),
+        leader: vault.leader,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct DepositToCopyVault<'info> {
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = vault.is_active @ SocialError::VaultNotActive,
+    )]
+    pub vault: Account<'info, CopyTradingVault>,
+
