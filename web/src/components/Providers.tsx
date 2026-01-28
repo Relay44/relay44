@@ -65,3 +65,26 @@ export const Providers: FC<ProvidersProps> = ({ children }) => {
             .filter((key) => key.includes('workbox') || key.includes('next-pwa'))
             .map((key) => caches.delete(key))
         );
+      }
+    })();
+  }, []);
+
+  return (
+    <ErrorBoundary>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <WagmiProvider config={wagmiConfig}>
+            <MiniKitWrapper>
+              <FarcasterProvider>
+                <NotificationProvider>
+                  <ToastProvider>{children}</ToastProvider>
+                </NotificationProvider>
+              </FarcasterProvider>
+            </MiniKitWrapper>
+          </WagmiProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
+  );
+};
+
