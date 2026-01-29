@@ -392,3 +392,89 @@ export function SecurityAuditChecklist() {
         </CardContent>
       </Card>
 
+      {/* Categories */}
+      {CHECKLIST.map((category) => {
+        const isExpanded = expandedCategory === category.name;
+        const categoryComplete = category.items.filter(
+          (i) => i.status === 'complete'
+        ).length;
+        const categoryTotal = category.items.length;
+
+        return (
+          <Card key={category.name}>
+            <button
+              type="button"
+              onClick={() => setExpandedCategory(isExpanded ? null : category.name)}
+              className="w-full text-left cursor-pointer"
+            >
+              <CardHeader className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <CardTitle className="text-lg">{category.name}</CardTitle>
+                    <span className="text-sm text-text-secondary">
+                      {categoryComplete}/{categoryTotal}
+                    </span>
+                  </div>
+                  <svg
+                    className={cn(
+                      'w-5 h-5 text-text-secondary transition-transform',
+                      isExpanded && 'rotate-180'
+                    )}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </div>
+              </CardHeader>
+            </button>
+
+            {isExpanded && (
+              <CardContent className="pt-0 pb-4">
+                <div className="space-y-3">
+                  {category.items.map((item) => {
+                    const statusConfig = STATUS_CONFIG[item.status];
+                    const priorityConfig = PRIORITY_CONFIG[item.priority];
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-4  bg-bg-secondary"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-text-primary">
+                                {item.title}
+                              </span>
+                              <Badge variant={statusConfig.variant}>
+                                {statusConfig.label}
+                              </Badge>
+                              <span
+                                className={cn('text-xs', priorityConfig.color)}
+                              >
+                                {priorityConfig.label}
+                              </span>
+                            </div>
+                            <p className="text-sm text-text-secondary">
+                              {item.description}
+                            </p>
+                            {item.notes && (
+                              <p className="text-xs text-accent mt-2">
+                                Note: {item.notes}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex-shrink-0">
+                            {item.status === 'complete' ? (
+                              <svg
+                                className="w-5 h-5 text-bid"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
