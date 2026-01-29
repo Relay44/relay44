@@ -211,3 +211,212 @@ function parseLoginRequestBody(bodyText: string): LoginRequestBody | null {
     if (typeof parsed.wallet !== 'string' || typeof parsed.signature !== 'string' || typeof parsed.message !== 'string') {
       return null;
     }
+
+    if (
+      (parsed.wallet as string).length > 96 ||
+      (parsed.signature as string).length > 1_024 ||
+      (parsed.message as string).length > 4_096
+    ) {
+      return null;
+    }
+
+    if (flow !== 'siwe' && flow !== 'solana') {
+      return null;
+    }
+
+    return {
+      wallet: (parsed.wallet as string).trim(),
+      signature: (parsed.signature as string).trim(),
+      message: parsed.message as string,
+      flow,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getRefreshToken(cookieStore: Awaited<ReturnType<typeof cookies>>): string | undefined {
+  const current = cookieStore.get(REFRESH_TOKEN_COOKIE)?.value;
+  if (current) return current;
+
+  for (const key of COMPAT_REFRESH_TOKEN_COOKIES) {
+    const compat = cookieStore.get(key)?.value;
+    if (compat) return compat;
+  }
+
+  return undefined;
+}
+
+function setRefreshTokenCookie(response: NextResponse, refreshToken: string) {
+  response.cookies.set(REFRESH_TOKEN_COOKIE, refreshToken, {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: 'strict',
+    maxAge: COOKIE_MAX_AGE,
+    path: '/',
+  });
+  for (const key of COMPAT_REFRESH_TOKEN_COOKIES) {
+    response.cookies.delete(key);
+  }
+}
+
+function clearRefreshTokenCookies(response: NextResponse) {
+  response.cookies.delete(REFRESH_TOKEN_COOKIE);
+  for (const key of COMPAT_REFRESH_TOKEN_COOKIES) {
+    response.cookies.delete(key);
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const guardError = requireMutatingRequestGuards(request);
+    if (guardError) return guardError;
+
+    const bodyText = await request.text();
+    if (Buffer.byteLength(bodyText, 'utf8') > MAX_BODY_BYTES) {
+      return jsonError(413, 'Request body too large');
+    }
+
+    const body = parseLoginRequestBody(bodyText);
+    if (!body) {
+      return jsonError(400, 'Invalid request body');
+    }
+
+    let target: string;
+    let upstreamBody: string;
+
+    if (body.flow === 'farcaster') {
+      const { signature, message, nonce } = body;
+      if (!signature || !message || !nonce) {
+        return jsonError(400, 'Missing required fields');
+      }
+      target = `${API_BASE}/auth/farcaster/login`;
+      upstreamBody = JSON.stringify({ signature, message, nonce });
+    } else {
+      const { wallet, signature, message } = body;
+      if (!wallet || !signature || !message) {
+        return jsonError(400, 'Missing required fields');
+      }
+      target = body.flow === 'solana'
+        ? `${API_BASE}/auth/solana/login`
+        : `${API_BASE}/auth/siwe/login`;
+      upstreamBody = JSON.stringify({ wallet, signature, message });
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    const res = await fetch(target, {
+      method: 'POST',
+      headers,
+      body: upstreamBody,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return jsonError(res.status, text || 'Authentication failed');
+    }
+
+    const rawTokens = (await res.json()) as UpstreamTokenPayload;
+    const tokens = normalizeTokens(rawTokens);
+    if (!tokens) {
+      console.error('Invalid upstream auth payload', rawTokens);
+      return jsonError(502, 'Authentication payload was invalid');
+    }
+
+    const response = NextResponse.json({
+      accessToken: tokens.accessToken,
+      expiresAt: tokens.expiresAt,
+    });
+    setRefreshTokenCookie(response, tokens.refreshToken);
+    return response;
+  } catch (error) {
+    console.error('Login error:', error);
+    return jsonError(500, 'Internal server error');
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const guardError = requireMutatingRequestGuards(request);
+    if (guardError) return guardError;
+
+    const cookieStore = await cookies();
+    const refreshToken = getRefreshToken(cookieStore);
+
+    if (!refreshToken) {
+      return jsonError(401, 'No refresh token');
+    }
+
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) {
+      const response = jsonError(res.status, 'Token refresh failed');
+      clearRefreshTokenCookies(response);
+      return response;
+    }
+
+    const rawTokens = (await res.json()) as UpstreamTokenPayload;
+    const tokens = normalizeTokens(rawTokens);
+    if (!tokens) {
+      console.error('Invalid upstream refresh payload', rawTokens);
+      const response = jsonError(502, 'Refresh payload was invalid');
+      clearRefreshTokenCookies(response);
+      return response;
+    }
+
+    const response = NextResponse.json({
+      accessToken: tokens.accessToken,
+      expiresAt: tokens.expiresAt,
+    });
+    setRefreshTokenCookie(response, tokens.refreshToken);
+    return response;
+  } catch (error) {
+    console.error('Refresh error:', error);
+    return jsonError(500, 'Internal server error');
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const guardError = requireMutatingRequestGuards(request);
+    if (guardError) return guardError;
+
+    const cookieStore = await cookies();
+    const refreshToken = getRefreshToken(cookieStore);
+
+    if (refreshToken) {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${refreshToken}`,
+        },
+      }).catch(() => {
+      });
+    }
+
+    const response = NextResponse.json({ success: true });
+    clearRefreshTokenCookies(response);
+    return response;
+  } catch (error) {
+    console.error('Logout error:', error);
+    const response = NextResponse.json({ success: true });
+    clearRefreshTokenCookies(response);
+    return response;
+  }
+}
+
+export async function GET() {
+  const cookieStore = await cookies();
+  const hasRefreshToken = !!getRefreshToken(cookieStore);
+
+  return NextResponse.json({ hasRefreshToken });
+}
