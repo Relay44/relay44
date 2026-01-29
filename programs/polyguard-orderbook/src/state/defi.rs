@@ -1,0 +1,235 @@
+use anchor_lang::prelude::*;
+
+/// Yield source types
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum YieldSource {
+    #[default]
+    None = 0,
+    /// Marinade stSOL
+    Marinade = 1,
+    /// Lido stSOL
+    Lido = 2,
+    /// Jito jitoSOL
+    JitoSOL = 3,
+    /// Custom yield source
+    Custom = 255,
+}
+
+/// Yield vault for DeFi integration
+#[account]
+#[derive(InitSpace)]
+pub struct YieldVault {
+    /// Market this vault is for
+    pub market: Pubkey,
+
+    /// Underlying yield token mint (e.g., stSOL)
+    pub yield_mint: Pubkey,
+
+    /// Vault token account
+    pub vault: Pubkey,
+
+    /// Authority (PDA)
+    pub authority: Pubkey,
+
+    /// Yield source type
+    pub yield_source: u8,
+
+    /// Bump seed
+    pub bump: u8,
+
+    /// Is vault active
+    pub is_active: bool,
+
+    /// Padding
+    pub _padding: [u8; 1],
+
+    // === State ===
+    /// Total deposited (in base units)
+    pub total_deposited: u64,
+
+    /// Total yield accrued
+    pub yield_accrued: u64,
+
+    /// Last harvest timestamp
+    pub last_harvest: i64,
+
+    /// Last known exchange rate (scaled by 10^9)
+    pub last_exchange_rate: u64,
+
+    // === Configuration ===
+    /// Minimum harvest interval (seconds)
+    pub min_harvest_interval: u64,
+
+    /// Protocol fee on yield (basis points)
+    pub protocol_fee_bps: u16,
+
+    /// Padding
+    pub _padding2: [u8; 6],
+
+    /// Reserved
+    pub _reserved: [u8; 32],
+}
+
+impl YieldVault {
+    pub const SEED_PREFIX: &'static [u8] = b"yield_vault";
+    pub const RATE_SCALE: u64 = 1_000_000_000;
+
+    pub fn get_yield_source(&self) -> YieldSource {
+        match self.yield_source {
+            1 => YieldSource::Marinade,
+            2 => YieldSource::Lido,
+            3 => YieldSource::JitoSOL,
+            255 => YieldSource::Custom,
+            _ => YieldSource::None,
+        }
+    }
+
+    /// Calculate base value from yield tokens
+    pub fn calculate_base_value(&self, yield_amount: u64, current_rate: u64) -> u64 {
+        (yield_amount as u128 * current_rate as u128 / Self::RATE_SCALE as u128) as u64
+    }
+
+    /// Calculate yield tokens from base value
+    pub fn calculate_yield_amount(&self, base_value: u64, current_rate: u64) -> u64 {
+        if current_rate == 0 {
+            return base_value;
+        }
+        (base_value as u128 * Self::RATE_SCALE as u128 / current_rate as u128) as u64
+    }
+
+    /// Calculate pending yield
+    pub fn pending_yield(&self, current_balance: u64, current_rate: u64) -> u64 {
+        let current_value = self.calculate_base_value(current_balance, current_rate);
+        current_value.saturating_sub(self.total_deposited)
+    }
+
+    /// Can harvest now
+    pub fn can_harvest(&self, current_time: i64) -> bool {
+        self.is_active &&
+        (current_time - self.last_harvest) as u64 >= self.min_harvest_interval
+    }
+}
+
+/// Margin account for leveraged trading
+#[account]
+#[derive(InitSpace)]
+pub struct MarginAccount {
+    /// Account owner
+    pub owner: Pubkey,
+
+    /// Collateral mint
+    pub collateral_mint: Pubkey,
+
+    /// Collateral vault
+    pub collateral_vault: Pubkey,
+
+    /// Bump seed
+    pub bump: u8,
+
+    /// Is account active
+    pub is_active: bool,
+
+    /// Maximum leverage allowed (e.g., 3 = 3x)
+    pub max_leverage: u8,
+
+    /// Padding
+    pub _padding: [u8; 1],
+
+    // === Balances ===
+    /// Deposited collateral
+    pub collateral: u64,
+
+    /// Borrowed amount
+    pub borrowed: u64,
+
+    /// Interest accrued
+    pub interest_accrued: u64,
+
+    // === Health tracking ===
+    /// Health factor (scaled by 10000, < 10000 = liquidatable)
+    pub health_factor: u16,
+
+    /// Liquidation threshold (basis points)
+    pub liquidation_threshold_bps: u16,
+
+    /// Last health update
+    pub last_health_update: i64,
+
+    /// Padding
+    pub _padding2: [u8; 4],
+
+    // === Statistics ===
+    /// Total borrowed over lifetime
+    pub total_borrowed: u64,
+
+    /// Total interest paid
+    pub total_interest_paid: u64,
+
+    /// Liquidation count
+    pub liquidation_count: u16,
+
+    /// Padding
+    pub _padding3: [u8; 6],
+
+    /// Reserved
+    pub _reserved: [u8; 32],
+}
+
+impl MarginAccount {
+    pub const SEED_PREFIX: &'static [u8] = b"margin_account";
+    pub const HEALTH_SCALE: u16 = 10000;
+
+    /// Calculate position value
+    pub fn position_value(&self) -> u64 {
+        self.collateral.saturating_add(self.borrowed)
+    }
+
+    /// Calculate current leverage
+    pub fn current_leverage(&self) -> u8 {
+        if self.collateral == 0 {
+            return 0;
+        }
+        let position = self.position_value();
+        ((position as u128 * 10 / self.collateral as u128) / 10) as u8
+    }
+
+    /// Check if position is healthy
+    pub fn is_healthy(&self) -> bool {
+        self.health_factor >= self.liquidation_threshold_bps
+    }
+
+    /// Calculate health factor
+    pub fn calculate_health(&self, position_value: u64, debt_value: u64) -> u16 {
+        if debt_value == 0 {
+            return u16::MAX; // Max health when no debt
+        }
+        let health = position_value as u128 * Self::HEALTH_SCALE as u128 / debt_value as u128;
+        health.min(u16::MAX as u128) as u16
+    }
+
+    /// Check if can borrow more
+    pub fn can_borrow(&self, additional: u64) -> bool {
+        if self.collateral == 0 || self.max_leverage == 0 {
+            return false;
+        }
+
+        let max_position = self.collateral as u128 * self.max_leverage as u128;
+        let new_position = self.position_value() as u128 + additional as u128;
+
+        new_position <= max_position
+    }
+
+    /// Calculate liquidation bonus
+    pub fn liquidation_bonus(&self, bonus_bps: u16) -> u64 {
+        (self.collateral as u128 * bonus_bps as u128 / 10000) as u64
+    }
+}
+
+/// Lending pool for margin trading
+#[account]
+#[derive(InitSpace)]
+pub struct LendingPool {
+    /// Pool authority
+    pub authority: Pubkey,
+
