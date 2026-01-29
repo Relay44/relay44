@@ -161,3 +161,77 @@ export function LeaderboardTable({
         actionLabel="Browse markets"
       />
     );
+  }
+
+  return (
+    <Card>
+      {showControls && (
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <CardTitle>Leaderboard</CardTitle>
+
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              {/* Period selector */}
+              <div className="flex gap-1 overflow-x-auto p-1 bg-bg-tertiary scrollbar-hide">
+                {PERIODS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPeriod(p.id)}
+                    className={cn(
+                      'shrink-0 whitespace-nowrap px-3 py-1 text-sm transition-colors duration-fast cursor-pointer',
+                      period === p.id
+                        ? 'bg-accent text-white'
+                        : 'text-text-secondary hover:text-text-primary'
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Metric selector */}
+              <div className="flex gap-1 overflow-x-auto p-1 bg-bg-tertiary scrollbar-hide">
+                {METRICS.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setMetric(m.id)}
+                    className={cn(
+                      'shrink-0 whitespace-nowrap px-3 py-1 text-sm transition-colors duration-fast cursor-pointer',
+                      metric === m.id
+                        ? 'bg-accent text-white'
+                        : 'text-text-secondary hover:text-text-primary'
+                    )}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+      )}
+
+      <CardContent>
+        {error ? (
+          <div className="text-center py-8 text-ask">{error}</div>
+        ) : !leaderboard || leaderboard.entries.length === 0 ? (
+          <div className="text-center py-8 text-text-secondary">
+            No data available for this period
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {/* Header */}
+            <div className={cn(
+              'grid items-center gap-2 border-b border-border py-2 text-xs text-text-secondary',
+              compact
+                ? 'grid-cols-3'
+                : 'grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-4'
+            )}>
+              <span>Rank</span>
+              <span>Trader</span>
+              {!compact && <span className="hidden text-center sm:block">Change</span>}
+              <span className="text-right">{metricConfig?.label}</span>
+            </div>
+
