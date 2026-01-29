@@ -478,3 +478,100 @@ export function SecurityAuditChecklist() {
                                 fill="none"
                                 viewBox="0 0 24 24"
                                 stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                            ) : item.status === 'in_progress' ? (
+                              <svg
+                                className="w-5 h-5 text-yellow-500 animate-pulse"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                            ) : (
+                              <svg
+                                className="w-5 h-5 text-text-secondary"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* Audit Notes */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Pre-Audit Notes</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm text-text-secondary">
+            <li className="flex items-start gap-2">
+              <span className="text-accent">1.</span>
+              <span>
+                Smart contract audit should be completed by a reputable firm before mainnet
+                deployment. Recommended: Halborn, Trail of Bits, or Zellic.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-accent">2.</span>
+              <span>
+                All critical and high priority items should be complete before engaging external
+                auditors.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-accent">3.</span>
+              <span>
+                Prepare audit documentation: architecture diagrams, threat model, and scope
+                definition.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-accent">4.</span>
+              <span>
+                Run npm audit, cargo audit, forge test, and contract verification before submitting
+                for audit.
+              </span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-accent">5.</span>
+              <span>
+                Ensure all test suites pass and coverage is documented.
+              </span>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
