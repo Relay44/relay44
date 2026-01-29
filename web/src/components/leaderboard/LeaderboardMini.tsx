@@ -70,3 +70,34 @@ export function LeaderboardMini({ title = 'Top Traders', limit = 5 }: Leaderboar
               >
                 <div className="flex items-center gap-3">
                   <span
+                    className={cn(
+                      'w-6 h-6  flex items-center justify-center text-xs font-medium',
+                      entry.rank === 1 && 'bg-yellow-500/20 text-yellow-500',
+                      entry.rank === 2 && 'bg-gray-400/20 text-gray-400',
+                      entry.rank === 3 && 'bg-amber-700/20 text-amber-700',
+                      entry.rank > 3 && 'text-text-secondary'
+                    )}
+                  >
+                    {entry.rank}
+                  </span>
+                  <span className="text-sm text-text-primary">
+                    {entry.username || truncateAddress(entry.wallet)}
+                  </span>
+                </div>
+                <span
+                  className={cn(
+                    'text-sm font-medium',
+                    isPositive ? 'text-bid' : 'text-ask'
+                  )}
+                >
+                  {isPositive ? '+' : ''}${Math.abs(entry.value).toLocaleString()}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
