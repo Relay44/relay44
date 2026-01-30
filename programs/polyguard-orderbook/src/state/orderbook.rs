@@ -1,0 +1,321 @@
+use anchor_lang::prelude::*;
+use bytemuck::{Pod, Zeroable};
+
+/// Maximum orders per side of the orderbook
+pub const MAX_ORDERS: usize = 512;
+
+/// Maximum events in the event heap
+pub const MAX_EVENTS: usize = 256;
+
+/// Price scale for basis points (10000 = 100%)
+pub const PRICE_SCALE: u64 = 10000;
+
+/// Maximum quantity per order (1 billion units)
+pub const MAX_ORDER_QUANTITY: u64 = 1_000_000_000;
+
+/// Node handle type for tree indices
+pub type NodeHandle = u32;
+
+/// Sentinel value for empty nodes
+pub const FREE_NODE: NodeHandle = u32::MAX;
+
+/// Order tree node - stored in BookSide
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
+#[repr(C)]
+pub struct OrderNode {
+    /// Order key: (price << 64) | sequence_number
+    pub key: u128,
+
+    /// Owner's position account
+    pub owner: Pubkey,
+
+    /// Quantity remaining
+    pub quantity: u64,
+
+    /// Client-provided order ID
+    pub client_order_id: u64,
+
+    /// Timestamp when order was placed
+    pub timestamp: i64,
+
+    /// Slot for the owner's open orders array
+    pub owner_slot: u8,
+
+    /// Padding for alignment before u32 fields
+    pub _pad1: [u8; 3],
+
+    /// Tree links: parent, left child, right child
+    pub parent: NodeHandle,
+    pub left: NodeHandle,
+    pub right: NodeHandle,
+
+    /// Color for red-black tree (0 = black, 1 = red)
+    pub color: u8,
+
+    /// Padding for alignment
+    pub _padding: [u8; 3],
+}
+
+unsafe impl Zeroable for OrderNode {}
+unsafe impl Pod for OrderNode {}
+
+impl OrderNode {
+    pub const SIZE: usize = 16 + 32 + 8 + 8 + 8 + 1 + 4 + 4 + 4 + 1 + 2; // 88 bytes
+
+    pub fn price(&self) -> u64 {
+        (self.key >> 64) as u64
+    }
+
+    pub fn seq_num(&self) -> u64 {
+        self.key as u64
+    }
+
+    pub fn is_free(&self) -> bool {
+        self.key == 0 && self.owner == Pubkey::default()
+    }
+}
+
+/// BookSide holds one side of the orderbook (bids or asks)
+#[account(zero_copy)]
+#[repr(C)]
+pub struct BookSide {
+    /// Root node index (FREE_NODE if empty)
+    pub root: NodeHandle,
+
+    /// Best price node index (cached for O(1) access)
+    pub best: NodeHandle,
+
+    /// Number of orders in the tree
+    pub order_count: u32,
+
+    /// Head of free list
+    pub free_list_head: NodeHandle,
+
+    /// Sequence number for order priority
+    pub seq_num: u64,
+
+    /// 1 = bids (buy), 0 = asks (sell)
+    pub is_bids: u8,
+
+    /// Padding
+    pub _padding: [u8; 7],
+
+    /// Reserved for future use
+    pub _reserved: [u8; 64],
+
+    /// Order nodes array
+    pub nodes: [OrderNode; MAX_ORDERS],
+}
+
+impl Default for BookSide {
+    fn default() -> Self {
+        Self {
+            root: FREE_NODE,
+            best: FREE_NODE,
+            order_count: 0,
+            free_list_head: 0,
+            seq_num: 0,
+            is_bids: 0,
+            _padding: [0; 7],
+            _reserved: [0; 64],
+            nodes: [OrderNode::default(); MAX_ORDERS],
+        }
+    }
+}
+
+impl BookSide {
+    pub const SIZE: usize = 4 + 4 + 4 + 4 + 8 + 1 + 7 + 64 + (OrderNode::SIZE * MAX_ORDERS);
+
+    /// Initialize the bookside with a free list
+    pub fn initialize(&mut self, is_bids: bool) {
+        self.root = FREE_NODE;
+        self.best = FREE_NODE;
+        self.order_count = 0;
+        self.seq_num = 0;
+        self.is_bids = if is_bids { 1 } else { 0 };
+
+        // Initialize free list: each node points to the next
+        for i in 0..MAX_ORDERS {
+            self.nodes[i].parent = if i + 1 < MAX_ORDERS {
+                (i + 1) as NodeHandle
+            } else {
+                FREE_NODE
+            };
+        }
+        self.free_list_head = 0;
+    }
+
+    /// Allocate a node from the free list
+    fn allocate_node(&mut self) -> Option<NodeHandle> {
+        if self.free_list_head == FREE_NODE {
+            return None;
+        }
+        let index = self.free_list_head;
+        self.free_list_head = self.nodes[index as usize].parent;
+        self.nodes[index as usize] = OrderNode::default();
+        Some(index)
+    }
+
+    /// Return a node to the free list
+    fn deallocate_node(&mut self, index: NodeHandle) {
+        self.nodes[index as usize] = OrderNode::default();
+        self.nodes[index as usize].parent = self.free_list_head;
+        self.free_list_head = index;
+    }
+
+    /// Create order key from price and sequence number
+    pub fn make_key(&mut self, price: u64) -> u128 {
+        let seq = self.seq_num;
+        self.seq_num += 1;
+
+        if self.is_bids == 1 {
+            // For bids: higher prices first, then earlier orders
+            // Invert sequence for FIFO within same price
+            ((price as u128) << 64) | (!seq as u128)
+        } else {
+            // For asks: lower prices first, then earlier orders
+            ((price as u128) << 64) | (seq as u128)
+        }
+    }
+
+    /// Insert an order into the tree
+    pub fn insert(
+        &mut self,
+        price: u64,
+        quantity: u64,
+        owner: Pubkey,
+        client_order_id: u64,
+        timestamp: i64,
+        owner_slot: u8,
+    ) -> Option<(NodeHandle, u128)> {
+        let index = self.allocate_node()?;
+        let key = self.make_key(price);
+
+        let node = &mut self.nodes[index as usize];
+        node.key = key;
+        node.owner = owner;
+        node.quantity = quantity;
+        node.client_order_id = client_order_id;
+        node.timestamp = timestamp;
+        node.owner_slot = owner_slot;
+        node.parent = FREE_NODE;
+        node.left = FREE_NODE;
+        node.right = FREE_NODE;
+        node.color = 1; // Red
+
+        // BST insert
+        if self.root == FREE_NODE {
+            self.root = index;
+            self.nodes[index as usize].color = 0; // Root is black
+        } else {
+            let mut current = self.root;
+            loop {
+                let current_key = self.nodes[current as usize].key;
+                if key < current_key {
+                    if self.nodes[current as usize].left == FREE_NODE {
+                        self.nodes[current as usize].left = index;
+                        self.nodes[index as usize].parent = current;
+                        break;
+                    }
+                    current = self.nodes[current as usize].left;
+                } else {
+                    if self.nodes[current as usize].right == FREE_NODE {
+                        self.nodes[current as usize].right = index;
+                        self.nodes[index as usize].parent = current;
+                        break;
+                    }
+                    current = self.nodes[current as usize].right;
+                }
+            }
+            self.fix_insert(index);
+        }
+
+        // Update best price
+        self.update_best();
+        self.order_count += 1;
+
+        Some((index, key))
+    }
+
+    /// Red-black tree insert fixup
+    fn fix_insert(&mut self, mut node: NodeHandle) {
+        while node != self.root {
+            let parent = self.nodes[node as usize].parent;
+            if parent == FREE_NODE || self.nodes[parent as usize].color == 0 {
+                break;
+            }
+
+            let grandparent = self.nodes[parent as usize].parent;
+            if grandparent == FREE_NODE {
+                break;
+            }
+
+            let uncle = if self.nodes[grandparent as usize].left == parent {
+                self.nodes[grandparent as usize].right
+            } else {
+                self.nodes[grandparent as usize].left
+            };
+
+            if uncle != FREE_NODE && self.nodes[uncle as usize].color == 1 {
+                // Uncle is red: recolor
+                self.nodes[parent as usize].color = 0;
+                self.nodes[uncle as usize].color = 0;
+                self.nodes[grandparent as usize].color = 1;
+                node = grandparent;
+            } else {
+                // Uncle is black: rotate
+                if self.nodes[grandparent as usize].left == parent {
+                    if self.nodes[parent as usize].right == node {
+                        self.rotate_left(parent);
+                        node = parent;
+                    }
+                    let p = self.nodes[node as usize].parent;
+                    self.nodes[p as usize].color = 0;
+                    self.nodes[grandparent as usize].color = 1;
+                    self.rotate_right(grandparent);
+                } else {
+                    if self.nodes[parent as usize].left == node {
+                        self.rotate_right(parent);
+                        node = parent;
+                    }
+                    let p = self.nodes[node as usize].parent;
+                    self.nodes[p as usize].color = 0;
+                    self.nodes[grandparent as usize].color = 1;
+                    self.rotate_left(grandparent);
+                }
+                break;
+            }
+        }
+        self.nodes[self.root as usize].color = 0;
+    }
+
+    fn rotate_left(&mut self, node: NodeHandle) {
+        let right = self.nodes[node as usize].right;
+        if right == FREE_NODE {
+            return;
+        }
+
+        self.nodes[node as usize].right = self.nodes[right as usize].left;
+        if self.nodes[right as usize].left != FREE_NODE {
+            self.nodes[self.nodes[right as usize].left as usize].parent = node;
+        }
+
+        self.nodes[right as usize].parent = self.nodes[node as usize].parent;
+        if self.nodes[node as usize].parent == FREE_NODE {
+            self.root = right;
+        } else if self.nodes[self.nodes[node as usize].parent as usize].left == node {
+            self.nodes[self.nodes[node as usize].parent as usize].left = right;
+        } else {
+            self.nodes[self.nodes[node as usize].parent as usize].right = right;
+        }
+
+        self.nodes[right as usize].left = node;
+        self.nodes[node as usize].parent = right;
+    }
+
+    fn rotate_right(&mut self, node: NodeHandle) {
+        let left = self.nodes[node as usize].left;
+        if left == FREE_NODE {
+            return;
+        }
+
