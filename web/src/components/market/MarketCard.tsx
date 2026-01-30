@@ -104,3 +104,29 @@ export function MarketCard({ market }: MarketCardProps) {
                 </span>
               </div>
             );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="relative flex items-center justify-between pt-3 border-t border-border">
+          <div className="flex items-center gap-2 text-xs text-text-muted">
+            <span className="font-semibold text-text-primary">
+              {formatVolume(market.totalVolume)}
+            </span>
+            {market.frequency && (
+              <>
+                <RefreshCw className="w-3 h-3" />
+                <span>{formatFrequency(market.frequency)}</span>
+              </>
+            )}
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-text-muted">
+            Open market
+            <ArrowUpRight className="w-3.5 h-3.5" />
+          </span>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
