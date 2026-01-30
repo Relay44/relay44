@@ -235,3 +235,76 @@ export function LeaderboardTable({
               <span className="text-right">{metricConfig?.label}</span>
             </div>
 
+            {/* Entries */}
+            {leaderboard.entries.map((entry) => (
+              <LeaderboardRow
+                key={entry.wallet}
+                entry={entry}
+                formatValue={metricConfig?.format || ((v) => v.toString())}
+                metric={metric}
+                compact={compact}
+              />
+            ))}
+          </div>
+        )}
+
+        {leaderboard && (
+          <div className="mt-4 text-xs text-text-secondary text-center">
+            Last updated: {new Date(leaderboard.updatedAt).toLocaleString()}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface LeaderboardRowProps {
+  entry: LeaderboardEntry;
+  formatValue: (v: number) => string;
+  metric: LeaderboardMetric;
+  compact?: boolean;
+}
+
+function LeaderboardRow({ entry, formatValue, metric, compact }: LeaderboardRowProps) {
+  const isPnl = metric === 'pnl';
+  const isPositive = entry.value >= 0;
+
+  return (
+    <Link
+      href={`/profile/${entry.wallet}`}
+      className={cn(
+        'grid items-center gap-2 py-2 hover:bg-bg-secondary transition-colors duration-fast cursor-pointer',
+        compact
+          ? 'grid-cols-3'
+          : 'grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-4'
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <RankBadge rank={entry.rank} />
+      </div>
+
+      <div className="min-w-0">
+        <span className="block truncate font-medium text-text-primary">
+          {entry.username || truncateAddress(entry.wallet)}
+        </span>
+      </div>
+
+      {!compact && (
+        <div className="hidden text-center sm:block">
+          <RankChange current={entry.rank} previous={entry.previousRank} />
+        </div>
+      )}
+
+      <div className="text-right">
+        <span className={cn(
+          'font-medium',
+          isPnl && (isPositive ? 'text-bid' : 'text-ask'),
+          !isPnl && 'text-text-primary'
+        )}>
+          {formatValue(entry.value)}
+        </span>
+      </div>
+    </Link>
+  );
+}
+
