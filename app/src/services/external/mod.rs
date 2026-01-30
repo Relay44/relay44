@@ -602,4 +602,3 @@ pub async fn fetch_trades(
 
     Ok(value)
 }
-
