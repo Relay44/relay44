@@ -128,3 +128,55 @@ export function NotificationItem({ notification, onClick }: NotificationItemProp
     }
     onClick?.();
   };
+
+  const content = (
+    <div
+      className={cn(
+        'flex items-start gap-3 px-4 py-3 transition-colors duration-fast cursor-pointer',
+        'hover:bg-bg-tertiary',
+        !notification.read && 'bg-accent/5'
+      )}
+      onClick={!link ? handleClick : undefined}
+    >
+      {/* Icon */}
+      <div
+        className={cn(
+          'flex-shrink-0 w-8 h-8  flex items-center justify-center',
+          NOTIFICATION_COLORS[notification.type]
+        )}
+      >
+        {NOTIFICATION_ICONS[notification.type]}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-text-primary">
+          {notification.title}
+        </p>
+        <p className="text-sm text-text-secondary line-clamp-2">
+          {notification.message}
+        </p>
+      </div>
+
+      {/* Time and unread indicator */}
+      <div className="flex-shrink-0 flex items-center gap-2">
+        <span className="text-xs text-text-secondary">
+          {formatTime(notification.createdAt)}
+        </span>
+        {!notification.read && (
+          <span className="w-2 h-2  bg-accent" />
+        )}
+      </div>
+    </div>
+  );
+
+  if (link) {
+    return (
+      <Link href={link} onClick={handleClick}>
+        {content}
+      </Link>
+    );
+  }
+
+  return content;
+}
