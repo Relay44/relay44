@@ -166,3 +166,69 @@ export function PriceChart({
             </linearGradient>
           </defs>
 
+          {/* Area fill */}
+          <path d={areaPath} fill="url(#priceGradient)" />
+
+          {/* Line */}
+          <path
+            d={linePath}
+            fill="none"
+            stroke="var(--color-accent)"
+            strokeWidth="0.5"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+
+        {/* Hover zones */}
+        <div className="absolute inset-0 flex">
+          {filteredData.map((_, i) => (
+            <div
+              key={i}
+              className="flex-1 cursor-crosshair"
+              onMouseEnter={() => setHoveredIndex(i)}
+            />
+          ))}
+        </div>
+
+        {/* Hover line */}
+        {hoveredIndex !== null && (
+          <div
+            className="absolute top-0 bottom-0 w-px bg-border pointer-events-none"
+            style={{
+              left: `${(hoveredIndex / (filteredData.length - 1 || 1)) * 100}%`,
+            }}
+          />
+        )}
+
+        {/* Volume bars */}
+        {showVolume && (
+          <div
+            className="absolute bottom-0 left-0 right-0 flex items-end gap-px"
+            style={{ height: volumeHeight }}
+          >
+            {filteredData.map((point, i) => (
+              <div
+                key={i}
+                className={cn(
+                  'flex-1',
+                  hoveredIndex === i ? 'bg-accent' : 'bg-bg-tertiary'
+                )}
+                style={{
+                  height: `${((point.volume || 0) / maxVolume) * 100}%`,
+                  minHeight: point.volume ? 2 : 0,
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Price labels */}
+      <div className="flex justify-between text-xs text-text-secondary mt-2">
+        <span>{minPrice.toFixed(1)}%</span>
+        <span>{maxPrice.toFixed(1)}%</span>
+      </div>
+    </div>
+  );
+}
+
