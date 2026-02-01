@@ -180,3 +180,4 @@ export function NotificationItem({ notification, onClick }: NotificationItemProp
 
   return content;
 }
+
