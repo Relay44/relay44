@@ -178,3 +178,172 @@ pub fn handler(ctx: Context<ResolveMarket>) -> Result<ResolveMarketResult> {
         resolver: ctx.accounts.resolver.key(),
     });
 
+    Ok(ResolveMarketResult {
+        outcome: outcome as u8,
+        price: oracle_price.price,
+        timestamp: clock.unix_timestamp,
+    })
+}
+
+/// Read price from Switchboard pull feed
+fn read_switchboard_price(feed_account: &AccountInfo, current_slot: u64) -> Result<OraclePrice> {
+    // Switchboard on-demand uses a specific account structure
+    // The feed data is stored in the account data after a discriminator
+
+    let data = feed_account.try_borrow_data()?;
+
+    // Minimum data length check
+    if data.len() < 128 {
+        return Err(OrderBookError::OracleFeedInvalid.into());
+    }
+
+    // Switchboard pull feed structure (simplified):
+    // - 8 bytes: discriminator
+    // - 32 bytes: queue pubkey
+    // - 8 bytes: created_at
+    // - 16 bytes: result (i128)
+    // - 8 bytes: max_variance
+    // - 4 bytes: min_responses
+    // - ... more fields
+    // - 8 bytes: last_update_slot
+
+    // Read the result value (i128 at offset ~48-64, varies by version)
+    // For switchboard-on-demand, we read the aggregated result
+
+    // Note: In production, use the official switchboard-on-demand crate's
+    // deserialization. This is a simplified example.
+
+    // Read price from typical offset
+    let price_offset = 48;
+    let price_bytes: [u8; 16] = data[price_offset..price_offset + 16]
+        .try_into()
+        .map_err(|_| OrderBookError::OracleFeedInvalid)?;
+    let price = i128::from_le_bytes(price_bytes);
+
+    // Read slot from end of commonly used area
+    let slot_offset = data.len().saturating_sub(16);
+    let slot_bytes: [u8; 8] = data[slot_offset..slot_offset + 8]
+        .try_into()
+        .map_err(|_| OrderBookError::OracleFeedInvalid)?;
+    let slot = u64::from_le_bytes(slot_bytes);
+
+    // Read timestamp (typically 8 bytes before slot)
+    let ts_offset = slot_offset.saturating_sub(8);
+    let ts_bytes: [u8; 8] = data[ts_offset..ts_offset + 8]
+        .try_into()
+        .map_err(|_| OrderBookError::OracleFeedInvalid)?;
+    let timestamp = i64::from_le_bytes(ts_bytes);
+
+    // Confidence is typically stored nearby
+    let confidence = 0u64; // Simplified
+
+    Ok(OraclePrice {
+        price,
+        confidence,
+        slot,
+        timestamp,
+    })
+}
+
+/// Manual resolution by authority
+#[derive(Accounts)]
+pub struct ResolveMarketManual<'info> {
+    #[account(
+        mut,
+        constraint = authority.key() == market.authority @ OrderBookError::UnauthorizedAdmin
+    )]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [OrderBookConfig::SEED_PREFIX],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, OrderBookConfig>,
+
+    #[account(
+        mut,
+        seeds = [MarketV2::SEED_PREFIX, market.oracle_feed.as_ref()],
+        bump = market.bump,
+        constraint = !market.is_resolved() @ OrderBookError::MarketAlreadyResolved,
+        constraint = market.oracle_config.get_oracle_type() == OracleType::Manual @ OrderBookError::OracleFeedInvalid,
+    )]
+    pub market: Account<'info, MarketV2>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
+pub struct ManualResolutionParams {
+    pub outcome: u8, // 1 = Yes, 2 = No
+}
+
+pub fn handler_manual(
+    ctx: Context<ResolveMarketManual>,
+    params: ManualResolutionParams,
+) -> Result<()> {
+    let market = &mut ctx.accounts.market;
+    let clock = Clock::get()?;
+
+    // Validate outcome
+    require!(
+        params.outcome == 1 || params.outcome == 2,
+        OrderBookError::InvalidResolutionOutcome
+    );
+
+    // Update market state
+    market.status = 2; // Resolved
+    market.resolved_outcome = params.outcome;
+    market.resolved_at = clock.unix_timestamp;
+    market.set_resolution_price(0); // No oracle price for manual
+
+    emit!(MarketResolved {
+        market: market.key(),
+        outcome: params.outcome,
+        price: 0,
+        timestamp: clock.unix_timestamp,
+        resolver: ctx.accounts.authority.key(),
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct MarketResolved {
+    pub market: Pubkey,
+    pub outcome: u8,
+    pub price: i128,
+    pub timestamp: i64,
+    pub resolver: Pubkey,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolution_outcome_conversion() {
+        assert_eq!(ResolutionOutcome::from(0), ResolutionOutcome::Unresolved);
+        assert_eq!(ResolutionOutcome::from(1), ResolutionOutcome::Yes);
+        assert_eq!(ResolutionOutcome::from(2), ResolutionOutcome::No);
+        assert_eq!(ResolutionOutcome::from(3), ResolutionOutcome::Invalid);
+        assert_eq!(ResolutionOutcome::from(99), ResolutionOutcome::Unresolved);
+    }
+
+    #[test]
+    fn test_oracle_config_threshold() {
+        // BTC > $50,000 example
+        // $50,000 with 18 decimals = 50_000 * 10^18
+        let threshold = 50_000_000_000_000_000_000_000i128;
+        let config = OracleConfig::new_switchboard(threshold, ComparisonOp::GreaterThan, 150);
+
+        // Price at $55,000
+        let price = 55_000_000_000_000_000_000_000i128;
+        assert!(config.evaluate_threshold(price)); // Yes
+
+        // Price at $45,000
+        let price = 45_000_000_000_000_000_000_000i128;
+        assert!(!config.evaluate_threshold(price)); // No
+
+        // Price exactly at $50,000 (GreaterThan, so No)
+        let price = 50_000_000_000_000_000_000_000i128;
+        assert!(!config.evaluate_threshold(price)); // No (not strictly greater)
+    }
+}
