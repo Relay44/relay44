@@ -239,3 +239,242 @@ pub fn handler(ctx: Context<PlaceOrderV2>, params: PlaceOrderParams) -> Result<P
                 1
             },
         );
+
+        event_heap.seq_num += 1;
+        event_heap.push_fill(fill);
+
+        // Update taker's position immediately
+        if params.side == OrderSideV2::Buy {
+            open_orders.collateral_free = open_orders.collateral_free.saturating_sub(fill_cost);
+            match params.outcome {
+                OutcomeV2::Yes => {
+                    open_orders.yes_free = open_orders.yes_free.saturating_add(fill_quantity)
+                }
+                OutcomeV2::No => {
+                    open_orders.no_free = open_orders.no_free.saturating_add(fill_quantity)
+                }
+            }
+        } else {
+            match params.outcome {
+                OutcomeV2::Yes => {
+                    open_orders.yes_free = open_orders.yes_free.saturating_sub(fill_quantity)
+                }
+                OutcomeV2::No => {
+                    open_orders.no_free = open_orders.no_free.saturating_sub(fill_quantity)
+                }
+            }
+            open_orders.collateral_free = open_orders.collateral_free.saturating_add(fill_cost);
+        }
+
+        // Track order for removal/update
+        if fill_quantity == best.quantity {
+            orders_to_remove.push(best.key);
+        } else {
+            orders_to_update.push((best.key, best.quantity - fill_quantity));
+        }
+
+        remaining_quantity -= fill_quantity;
+        total_filled += fill_quantity;
+        total_cost += fill_cost;
+        matches_count += 1;
+
+        open_orders.taker_volume = open_orders.taker_volume.saturating_add(fill_quantity);
+    }
+
+    // Apply order removals
+    for key in orders_to_remove {
+        matching_book.remove(key);
+    }
+
+    // Apply order updates
+    for (key, new_qty) in orders_to_update {
+        if let Some(idx) = matching_book.find_by_key_index(key) {
+            matching_book.update_quantity(idx, new_qty);
+        }
+    }
+
+    // Check fill-or-kill
+    if params.order_type == OrderTypeV2::FillOrKill && remaining_quantity > 0 {
+        return Err(OrderBookError::FillOrKillNotSatisfied.into());
+    }
+
+    // Post remaining quantity if limit order
+    let order_id = if remaining_quantity > 0
+        && params.order_type == OrderTypeV2::Limit
+        && params.order_type != OrderTypeV2::ImmediateOrCancel
+    {
+        // Lock funds for the posted order
+        let posted_cost = calculate_cost(remaining_quantity, params.price);
+
+        if params.side == OrderSideV2::Buy {
+            open_orders.lock_collateral(posted_cost)?;
+        } else {
+            match params.outcome {
+                OutcomeV2::Yes => open_orders.lock_yes(remaining_quantity)?,
+                OutcomeV2::No => open_orders.lock_no(remaining_quantity)?,
+            }
+        }
+
+        // Find a free slot in open_orders
+        let slot = open_orders
+            .add_order(
+                0, // Will be set after insert
+                params.client_order_id,
+                params.price,
+                if params.side == OrderSideV2::Buy {
+                    0
+                } else {
+                    1
+                },
+                if params.outcome == OutcomeV2::Yes {
+                    0
+                } else {
+                    1
+                },
+            )
+            .ok_or(OrderBookError::NoFreeSlots)?;
+
+        // Insert into orderbook
+        let (idx, key) = posting_book
+            .insert(
+                params.price,
+                remaining_quantity,
+                open_orders.owner,
+                params.client_order_id,
+                now,
+                slot,
+            )
+            .ok_or(OrderBookError::OrderbookFull)?;
+
+        // Update the order slot with the actual key
+        if let Some(order_slot) = open_orders.orders.get_mut(slot as usize) {
+            order_slot.key = key;
+        }
+
+        Some(key)
+    } else {
+        None
+    };
+
+    // Transfer collateral if taker bought
+    if params.side == OrderSideV2::Buy && total_cost > 0 {
+        let transfer_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.user_collateral.to_account_info(),
+                to: ctx.accounts.market_vault.to_account_info(),
+                authority: ctx.accounts.owner.to_account_info(),
+            },
+        );
+        token::transfer(transfer_ctx, total_cost)?;
+    }
+
+    emit!(OrderPlacedV2 {
+        market: ctx.accounts.market.key(),
+        owner: ctx.accounts.owner.key(),
+        order_id,
+        side: params.side,
+        outcome: params.outcome,
+        price: params.price,
+        quantity: params.quantity,
+        filled_quantity: total_filled,
+        posted_quantity: remaining_quantity,
+        client_order_id: params.client_order_id,
+    });
+
+    Ok(PlaceOrderResult {
+        order_id,
+        posted_quantity: if order_id.is_some() {
+            remaining_quantity
+        } else {
+            0
+        },
+        filled_quantity: total_filled,
+        total_cost,
+    })
+}
+
+/// Check if prices are compatible for matching
+fn is_price_acceptable(taker_side: OrderSideV2, taker_price: u64, maker_price: u64) -> bool {
+    match taker_side {
+        // Taker buying: maker's ask price must be <= taker's bid
+        OrderSideV2::Buy => maker_price <= taker_price,
+        // Taker selling: maker's bid price must be >= taker's ask
+        OrderSideV2::Sell => maker_price >= taker_price,
+    }
+}
+
+/// Calculate cost in collateral for a given quantity and price
+fn calculate_cost(quantity: u64, price: u64) -> u64 {
+    (quantity as u128)
+        .checked_mul(price as u128)
+        .and_then(|v| v.checked_div(PRICE_SCALE as u128))
+        .unwrap_or(0) as u64
+}
+
+// Helper trait for BookSide
+impl BookSide {
+    fn find_by_key_index(&self, key: u128) -> Option<u32> {
+        let mut current = self.root;
+        while current != super::super::state::orderbook::FREE_NODE {
+            let current_key = self.nodes[current as usize].key;
+            if key == current_key {
+                return Some(current);
+            } else if key < current_key {
+                current = self.nodes[current as usize].left;
+            } else {
+                current = self.nodes[current as usize].right;
+            }
+        }
+        None
+    }
+}
+
+#[event]
+pub struct OrderPlacedV2 {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub order_id: Option<u128>,
+    pub side: OrderSideV2,
+    pub outcome: OutcomeV2,
+    pub price: u64,
+    pub quantity: u64,
+    pub filled_quantity: u64,
+    pub posted_quantity: u64,
+    pub client_order_id: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_price_acceptable() {
+        // Buyer at 60, seller at 55 -> match
+        assert!(is_price_acceptable(OrderSideV2::Buy, 6000, 5500));
+
+        // Buyer at 50, seller at 55 -> no match
+        assert!(!is_price_acceptable(OrderSideV2::Buy, 5000, 5500));
+
+        // Seller at 45, buyer at 50 -> match
+        assert!(is_price_acceptable(OrderSideV2::Sell, 4500, 5000));
+
+        // Seller at 55, buyer at 50 -> no match
+        assert!(!is_price_acceptable(OrderSideV2::Sell, 5500, 5000));
+    }
+
+    #[test]
+    fn test_calculate_cost() {
+        // 100 tokens at 50% = 50 collateral
+        assert_eq!(calculate_cost(100, 5000), 50);
+
+        // 1000 tokens at 75% = 750 collateral
+        assert_eq!(calculate_cost(1000, 7500), 750);
+
+        // 1 token at 1% = 0 (rounding down)
+        assert_eq!(calculate_cost(1, 100), 0);
+
+        // 100 tokens at 1% = 1
+        assert_eq!(calculate_cost(100, 100), 1);
+    }
+}
