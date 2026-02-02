@@ -148,4 +148,3 @@ export const CURATED_MARKETS_BY_ID: Record<number, CuratedMarketDefinition> = {
     category: 'Financials',
   },
 };
-
