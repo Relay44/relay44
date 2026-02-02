@@ -96,3 +96,4 @@ export function NotificationList({ onClose }: NotificationListProps) {
     </div>
   );
 }
+
