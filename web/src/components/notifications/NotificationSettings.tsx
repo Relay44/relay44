@@ -177,3 +177,80 @@ export function NotificationSettings() {
       </CardHeader>
       <CardContent className="space-y-6">
         {/* In-app notifications */}
+        <div>
+          <h4 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-2">
+            In-App Notifications
+          </h4>
+          <div className="divide-y divide-border">
+            <Toggle
+              label="Order fills"
+              description="When your orders are filled or partially filled"
+              checked={preferences.orderFills}
+              onChange={(v) => handleChange('orderFills', v)}
+            />
+            <Toggle
+              label="Market resolutions"
+              description="When markets you have positions in are resolved"
+              checked={preferences.marketResolutions}
+              onChange={(v) => handleChange('marketResolutions', v)}
+            />
+            <Toggle
+              label="Price alerts"
+              description="Custom price alerts you've set up"
+              checked={preferences.priceAlerts}
+              onChange={(v) => handleChange('priceAlerts', v)}
+            />
+            <Toggle
+              label="System announcements"
+              description="Important platform updates and announcements"
+              checked={preferences.systemAnnouncements}
+              onChange={(v) => handleChange('systemAnnouncements', v)}
+            />
+            <Toggle
+              label="Decision alerts"
+              description="Recommendation changes, threshold crossings, and confidence drops"
+              checked={preferences.decisionAlerts}
+              onChange={(v) => handleChange('decisionAlerts', v)}
+            />
+          </div>
+        </div>
+
+        {/* External notifications */}
+        <div>
+          <h4 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-2">
+            External Notifications
+          </h4>
+          <div className="divide-y divide-border">
+            <Toggle
+              label="Email notifications"
+              description="Email delivery is not live yet"
+              checked={preferences.emailNotifications}
+              onChange={(v) => handleChange('emailNotifications', v)}
+              disabled
+            />
+            <Toggle
+              label="Push notifications"
+              description="Browser push delivery is not live yet"
+              checked={preferences.pushNotifications}
+              onChange={(v) => handleChange('pushNotifications', v)}
+              disabled
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-end">
+          {status === 'saved' && (
+            <span className="text-sm text-bid">Settings saved</span>
+          )}
+          {status === 'error' && (
+            <span className="text-sm text-ask">Failed to save</span>
+          )}
+          <Button onClick={handleSave} loading={saving} className="w-full sm:w-auto">
+            Save Changes
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
