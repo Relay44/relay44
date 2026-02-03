@@ -163,3 +163,60 @@ export function OrderForm({ market, onSuccess }: OrderFormProps) {
             disabled={isPending}
           />
 
+          <Input
+            type="number"
+            label="Limit Price (optional)"
+            placeholder={formatPrice(currentPrice)}
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            min="0.01"
+            max="0.99"
+            step="0.01"
+            hint="Leave empty for market order"
+            error={errors.price}
+            disabled={isPending}
+          />
+        </div>
+
+        {/* Order summary */}
+        <div className="bg-bg-secondary  p-3 mb-4 space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-text-muted">
+              {side === 'buy' ? 'Avg Price' : 'Est. Return'}
+            </span>
+            <span className="font-mono">${formatPrice(effectivePrice)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-text-muted">
+              {side === 'buy' ? 'Est. Shares' : 'Total'}
+            </span>
+            <span className="font-mono">{shares.toFixed(2)}</span>
+          </div>
+          {side === 'buy' && potentialReturn > 0 && (
+            <div className="flex justify-between pt-2 border-t border-border">
+              <span className="text-text-muted">Max Profit</span>
+              <span className={cn(
+                "font-mono font-medium",
+                isYes ? "text-bid" : "text-ask"
+              )}>
+                +${formatPrice(potentialReturn)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <Button
+          type="submit"
+          variant={isYes ? 'bid' : 'ask'}
+          size="lg"
+          className="w-full"
+          disabled={!amountValue || placeOrder.isPending}
+          loading={placeOrder.isPending}
+        >
+          {side === 'buy' ? 'Buy' : 'Sell'} {isYes ? 'Yes' : 'No'}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
