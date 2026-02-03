@@ -99,3 +99,28 @@ export function ProfilePositions({ wallet }: ProfilePositionsProps) {
                       )}
                     </div>
 
+                    <div className="text-right">
+                      <p
+                        className={cn(
+                          'text-sm font-medium',
+                          position.unrealizedPnl >= 0 ? 'text-bid' : 'text-ask'
+                        )}
+                      >
+                        {position.unrealizedPnl >= 0 ? '+' : ''}
+                        ${position.unrealizedPnl.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-text-secondary">
+                        Value: ${totalValue.toFixed(2)}
+                      </p>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
