@@ -100,4 +100,3 @@ export function LeaderboardMini({ title = 'Top Traders', limit = 5 }: Leaderboar
     </Card>
   );
 }
-
