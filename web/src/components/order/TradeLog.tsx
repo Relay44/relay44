@@ -114,3 +114,36 @@ export function TradeLog({ marketId, outcome, limit = 20 }: TradeLogProps) {
                   </span>
                 </div>
               );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return 'now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  return date.toLocaleDateString();
+}
+
+function formatQuantity(quantity: number): string {
+  if (quantity >= 1000000) {
+    return `${(quantity / 1000000).toFixed(1)}M`;
+  }
+  if (quantity >= 1000) {
+    return `${(quantity / 1000).toFixed(1)}K`;
+  }
+  return quantity.toString();
+}
+
