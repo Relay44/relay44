@@ -144,3 +144,48 @@ export function OrderHistory({ marketId }: OrderHistoryProps) {
                       {isBuy ? 'BUY' : 'SELL'}
                     </div>
 
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-text-primary">
+                          {order.outcome.toUpperCase()} @ {order.price.toFixed(1)}%
+                        </span>
+                        <Badge variant={config.variant}>{config.label}</Badge>
+                      </div>
+                      <div className="text-sm text-text-secondary">
+                        {order.filledQuantity}/{order.quantity} filled |{' '}
+                        {new Date(order.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="font-medium text-text-primary">
+                        ${((order.price * order.quantity) / 10000).toFixed(2)}
+                      </p>
+                      <p className="text-sm text-text-secondary">
+                        {order.quantity} shares
+                      </p>
+                    </div>
+
+                    {canCancel && !readOnly && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCancel(order.id)}
+                        loading={cancellingId === order.id}
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
