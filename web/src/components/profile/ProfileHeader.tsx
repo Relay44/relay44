@@ -150,3 +150,65 @@ export function ProfileHeader({ wallet }: ProfileHeaderProps) {
               <p className="text-text-secondary mb-3">{profile.bio}</p>
             )}
 
+            <div className="flex flex-wrap items-center gap-4 text-sm text-text-secondary">
+              <span>Joined {formatDate(profile.joinedAt)}</span>
+              <span>{profile.stats.marketsTraded} markets traded</span>
+              <span>{profile.stats.totalTrades} trades</span>
+            </div>
+
+            {/* Badges */}
+            {profile.badges.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {profile.badges.map((badge) => (
+                  <div
+                    key={badge.id}
+                    className="flex items-center gap-1.5 px-2 py-1 bg-bg-tertiary "
+                    title={badge.description}
+                  >
+                    <span>{badge.icon}</span>
+                    <span className="text-xs text-text-primary">{badge.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Key stats */}
+          <div className="flex-shrink-0 grid grid-cols-2 gap-4">
+            <div className="text-center">
+              <p className="text-sm text-text-secondary">30D P&L</p>
+              <p
+                className={cn(
+                  'text-xl font-bold',
+                  profile.stats.pnl30d >= 0 ? 'text-bid' : 'text-ask'
+                )}
+              >
+                {profile.stats.pnl30d >= 0 ? '+' : ''}
+                ${Math.abs(profile.stats.pnl30d).toLocaleString()}
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm text-text-secondary">Win Rate</p>
+              <p className="text-xl font-bold text-text-primary">
+                {(profile.stats.winRate * 100).toFixed(1)}%
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm text-text-secondary">Volume</p>
+              <p className="text-xl font-bold text-text-primary">
+                ${(profile.stats.totalVolume / 1000).toFixed(0)}K
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm text-text-secondary">Streak</p>
+              <p className="text-xl font-bold text-accent">
+                {profile.stats.currentStreak}
+              </p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
