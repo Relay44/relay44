@@ -304,4 +304,3 @@ mod tests {
         assert!((realized_pnl("sell", 0.60, 0.50, 10.0, 0.2) - 0.8).abs() < 0.0001);
     }
 }
-
