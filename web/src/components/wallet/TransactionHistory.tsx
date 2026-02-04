@@ -140,3 +140,46 @@ export function TransactionHistory() {
                           ? 'warning'
                           : 'danger'
                       }
+                    >
+                      {tx.status}
+                    </Badge>
+                  </div>
+                  <p className="text-sm text-text-secondary">
+                    {formatDate(tx.createdAt)}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p
+                  className={cn(
+                    'font-medium',
+                    isIncoming ? 'text-bid' : 'text-ask'
+                  )}
+                >
+                  {isIncoming ? '+' : '-'}${formatUsdc(tx.amount)}
+                </p>
+                {tx.fee > 0 && (
+                  <p className="text-xs text-text-secondary">
+                    Fee: ${formatUsdc(tx.fee)}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {hasMore && (
+        <Button
+          variant="secondary"
+          className="w-full"
+          onClick={() => fetchTransactions(offset)}
+          loading={loading}
+        >
+          Load More
+        </Button>
+      )}
+    </div>
+  );
+}
+
