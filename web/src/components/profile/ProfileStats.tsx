@@ -84,3 +84,41 @@ export function ProfileStats({ wallet }: ProfileStatsProps) {
             trend={stats.pnlAllTime >= 0 ? 'up' : 'down'}
           />
           <StatCard
+            label="30-Day P&L"
+            value={`${stats.pnl30d >= 0 ? '+' : ''}$${Math.abs(stats.pnl30d).toLocaleString()}`}
+            trend={stats.pnl30d >= 0 ? 'up' : 'down'}
+          />
+          <StatCard
+            label="Total Volume"
+            value={`$${(stats.totalVolume / 1000).toFixed(0)}K`}
+          />
+          <StatCard
+            label="Win Rate"
+            value={`${(stats.winRate * 100).toFixed(1)}%`}
+            subValue={`${stats.totalTrades} trades`}
+          />
+          <StatCard
+            label="Best Trade"
+            value={`+$${stats.bestTrade.toLocaleString()}`}
+            trend="up"
+          />
+          <StatCard
+            label="Worst Trade"
+            value={`-$${Math.abs(stats.worstTrade).toLocaleString()}`}
+            trend="down"
+          />
+          <StatCard
+            label="Current Streak"
+            value={stats.currentStreak}
+            subValue={`Best: ${stats.longestStreak}`}
+          />
+          <StatCard
+            label="Markets Traded"
+            value={stats.marketsTraded}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
