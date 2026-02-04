@@ -184,3 +184,57 @@ export function WalletPanel() {
         </CardContent>
       </Card>
 
+      {/* Deposit/Withdraw Tabs */}
+      <Card>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} className="w-full">
+          <CardHeader className="pb-0">
+            {readOnly ? (
+              <ReadOnlyNotice
+                title="Wallet actions are disabled"
+                body={transferNotice || 'Wallet actions are disabled in this environment.'}
+              />
+            ) : transferNotice ? (
+              <p className="mb-4 text-sm text-text-secondary">{transferNotice}</p>
+            ) : null}
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="deposit" disabled={!depositEnabled}>
+                Deposit
+              </TabsTrigger>
+              <TabsTrigger value="withdraw" disabled={!withdrawEnabled}>
+                Withdraw
+              </TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <TabsContent value="deposit">
+              {depositEnabled ? (
+                <DepositForm onSuccess={fetchBalance} />
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  Wallet funding is disabled for the current runtime configuration.
+                </p>
+              )}
+            </TabsContent>
+            <TabsContent value="withdraw">
+              {withdrawEnabled ? (
+                <WithdrawForm
+                  availableBalance={balance?.available || 0}
+                  onSuccess={fetchBalance}
+                />
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  Wallet payouts are disabled for the current runtime configuration.
+                </p>
+              )}
+            </TabsContent>
+            <TabsContent value="history">
+              <TransactionHistory />
+            </TabsContent>
+          </CardContent>
+        </Tabs>
+      </Card>
+    </div>
+  );
+}
+
