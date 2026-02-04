@@ -170,3 +170,61 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
         </div>
       </div>
 
+      {depositAddress && (
+        <div className="space-y-2 p-4  bg-bg-secondary">
+          <p className="text-sm font-medium text-text-secondary">
+            Vault Contract
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-sm text-text-primary bg-bg-tertiary px-3 py-2  font-mono break-all">
+              {depositAddress.address}
+            </code>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => navigator.clipboard.writeText(depositAddress.address)}
+            >
+              Copy
+            </Button>
+          </div>
+          <p className="text-xs text-text-secondary mt-2">
+            Transactions are signed from your connected wallet and settled on Base.
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3  bg-ask/10 border border-ask/20">
+          <p className="text-sm text-ask">{error}</p>
+        </div>
+      )}
+
+      {success && (
+        <div className="p-3  bg-bid/10 border border-bid/20">
+          <p className="text-sm text-bid">{success}</p>
+        </div>
+      )}
+
+      <Button
+        variant="primary"
+        size="lg"
+        className="w-full"
+        onClick={() => {
+          if (wallet.isConnected) {
+            void handleDeposit();
+            return;
+          }
+          setError(null);
+          void wallet.connect().catch((err) => {
+            setError(err instanceof Error ? err.message : 'Wallet connection failed');
+          });
+        }}
+        loading={loading || walletBusy}
+        disabled={wallet.isConnected && (!amount || parseFloat(amount) < 1)}
+      >
+        {wallet.isConnected ? 'Deposit to Vault' : 'Connect Base Wallet'}
+      </Button>
+    </div>
+  );
+}
+
