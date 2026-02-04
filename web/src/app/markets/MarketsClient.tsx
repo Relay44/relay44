@@ -160,3 +160,60 @@ export default function MarketsClient({
               {includeLowLiquidity ? 'All Liquidity' : 'Live Liquidity'}
             </button>
 
+            <div className="w-px h-5 bg-border flex-shrink-0" />
+
+            <div className="flex items-center gap-1.5">
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setCategory(cat)}
+                  className={cn(
+                    'px-3 py-1.5  text-sm font-medium whitespace-nowrap transition-colors cursor-pointer',
+                    category === cat
+                      ? 'bg-bg-tertiary text-text-primary'
+                      : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+                  )}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
+        <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold text-text-primary">
+              {category === 'All' ? 'All Markets' : category}
+            </h1>
+            {searchQuery ? (
+              <p className="text-sm text-text-secondary">
+                Search results for "{searchQuery}"
+              </p>
+            ) : null}
+          </div>
+          <span className="text-sm text-text-muted">
+            {visibleMarkets.length} markets · {includeLowLiquidity ? 'including low-liquidity' : 'liquidity-filtered'}
+          </span>
+        </div>
+
+        {errorMessage && (
+          <div className="mb-4 p-3 border border-ask/20 bg-ask/10 text-ask text-sm">
+            {errorMessage}
+          </div>
+        )}
+
+        <MarketList
+          markets={visibleMarkets}
+          isLoading={isLoading}
+          columns={4}
+          emptyMessage={emptyMessage}
+        />
+      </div>
+
+      <BottomNav />
+    </div>
+  );
+}
