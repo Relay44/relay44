@@ -173,3 +173,75 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
         </div>
       </div>
 
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-text-secondary">
+          Destination Wallet
+        </label>
+        <div className="p-3 border border-border font-mono text-sm text-text-primary">
+          {wallet.address || 'Connect wallet'}
+        </div>
+        <p className="text-xs text-text-secondary">
+          Withdraw flow only supports your authenticated wallet in v1.
+        </p>
+      </div>
+
+      {/* Fee Breakdown */}
+      {amountNumber > 0 && (
+        <div className="space-y-2 p-4  bg-bg-secondary">
+          <div className="flex justify-between text-sm">
+            <span className="text-text-secondary">Amount</span>
+            <span className="text-text-primary">${amountNumber.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-text-secondary">Network Fee</span>
+            <span className="text-text-secondary">-${formatUsdc(fee)}</span>
+          </div>
+          <div className="border-t border-border pt-2 mt-2">
+            <div className="flex justify-between font-medium">
+              <span className="text-text-secondary">You Receive</span>
+              <span className="text-text-primary">${formatUsdc(netAmount)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error/Success Messages */}
+      {error && (
+        <div className="p-3  bg-ask/10 border border-ask/20">
+          <p className="text-sm text-ask">{error}</p>
+        </div>
+      )}
+
+      {success && (
+        <div className="p-3  bg-bid/10 border border-bid/20">
+          <p className="text-sm text-bid">{success}</p>
+        </div>
+      )}
+
+      {/* Submit Button */}
+      <Button
+        variant="primary"
+        size="lg"
+        className="w-full"
+        onClick={() => {
+          if (wallet.isConnected) {
+            void handleWithdraw();
+            return;
+          }
+          setError(null);
+          void wallet.connect().catch((err) => {
+            setError(err instanceof Error ? err.message : 'Wallet connection failed');
+          });
+        }}
+        loading={loading || walletBusy}
+        disabled={
+          wallet.isConnected &&
+          (amountLamports < 1_000_000 || amountLamports > availableBalance)
+        }
+      >
+        {wallet.isConnected ? 'Withdraw from Vault' : 'Connect Base Wallet'}
+      </Button>
+    </div>
+  );
+}
+
