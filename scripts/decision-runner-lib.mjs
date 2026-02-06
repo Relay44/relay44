@@ -78,3 +78,34 @@ export async function loginAdmin() {
   if (!nonce) {
     throw new Error('missing SIWE nonce');
   }
+
+  const issuedAt = new Date().toISOString();
+  const message = `${siweDomain} wants you to sign in with your Ethereum account:\n${account.address}\n\nSign in to relay44 decision runner\n\nURI: ${apiOrigin}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
+  const signature = await account.signMessage({ message });
+  const tokens = await fetchJson(`${apiBase}/auth/siwe/login`, {
+    method: 'POST',
+    headers: buildHeaders(),
+    body: JSON.stringify({
+      wallet: account.address,
+      message,
+      signature,
+    }),
+  });
+
+  if (!tokens?.access_token) {
+    throw new Error('missing access token');
+  }
+
+  return {
+    account,
+    accessToken: tokens.access_token,
+  };
+}
+
+export async function apiPost(pathname, token, body = {}) {
+  return fetchJson(`${apiBase}${pathname}`, {
+    method: 'POST',
+    headers: buildHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
