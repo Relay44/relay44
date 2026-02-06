@@ -100,3 +100,36 @@ impl Order {
             .checked_mul(price_u64)?
             .checked_div(10000)
     }
+
+    /// Check if order is still valid
+    pub fn is_valid(&self, current_time: i64) -> bool {
+        if self.status != OrderStatus::Open && self.status != OrderStatus::PartiallyFilled {
+            return false;
+        }
+        if self.expires_at > 0 && current_time >= self.expires_at {
+            return false;
+        }
+        true
+    }
+
+    /// Check if orders can match
+    pub fn can_match(&self, other: &Order) -> bool {
+        // Must be opposite sides
+        if self.side == other.side {
+            return false;
+        }
+        // Must be same outcome
+        if self.outcome != other.outcome {
+            return false;
+        }
+        // Must be same market
+        if self.market != other.market {
+            return false;
+        }
+        // Prices must cross (buy price >= sell price)
+        match self.side {
+            OrderSide::Buy => self.price_bps >= other.price_bps,
+            OrderSide::Sell => other.price_bps >= self.price_bps,
+        }
+    }
+}
