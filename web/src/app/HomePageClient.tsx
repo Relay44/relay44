@@ -142,3 +142,61 @@ export default function HomePageClient({
               </ul>
             </div>
 
+            <div className="border border-border bg-bg-primary p-5 brutal-shadow">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
+                Before you publish
+              </p>
+              <ul className="mt-4 space-y-3 text-sm leading-6 text-text-secondary">
+                <li>Use one objective yes or no outcome.</li>
+                <li>Name a source that can resolve the market cleanly.</li>
+                <li>
+                  Set a deadline that matches the question and settlement
+                  window.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="py-8 pb-16">
+          {isLoading ? (
+            <div className="space-y-0">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-6 py-5 border-b border-border animate-pulse"
+                >
+                  <div className="w-12 h-4 bg-bg-secondary hidden sm:block" />
+                  <div className="flex-1 h-5 bg-bg-secondary" />
+                  <div className="w-16 h-4 bg-bg-secondary hidden md:block" />
+                  <div className="w-20 h-4 bg-bg-secondary hidden md:block" />
+                  <div className="w-16 h-8 bg-bg-secondary" />
+                </div>
+              ))}
+            </div>
+          ) : markets.length > 0 ? (
+            markets.map((market, i) => (
+              <MarketRow key={market.id} market={market} index={i} />
+            ))
+          ) : (
+            <div className="py-12 text-center text-text-muted text-sm uppercase tracking-[0.16em]">
+              No active markets
+            </div>
+          )}
+        </section>
+      </main>
+
+      <div className="fixed bottom-0 left-0 right-0 bg-bg-primary border-t border-border overflow-hidden z-30 md:z-40">
+        <div className="py-2.5 whitespace-nowrap overflow-hidden">
+          <span className="animate-marquee text-[11px] text-accent uppercase tracking-[0.16em] font-mono">
+            {TICKER_TEXT}
+            {TICKER_TEXT}
+          </span>
+        </div>
+      </div>
+
+      <BottomNav />
+    </div>
+  );
+}
+
