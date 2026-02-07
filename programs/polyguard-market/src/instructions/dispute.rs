@@ -168,3 +168,166 @@ pub fn finalize_dispute_handler(ctx: Context<FinalizeDispute>) -> Result<()> {
         dispute.has_minimum_consensus(),
         DisputeError::NoOracleSubmissions
     );
+
+    // Check reveal delay
+    require!(
+        dispute.reveal_delay_passed(clock.unix_timestamp),
+        DisputeError::RevealDelayNotMet
+    );
+
+    // Get oracle weights from registry
+    let registry = &ctx.accounts.oracle_registry;
+    let oracle_weights: Vec<(Pubkey, u16)> = registry
+        .oracles
+        .iter()
+        .filter(|o| o.is_active)
+        .map(|o| (o.pubkey, o.weight.unwrap_or(100)))
+        .collect();
+
+    // Calculate consensus
+    let (consensus_outcome, consensus_score) = calculate_dispute_consensus(
+        &dispute.oracle_submissions,
+        &oracle_weights,
+        MAX_SCORE_DEVIATION,
+    )?;
+
+    // Determine dispute result
+    let dispute = &mut ctx.accounts.dispute;
+    let market = &mut ctx.accounts.market;
+
+    dispute.consensus_outcome = Some(consensus_outcome);
+    dispute.consensus_score = Some(consensus_score);
+    dispute.resolved_at = Some(clock.unix_timestamp);
+
+    if consensus_outcome == 3 {
+        // Cancel market
+        dispute.status = DisputeStatus::Cancelled;
+        market.status = MarketStatus::Cancelled;
+        msg!("Dispute resulted in market cancellation");
+    } else if consensus_outcome != dispute.original_outcome {
+        // Overturn resolution
+        dispute.status = DisputeStatus::Upheld;
+        market.resolved_outcome = consensus_outcome;
+        market.status = MarketStatus::Resolved;
+        msg!("Dispute upheld - resolution overturned to outcome {}", consensus_outcome);
+    } else {
+        // Original resolution stands
+        dispute.status = DisputeStatus::Rejected;
+        market.status = MarketStatus::Resolved;
+        msg!("Dispute rejected - original resolution stands");
+    }
+
+    // Distribute bond based on outcome
+    let bond = dispute.bond_amount;
+    let oracle_count = dispute.oracle_submissions.len() as u64;
+
+    if dispute.status == DisputeStatus::Upheld {
+        // Refund bond to disputer using safe transfer
+        // The dispute account holds the bond, transfer it back to disputer
+        let dispute_info = dispute.to_account_info();
+        let disputer_info = ctx.accounts.disputer.to_account_info();
+
+        // Verify dispute account has sufficient lamports
+        let dispute_lamports = dispute_info.lamports();
+        let rent = Rent::get()?;
+        let min_rent = rent.minimum_balance(dispute_info.data_len());
+
+        // Only transfer if we have enough lamports above rent
+        let transferable = dispute_lamports.saturating_sub(min_rent);
+        let transfer_amount = bond.min(transferable);
+
+        if transfer_amount > 0 {
+            // Use safe lamport transfer
+            **dispute_info.try_borrow_mut_lamports()? = dispute_lamports
+                .checked_sub(transfer_amount)
+                .ok_or(MarketError::ArithmeticOverflow)?;
+            **disputer_info.try_borrow_mut_lamports()? = disputer_info
+                .lamports()
+                .checked_add(transfer_amount)
+                .ok_or(MarketError::ArithmeticOverflow)?;
+
+            msg!("Refunded {} lamports to disputer", transfer_amount);
+        }
+    } else {
+        // Distribute bond to oracles as reward
+        let oracle_reward = (bond as u128)
+            .checked_mul(ORACLE_REWARD_PERCENT as u128)
+            .and_then(|v| v.checked_div(100))
+            .ok_or(MarketError::ArithmeticOverflow)? as u64;
+        let reward_per_oracle = oracle_reward.checked_div(oracle_count.max(1))
+            .ok_or(MarketError::ArithmeticOverflow)?;
+
+        // Bond remains in dispute account for oracle claims
+        // Oracles can claim via separate instruction
+        msg!("Oracle rewards: {} per oracle (claimable)", reward_per_oracle);
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Contexts
+// ============================================================================
+
+#[derive(Accounts)]
+#[instruction(reason_hash: String)]
+pub struct FileDispute<'info> {
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Resolved @ MarketError::MarketNotResolved
+    )]
+    pub market: Account<'info, Market>,
+
+    #[account(
+        init,
+        payer = disputer,
+        space = 8 + Dispute::INIT_SPACE,
+        seeds = [Dispute::SEED_PREFIX, market.key().as_ref()],
+        bump
+    )]
+    pub dispute: Account<'info, Dispute>,
+
+    #[account(mut)]
+    pub disputer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SubmitDisputeVote<'info> {
+    #[account(mut)]
+    pub dispute: Account<'info, Dispute>,
+
+    #[account(
+        seeds = [b"oracle_registry"],
+        bump = oracle_registry.bump
+    )]
+    pub oracle_registry: Account<'info, OracleRegistry>,
+
+    pub oracle: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct FinalizeDispute<'info> {
+    #[account(mut)]
+    pub dispute: Account<'info, Dispute>,
+
+    #[account(
+        mut,
+        constraint = dispute.market == market.key()
+    )]
+    pub market: Account<'info, Market>,
+
+    #[account(
+        seeds = [b"oracle_registry"],
+        bump = oracle_registry.bump
+    )]
+    pub oracle_registry: Account<'info, OracleRegistry>,
+
+    /// CHECK: Validated against dispute.disputer
+    #[account(
+        mut,
+        constraint = disputer.key() == dispute.disputer
+    )]
+    pub disputer: UncheckedAccount<'info>,
+}
