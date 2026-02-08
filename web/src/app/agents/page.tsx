@@ -479,3 +479,141 @@ export default function AgentsPage() {
           </Card>
         </section>
 
+        {mode === 'onchain' ? (
+          <>
+            <section className="grid lg:grid-cols-2 gap-6 mb-8">
+            {readOnly ? (
+              <ReadOnlyNotice
+                title="Onchain agent launch is disabled"
+                body="Directory data remains live, but new onchain agents cannot be launched or forced from this environment."
+              />
+            ) : (
+              <Card>
+                <h2 className="text-lg font-semibold mb-4">Launch Agent</h2>
+
+                <form onSubmit={onCreateAgent} className="space-y-3">
+                  <div>
+                    <FieldLabel
+                      label="Market"
+                      hint="The agent will place and manage orders only on this market."
+                    />
+                    <Select
+                      value={marketId || undefined}
+                      onChange={(event) => setMarketId(event.target.value)}
+                      options={marketSelectOptions}
+                      placeholder="Select market"
+                    />
+                    {selectedMarket ? (
+                      <p className="text-xs text-text-muted mt-1">
+                        Trading closes {new Date(selectedMarket.tradingEnd).toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className={cn(
+                        'h-10 border text-sm font-medium',
+                        isYes ? 'border-bid text-bid bg-bid-muted' : 'border-border text-text-secondary'
+                      )}
+                      onClick={() => setIsYes(true)}
+                    >
+                      YES Agent
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        'h-10 border text-sm font-medium',
+                        !isYes ? 'border-ask text-ask bg-ask-muted' : 'border-border text-text-secondary'
+                      )}
+                      onClick={() => setIsYes(false)}
+                    >
+                      NO Agent
+                    </button>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Input
+                      label="Price (bps)"
+                      type="number"
+                      value={priceBps}
+                      onChange={(event) => setPriceBps(event.target.value)}
+                      min="1"
+                      max="9999"
+                    />
+                    <Input
+                      label="Order Size (USDC)"
+                      type="number"
+                      value={size}
+                      onChange={(event) => setSize(event.target.value)}
+                      step="0.01"
+                      min="0.01"
+                    />
+                    <Input
+                      label="Cadence (sec)"
+                      type="number"
+                      value={cadence}
+                      onChange={(event) => setCadence(event.target.value)}
+                      min="1"
+                    />
+                    <Input
+                      label="Expiry Window (sec)"
+                      type="number"
+                      value={expiryWindow}
+                      onChange={(event) => setExpiryWindow(event.target.value)}
+                      min="1"
+                    />
+                  </div>
+                  <p className="text-xs text-text-muted">
+                    Price uses basis points. `5500` means a 55.00% quote.
+                  </p>
+
+                  <Input
+                    label="Strategy"
+                    value={strategy}
+                    onChange={(event) => setStrategy(event.target.value)}
+                    placeholder="signal-source + risk profile"
+                    hint="Internal label for the trading logic or signal profile you want this agent to represent."
+                  />
+
+                  <Button type="submit" className="w-full" loading={createAgent.isPending}>
+                    Launch Onchain Agent
+                  </Button>
+                </form>
+              </Card>
+            )}
+
+            <Card>
+              <h2 className="text-lg font-semibold mb-4">Web4 Operating Notes</h2>
+              <ul className="space-y-3 text-sm text-text-secondary">
+                <li>Agents are persisted in `AgentRuntime` and executable by the network.</li>
+                <li>Execution status is calculated from cadence and last execution timestamp.</li>
+                <li>Use this directory as the control plane for autonomous market participation.</li>
+              </ul>
+              <div className="mt-6 pt-4 border-t border-border text-sm">
+                <div className="flex flex-wrap gap-3">
+                  <Link href="/docs/api" className="text-accent hover:text-accent-hover">
+                    API Reference
+                  </Link>
+                  <a
+                    href={`${web4ApiBase}/web4/mcp`}
+                    className="text-accent hover:text-accent-hover"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    MCP Manifest
+                  </a>
+                  <a
+                    href={`${web4ApiBase}/web4/agent-card`}
+                    className="text-accent hover:text-accent-hover"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Agent Card
+                  </a>
+                </div>
+              </div>
+            </Card>
+          </section>
+
