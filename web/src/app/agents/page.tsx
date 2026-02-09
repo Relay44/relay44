@@ -717,3 +717,129 @@ export default function AgentsPage() {
                 {!canManageExternal ? (
                   <div className="mb-4 border border-border p-3 text-sm text-text-secondary">
                     Authenticate your wallet session before loading venue credentials or launching
+                    external agents.
+                  </div>
+                ) : null}
+                <form onSubmit={onCreateExternalAgent} className="space-y-3">
+                  <Input
+                    label="Name"
+                    value={externalName}
+                    onChange={(event) => setExternalName(event.target.value)}
+                    hint="Operator-facing label for this saved execution profile."
+                  />
+                  <div>
+                    <FieldLabel
+                      label="Provider"
+                      hint="The execution venue the agent will trade on. Provider choice also determines the available market list."
+                    />
+                    <Select
+                      value={externalProvider}
+                      onChange={(event) => setExternalProvider(event.target.value as 'limitless' | 'polymarket')}
+                      options={providerOptions}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel
+                      label="Market"
+                      hint="Only markets from the selected provider appear here. The agent will keep reusing this venue market on each run."
+                    />
+                    <Select
+                      value={externalMarketId || undefined}
+                      onChange={(event) => setExternalMarketId(event.target.value)}
+                      options={filteredExternalMarketSelectOptions}
+                      placeholder="Select market"
+                    />
+                    {selectedExternalMarket ? (
+                      <p className="text-xs text-text-muted mt-1">
+                        Chain {selectedExternalMarket.chainId} · closes {new Date(selectedExternalMarket.tradingEnd).toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <FieldLabel
+                        label="Outcome"
+                        hint="The binary outcome leg on the selected venue market."
+                      />
+                      <Select
+                        value={externalOutcome}
+                        onChange={(event) => setExternalOutcome(event.target.value as 'yes' | 'no')}
+                        options={externalOutcomeOptions}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel
+                        label="Side"
+                        hint="Buy opens or adds to exposure on the chosen outcome. Sell reduces or takes the opposite venue-side action."
+                      />
+                      <Select
+                        value={externalSide}
+                        onChange={(event) => setExternalSide(event.target.value as 'buy' | 'sell')}
+                        options={externalSideOptions}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <Input
+                      label="Price"
+                      type="number"
+                      value={externalPrice}
+                      onChange={(event) => setExternalPrice(event.target.value)}
+                      min="0.01"
+                      max="0.99"
+                      step="0.01"
+                    />
+                    <Input
+                      label="Quantity"
+                      type="number"
+                      value={externalQuantity}
+                      onChange={(event) => setExternalQuantity(event.target.value)}
+                      min="0.01"
+                      step="0.01"
+                    />
+                    <Input
+                      label="Cadence (sec)"
+                      type="number"
+                      value={externalCadence}
+                      onChange={(event) => setExternalCadence(event.target.value)}
+                      min="1"
+                      hint="Minimum delay between eligible automatic executions."
+                    />
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <FieldLabel
+                        label="Credential"
+                        hint="Stored venue credential used to sign and submit provider-native orders."
+                      />
+                      <Select
+                        value={externalCredentialId || undefined}
+                        onChange={(event) => setExternalCredentialId(event.target.value)}
+                        options={externalCredentialOptions}
+                        placeholder="Select credential"
+                      />
+                    </div>
+                  </div>
+
+                  {externalCredentialStatus ? (
+                    <div className="border border-border p-3 text-xs text-text-secondary">
+                      <div className="font-medium text-text-primary">
+                        {externalCredentialStatus.ready
+                          ? 'Credential ready'
+                          : 'Credential not ready'}
+                      </div>
+                      {externalCredentialStatus.base_wallet ? (
+                        <div className="mt-1">
+                          Base wallet: {externalCredentialStatus.base_wallet}
+                        </div>
+                      ) : null}
+                      {externalCredentialStatus.checks
+                        .filter((check) => !check.ok)
+                        .map((check) => (
+                          <div key={check.code} className="mt-1">
+                            {check.message}
+                          </div>
+                        ))}
+                    </div>
+                  ) : null}
+
