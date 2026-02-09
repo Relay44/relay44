@@ -617,3 +617,103 @@ export default function AgentsPage() {
             </Card>
           </section>
 
+          <section>
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-lg font-semibold">Agent Directory</h2>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  value={filterMarketId || undefined}
+                  onChange={(event) => setFilterMarketId(event.target.value)}
+                  options={marketFilterOptions}
+                  placeholder="All markets"
+                  className="w-full text-sm sm:w-[11rem]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFilterActiveOnly((prev) => !prev)}
+                  className={cn(
+                    'h-9 w-full border px-3 text-sm sm:w-auto',
+                    filterActiveOnly
+                      ? 'border-accent text-accent bg-accent/10'
+                      : 'border-border text-text-secondary'
+                  )}
+                >
+                  Active only
+                </button>
+              </div>
+            </div>
+
+            {isLoading ? (
+              <Card>Loading agents...</Card>
+            ) : agents.length === 0 ? (
+              <Card>No agents found for current filter.</Card>
+            ) : (
+              <div className="grid gap-3">
+                {agents.map((agent) => (
+                  <Card key={agent.id} className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-text-muted">#{agent.id}</span>
+                        <span
+                          className={cn(
+                            'text-xs px-2 py-1 border',
+                            agent.status === 'ready'
+                              ? 'border-bid text-bid'
+                              : agent.status === 'cooldown'
+                                ? 'border-border-hover text-text-secondary'
+                                : 'border-border text-text-muted'
+                          )}
+                        >
+                          {statusLabel(agent.status)}
+                        </span>
+                      </div>
+                      <p className="text-sm text-text-primary">
+                        Market #{agent.marketId} · {agent.isYes ? 'YES' : 'NO'} · {agent.priceBps} bps
+                      </p>
+                      <p className="text-xs text-text-muted">
+                        Owner {truncateAddress(agent.owner)} · Size {Number(agent.size) / 1_000_000} USDC · Cadence {agent.cadence}s
+                      </p>
+                      {agent.identityTier !== undefined || agent.reputationScoreBps !== undefined ? (
+                        <p className="text-xs text-text-muted">
+                          Identity {agent.identityTier ?? 'n/a'} · Reputation {agent.reputationScoreBps ?? 'n/a'} bps
+                        </p>
+                      ) : null}
+                      <p className="text-xs text-text-muted">Strategy: {agent.strategy || 'n/a'}</p>
+                    </div>
+
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Link href={`/markets/${encodeURIComponent(agent.marketId)}`} className="flex h-9 items-center justify-center border border-border px-3 text-sm sm:w-auto">
+                        Open Market
+                      </Link>
+                      <Button
+                        type="button"
+                        variant={agent.isYes ? 'bid' : 'ask'}
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        disabled={readOnly || !agent.canExecute || executeAgent.isPending}
+                        loading={executeAgent.isPending}
+                        onClick={() => onExecuteAgent(agent.id)}
+                      >
+                        Execute
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+          </>
+        ) : (
+          <>
+            <section className="grid lg:grid-cols-2 gap-6 mb-8">
+            {readOnly ? (
+              <ReadOnlyNotice
+                title="External agent launch is disabled"
+                body="Venue market data remains visible, but credential-backed agent execution is locked in this preview."
+              />
+            ) : (
+              <Card>
+                <h2 className="text-lg font-semibold mb-4">Launch External Agent</h2>
+                {!canManageExternal ? (
+                  <div className="mb-4 border border-border p-3 text-sm text-text-secondary">
+                    Authenticate your wallet session before loading venue credentials or launching
