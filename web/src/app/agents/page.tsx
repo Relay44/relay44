@@ -843,3 +843,117 @@ export default function AgentsPage() {
                     </div>
                   ) : null}
 
+                  {externalProvider === 'polymarket' ? (
+                    <div className="border border-border p-3 text-xs text-text-secondary">
+                      Polymarket agent runs use saved CLOB credentials and the same provider
+                      readiness checks as direct orders. Use a browser-wallet account path if you
+                      want the connected wallet to sign normally.
+                    </div>
+                  ) : null}
+
+                  <Input
+                    label="Strategy"
+                    value={externalStrategy}
+                    onChange={(event) => setExternalStrategy(event.target.value)}
+                    hint="Internal label for the venue execution logic or strategy family."
+                  />
+
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    loading={createExternalAgent.isPending}
+                    disabled={
+                      !canManageExternal ||
+                      createExternalAgent.isPending ||
+                      !externalCredentialId ||
+                      (externalCredentialStatus ? !externalCredentialStatus.ready : false)
+                    }
+                  >
+                    Launch External Agent
+                  </Button>
+                </form>
+              </Card>
+            )}
+
+            <Card>
+              <h2 className="text-lg font-semibold mb-4">External Execution Notes</h2>
+              <ul className="space-y-3 text-sm text-text-secondary">
+                <li>External agents use BYOK credentials and venue-native execution paths.</li>
+                <li>Funding and allowance checks are surfaced via preflight on each execution intent.</li>
+                <li>Launch scope is binary YES/NO markets only.</li>
+              </ul>
+            </Card>
+          </section>
+
+          <section>
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-lg font-semibold">External Agent Directory</h2>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  value={filterExternalProvider || undefined}
+                  onChange={(event) =>
+                    setFilterExternalProvider(event.target.value as 'limitless' | 'polymarket' | '')
+                  }
+                  options={externalProviderFilterOptions}
+                  placeholder="All providers"
+                  className="w-full text-sm sm:w-[11rem]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFilterActiveOnly((prev) => !prev)}
+                  className={cn(
+                    'h-9 w-full border px-3 text-sm sm:w-auto',
+                    filterActiveOnly
+                      ? 'border-accent text-accent bg-accent/10'
+                      : 'border-border text-text-secondary'
+                  )}
+                >
+                  Active only
+                </button>
+              </div>
+            </div>
+
+            {isLoadingExternal ? (
+              <Card>Loading external agents...</Card>
+            ) : externalAgents.length === 0 ? (
+              <Card>No external agents found for current filter.</Card>
+            ) : (
+              <div className="grid gap-3">
+                {externalAgents.map((agent) => (
+                  <Card key={agent.id} className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm text-text-primary">
+                        {agent.name} · {agent.provider} · {agent.market_id}
+                      </p>
+                      <p className="text-xs text-text-muted">
+                        {agent.outcome.toUpperCase()} {agent.side.toUpperCase()} · price {agent.price} · qty {agent.quantity}
+                      </p>
+                      <p className="text-xs text-text-muted">Cadence {agent.cadence_seconds}s · Strategy {agent.strategy}</p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Link href={`/markets/${encodeURIComponent(agent.market_id)}`} className="flex h-9 items-center justify-center border border-border px-3 text-sm sm:w-auto">
+                        Open Market
+                      </Link>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        disabled={readOnly || !canManageExternal || executeExternalAgent.isPending}
+                        loading={executeExternalAgent.isPending}
+                        onClick={() => onExecuteExternalAgent(agent.id)}
+                      >
+                        Execute
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+          </>
+        )}
+      </PageShell>
+    </TooltipProvider>
+  );
+}
+
