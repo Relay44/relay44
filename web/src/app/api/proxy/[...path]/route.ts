@@ -82,3 +82,38 @@ async function proxyRequest(
   const target = buildTargetUrl(request, path);
   const method = request.method.toUpperCase();
 
+  if (READ_ONLY_MODE && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    return NextResponse.json(
+      { error: 'This action is disabled in read-only mode' },
+      { status: 403 }
+    );
+  }
+
+  const headers = buildProxyHeaders(request);
+  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text();
+
+  const response = await fetch(target, {
+    method,
+    headers,
+    body,
+    cache: 'no-store',
+    redirect: 'manual',
+  });
+
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.delete('content-encoding');
+  responseHeaders.delete('content-length');
+
+  return new NextResponse(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: responseHeaders,
+  });
+}
+
+export { proxyRequest as GET };
+export { proxyRequest as POST };
+export { proxyRequest as PATCH };
+export { proxyRequest as PUT };
+export { proxyRequest as DELETE };
+
