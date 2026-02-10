@@ -317,3 +317,107 @@ export async function POST(request: NextRequest) {
       const text = await res.text();
       return jsonError(res.status, text || 'Authentication failed');
     }
+
+    const rawTokens = (await res.json()) as UpstreamTokenPayload;
+    const tokens = normalizeTokens(rawTokens);
+    if (!tokens) {
+      console.error('Invalid upstream auth payload', rawTokens);
+      return jsonError(502, 'Authentication payload was invalid');
+    }
+
+    const response = NextResponse.json({
+      accessToken: tokens.accessToken,
+      expiresAt: tokens.expiresAt,
+    });
+    setRefreshTokenCookie(response, tokens.refreshToken);
+    return response;
+  } catch (error) {
+    console.error('Login error:', error);
+    return jsonError(500, 'Internal server error');
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const guardError = requireMutatingRequestGuards(request);
+    if (guardError) return guardError;
+
+    const cookieStore = await cookies();
+    const refreshToken = getRefreshToken(cookieStore);
+
+    if (!refreshToken) {
+      return jsonError(401, 'No refresh token');
+    }
+
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) {
+      const response = jsonError(res.status, 'Token refresh failed');
+      clearRefreshTokenCookies(response);
+      return response;
+    }
+
+    const rawTokens = (await res.json()) as UpstreamTokenPayload;
+    const tokens = normalizeTokens(rawTokens);
+    if (!tokens) {
+      console.error('Invalid upstream refresh payload', rawTokens);
+      const response = jsonError(502, 'Refresh payload was invalid');
+      clearRefreshTokenCookies(response);
+      return response;
+    }
+
+    const response = NextResponse.json({
+      accessToken: tokens.accessToken,
+      expiresAt: tokens.expiresAt,
+    });
+    setRefreshTokenCookie(response, tokens.refreshToken);
+    return response;
+  } catch (error) {
+    console.error('Refresh error:', error);
+    return jsonError(500, 'Internal server error');
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const guardError = requireMutatingRequestGuards(request);
+    if (guardError) return guardError;
+
+    const cookieStore = await cookies();
+    const refreshToken = getRefreshToken(cookieStore);
+
+    if (refreshToken) {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${refreshToken}`,
+        },
+      }).catch(() => {
+      });
+    }
+
+    const response = NextResponse.json({ success: true });
+    clearRefreshTokenCookies(response);
+    return response;
+  } catch (error) {
+    console.error('Logout error:', error);
+    const response = NextResponse.json({ success: true });
+    clearRefreshTokenCookies(response);
+    return response;
+  }
+}
+
+export async function GET() {
+  const cookieStore = await cookies();
+  const hasRefreshToken = !!getRefreshToken(cookieStore);
+
+  return NextResponse.json({ hasRefreshToken });
+}
+
