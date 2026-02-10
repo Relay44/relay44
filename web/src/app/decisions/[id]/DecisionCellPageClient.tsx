@@ -639,3 +639,129 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     } catch (error) {
       addToast(error instanceof Error ? error.message : 'Failed to update alert.', 'error');
     }
+  };
+
+  return (
+    <PageShell>
+      <DecisionAccessGate>
+        {isLoading ? (
+          <Card>Loading decision cell...</Card>
+        ) : error ? (
+          <Card className="text-ask">
+            {error instanceof Error ? error.message : 'Failed to load decision cell'}
+          </Card>
+        ) : !cell ? (
+          <Card className="space-y-3">
+            <h1 className="text-xl font-semibold text-text-primary">Decision cell not found</h1>
+            <Link
+              href="/decisions"
+              className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+            >
+              Back to decisions
+            </Link>
+          </Card>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="max-w-3xl">
+                <Link
+                  href="/decisions"
+                  className="text-[11px] uppercase tracking-[0.18em] text-text-muted transition-colors hover:text-text-primary"
+                >
+                  decision cells
+                </Link>
+                <h1 className="mt-2 text-3xl font-semibold text-text-primary">{cell.title}</h1>
+                <p className="mt-3 text-sm text-text-secondary">{cell.statement}</p>
+                <div className="mt-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em] text-text-muted">
+                  <span className="border border-border bg-bg-secondary px-2 py-1">{cell.decisionType}</span>
+                  <span className="border border-border bg-bg-secondary px-2 py-1">
+                    {formatState(cell.recommendation.state)}
+                  </span>
+                  <span className="border border-border bg-bg-secondary px-2 py-1">
+                    confidence {toPercent(cell.recommendation.confidenceBps)}%
+                  </span>
+                  {cell.horizonAt ? (
+                    <span className="border border-border bg-bg-secondary px-2 py-1">
+                      horizon {new Date(cell.horizonAt).toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <Button type="button" onClick={() => void handleRecalculate()} loading={recalculate.isPending}>
+                Recalculate
+              </Button>
+            </div>
+
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr),minmax(340px,1fr)]">
+              <div className="space-y-6">
+                <Card className="space-y-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">recommendation</p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">{formatState(cell.recommendation.state)}</h2>
+                    <p className="mt-2 text-sm text-text-secondary">{cell.recommendation.whyChanged}</p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {cell.recommendation.actionScores.map((action, index) => (
+                      <DecisionScoreBar
+                        key={action.actionId}
+                        label={action.label}
+                        scoreBps={action.scoreBps}
+                        rank={index}
+                      />
+                    ))}
+                  </div>
+
+                  {cell.recommendation.topContributors.length > 0 ? (
+                    <div className="space-y-3 border-t border-border pt-4">
+                      <h3 className="text-sm font-medium text-text-primary">Top contributing nodes</h3>
+                      {cell.recommendation.topContributors.map((contributor) => (
+                        <div key={contributor.nodeId} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-text-primary">{contributor.label}</div>
+                              <div className="mt-1 text-text-secondary">
+                                {contributor.actionLabel} • {toPercent(contributor.probabilityBps)}%
+                              </div>
+                            </div>
+                            <div className="font-medium text-text-primary">{toPercent(contributor.scoreBps)}%</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </Card>
+
+                <Card className="space-y-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">nodes</p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Decision graph</h2>
+                    <p className="mt-2 text-sm text-text-secondary">
+                      Each node can stay as a draft, attach to an internal market, or attach to an
+                      external venue market. Only live nodes contribute to scores.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {cell.nodes.map((node) => (
+                      <DecisionNodeCard
+                        key={node.id}
+                        cell={cell}
+                        node={node}
+                        internalMarketOptions={internalMarketOptions}
+                        externalMarketOptions={externalMarketOptions}
+                        agentOptions={externalAgents}
+                      />
+                    ))}
+                  </div>
+                </Card>
+
+                <Card className="space-y-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">new node</p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Add node</h2>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Input
+                      label="Label"
+                      value={newNodeLabel}
