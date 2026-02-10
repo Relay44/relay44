@@ -514,3 +514,128 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     enabled: hasSession && sessionRestored,
   });
 
+  const [newNodeLabel, setNewNodeLabel] = useState('');
+  const [newNodeDescription, setNewNodeDescription] = useState('');
+  const [newNodeWeight, setNewNodeWeight] = useState('20');
+  const [newNodeSourceType, setNewNodeSourceType] = useState<DecisionNodeSourceType>('draft_market');
+
+  const [recommendationAlertActive, setRecommendationAlertActive] = useState(true);
+  const [confidenceAlertActive, setConfidenceAlertActive] = useState(false);
+  const [confidenceAlertThreshold, setConfidenceAlertThreshold] = useState('55');
+  const [leadAlertActive, setLeadAlertActive] = useState(false);
+  const [leadAlertThreshold, setLeadAlertThreshold] = useState('7.5');
+  const [nodeAlertActive, setNodeAlertActive] = useState(false);
+  const [nodeAlertThreshold, setNodeAlertThreshold] = useState('65');
+  const [nodeAlertNodeId, setNodeAlertNodeId] = useState('');
+  const [nodeAlertDirection, setNodeAlertDirection] = useState<'above' | 'below'>('above');
+
+  useEffect(() => {
+    if (!cell) {
+      return;
+    }
+
+    const recommendationAlert = cell.alerts.find((alert) => alert.kind === 'recommendation_changed');
+    const confidenceAlert = cell.alerts.find((alert) => alert.kind === 'confidence_below');
+    const leadAlert = cell.alerts.find((alert) => alert.kind === 'action_lead_above');
+    const probabilityAlert = cell.alerts.find((alert) => alert.kind === 'node_probability_cross');
+
+    setRecommendationAlertActive(recommendationAlert?.active ?? true);
+    setConfidenceAlertActive(confidenceAlert?.active ?? false);
+    setConfidenceAlertThreshold(
+      String(((Number(confidenceAlert?.threshold?.bps) || 5500) / 100).toFixed(1)),
+    );
+    setLeadAlertActive(leadAlert?.active ?? false);
+    setLeadAlertThreshold(String(((Number(leadAlert?.threshold?.bps) || 750) / 100).toFixed(1)));
+    setNodeAlertActive(probabilityAlert?.active ?? false);
+    setNodeAlertThreshold(
+      String(((Number(probabilityAlert?.threshold?.bps) || 6500) / 100).toFixed(1)),
+    );
+    setNodeAlertNodeId(String(probabilityAlert?.threshold?.nodeId || cell.nodes[0]?.id || ''));
+    setNodeAlertDirection(
+      String(probabilityAlert?.threshold?.direction || 'above') === 'below' ? 'below' : 'above',
+    );
+  }, [cell]);
+
+  const internalMarketOptions = useMemo(
+    () =>
+      (marketsData?.data || [])
+        .filter((market) => !market.isExternal)
+        .map((market) => ({ value: market.id, label: `${market.question} • ${market.category}` })),
+    [marketsData],
+  );
+
+  const externalMarketOptions = useMemo(
+    () =>
+      (marketsData?.data || [])
+        .filter((market) => market.isExternal)
+        .map((market) => ({ value: market.id, label: `${market.question} • ${market.provider}` })),
+    [marketsData],
+  );
+
+  const externalAgents = externalAgentsData?.data || [];
+  const attachedAutomations = useMemo(
+    () =>
+      (cell?.nodes || []).flatMap((node) =>
+        node.agents.map((agent) => ({ nodeId: node.id, nodeLabel: node.label, ...agent })),
+      ),
+    [cell],
+  );
+
+  const handleRecalculate = async () => {
+    try {
+      await recalculate.mutateAsync();
+      addToast('Decision cell recalculated.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to recalculate cell.', 'error');
+    }
+  };
+
+  const handleSaveAutomation = async (payload: {
+    automationEnabled: boolean;
+    maxAgentNotionalUsdc: number;
+    maxTriggersPerDay: number;
+    minTriggerIntervalSeconds: number;
+    allowedProvider?: 'limitless' | 'polymarket';
+    requireConfidenceBps: number;
+    active: boolean;
+  }) => {
+    try {
+      await updateAutomation.mutateAsync(payload);
+      addToast('Automation policy saved.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to save automation policy.', 'error');
+    }
+  };
+
+  const handleAddNode = async () => {
+    if (!cell || !newNodeLabel.trim()) {
+      addToast('Node label is required.', 'error');
+      return;
+    }
+
+    try {
+      await addNode.mutateAsync({
+        label: newNodeLabel.trim(),
+        description: newNodeDescription.trim(),
+        weightBps: parsePercent(newNodeWeight, 2000),
+        sourceType: newNodeSourceType,
+        status: newNodeSourceType === 'draft_market' ? 'draft' : 'live',
+        actionEffects: defaultNodeEffects(cell),
+      });
+      setNewNodeLabel('');
+      setNewNodeDescription('');
+      setNewNodeWeight('20');
+      setNewNodeSourceType('draft_market');
+      addToast('Node added.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to add node.', 'error');
+    }
+  };
+
+  const saveAlert = async (kind: string, threshold?: Record<string, unknown>, active = true) => {
+    try {
+      await upsertAlert.mutateAsync({ kind, threshold, active });
+      addToast('Alert updated.', 'success');
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : 'Failed to update alert.', 'error');
+    }
