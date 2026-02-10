@@ -765,3 +765,137 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                     <Input
                       label="Label"
                       value={newNodeLabel}
+                      onChange={(event) => setNewNodeLabel(event.target.value)}
+                      placeholder="Regulatory approval lands"
+                    />
+                    <Input
+                      label="Weight (%)"
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={newNodeWeight}
+                      onChange={(event) => setNewNodeWeight(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-sm font-medium text-text-primary">Description</label>
+                    <textarea
+                      value={newNodeDescription}
+                      onChange={(event) => setNewNodeDescription(event.target.value)}
+                      rows={3}
+                      className="flex w-full border border-border bg-bg-secondary px-3 py-2 text-base text-text-primary placeholder:text-text-muted transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus-visible:border-accent"
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:max-w-sm">
+                    <label className="block text-sm font-medium text-text-primary">Source type</label>
+                    <Select
+                      value={newNodeSourceType}
+                      onChange={(event) => setNewNodeSourceType(event.target.value as DecisionNodeSourceType)}
+                      options={SOURCE_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                    />
+                  </div>
+                  <Button type="button" onClick={() => void handleAddNode()} loading={addNode.isPending}>
+                    Add node
+                  </Button>
+                </Card>
+              </div>
+
+              <div className="space-y-6">
+                <AutomationEditor
+                  policy={cell.automationPolicy}
+                  onSave={handleSaveAutomation}
+                  saving={updateAutomation.isPending}
+                />
+
+                <Card className="space-y-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">alerts</p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Threshold rules</h2>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="border border-border bg-bg-secondary px-4 py-4">
+                      <label className="flex items-center gap-3 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={recommendationAlertActive}
+                          onChange={(event) => setRecommendationAlertActive(event.target.checked)}
+                          className="h-4 w-4 accent-[var(--accent)]"
+                        />
+                        Fire when the recommendation changes
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void saveAlert('recommendation_changed', undefined, recommendationAlertActive)}
+                        className="mt-3 inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-primary hover:text-text-primary"
+                      >
+                        Save
+                      </button>
+                    </div>
+
+                    <div className="border border-border bg-bg-secondary px-4 py-4">
+                      <label className="flex items-center gap-3 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={confidenceAlertActive}
+                          onChange={(event) => setConfidenceAlertActive(event.target.checked)}
+                          className="h-4 w-4 accent-[var(--accent)]"
+                        />
+                        Fire when confidence falls below threshold
+                      </label>
+                      <div className="mt-3 max-w-[180px]">
+                        <Input
+                          label="Confidence (%)"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={confidenceAlertThreshold}
+                          onChange={(event) => setConfidenceAlertThreshold(event.target.value)}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void saveAlert(
+                            'confidence_below',
+                            { bps: parsePercent(confidenceAlertThreshold, 5500) },
+                            confidenceAlertActive,
+                          )
+                        }
+                        className="mt-3 inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-primary hover:text-text-primary"
+                      >
+                        Save
+                      </button>
+                    </div>
+
+                    <div className="border border-border bg-bg-secondary px-4 py-4">
+                      <label className="flex items-center gap-3 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={leadAlertActive}
+                          onChange={(event) => setLeadAlertActive(event.target.checked)}
+                          className="h-4 w-4 accent-[var(--accent)]"
+                        />
+                        Fire when the action lead exceeds threshold
+                      </label>
+                      <div className="mt-3 max-w-[180px]">
+                        <Input
+                          label="Lead (%)"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={leadAlertThreshold}
+                          onChange={(event) => setLeadAlertThreshold(event.target.value)}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void saveAlert(
+                            'action_lead_above',
+                            { bps: parsePercent(leadAlertThreshold, 750) },
+                            leadAlertActive,
+                          )
