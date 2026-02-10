@@ -193,3 +193,86 @@ mod tests {
     fn create_tenant() -> EnterpriseTenant {
         EnterpriseTenant {
             owner: Pubkey::new_unique(),
+            name: "Test Tenant".to_string(),
+            api_key_hash: [0; 32],
+            bump: 0,
+            is_active: true,
+            _padding: [0; 2],
+            max_markets: 10,
+            max_daily_volume: 1_000_000,
+            fee_override_bps: 0,
+            revenue_share_bps: 5000, // 50%
+            _padding2: [0; 4],
+            markets_created: 5,
+            total_volume: 500_000,
+            fees_collected: 1000,
+            daily_volume: 100_000,
+            last_day: 19800,
+            created_at: 0,
+            last_activity_at: 0,
+            allowed_categories_count: 0,
+            _reserved: [0; 31],
+            allowed_categories: vec![],
+        }
+    }
+
+    #[test]
+    fn test_can_create_market() {
+        let mut tenant = create_tenant();
+        assert!(tenant.can_create_market());
+
+        tenant.markets_created = 10;
+        assert!(!tenant.can_create_market());
+
+        tenant.markets_created = 5;
+        tenant.is_active = false;
+        assert!(!tenant.can_create_market());
+    }
+
+    #[test]
+    fn test_volume_limit() {
+        let tenant = create_tenant();
+
+        // Within limit
+        assert!(tenant.check_volume_limit(500_000));
+
+        // Over limit
+        assert!(!tenant.check_volume_limit(1_000_000));
+    }
+
+    #[test]
+    fn test_category_filter() {
+        let mut tenant = create_tenant();
+
+        // No filter = all allowed
+        assert!(tenant.is_category_allowed("crypto"));
+        assert!(tenant.is_category_allowed("sports"));
+
+        // Add filter
+        tenant.allowed_categories.push("crypto".to_string());
+        tenant.allowed_categories_count = 1;
+
+        assert!(tenant.is_category_allowed("crypto"));
+        assert!(!tenant.is_category_allowed("sports"));
+    }
+
+    #[test]
+    fn test_fee_share() {
+        let tenant = create_tenant();
+
+        // 50% of 1000 = 500
+        assert_eq!(tenant.calculate_fee_share(1000), 500);
+    }
+
+    #[test]
+    fn test_effective_fee() {
+        let mut tenant = create_tenant();
+
+        // No override = default
+        assert_eq!(tenant.effective_fee_bps(30), 30);
+
+        // With override
+        tenant.fee_override_bps = 20;
+        assert_eq!(tenant.effective_fee_bps(30), 20);
+    }
+}
