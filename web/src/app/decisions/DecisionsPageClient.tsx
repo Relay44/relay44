@@ -61,3 +61,31 @@ export default function DecisionsPageClient() {
           ) : error ? (
             <Card className="text-ask">
               {error instanceof Error ? error.message : 'Failed to load decision cells'}
+            </Card>
+          ) : cells.length === 0 ? (
+            <Card className="space-y-4">
+              <h2 className="text-xl font-semibold text-text-primary">No decision cells yet</h2>
+              <p className="text-sm text-text-secondary">
+                Start with a timing, choice, hedge, or allocation problem. The app will create
+                starter nodes you can connect to markets and agents.
+              </p>
+              <Link
+                href="/decisions/create"
+                className="inline-flex h-10 items-center border border-accent bg-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-accent-hover"
+              >
+                Create your first cell
+              </Link>
+            </Card>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {cells.map((cell) => (
+                <DecisionCellCard key={cell.id} cell={cell} />
+              ))}
+            </div>
+          )}
+        </div>
+      </DecisionAccessGate>
+    </PageShell>
+  );
+}
+
