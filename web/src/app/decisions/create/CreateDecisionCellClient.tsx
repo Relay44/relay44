@@ -153,3 +153,70 @@ export default function CreateDecisionCellClient() {
                 </div>
 
                 {usesDefaultTimingActions ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="border border-border bg-bg-secondary px-3 py-3 text-sm text-text-primary">act now</div>
+                    <div className="border border-border bg-bg-secondary px-3 py-3 text-sm text-text-primary">wait</div>
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    <Input
+                      label="Action 1"
+                      value={actions[0]}
+                      onChange={(event) => handleActionChange(0, event.target.value)}
+                      placeholder="Increase allocation"
+                    />
+                    <Input
+                      label="Action 2"
+                      value={actions[1]}
+                      onChange={(event) => handleActionChange(1, event.target.value)}
+                      placeholder="Hold flat"
+                    />
+                    <Input
+                      label="Action 3 (optional)"
+                      value={actions[2]}
+                      onChange={(event) => handleActionChange(2, event.target.value)}
+                      placeholder="Reduce exposure"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Button type="submit" loading={createCell.isPending}>
+                  Create decision cell
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/decisions')}
+                  className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+                >
+                  Cancel
+                </button>
+              </div>
+            </Card>
+
+            <Card className="space-y-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">starter graph</p>
+                <h2 className="mt-2 text-lg font-semibold text-text-primary">Initial node set</h2>
+              </div>
+              <div className="space-y-3">
+                {starterNodes.map((label, index) => (
+                  <div key={label} className="border border-border bg-bg-secondary px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">node {index + 1}</div>
+                    <div className="mt-1 text-sm font-medium text-text-primary">{label}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm text-text-secondary">
+                After creation, attach live markets, set action effects, wire alerts, and bind
+                external agents to threshold triggers.
+              </p>
+            </Card>
+          </form>
+        </div>
+      </DecisionAccessGate>
+    </PageShell>
+  );
+}
+
