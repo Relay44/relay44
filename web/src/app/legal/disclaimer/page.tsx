@@ -119,3 +119,43 @@ export default function DisclaimerPage() {
             </p>
           </section>
 
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              No Investment Advice
+            </h2>
+            <p>
+              Nothing on this platform constitutes investment, financial, legal, or tax
+              advice. You should consult with appropriate professionals before making any
+              financial decisions. We do not recommend or endorse any particular trading
+              strategies.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              Your Responsibility
+            </h2>
+            <p>
+              By using the platform, you acknowledge that you:
+            </p>
+            <ul className="list-disc pl-6 space-y-2 mt-2">
+              <li>Understand the risks involved</li>
+              <li>Are solely responsible for your trading decisions</li>
+              <li>Have conducted your own research</li>
+              <li>Can afford to lose any funds you deposit</li>
+              <li>Accept full responsibility for your use of the platform</li>
+            </ul>
+          </section>
+
+          <section className="mt-8 p-4  bg-bg-secondary">
+            <p className="text-sm">
+              If you do not understand these risks or do not agree with this disclaimer,
+              please do not use the platform.
+            </p>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
