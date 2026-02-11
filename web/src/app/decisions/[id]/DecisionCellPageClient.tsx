@@ -899,3 +899,125 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                             { bps: parsePercent(leadAlertThreshold, 750) },
                             leadAlertActive,
                           )
+                        }
+                        className="mt-3 inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-primary hover:text-text-primary"
+                      >
+                        Save
+                      </button>
+                    </div>
+
+                    <div className="border border-border bg-bg-secondary px-4 py-4">
+                      <label className="flex items-center gap-3 text-sm text-text-primary">
+                        <input
+                          type="checkbox"
+                          checked={nodeAlertActive}
+                          onChange={(event) => setNodeAlertActive(event.target.checked)}
+                          className="h-4 w-4 accent-[var(--accent)]"
+                        />
+                        Fire when a node probability crosses a threshold
+                      </label>
+                      <div className="mt-3 grid gap-4">
+                        <div className="space-y-1.5">
+                          <label className="block text-sm font-medium text-text-primary">Node</label>
+                          <Select
+                            value={nodeAlertNodeId}
+                            onChange={(event) => setNodeAlertNodeId(event.target.value)}
+                            options={cell.nodes.map((node) => ({ value: node.id, label: node.label }))}
+                          />
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-medium text-text-primary">Direction</label>
+                            <Select
+                              value={nodeAlertDirection}
+                              onChange={(event) => setNodeAlertDirection(event.target.value as 'above' | 'below')}
+                              options={DIRECTION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                            />
+                          </div>
+                          <Input
+                            label="Threshold (%)"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={nodeAlertThreshold}
+                            onChange={(event) => setNodeAlertThreshold(event.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void saveAlert(
+                            'node_probability_cross',
+                            {
+                              nodeId: nodeAlertNodeId,
+                              direction: nodeAlertDirection,
+                              bps: parsePercent(nodeAlertThreshold, 6500),
+                            },
+                            nodeAlertActive,
+                          )
+                        }
+                        className="mt-3 inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-primary hover:text-text-primary"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="space-y-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">attached automations</p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Node-driven agent triggers</h2>
+                  </div>
+                  {attachedAutomations.length > 0 ? (
+                    <div className="space-y-3">
+                      {attachedAutomations.map((agent) => (
+                        <div key={agent.id} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
+                          <div className="font-medium text-text-primary">{agent.name || agent.externalAgentId}</div>
+                          <div className="mt-1 text-text-secondary">
+                            {agent.nodeLabel} • {agent.provider || 'unknown'} • {formatState(agent.triggerMode)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-text-secondary">No external agents are attached to this cell yet.</p>
+                  )}
+                </Card>
+
+                <Card className="space-y-4">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">event log</p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Recent events</h2>
+                  </div>
+                  {cell.events.length > 0 ? (
+                    <div className="space-y-3">
+                      {cell.events.map((event) => (
+                        <div key={event.id} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="font-medium uppercase tracking-[0.12em] text-text-primary">
+                              {formatState(event.kind)}
+                            </div>
+                            <div className="text-text-muted">{new Date(event.createdAt).toLocaleString()}</div>
+                          </div>
+                          {Object.keys(event.payload).length > 0 ? (
+                            <p className="mt-2 text-text-secondary">{summarizePayload(event.payload)}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-text-secondary">No events recorded yet.</p>
+                  )}
+                </Card>
+              </div>
+            </div>
+          </div>
+        )}
+      </DecisionAccessGate>
+    </PageShell>
+  );
+}
+
