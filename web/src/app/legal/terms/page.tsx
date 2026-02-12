@@ -149,3 +149,53 @@ export default function TermsOfServicePage() {
             <p className="mt-2">Fees are subject to change with notice.</p>
           </section>
 
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              9. Dispute Resolution
+            </h2>
+            <p>
+              Market resolution disputes are handled through on-chain oracle mechanisms.
+              The Platform reserves the right to void markets that violate these terms or
+              cannot be fairly resolved.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              10. Limitation of Liability
+            </h2>
+            <p>
+              THE PLATFORM IS PROVIDED &quot;AS IS&quot; WITHOUT WARRANTIES OF ANY KIND. TO THE
+              MAXIMUM EXTENT PERMITTED BY LAW, THE PLATFORM OPERATORS SHALL NOT BE LIABLE
+              FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES
+              ARISING FROM YOUR USE OF THE PLATFORM.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              11. Changes to Terms
+            </h2>
+            <p>
+              We may modify these terms at any time. Continued use of the Platform after
+              changes constitutes acceptance of the modified terms.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              12. Contact
+            </h2>
+            <p>
+              For questions about these terms, contact us at{' '}
+              <a href="mailto:legal@relay44.com" className="text-accent hover:underline">
+                legal@relay44.com
+              </a>
+            </p>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
