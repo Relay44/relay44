@@ -139,3 +139,61 @@ export default function PrivacyPolicyPage() {
             </p>
           </section>
 
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              7. Cookies
+            </h2>
+            <p>
+              We use essential cookies to maintain your session and preferences. We do not
+              use tracking cookies or share data with advertisers.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              8. Security
+            </h2>
+            <p>
+              We implement appropriate technical and organizational measures to protect
+              your data. However, no system is completely secure. You are responsible for
+              maintaining the security of your wallet and private keys.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              9. International Transfers
+            </h2>
+            <p>
+              Your information may be processed in countries other than your own. By using
+              the platform, you consent to such transfers.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              10. Changes to This Policy
+            </h2>
+            <p>
+              We may update this policy from time to time. We will notify you of
+              significant changes by posting on the platform.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mt-8 mb-4">
+              11. Contact Us
+            </h2>
+            <p>
+              For privacy-related inquiries, contact us at{' '}
+              <a href="mailto:privacy@relay44.com" className="text-accent hover:underline">
+                privacy@relay44.com
+              </a>
+            </p>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
