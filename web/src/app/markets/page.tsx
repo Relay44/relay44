@@ -100,3 +100,37 @@ async function fetchInitialMarkets(): Promise<PaginatedResponse<Market> | null> 
       if (payload && payload.data.length > 0) {
         return payload;
       }
+    }
+    return null;
+  }
+}
+
+export default async function MarketsPage({ searchParams }: MarketsPageProps) {
+  const params = searchParams ? await searchParams : {};
+  const initialMarkets = await fetchInitialMarkets();
+  const category = normalizeCategory(params.category);
+  const searchQuery = normalizeQuery(params.q);
+  const itemList = (initialMarkets?.data ?? []).map((market) => ({
+    name: market.question,
+    url: absoluteUrl(`/markets/${encodeURIComponent(market.id)}`),
+  }));
+
+  return (
+    <>
+      <StructuredData
+        data={buildCollectionPageStructuredData({
+          path: '/markets',
+          name: category === 'All' ? 'Markets' : `${category} markets`,
+          description: categoryDescription(category),
+          items: itemList,
+        })}
+      />
+      <MarketsClient
+        initialCategory={category}
+        initialMarkets={initialMarkets}
+        initialSearchQuery={searchQuery}
+      />
+    </>
+  );
+}
+
