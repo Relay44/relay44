@@ -72,3 +72,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
+  const marketRoutes: MetadataRoute.Sitemap = markets.map((market) => ({
+    url: `${SITE_URL}/markets/${encodeURIComponent(market.id)}`,
+    lastModified: new Date(
+      market.resolvedAt || market.tradingEnd || market.createdAt || now,
+    ),
+    changeFrequency: market.status === "active" ? "hourly" : "daily",
+    priority: market.status === "active" ? 0.85 : 0.65,
+  }));
+
+  const profileRoutes: MetadataRoute.Sitemap = [
+    ...new Set(leaderboardEntries.map((entry) => entry.wallet)),
+  ]
+    .filter(Boolean)
+    .map((wallet) => ({
+      url: `${SITE_URL}/profile/${wallet}`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.65,
+    }));
+
+  return [...staticRoutes, ...marketRoutes, ...profileRoutes];
+}
+
