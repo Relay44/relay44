@@ -173,3 +173,84 @@ export function MiniAppOrderForm({ market, onSuccess }: MiniAppOrderFormProps) {
       const message = err instanceof Error ? err.message : 'Order failed';
       addToast(message, 'error');
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isExternal) {
+      await handleSubmitExternal();
+    } else {
+      await handleSubmitInternal();
+    }
+  };
+
+  return (
+    <Card className="!p-4 sm:!p-6 relative">
+      {isPending && (
+        <div className="absolute inset-0 bg-bg-base/80 z-10 flex flex-col items-center justify-center gap-3">
+          <Spinner size="lg" className={isYes ? 'text-bid' : 'text-ask'} />
+          <div className="text-center">
+            <p className="font-medium text-text-primary">Confirming transaction...</p>
+            <p className="text-sm text-text-muted mt-1">Waiting for confirmation</p>
+          </div>
+        </div>
+      )}
+
+      <h3 className="font-display font-semibold text-lg mb-4">Trade</h3>
+
+      {/* Outcome selector */}
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <button
+          type="button"
+          onClick={() => setOutcome('yes')}
+          disabled={isPending}
+          className={cn(
+            'py-3 font-semibold text-center transition-all duration-fast',
+            'border-2 cursor-pointer',
+            'disabled:cursor-not-allowed disabled:opacity-50',
+            isYes
+              ? 'bg-bid-muted border-bid text-bid'
+              : 'bg-bg-secondary border-border text-text-secondary hover:border-border-hover',
+          )}
+        >
+          <div className="font-mono text-xl">{Math.round(market.yesPrice * 100)}¢</div>
+          <div className="text-xs mt-0.5 opacity-80">Yes</div>
+        </button>
+        <button
+          type="button"
+          onClick={() => setOutcome('no')}
+          disabled={isPending}
+          className={cn(
+            'py-3 font-semibold text-center transition-all duration-fast',
+            'border-2 cursor-pointer',
+            'disabled:cursor-not-allowed disabled:opacity-50',
+            !isYes
+              ? 'bg-ask-muted border-ask text-ask'
+              : 'bg-bg-secondary border-border text-text-secondary hover:border-border-hover',
+          )}
+        >
+          <div className="font-mono text-xl">{Math.round(market.noPrice * 100)}¢</div>
+          <div className="text-xs mt-0.5 opacity-80">No</div>
+        </button>
+      </div>
+
+      {/* Buy/Sell tabs */}
+      <Tabs
+        tabs={[
+          { value: 'buy', label: 'Buy' },
+          { value: 'sell', label: 'Sell' },
+        ]}
+        value={side}
+        onChange={(v) => setSide(v as OrderSide)}
+        disabled={isPending}
+        className="mb-4"
+      />
+
+      <form onSubmit={handleSubmit}>
+        <div className="space-y-4 mb-4">
+          {!walletReady ? (
+            <div className="border border-border bg-bg-secondary p-3 text-sm text-text-secondary">
+              Connect your Base wallet from the miniapp shell before you place a trade.
+            </div>
+          ) : null}
+
