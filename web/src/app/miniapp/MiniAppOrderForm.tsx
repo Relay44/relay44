@@ -254,3 +254,83 @@ export function MiniAppOrderForm({ market, onSuccess }: MiniAppOrderFormProps) {
             </div>
           ) : null}
 
+          {walletReady && isExternal && !credentialLoading && !credential ? (
+            <div className="border border-border bg-bg-secondary p-3 text-sm text-text-secondary">
+              No stored venue credential is ready for this provider yet.
+            </div>
+          ) : null}
+
+          <Input
+            type="number"
+            label={side === 'buy' ? 'Amount (USDC)' : 'Shares to sell'}
+            placeholder="0.00"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            min="0"
+            step="0.01"
+            disabled={isPending}
+          />
+
+          <Input
+            type="number"
+            label="Limit Price (optional)"
+            placeholder={formatPrice(currentPrice)}
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            min="0.01"
+            max="0.99"
+            step="0.01"
+            hint="Leave empty for market order"
+            disabled={isPending}
+          />
+        </div>
+
+        {/* Order summary */}
+        <div className="bg-bg-secondary p-3 mb-4 space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-text-muted">{side === 'buy' ? 'Avg Price' : 'Est. Return'}</span>
+            <span className="font-mono">${formatPrice(effectivePrice)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-text-muted">{side === 'buy' ? 'Est. Shares' : 'Total'}</span>
+            <span className="font-mono">{shares.toFixed(2)}</span>
+          </div>
+          {side === 'buy' && potentialReturn > 0 && (
+            <div className="flex justify-between pt-2 border-t border-border">
+              <span className="text-text-muted">Max Profit</span>
+              <span className={cn('font-mono font-medium', isYes ? 'text-bid' : 'text-ask')}>
+                +${formatPrice(potentialReturn)}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {isExternal && credentialLoading && (
+          <p className="text-xs text-text-muted mb-2">Loading trading credentials...</p>
+        )}
+
+        <Button
+          type="submit"
+          variant={isYes ? 'bid' : 'ask'}
+          size="lg"
+          className="w-full"
+          disabled={
+            !walletReady ||
+            !credentialReady ||
+            !amountValue ||
+            isPending ||
+            (isExternal && credentialLoading)
+          }
+          loading={isPending}
+        >
+          {!walletReady
+            ? 'Connect wallet to trade'
+            : !credentialReady
+              ? 'Credential required'
+              : `${side === 'buy' ? 'Buy' : 'Sell'} ${isYes ? 'Yes' : 'No'}`}
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
