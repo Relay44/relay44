@@ -91,3 +91,25 @@ export default function MiniAppHome() {
         <p className="text-xs text-red-400">{fcAuth.error}</p>
       )}
 
+      {/* Market list */}
+      {isLoading ? (
+        <div className="flex justify-center py-8">
+          <div className="h-5 w-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {markets?.data?.map((market) => (
+            <MiniMarketCard key={market.id} market={market} />
+          ))}
+        </div>
+      )}
+
+      {!isLoading && (!markets?.data || markets.data.length === 0) && (
+        <p className="text-center text-text-secondary py-8 text-sm">
+          No markets available right now.
+        </p>
+      )}
+    </div>
+  );
+}
+
