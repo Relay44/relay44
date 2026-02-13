@@ -150,3 +150,151 @@ pub fn handler(
     let seeds = &[b"escrow_authority".as_ref(), &[ctx.bumps.escrow_authority]];
     let signer_seeds = &[&seeds[..]];
 
+    // Transfer collateral from escrow to seller
+    let transfer_to_seller_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        Transfer {
+            from: ctx.accounts.escrow_vault.to_account_info(),
+            to: ctx.accounts.seller_collateral.to_account_info(),
+            authority: ctx.accounts.escrow_authority.to_account_info(),
+        },
+        signer_seeds,
+    );
+    token::transfer(transfer_to_seller_ctx, collateral_amount)?;
+
+    // SECURITY FIX: Transfer buyer's refund back to buyer if fill price was lower
+    if buyer_refund > 0 {
+        let transfer_refund_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.escrow_vault.to_account_info(),
+                to: ctx.accounts.buyer_collateral.to_account_info(),
+                authority: ctx.accounts.escrow_authority.to_account_info(),
+            },
+            signer_seeds,
+        );
+        token::transfer(transfer_refund_ctx, buyer_refund)?;
+    }
+
+    // Update orders
+    let buy_order = &mut ctx.accounts.buy_order;
+    buy_order.remaining_quantity = buy_order.remaining_quantity
+        .checked_sub(fill_quantity)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+    buy_order.filled_quantity = buy_order.filled_quantity
+        .checked_add(fill_quantity)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+    buy_order.updated_at = clock.unix_timestamp;
+
+    if buy_order.remaining_quantity == 0 {
+        buy_order.status = OrderStatus::Filled;
+    } else {
+        buy_order.status = OrderStatus::PartiallyFilled;
+    }
+
+    let sell_order = &mut ctx.accounts.sell_order;
+    sell_order.remaining_quantity = sell_order.remaining_quantity
+        .checked_sub(fill_quantity)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+    sell_order.filled_quantity = sell_order.filled_quantity
+        .checked_add(fill_quantity)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+    sell_order.updated_at = clock.unix_timestamp;
+
+    if sell_order.remaining_quantity == 0 {
+        sell_order.status = OrderStatus::Filled;
+    } else {
+        sell_order.status = OrderStatus::PartiallyFilled;
+    }
+
+    // Update positions
+    let buyer_position = &mut ctx.accounts.buyer_position;
+    buyer_position.locked_collateral = buyer_position.locked_collateral
+        .saturating_sub(buyer_locked);
+    buyer_position.total_trades = buyer_position.total_trades
+        .checked_add(1)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+
+    // Credit buyer with outcome tokens
+    match ctx.accounts.buy_order.outcome {
+        OutcomeType::Yes => {
+            buyer_position.yes_balance = buyer_position.yes_balance
+                .checked_add(fill_quantity)
+                .ok_or(OrderBookError::ArithmeticOverflow)?;
+        }
+        OutcomeType::No => {
+            buyer_position.no_balance = buyer_position.no_balance
+                .checked_add(fill_quantity)
+                .ok_or(OrderBookError::ArithmeticOverflow)?;
+        }
+    }
+
+    if ctx.accounts.buy_order.status == OrderStatus::Filled {
+        buyer_position.open_order_count = buyer_position.open_order_count.saturating_sub(1);
+    }
+
+    let seller_position = &mut ctx.accounts.seller_position;
+    seller_position.total_trades = seller_position.total_trades
+        .checked_add(1)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+
+    // Debit seller's locked tokens
+    match ctx.accounts.sell_order.outcome {
+        OutcomeType::Yes => {
+            seller_position.locked_yes = seller_position.locked_yes
+                .saturating_sub(fill_quantity);
+            seller_position.yes_balance = seller_position.yes_balance
+                .saturating_sub(fill_quantity);
+        }
+        OutcomeType::No => {
+            seller_position.locked_no = seller_position.locked_no
+                .saturating_sub(fill_quantity);
+            seller_position.no_balance = seller_position.no_balance
+                .saturating_sub(fill_quantity);
+        }
+    }
+
+    if ctx.accounts.sell_order.status == OrderStatus::Filled {
+        seller_position.open_order_count = seller_position.open_order_count.saturating_sub(1);
+    }
+
+    // Update global stats
+    let config = &mut ctx.accounts.config;
+    config.total_trades = config.total_trades
+        .checked_add(1)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+    config.total_volume = config.total_volume
+        .checked_add(collateral_amount)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+
+    emit!(TradeFilled {
+        buy_order_id: ctx.accounts.buy_order.order_id,
+        sell_order_id: ctx.accounts.sell_order.order_id,
+        market: ctx.accounts.buy_order.market,
+        outcome: ctx.accounts.buy_order.outcome,
+        buyer: ctx.accounts.buy_order.owner,
+        seller: ctx.accounts.sell_order.owner,
+        fill_price_bps,
+        fill_quantity,
+        collateral_amount,
+        buyer_refund,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct TradeFilled {
+    pub buy_order_id: u64,
+    pub sell_order_id: u64,
+    pub market: Pubkey,
+    pub outcome: OutcomeType,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub fill_price_bps: u16,
+    pub fill_quantity: u64,
+    pub collateral_amount: u64,
+    pub buyer_refund: u64,
+    pub timestamp: i64,
+}

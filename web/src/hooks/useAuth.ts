@@ -137,4 +137,3 @@ export function useAuth() {
     solanaWalletConnected: solanaWallet.isConnected,
   };
 }
-
