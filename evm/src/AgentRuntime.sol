@@ -146,3 +146,63 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
         if (agent.owner != msg.sender && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
             revert NotOwner();
         }
+
+        agent.active = false;
+        emit AgentDeactivated(agentId);
+    }
+
+    function setIdentityRegistry(address registry) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (registry == address(0)) revert ZeroAddress();
+        identityRegistry = IAgentIdentityRegistry(registry);
+        emit IdentityRegistrySet(registry);
+    }
+
+    function registerAgentIdentity(uint256 agentId, string calldata agentURI)
+        external
+        whenNotPaused
+        returns (uint256 identityId)
+    {
+        Agent storage agent = agents[agentId];
+        if (agent.owner == address(0)) revert AgentNotFound();
+        if (agent.owner != msg.sender) revert NotOwner();
+        if (address(identityRegistry) == address(0)) revert IdentityRegistryNotConfigured();
+        if (agentIdentityId[agentId] != 0) revert IdentityAlreadyRegistered();
+
+        identityId = identityRegistry.registerFor(agent.owner, agentURI);
+        agentIdentityId[agentId] = identityId;
+
+        emit AgentIdentityLinked(agentId, identityId, agent.owner);
+    }
+
+    function executeAgent(uint256 agentId) external nonReentrant whenNotPaused returns (uint256 orderId) {
+        Agent storage agent = agents[agentId];
+        if (agent.owner == address(0)) revert AgentNotFound();
+        if (!agent.active) revert AgentInactive();
+
+        uint64 nowTs = uint64(block.timestamp);
+        uint64 nextExecution = agent.lastExecutedAt + agent.cadence;
+        if (agent.lastExecutedAt != 0 && nowTs < nextExecution) {
+            revert ExecutionTooEarly();
+        }
+
+        uint64 expiry = nowTs + agent.expiryWindow;
+        orderId = orderBook.placeOrderFor(agent.owner, agent.marketId, agent.isYes, agent.priceBps, agent.size, expiry);
+
+        agent.lastExecutedAt = nowTs;
+        emit AgentExecuted(agentId, orderId, msg.sender, nowTs, expiry);
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+
+    function _validateConfig(uint128 priceBps, uint128 size, uint64 cadence, uint64 expiryWindow) internal pure {
+        if (priceBps < MIN_PRICE_BPS || priceBps > MAX_PRICE_BPS) revert InvalidConfig();
+        if (size == 0 || cadence == 0 || expiryWindow == 0) revert InvalidConfig();
+    }
+}
+
