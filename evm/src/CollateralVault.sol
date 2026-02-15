@@ -81,3 +81,38 @@ contract CollateralVault is AccessControl, Pausable, ReentrancyGuard {
         emit Unlocked(user, amount);
     }
 
+    function settle(address from, address to, uint256 amount) external onlyRole(OPERATOR_ROLE) whenNotPaused {
+        if (from == address(0) || to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert InvalidAmount();
+        if (lockedBalance[from] < amount) revert InsufficientLocked();
+
+        lockedBalance[from] -= amount;
+        availableBalance[to] += amount;
+
+        emit Settled(from, to, amount);
+    }
+
+    function transferAvailable(address from, address to, uint256 amount)
+        external
+        onlyRole(OPERATOR_ROLE)
+        whenNotPaused
+    {
+        if (from == address(0) || to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert InvalidAmount();
+        if (availableBalance[from] < amount) revert InsufficientAvailable();
+
+        availableBalance[from] -= amount;
+        availableBalance[to] += amount;
+
+        emit AvailableTransferred(from, to, amount);
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+}
+
