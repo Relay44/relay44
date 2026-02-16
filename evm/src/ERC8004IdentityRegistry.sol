@@ -173,3 +173,85 @@ contract ERC8004IdentityRegistry is ERC721URIStorage, AccessControl, Pausable, E
         address signer = ECDSA.recover(digest, signature);
         if (signer != newWallet) revert InvalidSignature();
 
+        _agentWallets[identityId] = newWallet;
+        _metadata[identityId][AGENT_WALLET_KEY] = abi.encodePacked(newWallet);
+        _profiles[owner].updatedAt = uint64(block.timestamp);
+
+        emit AgentWalletSet(identityId, newWallet);
+    }
+
+    function getAgentWallet(uint256 identityId) external view returns (address wallet) {
+        if (_ownersByIdentity[identityId] == address(0)) revert NotRegistered();
+
+        wallet = _agentWallets[identityId];
+        if (wallet == address(0)) {
+            wallet = _ownersByIdentity[identityId];
+        }
+    }
+
+    function unsetAgentWallet(uint256 identityId) external whenNotPaused {
+        address owner = _ownersByIdentity[identityId];
+        if (owner == address(0)) revert NotRegistered();
+        if (msg.sender != owner && !hasRole(ISSUER_ROLE, msg.sender)) revert NotAgentOwner();
+
+        delete _agentWallets[identityId];
+        delete _metadata[identityId][AGENT_WALLET_KEY];
+        _profiles[owner].updatedAt = uint64(block.timestamp);
+
+        emit AgentWalletUnset(identityId);
+    }
+
+    function revokeIdentity(uint256 identityId) external onlyRole(ISSUER_ROLE) whenNotPaused {
+        address wallet = _ownersByIdentity[identityId];
+        if (wallet == address(0)) revert NotRegistered();
+
+        IdentityProfile storage entry = _profiles[wallet];
+        entry.active = false;
+        entry.updatedAt = uint64(block.timestamp);
+
+        emit IdentityActivated(wallet, false);
+        emit IdentityRevoked(wallet, identityId);
+    }
+
+    function isRegistered(address wallet) external view returns (bool) {
+        return _profiles[wallet].identityId != 0;
+    }
+
+    function getAgentId(address wallet) external view returns (uint256) {
+        return _profiles[wallet].identityId;
+    }
+
+    function registerable(address wallet) external view returns (bool) {
+        return wallet != address(0) && _profiles[wallet].identityId == 0;
+    }
+
+    function setTier(address wallet, uint8 tier) external onlyRole(ISSUER_ROLE) whenNotPaused {
+        if (tier > MAX_TIER) revert InvalidTier();
+
+        IdentityProfile storage entry = _profiles[wallet];
+        if (entry.identityId == 0) revert NotRegistered();
+
+        entry.tier = tier;
+        entry.updatedAt = uint64(block.timestamp);
+
+        emit TierUpdated(wallet, tier);
+    }
+
+    function setActive(address wallet, bool active) external onlyRole(ISSUER_ROLE) whenNotPaused {
+        IdentityProfile storage entry = _profiles[wallet];
+        if (entry.identityId == 0) revert NotRegistered();
+
+        entry.active = active;
+        entry.updatedAt = uint64(block.timestamp);
+
+        emit IdentityActivated(wallet, active);
+    }
+
+    function profile(address wallet)
+        external
+        view
+        returns (uint256 identityId, uint8 tier, bool active, uint64 updatedAt)
+    {
+        IdentityProfile storage entry = _profiles[wallet];
+        return (entry.identityId, entry.tier, entry.active, entry.updatedAt);
+    }
