@@ -255,3 +255,88 @@ contract ERC8004IdentityRegistry is ERC721URIStorage, AccessControl, Pausable, E
         IdentityProfile storage entry = _profiles[wallet];
         return (entry.identityId, entry.tier, entry.active, entry.updatedAt);
     }
+
+    function identityOf(address wallet) external view returns (uint256) {
+        return _profiles[wallet].identityId;
+    }
+
+    function ownerOfIdentity(uint256 identityId) external view returns (address) {
+        return _ownersByIdentity[identityId];
+    }
+
+    function totalSupply() external view returns (uint256) {
+        return identityCount;
+    }
+
+    function exists(uint256 identityId) external view returns (bool) {
+        return _ownersByIdentity[identityId] != address(0);
+    }
+
+    function getGlobalId(uint256 identityId) external view returns (string memory) {
+        if (_ownersByIdentity[identityId] == address(0)) revert NotRegistered();
+
+        return string(
+            abi.encodePacked(
+                "eip155:",
+                uint256(block.chainid).toString(),
+                ":",
+                Strings.toHexString(uint160(address(this)), 20),
+                ":",
+                identityId.toString()
+            )
+        );
+    }
+
+    function _register(address wallet, uint8 tier, string memory identityURI, bool emitRegisteredEvent)
+        internal
+        returns (uint256 identityId)
+    {
+        if (wallet == address(0)) revert ZeroAddress();
+        if (tier > MAX_TIER) revert InvalidTier();
+        if (_profiles[wallet].identityId != 0) revert AlreadyRegistered();
+
+        identityId = ++identityCount;
+        uint64 nowTs = uint64(block.timestamp);
+        _profiles[wallet] = IdentityProfile({
+            identityId: identityId,
+            tier: tier,
+            active: true,
+            createdAt: nowTs,
+            updatedAt: nowTs
+        });
+        _ownersByIdentity[identityId] = wallet;
+        registeredAt[identityId] = nowTs;
+
+        _mint(wallet, identityId);
+
+        if (bytes(identityURI).length > 0) {
+            _setTokenURI(identityId, identityURI);
+            emit IdentityURIUpdated(wallet, identityId, identityURI);
+            emit URIUpdated(identityId, identityURI, msg.sender);
+        }
+
+        emit IdentityRegistered(wallet, identityId, tier);
+        if (emitRegisteredEvent) {
+            emit Registered(identityId, identityURI, wallet);
+        }
+    }
+
+    function _update(address to, uint256 tokenId, address auth) internal override(ERC721) returns (address) {
+        address from = _ownerOf(tokenId);
+        if (from != address(0) && to != address(0)) revert IdentityNonTransferable();
+        return super._update(to, tokenId, auth);
+    }
+
+    function supportsInterface(bytes4 interfaceId) public view override(ERC721URIStorage, AccessControl) returns (bool) {
+        return super.supportsInterface(interfaceId);
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+}
+
