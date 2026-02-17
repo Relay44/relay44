@@ -258,3 +258,89 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
         address owner = identityRegistry.ownerOfIdentity(agentId);
         if (msg.sender == owner) revert SelfFeedbackForbidden();
 
+        uint64 feedbackIndex = _feedbackCount[agentId][msg.sender];
+        _feedback[agentId][msg.sender][feedbackIndex] = Feedback({
+            value: value,
+            valueDecimals: valueDecimals,
+            tag1: tag1,
+            tag2: tag2,
+            endpoint: endpoint,
+            feedbackURI: feedbackURI,
+            feedbackHash: feedbackHash,
+            timestamp: uint64(block.timestamp),
+            isRevoked: false
+        });
+        _feedbackCount[agentId][msg.sender] = feedbackIndex + 1;
+
+        if (!_hasSubmittedFeedback[agentId][msg.sender]) {
+            _agentClients[agentId].push(msg.sender);
+            _hasSubmittedFeedback[agentId][msg.sender] = true;
+        }
+
+        emit NewFeedback(
+            agentId,
+            msg.sender,
+            feedbackIndex,
+            value,
+            valueDecimals,
+            tag1,
+            tag1,
+            tag2,
+            endpoint,
+            feedbackURI,
+            feedbackHash
+        );
+    }
+
+    function revokeFeedback(uint256 agentId, uint64 feedbackIndex) external whenNotPaused {
+        Feedback storage row = _feedback[agentId][msg.sender][feedbackIndex];
+        if (row.timestamp == 0) revert FeedbackNotFound();
+        if (row.isRevoked) revert FeedbackAlreadyRevoked();
+
+        row.isRevoked = true;
+
+        emit FeedbackRevoked(agentId, msg.sender, feedbackIndex);
+    }
+
+    function appendResponse(
+        uint256 agentId,
+        address clientAddress,
+        uint64 feedbackIndex,
+        string calldata responseURI,
+        bytes32 responseHash
+    ) external whenNotPaused {
+        if (!_agentExists(agentId)) revert AgentNotFound();
+
+        Feedback storage row = _feedback[agentId][clientAddress][feedbackIndex];
+        if (row.timestamp == 0) revert FeedbackNotFound();
+
+        _responses[agentId][clientAddress][feedbackIndex].push(
+            Response({
+                responder: msg.sender,
+                responseURI: responseURI,
+                responseHash: responseHash,
+                timestamp: uint64(block.timestamp)
+            })
+        );
+
+        emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseURI, responseHash);
+    }
+
+    function getSummary(
+        uint256 agentId,
+        address[] calldata clientAddresses,
+        bytes32 tag1,
+        bytes32 tag2
+    ) external view returns (uint64 count, int128 summaryValue, uint8 decimals) {
+        if (clientAddresses.length == 0) revert EmptyClientList();
+
+        int256 sum = 0;
+        uint8 maxDecimals = 0;
+
+        for (uint256 i = 0; i < clientAddresses.length; i++) {
+            uint64 rowCount = _feedbackCount[agentId][clientAddresses[i]];
+            for (uint64 j = 0; j < rowCount; j++) {
+                Feedback storage row = _feedback[agentId][clientAddresses[i]][j];
+                if (!_matchesFeedbackFilter(row, tag1, tag2, false)) {
+                    continue;
+                }
