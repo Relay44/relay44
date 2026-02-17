@@ -344,3 +344,91 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
                 if (!_matchesFeedbackFilter(row, tag1, tag2, false)) {
                     continue;
                 }
+                sum += int256(row.value);
+                count++;
+                if (row.valueDecimals > maxDecimals) {
+                    maxDecimals = row.valueDecimals;
+                }
+            }
+        }
+
+        summaryValue = int128(sum);
+        decimals = maxDecimals;
+    }
+
+    function readFeedback(uint256 agentId, address clientAddress, uint64 feedbackIndex)
+        external
+        view
+        returns (int128 value, uint8 valueDecimals, bytes32 tag1, bytes32 tag2, bool isRevoked)
+    {
+        Feedback storage row = _feedback[agentId][clientAddress][feedbackIndex];
+        if (row.timestamp == 0) revert FeedbackNotFound();
+
+        return (row.value, row.valueDecimals, row.tag1, row.tag2, row.isRevoked);
+    }
+
+    function readAllFeedback(
+        uint256 agentId,
+        address[] calldata clientAddresses,
+        bytes32 tag1,
+        bytes32 tag2,
+        bool includeRevoked
+    )
+        external
+        view
+        returns (
+            address[] memory,
+            uint64[] memory,
+            int128[] memory,
+            uint8[] memory,
+            bytes32[] memory,
+            bytes32[] memory,
+            bool[] memory
+        )
+    {
+        if (clientAddresses.length == 0) revert EmptyClientList();
+        FeedbackBatch memory batch = _buildFeedbackBatch(agentId, clientAddresses, tag1, tag2, includeRevoked);
+
+        return (
+            batch.clients, batch.indices, batch.values, batch.valueDecimals, batch.tag1s, batch.tag2s, batch.revoked
+        );
+    }
+
+    function getLastIndex(uint256 agentId, address clientAddress) external view returns (uint64) {
+        uint64 count = _feedbackCount[agentId][clientAddress];
+        if (count == 0) {
+            return 0;
+        }
+        return count - 1;
+    }
+
+    function getClients(uint256 agentId) external view returns (address[] memory) {
+        return _agentClients[agentId];
+    }
+
+    function getFeedbackFull(uint256 agentId, address clientAddress, uint64 feedbackIndex)
+        external
+        view
+        returns (Feedback memory)
+    {
+        Feedback storage row = _feedback[agentId][clientAddress][feedbackIndex];
+        if (row.timestamp == 0) revert FeedbackNotFound();
+        return row;
+    }
+
+    function getResponseCount(uint256 agentId, address clientAddress, uint64 feedbackIndex)
+        external
+        view
+        returns (uint256)
+    {
+        return _responses[agentId][clientAddress][feedbackIndex].length;
+    }
+
+    function getResponse(uint256 agentId, address clientAddress, uint64 feedbackIndex, uint256 responseIndex)
+        external
+        view
+        returns (address responder, string memory responseURI, bytes32 responseHash, uint64 timestamp)
+    {
+        Response storage row = _responses[agentId][clientAddress][feedbackIndex][responseIndex];
+        return (row.responder, row.responseURI, row.responseHash, row.timestamp);
+    }
