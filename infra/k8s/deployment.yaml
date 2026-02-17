@@ -1,0 +1,404 @@
+# Relay44 Backend Deployment with Blue-Green Support
+#
+# This configuration supports zero-downtime deployments using:
+# - Rolling updates with health checks
+# - Blue-green deployment via service selector switching
+# - Canary releases via traffic splitting
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay44-api-blue
+  namespace: relay44
+  labels:
+    app: relay44-api
+    version: blue
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: relay44-api
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: relay44-api
+        version: blue
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: relay44-api
+      terminationGracePeriodSeconds: 30
+
+      # Pod anti-affinity for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - relay44-api
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: api
+          image: relay44/api:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+
+          env:
+            - name: RUST_LOG
+              value: "info,relay44=debug"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: relay44-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: relay44-secrets
+                  key: redis-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: relay44-secrets
+                  key: jwt-secret
+            - name: BASE_RPC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: relay44-config
+                  key: base-rpc-url
+            - name: BASE_CHAIN_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: relay44-config
+                  key: base-chain-id
+            - name: EVM_ENABLED
+              value: "true"
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+          # Liveness probe - is the process healthy?
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness probe - is the pod ready to receive traffic?
+          readinessProbe:
+            httpGet:
+              path: /health/detailed
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Startup probe - give time for initial startup
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          # Graceful shutdown
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+---
+# Green deployment (for blue-green deployments)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay44-api-green
+  namespace: relay44
+  labels:
+    app: relay44-api
+    version: green
+spec:
+  replicas: 0  # Scale to 3 during deployment, then switch traffic
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: relay44-api
+      version: green
+  template:
+    metadata:
+      labels:
+        app: relay44-api
+        version: green
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: relay44-api
+      terminationGracePeriodSeconds: 30
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - relay44-api
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: api
+          image: relay44/api:latest  # Update this for green deployment
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: 9090
+
+          env:
+            - name: RUST_LOG
+              value: "info,relay44=debug"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: relay44-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: relay44-secrets
+                  key: redis-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: relay44-secrets
+                  key: jwt-secret
+            - name: BASE_RPC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: relay44-config
+                  key: base-rpc-url
+            - name: BASE_CHAIN_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: relay44-config
+                  key: base-chain-id
+            - name: EVM_ENABLED
+              value: "true"
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health/detailed
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+---
+# Service - routes to active deployment
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay44-api
+  namespace: relay44
+  labels:
+    app: relay44-api
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: relay44-api
+    version: blue  # Switch to 'green' during blue-green deployment
+
+---
+# Service for blue deployment (for testing before switch)
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay44-api-blue
+  namespace: relay44
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: relay44-api
+    version: blue
+
+---
+# Service for green deployment (for testing before switch)
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay44-api-green
+  namespace: relay44
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  selector:
+    app: relay44-api
+    version: green
+
+---
+# Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: relay44-api
+  namespace: relay44
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+    - hosts:
+        - relay44.com
+      secretName: relay44-api-tls
+  rules:
+    - host: relay44.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: relay44-api
+                port:
+                  number: 80
+
+---
+# HorizontalPodAutoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: relay44-api-blue
+  namespace: relay44
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: relay44-api-blue
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+---
+# PodDisruptionBudget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: relay44-api
+  namespace: relay44
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: relay44-api
