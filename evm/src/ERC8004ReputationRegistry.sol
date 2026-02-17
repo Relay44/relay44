@@ -432,3 +432,86 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
         Response storage row = _responses[agentId][clientAddress][feedbackIndex][responseIndex];
         return (row.responder, row.responseURI, row.responseHash, row.timestamp);
     }
+
+    function _countMatchingFeedback(
+        uint256 agentId,
+        address[] calldata clientAddresses,
+        bytes32 tag1,
+        bytes32 tag2,
+        bool includeRevoked
+    ) internal view returns (uint256 totalCount) {
+        for (uint256 i = 0; i < clientAddresses.length; i++) {
+            uint64 rowCount = _feedbackCount[agentId][clientAddresses[i]];
+            for (uint64 j = 0; j < rowCount; j++) {
+                Feedback storage row = _feedback[agentId][clientAddresses[i]][j];
+                if (_matchesFeedbackFilter(row, tag1, tag2, includeRevoked)) {
+                    totalCount++;
+                }
+            }
+        }
+    }
+
+    function _matchesFeedbackFilter(
+        Feedback storage row,
+        bytes32 tag1,
+        bytes32 tag2,
+        bool includeRevoked
+    ) internal view returns (bool) {
+        if (!includeRevoked && row.isRevoked) return false;
+        if (tag1 != bytes32(0) && row.tag1 != tag1) return false;
+        if (tag2 != bytes32(0) && row.tag2 != tag2) return false;
+        return true;
+    }
+
+    function _buildFeedbackBatch(
+        uint256 agentId,
+        address[] calldata clientAddresses,
+        bytes32 tag1,
+        bytes32 tag2,
+        bool includeRevoked
+    ) internal view returns (FeedbackBatch memory batch) {
+        uint256 totalCount = _countMatchingFeedback(agentId, clientAddresses, tag1, tag2, includeRevoked);
+        batch.clients = new address[](totalCount);
+        batch.indices = new uint64[](totalCount);
+        batch.values = new int128[](totalCount);
+        batch.valueDecimals = new uint8[](totalCount);
+        batch.tag1s = new bytes32[](totalCount);
+        batch.tag2s = new bytes32[](totalCount);
+        batch.revoked = new bool[](totalCount);
+
+        uint256 idx = 0;
+        for (uint256 i = 0; i < clientAddresses.length; i++) {
+            for (uint64 j = 0; j < _feedbackCount[agentId][clientAddresses[i]]; j++) {
+                Feedback storage row = _feedback[agentId][clientAddresses[i]][j];
+                if (!_matchesFeedbackFilter(row, tag1, tag2, includeRevoked)) {
+                    continue;
+                }
+                batch.clients[idx] = clientAddresses[i];
+                batch.indices[idx] = j;
+                batch.values[idx] = row.value;
+                batch.valueDecimals[idx] = row.valueDecimals;
+                batch.tag1s[idx] = row.tag1;
+                batch.tag2s[idx] = row.tag2;
+                batch.revoked[idx] = row.isRevoked;
+                idx++;
+            }
+        }
+    }
+
+    function _agentExists(uint256 agentId) internal view returns (bool) {
+        try identityRegistry.ownerOfIdentity(agentId) returns (address owner) {
+            return owner != address(0);
+        } catch {
+            return false;
+        }
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+}
+
