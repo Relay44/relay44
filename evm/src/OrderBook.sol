@@ -198,3 +198,88 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
         return _claim(msg.sender, marketId);
     }
 
+    function claimFor(address user, uint256 marketId) external whenNotPaused nonReentrant returns (uint256 payout) {
+        if (user == address(0)) revert ZeroAddress();
+        return _claim(user, marketId);
+    }
+
+    function _claim(address user, uint256 marketId) internal returns (uint256 payout) {
+        Position storage position = positions[marketId][user];
+        if (position.claimed) revert AlreadyClaimed();
+        if (position.yesShares == 0 && position.noShares == 0) revert NoPosition();
+
+        (,,,, bool resolved, bool outcome) = marketCore.markets(marketId);
+        if (!resolved) revert MarketNotResolved();
+
+        uint256 winningShares = outcome ? position.yesShares : position.noShares;
+        if (winningShares == 0) revert NoWinningShares();
+
+        payout = winningShares * 2;
+
+        MarketPool storage pool = marketPools[marketId];
+        uint256 remainingEscrow = pool.escrow - pool.paidOut;
+        if (remainingEscrow < payout) revert InsufficientEscrow();
+        pool.paidOut += payout;
+
+        position.yesShares = 0;
+        position.noShares = 0;
+        position.claimed = true;
+
+        collateralVault.transferAvailable(address(this), user, payout);
+        emit Claimed(marketId, user, outcome, payout, winningShares);
+    }
+
+    function claimable(uint256 marketId, address user) external view returns (uint256) {
+        if (user == address(0)) revert ZeroAddress();
+
+        Position memory position = positions[marketId][user];
+        if (position.claimed) return 0;
+        if (position.yesShares == 0 && position.noShares == 0) return 0;
+
+        (,,,, bool resolved, bool outcome) = marketCore.markets(marketId);
+        if (!resolved) return 0;
+
+        uint256 winningShares = outcome ? position.yesShares : position.noShares;
+        return winningShares * 2;
+    }
+
+    function _placeOrder(address maker, uint256 marketId, bool isYes, uint128 priceBps, uint128 size, uint64 expiry)
+        internal
+        returns (uint256 orderId)
+    {
+        if (priceBps < MIN_PRICE_BPS || priceBps > MAX_PRICE_BPS) revert InvalidPrice();
+        if (size == 0) revert InvalidSize();
+        if (expiry <= block.timestamp) revert InvalidExpiry();
+
+        orderId = ++orderCount;
+        orders[orderId] = Order({
+            maker: maker,
+            marketId: marketId,
+            isYes: isYes,
+            priceBps: priceBps,
+            size: size,
+            remaining: size,
+            expiry: expiry,
+            canceled: false
+        });
+
+        emit OrderPlaced(orderId, maker, marketId, isYes, priceBps, size, expiry);
+    }
+
+    function _assertOrderFillable(Order storage order, uint128 fillSize) internal view {
+        if (order.maker == address(0)) revert OrderNotFound();
+        if (order.canceled) revert OrderAlreadyCanceled();
+        if (order.remaining == 0) revert OrderFullyFilled();
+        if (order.expiry < block.timestamp) revert OrderExpired();
+        if (fillSize == 0 || fillSize > order.remaining) revert FillExceedsRemaining();
+    }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+}
+
