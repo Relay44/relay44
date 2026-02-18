@@ -120,3 +120,55 @@ contract MarketCore is AccessControl, Pausable {
 
         emit MarketResolved(marketId, outcome, market.resolveTime, msg.sender);
     }
+
+    function pause() external onlyRole(PAUSER_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(PAUSER_ROLE) {
+        _unpause();
+    }
+
+    function _createMarket(bytes32 questionHash, uint64 closeTime, address resolver)
+        internal
+        returns (uint256 marketId)
+    {
+        if (resolver == address(0)) revert ZeroAddress();
+        if (closeTime <= block.timestamp) revert InvalidCloseTime();
+
+        marketId = ++marketCount;
+        markets[marketId] = Market({
+            questionHash: questionHash,
+            closeTime: closeTime,
+            resolveTime: 0,
+            resolver: resolver,
+            resolved: false,
+            outcome: false
+        });
+
+        emit MarketCreated(marketId, questionHash, closeTime, resolver);
+    }
+
+    function _setMarketMetadata(
+        uint256 marketId,
+        string calldata question,
+        string calldata description,
+        string calldata category,
+        string calldata resolutionSource
+    ) internal {
+        if (bytes(question).length == 0) revert EmptyQuestion();
+        if (
+            bytes(question).length > MAX_TEXT_LENGTH || bytes(description).length > MAX_TEXT_LENGTH
+                || bytes(category).length > MAX_TEXT_LENGTH || bytes(resolutionSource).length > MAX_TEXT_LENGTH
+        ) {
+            revert TextTooLong();
+        }
+
+        marketMetadata[marketId] = MarketMetadata({
+            question: question, description: description, category: category, resolutionSource: resolutionSource
+        });
+
+        emit MarketMetadataSet(marketId, question, description, category, resolutionSource);
+    }
+}
+
