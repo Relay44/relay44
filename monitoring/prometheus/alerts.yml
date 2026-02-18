@@ -1,0 +1,74 @@
+groups:
+  - name: relay44.alerts
+    rules:
+      # API availability
+      - alert: Relay44APIDown
+        expr: up{job="relay44-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Relay44 API is down"
+          description: "API has been unavailable for more than 1 minute"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(relay44_requests_total{status="error"}[5m]) / rate(relay44_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is above 5% for the last 5 minutes"
+
+      # No trades
+      - alert: NoTradesExecuted
+        expr: increase(relay44_trades_total[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No trades executed"
+          description: "No trades have been executed in the last 2 hours"
+
+      # Low trading volume
+      - alert: LowTradingVolume
+        expr: increase(relay44_volume_total[24h]) < 1000000
+        for: 6h
+        labels:
+          severity: info
+        annotations:
+          summary: "Low trading volume"
+          description: "Trading volume is below 1M lamports in 24 hours"
+
+  - name: infrastructure.alerts
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80% for 10 minutes"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 85% for 10 minutes"
+
+      # Disk space low
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 80
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk space low"
+          description: "Disk usage is above 80%"
