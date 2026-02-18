@@ -257,3 +257,4 @@ contract ERC8004ValidationRegistry is AccessControl, Pausable {
         return false;
     }
 }
+
