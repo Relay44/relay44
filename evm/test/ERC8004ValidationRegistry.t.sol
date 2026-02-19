@@ -92,3 +92,42 @@ contract ERC8004ValidationRegistryTest is Test {
         assertEq(avgQuality, 90);
     }
 
+    function test_validationResponseFromTier() external {
+        bytes32 requestHash = keccak256("request-tier");
+
+        vm.prank(requester);
+        validationRegistry.validationRequest(validator, 1, "ipfs://tier", requestHash);
+
+        vm.prank(validator);
+        validationRegistry.validationResponseFromTier(requestHash, 3, "ipfs://tier-response", keccak256("tier-response"));
+
+        (, , uint8 response, , bytes32 tag,) = validationRegistry.getValidationStatus(requestHash);
+        assertEq(response, 80);
+        assertEq(tag, keccak256("validation_tier"));
+        assertEq(validationRegistry.responseToTier(response), 3);
+    }
+
+    function test_validationRejectsDuplicateRequest() external {
+        bytes32 requestHash = keccak256("request-dup");
+
+        vm.prank(requester);
+        validationRegistry.validationRequest(validator, 1, "ipfs://dup", requestHash);
+
+        vm.expectRevert(ERC8004ValidationRegistry.DuplicateValidationRequest.selector);
+        vm.prank(requester);
+        validationRegistry.validationRequest(validator, 1, "ipfs://dup", requestHash);
+    }
+
+    function test_validationRejectsUnassignedResponder() external {
+        bytes32 requestHash = keccak256("request-unassigned");
+        address intruder = makeAddr("intruder");
+
+        vm.prank(requester);
+        validationRegistry.validationRequest(validator, 1, "ipfs://intruder", requestHash);
+
+        vm.expectRevert(ERC8004ValidationRegistry.NotValidator.selector);
+        vm.prank(intruder);
+        validationRegistry.validationResponse(requestHash, 80, "ipfs://bad", keccak256("bad"), bytes32(0));
+    }
+}
+
