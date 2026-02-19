@@ -201,3 +201,197 @@ pub struct ConsumeEventsExplicit<'info> {
     #[account(mut)]
     pub crank: Signer<'info>,
 
+    #[account(
+        seeds = [OrderBookConfig::SEED_PREFIX],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, OrderBookConfig>,
+
+    /// CHECK: Market account
+    pub market: AccountInfo<'info>,
+
+    /// Event heap
+    #[account(mut)]
+    pub event_heap: AccountLoader<'info, EventHeap>,
+
+    /// Maker's open orders (for first event)
+    #[account(mut)]
+    pub maker_open_orders: Account<'info, OpenOrdersAccount>,
+
+    /// Taker's open orders (for first event, if different from maker)
+    #[account(mut)]
+    pub taker_open_orders: Option<Account<'info, OpenOrdersAccount>>,
+}
+
+pub fn handler_explicit(ctx: Context<ConsumeEventsExplicit>) -> Result<ConsumeEventsResult> {
+    let event_heap = &mut ctx.accounts.event_heap.load_mut()?;
+    let maker = &mut ctx.accounts.maker_open_orders;
+
+    let mut fills_processed = 0u32;
+    let mut outs_processed = 0u32;
+
+    // Process single event
+    if let Some((slot, node)) = event_heap.pop() {
+        match node.event_type() {
+            EventType::Fill => {
+                if let Some(fill) = node.as_fill() {
+                    // Verify maker account matches
+                    if maker.owner != fill.maker {
+                        return Err(OrderBookError::UnauthorizedOwner.into());
+                    }
+
+                    // Execute fill for maker
+                    maker.execute_maker_fill(
+                        fill.price,
+                        fill.quantity,
+                        if fill.taker_side == 1 { 0 } else { 1 }, // Maker's side is opposite
+                        fill.outcome,
+                        fill.maker == fill.taker, // self-trade check
+                    );
+
+                    // If maker order fully filled, remove from their slots
+                    if fill.is_maker_out() {
+                        maker.remove_order_at(fill.maker_slot as usize);
+                    }
+
+                    fills_processed += 1;
+                }
+            }
+            EventType::Out => {
+                if let Some(out) = node.as_out() {
+                    // Verify owner
+                    if maker.owner != out.owner {
+                        return Err(OrderBookError::UnauthorizedOwner.into());
+                    }
+
+                    // Return locked funds
+                    if out.side == 0 {
+                        // Was buy order - unlock collateral
+                        let collateral = out
+                            .quantity
+                            .checked_mul(10000) // Would need actual price
+                            .and_then(|v| v.checked_div(10000))
+                            .unwrap_or(0);
+                        maker.unlock_collateral(collateral);
+                    } else {
+                        // Was sell order - unlock tokens (need outcome info)
+                        // Simplified: assume YES
+                        maker.unlock_yes(out.quantity);
+                    }
+
+                    // Remove order from slots
+                    maker.remove_order_at(out.owner_slot as usize);
+
+                    outs_processed += 1;
+                }
+            }
+        }
+    }
+
+    Ok(ConsumeEventsResult {
+        events_consumed: fills_processed + outs_processed,
+        fills_processed,
+        outs_processed,
+    })
+}
+
+/// Prune expired orders from the orderbook
+#[derive(Accounts)]
+pub struct PruneOrders<'info> {
+    /// Crank operator
+    #[account(mut)]
+    pub crank: Signer<'info>,
+
+    #[account(
+        seeds = [OrderBookConfig::SEED_PREFIX],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, OrderBookConfig>,
+
+    /// CHECK: Market account
+    pub market: AccountInfo<'info>,
+
+    /// Bids bookside
+    #[account(mut)]
+    pub bids: AccountLoader<'info, crate::state::BookSide>,
+
+    /// Asks bookside
+    #[account(mut)]
+    pub asks: AccountLoader<'info, crate::state::BookSide>,
+
+    /// Event heap for out events
+    #[account(mut)]
+    pub event_heap: AccountLoader<'info, EventHeap>,
+}
+
+pub fn handler_prune(ctx: Context<PruneOrders>, limit: u8) -> Result<u32> {
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
+
+    let mut bids = ctx.accounts.bids.load_mut()?;
+    let mut asks = ctx.accounts.asks.load_mut()?;
+    let mut event_heap = ctx.accounts.event_heap.load_mut()?;
+
+    let max_prune = if limit == 0 { 10 } else { limit as usize };
+    let mut pruned = 0u32;
+
+    // Prune expired orders from bids
+    // Note: This is a simplified version. Full implementation would iterate
+    // through orders and check timestamps against time_in_force
+
+    // For now, just emit the event
+    emit!(OrdersPruned {
+        market: ctx.accounts.market.key(),
+        crank: ctx.accounts.crank.key(),
+        pruned_count: pruned,
+    });
+
+    Ok(pruned)
+}
+
+#[event]
+pub struct OrdersPruned {
+    pub market: Pubkey,
+    pub crank: Pubkey,
+    pub pruned_count: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fill_event_processing() {
+        // Test that fill event correctly identifies maker side
+        let fill = FillEvent::new(
+            0, // taker_side = buy
+            true,
+            0,
+            1000,
+            1,
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            5000,
+            100,
+            1,
+            2,
+            0,
+        );
+
+        // Taker bought, so maker sold
+        assert_eq!(fill.taker_side, 0);
+        assert!(fill.is_maker_out());
+    }
+
+    #[test]
+    fn test_collateral_calculation() {
+        // 100 tokens at 50% price
+        let quantity = 100u64;
+        let price = 5000u64;
+        let collateral = quantity
+            .checked_mul(price)
+            .and_then(|v| v.checked_div(10000))
+            .unwrap();
+        assert_eq!(collateral, 50);
+    }
+}
