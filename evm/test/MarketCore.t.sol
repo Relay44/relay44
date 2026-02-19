@@ -102,3 +102,44 @@ contract MarketCoreTest is Test {
         marketCore.grantRole(marketCore.RESOLVER_ROLE(), outsider);
         vm.stopPrank();
 
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(outsider);
+        vm.expectRevert(MarketCore.NotDesignatedResolver.selector);
+        marketCore.resolveMarket(marketId, true);
+    }
+
+    function test_cannotResolveBeforeCloseTime() external {
+        vm.prank(creator);
+        uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 1 days), resolver);
+
+        vm.prank(resolver);
+        vm.expectRevert(MarketCore.MarketNotClosed.selector);
+        marketCore.resolveMarket(marketId, true);
+    }
+
+    function test_pauseBlocksCreateAndResolve() external {
+        vm.prank(admin);
+        marketCore.pause();
+
+        vm.prank(creator);
+        vm.expectRevert();
+        marketCore.createMarket(keccak256("paused"), uint64(block.timestamp + 1 days), resolver);
+
+        vm.prank(admin);
+        marketCore.unpause();
+
+        vm.prank(creator);
+        uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 2 hours), resolver);
+
+        vm.warp(block.timestamp + 2 hours + 1);
+
+        vm.prank(admin);
+        marketCore.pause();
+
+        vm.prank(resolver);
+        vm.expectRevert();
+        marketCore.resolveMarket(marketId, true);
+    }
+}
+
