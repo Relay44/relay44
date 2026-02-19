@@ -115,3 +115,4 @@ contract CollateralVaultTest is Test {
         vault.deposit(1e6);
     }
 }
+
