@@ -98,3 +98,42 @@ contract AgentRuntimeTest is Test {
         vm.prank(alice);
         uint256 agentId = agentRuntime.createAgent(marketId, true, 5_000, 10e6, 300, 3_600, "base");
 
+        vm.prank(bob);
+        vm.expectRevert(AgentRuntime.NotOwner.selector);
+        agentRuntime.updateAgent(agentId, false, 4_800, 12e6, 300, 3_600, "updated");
+
+        vm.prank(alice);
+        agentRuntime.updateAgent(agentId, false, 4_800, 12e6, 300, 3_600, "updated");
+
+        uint256 orderId = agentRuntime.executeAgent(agentId);
+        (, uint256 storedMarketId, bool isYes, uint128 priceBps, uint128 size,,,) = orderBook.orders(orderId);
+        assertEq(storedMarketId, marketId);
+        assertEq(isYes, false);
+        assertEq(priceBps, 4_800);
+        assertEq(size, 12e6);
+    }
+
+    function test_pauseBlocksExecution() external {
+        vm.prank(alice);
+        uint256 agentId = agentRuntime.createAgent(marketId, true, 5_000, 10e6, 60, 600, "pause");
+
+        vm.prank(admin);
+        agentRuntime.pause();
+
+        vm.expectRevert();
+        agentRuntime.executeAgent(agentId);
+    }
+
+    function test_registerAgentIdentity() external {
+        vm.prank(alice);
+        uint256 agentId = agentRuntime.createAgent(marketId, true, 5_000, 10e6, 60, 600, "identity");
+
+        vm.prank(alice);
+        uint256 identityId = agentRuntime.registerAgentIdentity(agentId, "ipfs://neura-agent/1");
+
+        assertEq(identityId, 1);
+        assertEq(agentRuntime.agentIdentityId(agentId), 1);
+        assertEq(identityRegistry.ownerOf(identityId), alice);
+    }
+}
+
