@@ -94,3 +94,44 @@ contract AgentReputationRegistryTest is Test {
             })
         );
 
+        vm.prank(alice);
+        reputationRegistry.revokeFeedback(agentId, 1);
+
+        AgentReputationRegistry.FeedbackView[] memory visible = reputationRegistry.listFeedback(agentId, false, 10);
+        assertEq(visible.length, 0);
+
+        AgentReputationRegistry.FeedbackView[] memory allFeedback = reputationRegistry.listFeedback(agentId, true, 10);
+        assertEq(allFeedback.length, 1);
+        assertEq(allFeedback[0].revoked, true);
+    }
+
+    function test_updateMetrics() external {
+        vm.prank(oracle);
+        reputationRegistry.updateMetrics(agentId, 1450, 250_000e6, 150, 92, 58, 1800);
+
+        (
+            int128 roiBps,
+            uint128 totalVolume,
+            uint64 tradeCount,
+            uint64 winCount,
+            uint64 lossCount,
+            uint16 maxDrawdownBps,
+            uint64 updatedAt
+        ) = reputationRegistry.metrics(agentId);
+
+        assertEq(roiBps, 1450);
+        assertEq(totalVolume, 250_000e6);
+        assertEq(tradeCount, 150);
+        assertEq(winCount, 92);
+        assertEq(lossCount, 58);
+        assertEq(maxDrawdownBps, 1800);
+        assertGt(updatedAt, 0);
+    }
+
+    function test_onlyOracleCanUpdateMetrics() external {
+        vm.prank(alice);
+        vm.expectRevert();
+        reputationRegistry.updateMetrics(agentId, 500, 1000, 10, 6, 4, 900);
+    }
+}
+
