@@ -164,3 +164,70 @@ contract OrderBookTest is Test {
         vm.prank(outsider);
         orderBook.matchOrders(yesOrderId, noOrderId, 15e6);
 
+        vm.prank(yesTrader);
+        vm.expectRevert(OrderBook.MarketNotResolved.selector);
+        orderBook.claim(marketId);
+    }
+
+    function test_claimForSettlesToOwner() external {
+        uint64 closeTime = uint64(block.timestamp + 2 hours);
+
+        vm.prank(creator);
+        uint256 marketId = marketCore.createMarket(keccak256("agent-claim"), closeTime, resolver);
+
+        vm.prank(yesTrader);
+        uint256 yesOrderId = orderBook.placeOrder(marketId, true, 5_300, 60e6, uint64(block.timestamp + 1 days));
+
+        vm.prank(noTrader);
+        uint256 noOrderId = orderBook.placeOrder(marketId, false, 4_800, 60e6, uint64(block.timestamp + 1 days));
+
+        vm.prank(outsider);
+        orderBook.matchOrders(yesOrderId, noOrderId, 20e6);
+
+        vm.warp(closeTime + 1);
+        vm.prank(resolver);
+        marketCore.resolveMarket(marketId, true);
+
+        vm.prank(outsider);
+        uint256 payout = orderBook.claimFor(yesTrader, marketId);
+        assertEq(payout, 40e6);
+        assertEq(collateralVault.availableBalance(yesTrader), 520e6);
+        assertEq(orderBook.claimable(marketId, yesTrader), 0);
+    }
+
+    function test_pauseBlocksMatchingAndClaim() external {
+        vm.prank(creator);
+        uint256 marketId = marketCore.createMarket(keccak256("pause"), uint64(block.timestamp + 1 hours), resolver);
+
+        vm.prank(yesTrader);
+        uint256 yesOrderId = orderBook.placeOrder(marketId, true, 5_100, 40e6, uint64(block.timestamp + 1 days));
+
+        vm.prank(noTrader);
+        uint256 noOrderId = orderBook.placeOrder(marketId, false, 4_900, 40e6, uint64(block.timestamp + 1 days));
+
+        vm.prank(admin);
+        orderBook.pause();
+
+        vm.prank(outsider);
+        vm.expectRevert();
+        orderBook.matchOrders(yesOrderId, noOrderId, 10e6);
+
+        vm.prank(admin);
+        orderBook.unpause();
+
+        vm.prank(outsider);
+        orderBook.matchOrders(yesOrderId, noOrderId, 10e6);
+
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.prank(resolver);
+        marketCore.resolveMarket(marketId, true);
+
+        vm.prank(admin);
+        orderBook.pause();
+
+        vm.prank(yesTrader);
+        vm.expectRevert();
+        orderBook.claim(marketId);
+    }
+}
+
