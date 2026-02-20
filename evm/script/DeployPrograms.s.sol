@@ -278,3 +278,90 @@ contract DeployProgramsScript is Script {
     ) internal {
         bytes32 defaultAdminRole = reputationRegistry.DEFAULT_ADMIN_ROLE();
 
+        _grantRoleIfMissing(IAccessControlLike(address(reputationRegistry)), reputationRegistry.PAUSER_ROLE(), pauser);
+        _grantRoleIfMissing(
+            IAccessControlLike(address(reputationRegistry)), reputationRegistry.ATTESTER_ROLE(), attester
+        );
+
+        if (bootstrapAdmin != admin) {
+            _grantRoleIfMissing(IAccessControlLike(address(reputationRegistry)), defaultAdminRole, admin);
+            _revokeRoleIfPresent(
+                IAccessControlLike(address(reputationRegistry)), reputationRegistry.PAUSER_ROLE(), bootstrapAdmin
+            );
+            _revokeRoleIfPresent(
+                IAccessControlLike(address(reputationRegistry)), reputationRegistry.ATTESTER_ROLE(), bootstrapAdmin
+            );
+            _revokeRoleIfPresent(IAccessControlLike(address(reputationRegistry)), defaultAdminRole, bootstrapAdmin);
+        }
+    }
+
+    function _configureErc8004ValidationRegistry(
+        ERC8004ValidationRegistry validationRegistry,
+        address bootstrapAdmin,
+        address admin,
+        address pauser,
+        address validatorManager,
+        address validator
+    ) internal {
+        bytes32 defaultAdminRole = validationRegistry.DEFAULT_ADMIN_ROLE();
+
+        _grantRoleIfMissing(IAccessControlLike(address(validationRegistry)), validationRegistry.PAUSER_ROLE(), pauser);
+        _grantRoleIfMissing(
+            IAccessControlLike(address(validationRegistry)),
+            validationRegistry.VALIDATOR_MANAGER_ROLE(),
+            validatorManager
+        );
+        if (!validationRegistry.isValidator(validator)) {
+            validationRegistry.addValidator(validator);
+        }
+
+        if (bootstrapAdmin != admin) {
+            _grantRoleIfMissing(IAccessControlLike(address(validationRegistry)), defaultAdminRole, admin);
+            _revokeRoleIfPresent(
+                IAccessControlLike(address(validationRegistry)), validationRegistry.PAUSER_ROLE(), bootstrapAdmin
+            );
+            _revokeRoleIfPresent(
+                IAccessControlLike(address(validationRegistry)),
+                validationRegistry.VALIDATOR_MANAGER_ROLE(),
+                bootstrapAdmin
+            );
+            _revokeRoleIfPresent(IAccessControlLike(address(validationRegistry)), defaultAdminRole, bootstrapAdmin);
+        }
+    }
+
+    function _grantRoleIfMissing(IAccessControlLike target, bytes32 role, address account) internal {
+        if (account == address(0)) revert ZeroAddress("role-account");
+        if (!target.hasRole(role, account)) {
+            target.grantRole(role, account);
+        }
+    }
+
+    function _revokeRoleIfPresent(IAccessControlLike target, bytes32 role, address account) internal {
+        if (target.hasRole(role, account)) {
+            target.revokeRole(role, account);
+        }
+    }
+
+    function _envAddressOr(string memory key, address fallbackValue) internal view returns (address) {
+        try vm.envAddress(key) returns (address value) {
+            return value;
+        } catch {
+            return fallbackValue;
+        }
+    }
+
+    function _resolveCollateralToken() internal view returns (address) {
+        address collateralToken = _envAddressOr("COLLATERAL_TOKEN_ADDRESS", address(0));
+        if (collateralToken != address(0)) return collateralToken;
+
+        if (block.chainid == 8453) {
+            return _envAddressOr("COLLATERAL_TOKEN_BASE_MAINNET", address(0));
+        }
+        if (block.chainid == 84532) {
+            return _envAddressOr("COLLATERAL_TOKEN_BASE_SEPOLIA", address(0));
+        }
+
+        return address(0);
+    }
+}
+
