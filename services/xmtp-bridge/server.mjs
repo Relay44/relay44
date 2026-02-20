@@ -156,3 +156,50 @@ app.post('/swarm/send', async (req, res) => {
       error: error instanceof Error ? error.message : String(error),
     });
   }
+});
+
+app.get('/swarm/:swarmId/messages', async (req, res) => {
+  const { limit, offset } = normalizePagination(req.query);
+  const swarmId = req.params.swarmId;
+
+  try {
+    const agent = await getAgent();
+    await agent.client.conversations.sync();
+    const conversation = await resolveConversation(agent, swarmId);
+    const fetchLimit = Math.min(limit + offset, 200);
+    const messages = await conversation.messages({ limit: fetchLimit });
+
+    messages.sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+    const page = messages.slice(offset, offset + limit).map((entry) => {
+      const envelope = parseEnvelope(entry);
+      return {
+        id: entry.id,
+        swarm_id: swarmId,
+        topic: conversation.id,
+        sender: envelope.sender,
+        message: envelope.message,
+        signature: '',
+        metadata: envelope.metadata,
+        created_at: entry.sentAt.toISOString(),
+        unix_ms: entry.sentAt.getTime(),
+      };
+    });
+
+    return res.json({
+      data: page,
+      total_returned: page.length,
+      limit,
+      offset,
+      topic: conversation.id,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.listen(PORT, HOST, () => {
+  // eslint-disable-next-line no-console
+  console.log(`xmtp bridge listening on http://${HOST}:${PORT}`);
+});
