@@ -120,3 +120,55 @@ pub mod polyguard_market {
     // Multisig Operations
     // =========================================================================
 
+    /// Create a new multisig for admin operations
+    pub fn create_multisig(
+        ctx: Context<CreateMultisig>,
+        signers: Vec<Pubkey>,
+        threshold: u8,
+    ) -> Result<()> {
+        crate::instructions::multisig_ops::create_multisig_handler(ctx, signers, threshold)
+    }
+
+    /// Propose a new multisig transaction
+    pub fn propose_transaction(
+        ctx: Context<ProposeTransaction>,
+        instruction_data: Vec<u8>,
+        target: Pubkey,
+    ) -> Result<()> {
+        crate::instructions::multisig_ops::propose_transaction_handler(ctx, instruction_data, target)
+    }
+
+    /// Approve a pending multisig transaction
+    pub fn approve_transaction(ctx: Context<ApproveTransaction>) -> Result<()> {
+        crate::instructions::multisig_ops::approve_transaction_handler(ctx)
+    }
+
+    /// Execute an approved multisig transaction
+    pub fn execute_transaction(ctx: Context<ExecuteTransaction>) -> Result<()> {
+        crate::instructions::multisig_ops::execute_transaction_handler(ctx)
+    }
+
+    // =========================================================================
+    // Dispute Resolution
+    // =========================================================================
+
+    /// File a dispute against a market resolution
+    pub fn file_dispute(ctx: Context<FileDispute>, reason_hash: String) -> Result<()> {
+        crate::instructions::dispute::file_dispute_handler(ctx, reason_hash)
+    }
+
+    /// Submit oracle vote on a dispute
+    pub fn submit_dispute_vote(
+        ctx: Context<SubmitDisputeVote>,
+        outcome_vote: u8,
+        confidence_score: u8,
+    ) -> Result<()> {
+        crate::instructions::dispute::submit_dispute_vote_handler(ctx, outcome_vote, confidence_score)
+    }
+
+    /// Finalize dispute with oracle consensus
+    pub fn finalize_dispute(ctx: Context<FinalizeDispute>) -> Result<()> {
+        crate::instructions::dispute::finalize_dispute_handler(ctx)
+    }
+}
+
