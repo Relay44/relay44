@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0f1316"/>
+  <rect x="60" y="60" width="1080" height="510" fill="#141a1e" stroke="#f3efe6" stroke-width="4"/>
+  <text x="100" y="122" font-family="monospace" font-size="24" fill="#f3efe6">RELAY44 // MINIAPP</text>
+  <text x="100" y="308" font-family="monospace" font-size="116" fill="#f3efe6">RELAY44</text>
+  <rect x="100" y="340" width="280" height="12" fill="#e45714"/>
+  <text x="100" y="416" font-family="monospace" font-size="30" fill="#f3efe6">Prediction markets and decision automation on Base</text>
+  <text x="100" y="488" font-family="monospace" font-size="22" fill="#b8c0c7">Open the live grid at relay44.com</text>
+</svg>
