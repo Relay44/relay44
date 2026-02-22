@@ -68,3 +68,31 @@ pub enum MarketError {
     #[msg("No winnings to claim")]
     NoWinningsToClaim,
 
+    #[msg("Market is not cancelled")]
+    MarketNotCancelled,
+
+    #[msg("No tokens to refund")]
+    NoTokensToRefund,
+
+    #[msg("Need both YES and NO tokens for refund (paired tokens only)")]
+    NoPairedTokensToRefund,
+
+    #[msg("No fees available to withdraw")]
+    NoFeesToWithdraw,
+
+    #[msg("Insufficient fees for requested withdrawal amount")]
+    InsufficientFees,
+
+    #[msg("Invalid collateral mint")]
+    InvalidCollateral,
+
+    #[msg("Unauthorized withdrawal: recipient mismatch")]
+    UnauthorizedWithdrawal,
+
+    #[msg("Invalid outcome")]
+    InvalidOutcome,
+
+    #[msg("Insufficient vault balance for transfer")]
+    InsufficientVaultBalance,
+}
+
