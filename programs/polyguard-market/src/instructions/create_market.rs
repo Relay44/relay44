@@ -115,3 +115,54 @@ pub fn handler(
     market.description = description;
     market.category = category;
     market.authority = ctx.accounts.authority.key();
+    market.oracle = ctx.accounts.oracle.key();
+    market.yes_mint = ctx.accounts.yes_mint.key();
+    market.no_mint = ctx.accounts.no_mint.key();
+    market.vault = ctx.accounts.vault.key();
+    market.collateral_mint = ctx.accounts.collateral_mint.key();
+    market.status = MarketStatus::Active;
+    market.resolution_deadline = resolution_deadline;
+    market.trading_end = trading_end;
+    market.resolved_outcome = 0; // Unresolved
+    market.total_collateral = 0;
+    market.total_yes_supply = 0;
+    market.total_no_supply = 0;
+    market.fee_bps = fee_bps;
+    market.protocol_fee_share_bps = Market::DEFAULT_PROTOCOL_FEE_SHARE_BPS;
+    market.protocol_treasury = ctx.accounts.protocol_treasury.key();
+    market.accumulated_fees = 0;
+    market.protocol_fees_withdrawn = 0;
+    market.creator_fees_withdrawn = 0;
+    market.bump = ctx.bumps.market;
+    market.yes_mint_bump = ctx.bumps.yes_mint;
+    market.no_mint_bump = ctx.bumps.no_mint;
+    market.vault_bump = ctx.bumps.vault;
+    market.created_at = current_time;
+    market.resolved_at = 0;
+
+    emit!(MarketCreated {
+        market_id: market.market_id.clone(),
+        market: market.key(),
+        authority: market.authority,
+        oracle: market.oracle,
+        question: market.question.clone(),
+        resolution_deadline,
+        trading_end,
+        fee_bps,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct MarketCreated {
+    pub market_id: String,
+    pub market: Pubkey,
+    pub authority: Pubkey,
+    pub oracle: Pubkey,
+    pub question: String,
+    pub resolution_deadline: i64,
+    pub trading_end: i64,
+    pub fee_bps: u16,
+}
+
