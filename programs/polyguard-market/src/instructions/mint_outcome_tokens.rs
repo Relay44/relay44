@@ -125,3 +125,50 @@ pub fn handler(ctx: Context<MintOutcomeTokens>, amount: u64) -> Result<()> {
         },
         signer_seeds,
     );
+    token::mint_to(mint_no_ctx, net_amount)?;
+
+    // Update market state
+    let market = &mut ctx.accounts.market;
+
+    // Total collateral includes the full amount (net + fee)
+    market.total_collateral = market
+        .total_collateral
+        .checked_add(amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    // Token supplies only track the net amount
+    market.total_yes_supply = market
+        .total_yes_supply
+        .checked_add(net_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+    market.total_no_supply = market
+        .total_no_supply
+        .checked_add(net_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    // Accumulate fees
+    market.accumulated_fees = market
+        .accumulated_fees
+        .checked_add(fee_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    emit!(OutcomeTokensMinted {
+        market: market.key(),
+        user: ctx.accounts.user.key(),
+        amount: net_amount,
+        fee: fee_amount,
+        total_collateral: market.total_collateral,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct OutcomeTokensMinted {
+    pub market: Pubkey,
+    pub user: Pubkey,
+    pub amount: u64,
+    pub fee: u64,
+    pub total_collateral: u64,
+}
+
