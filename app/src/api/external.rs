@@ -5565,4 +5565,3 @@ mod tests {
         assert_eq!(run_status_from_error(&ApiError::internal("boom")), "failed");
     }
 }
-

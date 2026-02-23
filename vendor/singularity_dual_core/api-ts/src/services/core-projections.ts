@@ -232,3 +232,234 @@ function mapProjectedMarket(payload: Record<string, unknown>, row: BaseMarketPro
     provider: 'core_base',
   };
 }
+
+export const coreProjectionService = {
+  async listBaseMarkets(options?: {
+    category?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<CoreProjectedMarket[]> {
+    const limit = Math.max(1, Math.min(500, options?.limit ?? 100));
+    const offset = Math.max(0, options?.offset ?? 0);
+
+    if (!usePostgres) {
+      let items = [...baseProjectionMemory.values()];
+      if (options?.category) items = items.filter((market) => market.category === options.category);
+      if (options?.status) items = items.filter((market) => market.status === options.status);
+      return items.slice(offset, offset + limit);
+    }
+
+    await ensureInit();
+    const filters: string[] = ['chain = $1'];
+    const values: unknown[] = ['base'];
+    let index = 2;
+
+    if (options?.category) {
+      filters.push(`payload->>'category' = $${index}`);
+      values.push(options.category);
+      index += 1;
+    }
+    if (options?.status) {
+      filters.push(`payload->>'status' = $${index}`);
+      values.push(options.status);
+      index += 1;
+    }
+
+    values.push(limit, offset);
+
+    const sql = `
+      SELECT chain, market_ref, legacy_market_id, payload, updated_at
+      FROM keiro_core_market_projection
+      WHERE ${filters.join(' AND ')}
+      ORDER BY updated_at DESC
+      LIMIT $${index}
+      OFFSET $${index + 1}
+    `;
+
+    const result = await getPool().query<BaseMarketProjectionRow>(sql, values);
+    const mapped: CoreProjectedMarket[] = [];
+    for (const row of result.rows) {
+      const market = mapProjectedMarket(row.payload, row);
+      if (market) mapped.push(market);
+    }
+    return mapped;
+  },
+
+  async getBaseMarketByRef(marketRef: string): Promise<CoreProjectedMarket | null> {
+    if (!marketRef) return null;
+
+    if (!usePostgres) {
+      return baseProjectionMemory.get(marketRef) || null;
+    }
+
+    await ensureInit();
+    const result = await getPool().query<BaseMarketProjectionRow>(
+      `
+      SELECT chain, market_ref, legacy_market_id, payload, updated_at
+      FROM keiro_core_market_projection
+      WHERE chain = 'base' AND market_ref = $1
+      LIMIT 1
+      `,
+      [marketRef]
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+    return mapProjectedMarket(row.payload, row);
+  },
+
+  async upsertBaseMarket(marketRef: string, payload: Record<string, unknown>, legacyMarketId?: string | null) {
+    const normalized: CoreProjectedMarket = {
+      id: toNamespacedMarketId('base', marketRef),
+      chain: 'base',
+      marketRef,
+      legacyMarketId: legacyMarketId || null,
+      address: typeof payload.address === 'string' ? payload.address : marketRef,
+      question: typeof payload.question === 'string' ? payload.question : '',
+      description: typeof payload.description === 'string' ? payload.description : '',
+      category: typeof payload.category === 'string' ? payload.category : 'uncategorized',
+      status:
+        typeof payload.status === 'string'
+          ? (payload.status as CoreProjectedMarket['status'])
+          : 'active',
+      yesPrice: Number(payload.yesPrice ?? 0.5),
+      noPrice: Number(payload.noPrice ?? 0.5),
+      yesSupply: Number(payload.yesSupply ?? 0),
+      noSupply: Number(payload.noSupply ?? 0),
+      volume24h: Number(payload.volume24h ?? 0),
+      totalVolume: Number(payload.totalVolume ?? 0),
+      totalCollateral: Number(payload.totalCollateral ?? 0),
+      feeBps: Number(payload.feeBps ?? 50),
+      oracle: typeof payload.oracle === 'string' ? payload.oracle : 'committee',
+      resolutionMode:
+        typeof payload.resolutionMode === 'string'
+          ? (payload.resolutionMode as CoreProjectedMarket['resolutionMode'])
+          : 'committee_manual',
+      collateralMint: typeof payload.collateralMint === 'string' ? payload.collateralMint : 'USDC',
+      yesMint: typeof payload.yesMint === 'string' ? payload.yesMint : `${marketRef}:yes`,
+      noMint: typeof payload.noMint === 'string' ? payload.noMint : `${marketRef}:no`,
+      resolutionDeadline:
+        typeof payload.resolutionDeadline === 'string'
+          ? payload.resolutionDeadline
+          : new Date(Date.now() + 86_400_000).toISOString(),
+      tradingEnd:
+        typeof payload.tradingEnd === 'string'
+          ? payload.tradingEnd
+          : new Date(Date.now() + 43_200_000).toISOString(),
+      createdAt: typeof payload.createdAt === 'string' ? payload.createdAt : new Date().toISOString(),
+      resolvedOutcome:
+        payload.resolvedOutcome === 'yes' || payload.resolvedOutcome === 'no'
+          ? (payload.resolvedOutcome as CoreProjectedMarket['resolvedOutcome'])
+          : undefined,
+      resolvedAt: typeof payload.resolvedAt === 'string' ? payload.resolvedAt : undefined,
+      resolutionTx: typeof payload.resolutionTx === 'string' ? payload.resolutionTx : undefined,
+      evidenceHash: typeof payload.evidenceHash === 'string' ? payload.evidenceHash : undefined,
+      oracleSource: typeof payload.oracleSource === 'string' ? payload.oracleSource : undefined,
+      resolverIdentity: typeof payload.resolverIdentity === 'string' ? payload.resolverIdentity : undefined,
+      source: 'core',
+      provider: 'core_base',
+    };
+
+    if (!usePostgres) {
+      baseProjectionMemory.set(marketRef, normalized);
+      return normalized;
+    }
+
+    await ensureInit();
+    await getPool().query(
+      `
+      INSERT INTO keiro_core_market_projection (chain, market_ref, legacy_market_id, payload, updated_at)
+      VALUES ('base', $1, $2, $3::jsonb, now())
+      ON CONFLICT (chain, market_ref)
+      DO UPDATE SET
+        legacy_market_id = EXCLUDED.legacy_market_id,
+        payload = EXCLUDED.payload,
+        updated_at = now()
+      `,
+      [marketRef, legacyMarketId || null, JSON.stringify(payload)]
+    );
+
+    return normalized;
+  },
+
+  async mapLegacyMarket(legacyMarketId: string, solMarketId: string): Promise<void> {
+    if (!legacyMarketId || !solMarketId) return;
+
+    legacyMarketMapMemory.set(legacyMarketId, solMarketId);
+
+    if (!usePostgres) return;
+    await ensureInit();
+
+    await getPool().query(
+      `
+      INSERT INTO keiro_legacy_market_map (legacy_market_id, sol_market_id, created_at, updated_at)
+      VALUES ($1, $2, now(), now())
+      ON CONFLICT (legacy_market_id)
+      DO UPDATE SET sol_market_id = EXCLUDED.sol_market_id, updated_at = now()
+      `,
+      [legacyMarketId, solMarketId]
+    );
+  },
+
+  async resolveLegacyMarket(legacyMarketId: string): Promise<string | null> {
+    if (!legacyMarketId) return null;
+
+    const memory = legacyMarketMapMemory.get(legacyMarketId);
+    if (memory) return memory;
+
+    if (!usePostgres) return null;
+    await ensureInit();
+
+    const result = await getPool().query<{ sol_market_id: string }>(
+      `SELECT sol_market_id FROM keiro_legacy_market_map WHERE legacy_market_id = $1 LIMIT 1`,
+      [legacyMarketId]
+    );
+
+    return result.rows[0]?.sol_market_id || null;
+  },
+
+  async setCheckpoint(engine: string, chain: CoreChain, cursor: string): Promise<void> {
+    const key = `${engine}:${chain}`;
+    checkpointMemory.set(key, cursor);
+
+    if (!usePostgres) return;
+    await ensureInit();
+
+    await getPool().query(
+      `
+      INSERT INTO keiro_chain_checkpoints (engine, chain, cursor, updated_at)
+      VALUES ($1, $2, $3, now())
+      ON CONFLICT (engine, chain)
+      DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()
+      `,
+      [engine, chain, cursor]
+    );
+  },
+
+  async healthcheck(): Promise<{ ok: boolean; mode: 'memory' | 'postgres'; error?: string }> {
+    if (!usePostgres) {
+      return { ok: true, mode: 'memory' };
+    }
+
+    try {
+      await ensureInit();
+      await getPool().query('SELECT 1');
+      return { ok: true, mode: 'postgres' };
+    } catch (error) {
+      return {
+        ok: false,
+        mode: 'postgres',
+        error: error instanceof Error ? error.message : 'projection healthcheck failed',
+      };
+    }
+  },
+
+  async close(): Promise<void> {
+    if (pool) {
+      await pool.end();
+      pool = null;
+      initPromise = null;
+    }
+  },
+};
