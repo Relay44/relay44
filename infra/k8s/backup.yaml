@@ -159,3 +159,64 @@ spec:
                 - |
                   set -e
 
+                  # Download latest backup
+                  LATEST=$(aws s3 cp s3://${S3_BUCKET}/postgres/LATEST -)
+                  aws s3 cp s3://${S3_BUCKET}/postgres/${LATEST} /tmp/backup.sql.gz
+                  aws s3 cp s3://${S3_BUCKET}/postgres/${LATEST}.sha256 /tmp/backup.sha256
+
+                  # Verify checksum
+                  cd /tmp && sha256sum -c backup.sha256
+
+                  # Test restore to temp database
+                  createdb -h localhost test_restore
+                  gunzip -c /tmp/backup.sql.gz | psql -h localhost test_restore
+
+                  # Basic data verification
+                  psql -h localhost test_restore -c "SELECT COUNT(*) FROM orders;"
+                  psql -h localhost test_restore -c "SELECT COUNT(*) FROM positions;"
+                  psql -h localhost test_restore -c "SELECT COUNT(*) FROM markets;"
+
+                  # Cleanup
+                  dropdb -h localhost test_restore
+
+                  echo "Backup verification successful"
+
+              env:
+                - name: S3_BUCKET
+                  value: relay44-backups
+                - name: PGHOST
+                  value: postgres-test
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-test-secret
+                      key: password
+
+              resources:
+                requests:
+                  memory: "1Gi"
+                  cpu: "500m"
+
+---
+# Network policy to allow backup jobs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backup-to-postgres
+  namespace: relay44
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              job-name: postgres-backup
+      ports:
+        - protocol: TCP
+          port: 5432
