@@ -230,4 +230,3 @@ contract OrderBookTest is Test {
         orderBook.claim(marketId);
     }
 }
-
