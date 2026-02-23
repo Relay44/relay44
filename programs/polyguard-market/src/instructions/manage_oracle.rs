@@ -88,3 +88,41 @@ pub fn update_authority_handler(
     Ok(())
 }
 
+#[event]
+pub struct RegistryAuthorityUpdated {
+    pub old_authority: Pubkey,
+    pub new_authority: Pubkey,
+}
+
+#[derive(Accounts)]
+pub struct SetEnforceValidation<'info> {
+    #[account(
+        constraint = authority.key() == registry.authority @ OracleRegistryError::UnauthorizedAuthority
+    )]
+    pub authority: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [OracleRegistry::SEED_PREFIX],
+        bump = registry.bump
+    )]
+    pub registry: Account<'info, OracleRegistry>,
+}
+
+pub fn set_enforce_validation_handler(
+    ctx: Context<SetEnforceValidation>,
+    enforce: bool,
+) -> Result<()> {
+    let registry = &mut ctx.accounts.registry;
+    registry.enforce_validation = enforce;
+
+    emit!(EnforceValidationUpdated { enforce });
+
+    Ok(())
+}
+
+#[event]
+pub struct EnforceValidationUpdated {
+    pub enforce: bool,
+}
+
