@@ -257,3 +257,78 @@ pub fn finalize_dispute_handler(ctx: Context<FinalizeDispute>) -> Result<()> {
         let reward_per_oracle = oracle_reward.checked_div(oracle_count.max(1))
             .ok_or(MarketError::ArithmeticOverflow)?;
 
+        // Bond remains in dispute account for oracle claims
+        // Oracles can claim via separate instruction
+        msg!("Oracle rewards: {} per oracle (claimable)", reward_per_oracle);
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Contexts
+// ============================================================================
+
+#[derive(Accounts)]
+#[instruction(reason_hash: String)]
+pub struct FileDispute<'info> {
+    #[account(
+        mut,
+        constraint = market.status == MarketStatus::Resolved @ MarketError::MarketNotResolved
+    )]
+    pub market: Account<'info, Market>,
+
+    #[account(
+        init,
+        payer = disputer,
+        space = 8 + Dispute::INIT_SPACE,
+        seeds = [Dispute::SEED_PREFIX, market.key().as_ref()],
+        bump
+    )]
+    pub dispute: Account<'info, Dispute>,
+
+    #[account(mut)]
+    pub disputer: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SubmitDisputeVote<'info> {
+    #[account(mut)]
+    pub dispute: Account<'info, Dispute>,
+
+    #[account(
+        seeds = [b"oracle_registry"],
+        bump = oracle_registry.bump
+    )]
+    pub oracle_registry: Account<'info, OracleRegistry>,
+
+    pub oracle: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct FinalizeDispute<'info> {
+    #[account(mut)]
+    pub dispute: Account<'info, Dispute>,
+
+    #[account(
+        mut,
+        constraint = dispute.market == market.key()
+    )]
+    pub market: Account<'info, Market>,
+
+    #[account(
+        seeds = [b"oracle_registry"],
+        bump = oracle_registry.bump
+    )]
+    pub oracle_registry: Account<'info, OracleRegistry>,
+
+    /// CHECK: Validated against dispute.disputer
+    #[account(
+        mut,
+        constraint = disputer.key() == dispute.disputer
+    )]
+    pub disputer: UncheckedAccount<'info>,
+}
+
