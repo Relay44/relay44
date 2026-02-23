@@ -158,3 +158,67 @@ pub struct ExecuteTransaction<'info> {
     )]
     pub multisig: Account<'info, Multisig>,
 
+    #[account(
+        mut,
+        seeds = [MultisigTransaction::SEED_PREFIX, &transaction.nonce.to_le_bytes()],
+        bump = transaction.bump,
+        constraint = transaction.multisig == multisig.key(),
+        constraint = !transaction.executed @ MultisigError::AlreadyExecuted
+    )]
+    pub transaction: Account<'info, MultisigTransaction>,
+}
+
+pub fn execute_transaction_handler(ctx: Context<ExecuteTransaction>) -> Result<()> {
+    let clock = Clock::get()?;
+    let multisig = &ctx.accounts.multisig;
+    let transaction = &mut ctx.accounts.transaction;
+
+    require!(!transaction.is_expired(clock.unix_timestamp), MultisigError::TransactionExpired);
+    require!(transaction.has_threshold(multisig.threshold), MultisigError::ThresholdNotMet);
+
+    transaction.executed = true;
+
+    emit!(TransactionExecuted {
+        transaction: transaction.key(),
+        executor: ctx.accounts.executor.key(),
+        target: transaction.target,
+    });
+
+    // Note: The actual execution of the target instruction would be handled
+    // by a CPI call in a more complete implementation. This marks the transaction
+    // as approved and executable.
+
+    Ok(())
+}
+
+#[event]
+pub struct MultisigCreated {
+    pub multisig: Pubkey,
+    pub signers: Vec<Pubkey>,
+    pub threshold: u8,
+}
+
+#[event]
+pub struct TransactionProposed {
+    pub multisig: Pubkey,
+    pub transaction: Pubkey,
+    pub proposer: Pubkey,
+    pub target: Pubkey,
+    pub nonce: u64,
+}
+
+#[event]
+pub struct TransactionApproved {
+    pub transaction: Pubkey,
+    pub approver: Pubkey,
+    pub approvals: u8,
+    pub threshold: u8,
+}
+
+#[event]
+pub struct TransactionExecuted {
+    pub transaction: Pubkey,
+    pub executor: Pubkey,
+    pub target: Pubkey,
+}
+
