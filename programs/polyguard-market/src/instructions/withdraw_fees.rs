@@ -107,3 +107,46 @@ pub fn handler(ctx: Context<WithdrawFees>, recipient_type: FeeRecipient) -> Resu
     // Update market state
     let market = &mut ctx.accounts.market;
 
+    match recipient_type {
+        FeeRecipient::Protocol => {
+            market.protocol_fees_withdrawn = market
+                .protocol_fees_withdrawn
+                .checked_add(withdraw_amount)
+                .ok_or(MarketError::ArithmeticOverflow)?;
+        }
+        FeeRecipient::Creator => {
+            market.creator_fees_withdrawn = market
+                .creator_fees_withdrawn
+                .checked_add(withdraw_amount)
+                .ok_or(MarketError::ArithmeticOverflow)?;
+        }
+    }
+
+    // Decrease total_collateral since fees are part of vault balance
+    market.total_collateral = market
+        .total_collateral
+        .checked_sub(withdraw_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    emit!(FeesWithdrawn {
+        market: market.key(),
+        recipient_type,
+        recipient: ctx.accounts.recipient.key(),
+        amount: withdraw_amount,
+        protocol_fees_withdrawn: market.protocol_fees_withdrawn,
+        creator_fees_withdrawn: market.creator_fees_withdrawn,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct FeesWithdrawn {
+    pub market: Pubkey,
+    pub recipient_type: FeeRecipient,
+    pub recipient: Pubkey,
+    pub amount: u64,
+    pub protocol_fees_withdrawn: u64,
+    pub creator_fees_withdrawn: u64,
+}
+
