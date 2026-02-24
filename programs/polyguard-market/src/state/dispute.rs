@@ -350,3 +350,85 @@ mod tests {
         ];
         let weights = vec![];
 
+        let result = calculate_dispute_consensus(&submissions, &weights, 20);
+        assert!(result.is_ok());
+        let (outcome, _score) = result.unwrap();
+        assert_eq!(outcome, 3); // Cancel wins
+    }
+
+    #[test]
+    fn test_dispute_minimum_consensus() {
+        let mut dispute = Dispute {
+            market: Pubkey::default(),
+            disputer: Pubkey::default(),
+            original_oracle: Pubkey::default(),
+            original_outcome: 1,
+            status: DisputeStatus::Pending,
+            bond_amount: DISPUTE_BOND,
+            reason_hash: String::new(),
+            oracle_submissions: vec![],
+            consensus_outcome: None,
+            consensus_score: None,
+            created_at: 0,
+            first_submission_at: None,
+            resolved_at: None,
+            bump: 0,
+        };
+
+        assert!(!dispute.has_minimum_consensus());
+
+        dispute.oracle_submissions.push(make_submission([1; 32], 1, 80));
+        assert!(!dispute.has_minimum_consensus());
+
+        dispute.oracle_submissions.push(make_submission([2; 32], 1, 80));
+        assert!(!dispute.has_minimum_consensus());
+
+        dispute.oracle_submissions.push(make_submission([3; 32], 1, 80));
+        assert!(dispute.has_minimum_consensus());
+    }
+
+    #[test]
+    fn test_reveal_delay() {
+        let mut dispute = Dispute {
+            market: Pubkey::default(),
+            disputer: Pubkey::default(),
+            original_oracle: Pubkey::default(),
+            original_outcome: 1,
+            status: DisputeStatus::Voting,
+            bond_amount: DISPUTE_BOND,
+            reason_hash: String::new(),
+            oracle_submissions: vec![],
+            consensus_outcome: None,
+            consensus_score: None,
+            created_at: 1000,
+            first_submission_at: Some(1000),
+            resolved_at: None,
+            bump: 0,
+        };
+
+        // Before delay
+        assert!(!dispute.reveal_delay_passed(1000 + ORACLE_REVEAL_DELAY - 1));
+
+        // After delay
+        assert!(dispute.reveal_delay_passed(1000 + ORACLE_REVEAL_DELAY));
+        assert!(dispute.reveal_delay_passed(1000 + ORACLE_REVEAL_DELAY + 100));
+    }
+
+    #[test]
+    fn test_reveal_delay_not_started() {
+        let dispute = Dispute {
+            market: Pubkey::default(),
+            disputer: Pubkey::default(),
+            original_oracle: Pubkey::default(),
+            original_outcome: 1,
+            status: DisputeStatus::Pending,
+            bond_amount: DISPUTE_BOND,
+            reason_hash: String::new(),
+            oracle_submissions: vec![],
+            consensus_outcome: None,
+            consensus_score: None,
+            created_at: 1000,
+            first_submission_at: None, // No submissions yet
+            resolved_at: None,
+            bump: 0,
+        };
