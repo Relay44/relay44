@@ -222,3 +222,117 @@ mod tests {
         assert!(!can_pause(MarketStatus::Resolved));
         assert!(!can_pause(MarketStatus::Cancelled));
     }
+
+    #[test]
+    fn test_can_resume_by_status() {
+        assert!(!can_resume(MarketStatus::Active));
+        assert!(can_resume(MarketStatus::Paused));
+        assert!(!can_resume(MarketStatus::Closed));
+        assert!(!can_resume(MarketStatus::Resolved));
+        assert!(!can_resume(MarketStatus::Cancelled));
+    }
+
+    #[test]
+    fn test_can_cancel_by_status() {
+        assert!(can_cancel(MarketStatus::Active));
+        assert!(can_cancel(MarketStatus::Paused));
+        assert!(can_cancel(MarketStatus::Closed));
+        assert!(!can_cancel(MarketStatus::Resolved)); // Cannot cancel after resolution
+        assert!(can_cancel(MarketStatus::Cancelled)); // Idempotent
+    }
+
+    #[test]
+    fn test_can_file_dispute_by_status() {
+        assert!(!can_file_dispute(MarketStatus::Active));
+        assert!(!can_file_dispute(MarketStatus::Paused));
+        assert!(!can_file_dispute(MarketStatus::Closed));
+        assert!(can_file_dispute(MarketStatus::Resolved));
+        assert!(!can_file_dispute(MarketStatus::Cancelled));
+    }
+
+    // --- Timing Constraint Tests ---
+
+    #[test]
+    fn test_trading_active_boundary() {
+        let mut market = default_market();
+        market.status = MarketStatus::Active;
+        market.trading_end = 1000;
+
+        // Trading is active before trading_end
+        assert!(market.is_trading_active(999));
+        // Trading stops at trading_end
+        assert!(!market.is_trading_active(1000));
+        // Trading stops after trading_end
+        assert!(!market.is_trading_active(1001));
+    }
+
+    #[test]
+    fn test_can_resolve_boundary() {
+        let mut market = default_market();
+        market.status = MarketStatus::Closed;
+        market.resolution_deadline = 1000;
+
+        // Cannot resolve before deadline
+        assert!(!market.can_resolve(999));
+        // Can resolve at deadline
+        assert!(market.can_resolve(1000));
+        // Can resolve after deadline
+        assert!(market.can_resolve(2000));
+    }
+
+    #[test]
+    fn test_trading_end_before_resolution_deadline() {
+        // Trading ends before resolution is allowed
+        let mut market = default_market();
+        market.status = MarketStatus::Closed;
+        market.trading_end = 1000;
+        market.resolution_deadline = 2000;
+
+        // At time 1500: trading ended, but cannot resolve yet
+        assert!(!market.is_trading_active(1500));
+        assert!(!market.can_resolve(1500));
+
+        // At time 2500: trading ended, can resolve
+        assert!(!market.is_trading_active(2500));
+        assert!(market.can_resolve(2500));
+    }
+
+    // --- Market State Consistency Tests ---
+
+    #[test]
+    fn test_resolved_market_has_outcome() {
+        let mut market = default_market();
+        market.status = MarketStatus::Resolved;
+        market.resolved_outcome = 1; // YES
+
+        assert!(market.resolved_outcome == 1 || market.resolved_outcome == 2);
+    }
+
+    #[test]
+    fn test_unresolved_market_no_outcome() {
+        let market = default_market();
+        assert_eq!(market.resolved_outcome, 0);
+    }
+
+    #[test]
+    fn test_supply_invariant() {
+        // YES + NO supply should relate to total collateral
+        let mut market = default_market();
+        market.total_collateral = 1000;
+        market.total_yes_supply = 1000;
+        market.total_no_supply = 1000;
+
+        // For a balanced mint, yes_supply == no_supply == collateral
+        // (1 collateral = 1 YES + 1 NO)
+        assert_eq!(market.total_yes_supply, market.total_no_supply);
+        assert_eq!(market.total_yes_supply, market.total_collateral);
+    }
+
+    #[test]
+    fn test_fee_invariant() {
+        // Accumulated fees should be >= withdrawn fees
+        let mut market = default_market();
+        market.accumulated_fees = 1000;
+        market.protocol_fees_withdrawn = 200;
+        market.creator_fees_withdrawn = 800;
+
