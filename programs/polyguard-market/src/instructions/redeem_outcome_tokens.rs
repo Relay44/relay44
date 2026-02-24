@@ -136,3 +136,50 @@ pub fn handler(ctx: Context<RedeemOutcomeTokens>, amount: u64) -> Result<()> {
         },
         signer_seeds,
     );
+    token::transfer(transfer_ctx, net_amount)?;
+
+    // Update market state
+    let market = &mut ctx.accounts.market;
+
+    // Total collateral decreases by net amount only (fee stays)
+    market.total_collateral = market
+        .total_collateral
+        .checked_sub(net_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+    market.total_yes_supply = market
+        .total_yes_supply
+        .checked_sub(amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+    market.total_no_supply = market
+        .total_no_supply
+        .checked_sub(amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    // Accumulate fees
+    market.accumulated_fees = market
+        .accumulated_fees
+        .checked_add(fee_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    emit!(OutcomeTokensRedeemed {
+        market: market.key(),
+        user: ctx.accounts.user.key(),
+        amount,
+        fee: fee_amount,
+        net_amount,
+        total_collateral: market.total_collateral,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct OutcomeTokensRedeemed {
+    pub market: Pubkey,
+    pub user: Pubkey,
+    pub amount: u64,
+    pub fee: u64,
+    pub net_amount: u64,
+    pub total_collateral: u64,
+}
+
