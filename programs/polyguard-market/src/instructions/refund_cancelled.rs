@@ -126,3 +126,56 @@ pub fn handler(ctx: Context<RefundCancelled>) -> Result<()> {
         );
         token::burn(burn_no_ctx, no_to_burn)?;
     }
+
+    // Transfer collateral back to user
+    let seeds = &[
+        Market::SEED_PREFIX,
+        market.market_id.as_bytes(),
+        &[market.bump],
+    ];
+    let signer_seeds = &[&seeds[..]];
+
+    let transfer_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        Transfer {
+            from: ctx.accounts.vault.to_account_info(),
+            to: ctx.accounts.user_collateral.to_account_info(),
+            authority: ctx.accounts.market.to_account_info(),
+        },
+        signer_seeds,
+    );
+    token::transfer(transfer_ctx, refund_amount)?;
+
+    // Update market state
+    let market = &mut ctx.accounts.market;
+    market.total_collateral = market
+        .total_collateral
+        .checked_sub(refund_amount)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+    market.total_yes_supply = market
+        .total_yes_supply
+        .checked_sub(yes_to_burn)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+    market.total_no_supply = market
+        .total_no_supply
+        .checked_sub(no_to_burn)
+        .ok_or(MarketError::ArithmeticOverflow)?;
+
+    emit!(CancelledMarketRefund {
+        market: market.key(),
+        user: ctx.accounts.user.key(),
+        refund_amount,
+        remaining_collateral: market.total_collateral,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct CancelledMarketRefund {
+    pub market: Pubkey,
+    pub user: Pubkey,
+    pub refund_amount: u64,
+    pub remaining_collateral: u64,
+}
+
