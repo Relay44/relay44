@@ -300,3 +300,100 @@ mod tests {
         let mut market = default_market();
         market.accumulated_fees = u64::MAX;
 
+        // Should not overflow due to u128 intermediate
+        let protocol = market.calculate_protocol_fees();
+        let creator = market.calculate_creator_fees();
+
+        // Verify rough correctness (20% of u64::MAX)
+        let expected_protocol = (u64::MAX as u128 * 2000 / 10000) as u64;
+        assert_eq!(protocol, expected_protocol);
+        assert_eq!(creator, u64::MAX - expected_protocol);
+    }
+
+    #[test]
+    fn test_fee_calculation_small_amounts() {
+        let mut market = default_market();
+        market.accumulated_fees = 1; // 1 lamport
+
+        // 20% of 1 = 0 (integer division)
+        assert_eq!(market.calculate_protocol_fees(), 0);
+        assert_eq!(market.calculate_creator_fees(), 1);
+    }
+
+    #[test]
+    fn test_fee_calculation_rounding() {
+        let mut market = default_market();
+        market.accumulated_fees = 17; // Odd number
+
+        // 17 * 2000 / 10000 = 3.4 -> 3
+        let protocol = market.calculate_protocol_fees();
+        assert_eq!(protocol, 3);
+        // Creator gets remainder: 17 - 3 = 14
+        assert_eq!(market.calculate_creator_fees(), 14);
+    }
+
+    #[test]
+    fn test_is_trading_active() {
+        let mut market = default_market();
+        market.status = MarketStatus::Active;
+        market.trading_end = 1000;
+
+        assert!(market.is_trading_active(500));  // Before end
+        assert!(market.is_trading_active(999));  // Just before end
+        assert!(!market.is_trading_active(1000)); // At end
+        assert!(!market.is_trading_active(1001)); // After end
+    }
+
+    #[test]
+    fn test_is_trading_active_wrong_status() {
+        let mut market = default_market();
+        market.trading_end = 1000;
+
+        market.status = MarketStatus::Paused;
+        assert!(!market.is_trading_active(500));
+
+        market.status = MarketStatus::Closed;
+        assert!(!market.is_trading_active(500));
+
+        market.status = MarketStatus::Resolved;
+        assert!(!market.is_trading_active(500));
+
+        market.status = MarketStatus::Cancelled;
+        assert!(!market.is_trading_active(500));
+    }
+
+    #[test]
+    fn test_can_resolve() {
+        let mut market = default_market();
+        market.status = MarketStatus::Closed;
+        market.resolution_deadline = 1000;
+
+        assert!(!market.can_resolve(999));  // Before deadline
+        assert!(market.can_resolve(1000));  // At deadline
+        assert!(market.can_resolve(1001));  // After deadline
+    }
+
+    #[test]
+    fn test_can_resolve_wrong_status() {
+        let mut market = default_market();
+        market.resolution_deadline = 1000;
+
+        market.status = MarketStatus::Active;
+        assert!(!market.can_resolve(2000));
+
+        market.status = MarketStatus::Paused;
+        assert!(!market.can_resolve(2000));
+
+        market.status = MarketStatus::Resolved;
+        assert!(!market.can_resolve(2000));
+
+        market.status = MarketStatus::Cancelled;
+        assert!(!market.can_resolve(2000));
+    }
+
+    #[test]
+    fn test_market_status_default() {
+        assert_eq!(MarketStatus::default(), MarketStatus::Active);
+    }
+}
+
