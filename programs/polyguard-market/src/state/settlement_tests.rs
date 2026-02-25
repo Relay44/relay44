@@ -152,3 +152,80 @@ mod tests {
         assert_eq!(calculate_refund(0, 100), Some(50));
         assert_eq!(calculate_refund(0, 1000), Some(500));
     }
+
+    #[test]
+    fn test_refund_mixed_more_yes() {
+        // 150 YES, 100 NO
+        // Paired: 100 -> 100 collateral
+        // Unpaired: 50 YES -> 25 collateral
+        // Total: 125
+        assert_eq!(calculate_refund(150, 100), Some(125));
+    }
+
+    #[test]
+    fn test_refund_mixed_more_no() {
+        // 100 YES, 150 NO
+        // Paired: 100 -> 100 collateral
+        // Unpaired: 50 NO -> 25 collateral
+        // Total: 125
+        assert_eq!(calculate_refund(100, 150), Some(125));
+    }
+
+    #[test]
+    fn test_refund_odd_unpaired() {
+        // 101 YES, 100 NO
+        // Paired: 100 -> 100 collateral
+        // Unpaired: 1 YES -> 0 collateral (rounds down)
+        // Total: 100
+        assert_eq!(calculate_refund(101, 100), Some(100));
+    }
+
+    #[test]
+    fn test_refund_both_odd() {
+        // 101 YES, 100 NO
+        // 102 YES, 99 NO
+        // Paired: 99, Unpaired: 3 YES -> 1 (3/2=1)
+        // Total: 100
+        assert_eq!(calculate_refund(102, 99), Some(100));
+    }
+
+    #[test]
+    fn test_refund_single_token() {
+        // 1 YES only -> 0 collateral (1/2 = 0)
+        assert_eq!(calculate_refund(1, 0), Some(0));
+        // 2 YES only -> 1 collateral
+        assert_eq!(calculate_refund(2, 0), Some(1));
+    }
+
+    #[test]
+    fn test_refund_zero_tokens() {
+        assert_eq!(calculate_refund(0, 0), Some(0));
+    }
+
+    #[test]
+    fn test_refund_large_amounts() {
+        // Near u64::MAX
+        let half_max = u64::MAX / 2;
+        let result = calculate_refund(half_max, half_max);
+        assert_eq!(result, Some(half_max));
+    }
+
+    #[test]
+    fn test_refund_asymmetric_large() {
+        // One side has max tokens
+        let result = calculate_refund(u64::MAX, 0);
+        // Should be MAX / 2
+        assert_eq!(result, Some(u64::MAX / 2));
+    }
+
+    // --- Combined Settlement Scenarios ---
+
+    #[test]
+    fn test_full_redemption_flow() {
+        // User has 1000 YES and 1000 NO, wants to redeem
+        let amount = 1000;
+        let fee_bps = 100; // 1%
+
+        let fee = calculate_fee(amount, fee_bps).unwrap();
+        let net = calculate_payout(amount, fee_bps).unwrap();
+
