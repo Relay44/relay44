@@ -432,4 +432,3 @@ mod tests {
         assert!(notification_allowed_by_preferences(&NotificationType::OrderFilled, &prefs));
     }
 }
-
