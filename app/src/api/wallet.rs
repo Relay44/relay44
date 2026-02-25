@@ -1171,4 +1171,3 @@ async fn verify_vault_intent_transaction(
 
     Ok(())
 }
-
