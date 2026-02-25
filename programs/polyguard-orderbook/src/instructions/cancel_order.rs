@@ -92,3 +92,40 @@ pub fn handler(ctx: Context<CancelOrder>) -> Result<()> {
                     position.locked_yes = position.locked_yes
                         .saturating_sub(order.remaining_quantity);
                 }
+                OutcomeType::No => {
+                    position.locked_no = position.locked_no
+                        .saturating_sub(order.remaining_quantity);
+                }
+            }
+        }
+    }
+
+    // Update order status
+    order.status = OrderStatus::Cancelled;
+    order.updated_at = clock.unix_timestamp;
+
+    // Update position
+    position.open_order_count = position.open_order_count.saturating_sub(1);
+
+    emit!(OrderCancelled {
+        order_id: order.order_id,
+        order: order.key(),
+        market: order.market,
+        owner: order.owner,
+        remaining_quantity: order.remaining_quantity,
+        cancelled_at: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct OrderCancelled {
+    pub order_id: u64,
+    pub order: Pubkey,
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub remaining_quantity: u64,
+    pub cancelled_at: i64,
+}
+
