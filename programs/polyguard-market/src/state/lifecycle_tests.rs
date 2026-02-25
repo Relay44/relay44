@@ -336,3 +336,107 @@ mod tests {
         market.protocol_fees_withdrawn = 200;
         market.creator_fees_withdrawn = 800;
 
+        let total_withdrawn = market.protocol_fees_withdrawn + market.creator_fees_withdrawn;
+        assert!(market.accumulated_fees >= total_withdrawn);
+    }
+
+    // --- Full Lifecycle Simulation ---
+
+    #[test]
+    fn test_happy_path_lifecycle() {
+        let mut market = default_market();
+        market.trading_end = 1000;
+        market.resolution_deadline = 1500;
+
+        // Phase 1: Active (trading allowed)
+        assert_eq!(market.status, MarketStatus::Active);
+        assert!(can_mint(market.status));
+        assert!(can_trade(market.status));
+        assert!(market.is_trading_active(500));
+
+        // Phase 2: Closed (trading ended)
+        market.status = MarketStatus::Closed;
+        assert!(!can_mint(market.status));
+        assert!(!can_trade(market.status));
+        assert!(can_resolve(market.status));
+        assert!(!market.can_resolve(1200)); // Before deadline
+        assert!(market.can_resolve(1600)); // After deadline
+
+        // Phase 3: Resolved (claims available)
+        market.status = MarketStatus::Resolved;
+        market.resolved_outcome = 1;
+        assert!(can_claim_winnings(market.status));
+        assert!(!can_refund(market.status));
+    }
+
+    #[test]
+    fn test_cancelled_path_lifecycle() {
+        let mut market = default_market();
+
+        // Phase 1: Active
+        assert_eq!(market.status, MarketStatus::Active);
+        assert!(can_cancel(market.status));
+
+        // Phase 2: Cancelled
+        market.status = MarketStatus::Cancelled;
+        assert!(!can_mint(market.status));
+        assert!(!can_trade(market.status));
+        assert!(!can_claim_winnings(market.status));
+        assert!(can_refund(market.status));
+    }
+
+    #[test]
+    fn test_pause_resume_lifecycle() {
+        let mut market = default_market();
+        market.trading_end = 1000;
+
+        // Active -> Paused
+        market.status = MarketStatus::Paused;
+        assert!(!can_trade(market.status));
+        assert!(!market.is_trading_active(500));
+        assert!(can_resume(market.status));
+
+        // Paused -> Active
+        market.status = MarketStatus::Active;
+        assert!(can_trade(market.status));
+        assert!(market.is_trading_active(500));
+    }
+
+    // --- Edge Cases ---
+
+    #[test]
+    fn test_zero_collateral_market() {
+        let market = default_market();
+        assert_eq!(market.total_collateral, 0);
+        assert_eq!(market.total_yes_supply, 0);
+        assert_eq!(market.total_no_supply, 0);
+        // Market can still be cancelled
+        assert!(can_cancel(market.status));
+    }
+
+    #[test]
+    fn test_max_collateral_market() {
+        let mut market = default_market();
+        market.total_collateral = u64::MAX;
+        market.total_yes_supply = u64::MAX;
+        market.total_no_supply = u64::MAX;
+
+        // Fee calculations should still work
+        market.fee_bps = 100;
+        market.accumulated_fees = u64::MAX;
+        let _protocol = market.calculate_protocol_fees();
+        let _creator = market.calculate_creator_fees();
+    }
+
+    #[test]
+    fn test_timestamps_at_boundaries() {
+        let mut market = default_market();
+        market.trading_end = i64::MAX;
+        market.resolution_deadline = i64::MAX;
+
+        // Should handle max timestamps
+        assert!(market.is_trading_active(i64::MAX - 1));
+        assert!(!market.is_trading_active(i64::MAX));
+    }
+}
+
