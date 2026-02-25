@@ -229,3 +229,76 @@ mod tests {
         let fee = calculate_fee(amount, fee_bps).unwrap();
         let net = calculate_payout(amount, fee_bps).unwrap();
 
+        assert_eq!(fee, 10);
+        assert_eq!(net, 990);
+        assert_eq!(fee + net, amount);
+    }
+
+    #[test]
+    fn test_winning_claim_flow() {
+        // Market resolved YES, user has 1000 winning tokens
+        let winning_tokens = 1000;
+        let fee_bps = 200; // 2%
+
+        let fee = calculate_fee(winning_tokens, fee_bps).unwrap();
+        let payout = calculate_payout(winning_tokens, fee_bps).unwrap();
+
+        assert_eq!(fee, 20);
+        assert_eq!(payout, 980);
+    }
+
+    #[test]
+    fn test_cancelled_market_total_recovery() {
+        // User minted 1000 tokens (paid 1000 collateral)
+        // Receives 500 YES and 500 NO
+        // Market cancelled, they should get ~1000 back
+        let refund = calculate_refund(500, 500);
+        assert_eq!(refund, Some(500));
+        // Wait, that's wrong. Let's trace:
+        // User pays 1000 collateral, gets 1000 YES + 1000 NO
+        // On cancel with 1000 YES + 1000 NO -> 1000 paired -> 1000 refund
+        let refund_full = calculate_refund(1000, 1000);
+        assert_eq!(refund_full, Some(1000));
+    }
+
+    #[test]
+    fn test_cancelled_market_trader_loss() {
+        // Trader bought only YES tokens (1000 tokens)
+        // Paid some price < 1 collateral per token
+        // On cancel, they get 50% back
+        let refund = calculate_refund(1000, 0);
+        assert_eq!(refund, Some(500));
+    }
+
+    #[test]
+    fn test_fee_accumulation() {
+        // Simulate multiple claims accumulating fees
+        let mut total_fees = 0u64;
+        let fee_bps = 100;
+
+        // Claim 1: 10000 tokens
+        total_fees += calculate_fee(10000, fee_bps).unwrap();
+        // Claim 2: 5000 tokens
+        total_fees += calculate_fee(5000, fee_bps).unwrap();
+        // Claim 3: 2500 tokens
+        total_fees += calculate_fee(2500, fee_bps).unwrap();
+
+        // 100 + 50 + 25 = 175
+        assert_eq!(total_fees, 175);
+    }
+
+    #[test]
+    fn test_protocol_creator_split() {
+        // Total fees: 1000
+        // Protocol: 20%, Creator: 80%
+        let total_fees = 1000u64;
+        let protocol_bps = 2000u16; // 20%
+
+        let protocol_share = (total_fees as u128 * protocol_bps as u128 / 10000) as u64;
+        let creator_share = total_fees - protocol_share;
+
+        assert_eq!(protocol_share, 200);
+        assert_eq!(creator_share, 800);
+    }
+}
+
