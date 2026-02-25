@@ -94,3 +94,39 @@ impl OracleRegistry {
         info.weight = Some(weight);
         Ok(())
     }
+
+    /// Increment resolution count
+    pub fn record_resolution(&mut self, oracle: &Pubkey) -> Result<()> {
+        if let Some(info) = self.oracles.iter_mut().find(|o| o.pubkey == *oracle) {
+            info.resolution_count = info.resolution_count.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    /// Increment dispute count
+    pub fn record_dispute(&mut self, oracle: &Pubkey) -> Result<()> {
+        if let Some(info) = self.oracles.iter_mut().find(|o| o.pubkey == *oracle) {
+            info.dispute_count = info.dispute_count.saturating_add(1);
+        }
+        Ok(())
+    }
+}
+
+#[error_code]
+pub enum OracleRegistryError {
+    #[msg("Oracle registry is full")]
+    RegistryFull,
+
+    #[msg("Oracle is already registered")]
+    OracleAlreadyRegistered,
+
+    #[msg("Oracle not found in registry")]
+    OracleNotFound,
+
+    #[msg("Unauthorized: only registry authority")]
+    UnauthorizedAuthority,
+
+    #[msg("Oracle not approved for market resolution")]
+    OracleNotApproved,
+}
+
