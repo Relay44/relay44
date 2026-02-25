@@ -202,3 +202,101 @@ mod tests {
             created_at: 0,
             resolved_at: 0,
         }
+    }
+
+    #[test]
+    fn test_fee_calculation_zero_fees() {
+        let market = default_market();
+        assert_eq!(market.calculate_protocol_fees(), 0);
+        assert_eq!(market.calculate_creator_fees(), 0);
+    }
+
+    #[test]
+    fn test_fee_calculation_standard_split() {
+        // 20% protocol, 80% creator (default)
+        let mut market = default_market();
+        market.accumulated_fees = 10_000; // 10,000 lamports
+
+        let protocol = market.calculate_protocol_fees();
+        let creator = market.calculate_creator_fees();
+
+        assert_eq!(protocol, 2_000); // 20%
+        assert_eq!(creator, 8_000);  // 80%
+        assert_eq!(protocol + creator, 10_000);
+    }
+
+    #[test]
+    fn test_fee_calculation_custom_split() {
+        let mut market = default_market();
+        market.protocol_fee_share_bps = 5000; // 50% protocol
+        market.accumulated_fees = 1_000_000;
+
+        let protocol = market.calculate_protocol_fees();
+        let creator = market.calculate_creator_fees();
+
+        assert_eq!(protocol, 500_000);
+        assert_eq!(creator, 500_000);
+    }
+
+    #[test]
+    fn test_fee_calculation_all_to_protocol() {
+        let mut market = default_market();
+        market.protocol_fee_share_bps = 10000; // 100% protocol
+        market.accumulated_fees = 1_000_000;
+
+        assert_eq!(market.calculate_protocol_fees(), 1_000_000);
+        assert_eq!(market.calculate_creator_fees(), 0);
+    }
+
+    #[test]
+    fn test_fee_calculation_all_to_creator() {
+        let mut market = default_market();
+        market.protocol_fee_share_bps = 0; // 0% protocol
+        market.accumulated_fees = 1_000_000;
+
+        assert_eq!(market.calculate_protocol_fees(), 0);
+        assert_eq!(market.calculate_creator_fees(), 1_000_000);
+    }
+
+    #[test]
+    fn test_available_fees_with_withdrawals() {
+        let mut market = default_market();
+        market.accumulated_fees = 10_000;
+        market.protocol_fees_withdrawn = 1_000;
+        market.creator_fees_withdrawn = 4_000;
+
+        // Protocol: 2000 total, 1000 withdrawn = 1000 available
+        assert_eq!(market.available_protocol_fees(), 1_000);
+        // Creator: 8000 total, 4000 withdrawn = 4000 available
+        assert_eq!(market.available_creator_fees(), 4_000);
+    }
+
+    #[test]
+    fn test_available_fees_fully_withdrawn() {
+        let mut market = default_market();
+        market.accumulated_fees = 10_000;
+        market.protocol_fees_withdrawn = 2_000;
+        market.creator_fees_withdrawn = 8_000;
+
+        assert_eq!(market.available_protocol_fees(), 0);
+        assert_eq!(market.available_creator_fees(), 0);
+    }
+
+    #[test]
+    fn test_available_fees_over_withdrawn() {
+        // Edge case: withdrawn more than calculated (should not happen, but test safety)
+        let mut market = default_market();
+        market.accumulated_fees = 10_000;
+        market.protocol_fees_withdrawn = 5_000; // More than 20%
+        market.creator_fees_withdrawn = 10_000; // More than 80%
+
+        // saturating_sub should return 0
+        assert_eq!(market.available_protocol_fees(), 0);
+        assert_eq!(market.available_creator_fees(), 0);
+    }
+
+    #[test]
+    fn test_fee_calculation_large_amounts() {
+        let mut market = default_market();
+        market.accumulated_fees = u64::MAX;
+
