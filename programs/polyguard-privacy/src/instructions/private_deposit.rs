@@ -88,3 +88,39 @@ pub fn handler(
             authority: ctx.accounts.owner.to_account_info(),
         },
     );
+    token::transfer(transfer_ctx, amount)?;
+
+    let clock = Clock::get()?;
+    let private_account = &mut ctx.accounts.private_account;
+
+    // Homomorphically add to encrypted balance
+    private_account.add_to_balance(&ciphertext)
+        .map_err(|_| PrivacyError::ArithmeticOverflow)?;
+
+    // Update encrypted deposit total (also homomorphic)
+    let current_deposited = ElGamalCiphertext::from_bytes(&private_account.total_deposited_encrypted)
+        .map_err(|_| PrivacyError::InvalidEncryptedAmount)?;
+    let new_deposited = current_deposited.add(&ciphertext)
+        .map_err(|_| PrivacyError::ArithmeticOverflow)?;
+    private_account.total_deposited_encrypted = new_deposited.to_bytes();
+
+    private_account.last_activity = clock.unix_timestamp;
+
+    emit!(PrivateDeposited {
+        owner: private_account.owner,
+        // Note: amount is public since token transfer reveals it
+        amount,
+        new_encrypted_balance: private_account.encrypted_balance,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct PrivateDeposited {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub new_encrypted_balance: [u8; 64],
+    pub timestamp: i64,
+}
