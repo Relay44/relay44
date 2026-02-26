@@ -71,3 +71,11 @@ services:
       - monitoring
     restart: unless-stopped
 
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    driver: bridge
