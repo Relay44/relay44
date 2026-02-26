@@ -113,3 +113,51 @@ pub fn handler(
         },
         signer_seeds,
     );
+    token::transfer(transfer_ctx, amount)?;
+
+    let clock = Clock::get()?;
+    let private_account = &mut ctx.accounts.private_account;
+
+    // Create ciphertext for amount being withdrawn
+    // Use deterministic randomness derived from the withdrawal to ensure
+    // the subtraction is consistent
+    let pubkey = private_account.get_elgamal_pubkey()
+        .map_err(|_| PrivacyError::InvalidElGamalKey)?;
+
+    // For withdrawals, we use zero randomness since the amount is public anyway
+    // (visible in the token transfer). This simplifies the homomorphic operation.
+    let amount_ciphertext = pubkey.encrypt_with_randomness(
+        amount,
+        &curve25519_dalek::scalar::Scalar::ZERO,
+    ).map_err(|_| PrivacyError::InvalidEncryptedAmount)?;
+
+    // Homomorphically subtract from encrypted balance
+    private_account.subtract_from_balance(&amount_ciphertext)
+        .map_err(|_| PrivacyError::ArithmeticOverflow)?;
+
+    // Update encrypted withdrawal total
+    let current_withdrawn = ElGamalCiphertext::from_bytes(&private_account.total_withdrawn_encrypted)
+        .map_err(|_| PrivacyError::InvalidEncryptedAmount)?;
+    let new_withdrawn = current_withdrawn.add(&amount_ciphertext)
+        .map_err(|_| PrivacyError::ArithmeticOverflow)?;
+    private_account.total_withdrawn_encrypted = new_withdrawn.to_bytes();
+
+    private_account.last_activity = clock.unix_timestamp;
+
+    emit!(PrivateWithdrawn {
+        owner: private_account.owner,
+        amount,
+        new_encrypted_balance: private_account.encrypted_balance,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct PrivateWithdrawn {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub new_encrypted_balance: [u8; 64],
+    pub timestamp: i64,
+}

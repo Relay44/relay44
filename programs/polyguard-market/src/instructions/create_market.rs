@@ -165,4 +165,3 @@ pub struct MarketCreated {
     pub trading_end: i64,
     pub fee_bps: u16,
 }
-
