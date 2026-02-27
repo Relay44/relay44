@@ -131,4 +131,3 @@ export async function fetchSeoProfile(wallet: string): Promise<PublicProfile | n
 
   return payload;
 }
-
