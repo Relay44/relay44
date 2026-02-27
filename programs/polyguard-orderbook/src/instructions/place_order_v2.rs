@@ -332,3 +332,73 @@ pub fn handler(ctx: Context<PlaceOrderV2>, params: PlaceOrderParams) -> Result<P
                     1
                 },
             )
+            .ok_or(OrderBookError::NoFreeSlots)?;
+
+        // Insert into orderbook
+        let (idx, key) = posting_book
+            .insert(
+                params.price,
+                remaining_quantity,
+                open_orders.owner,
+                params.client_order_id,
+                now,
+                slot,
+            )
+            .ok_or(OrderBookError::OrderbookFull)?;
+
+        // Update the order slot with the actual key
+        if let Some(order_slot) = open_orders.orders.get_mut(slot as usize) {
+            order_slot.key = key;
+        }
+
+        Some(key)
+    } else {
+        None
+    };
+
+    // Transfer collateral if taker bought
+    if params.side == OrderSideV2::Buy && total_cost > 0 {
+        let transfer_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.user_collateral.to_account_info(),
+                to: ctx.accounts.market_vault.to_account_info(),
+                authority: ctx.accounts.owner.to_account_info(),
+            },
+        );
+        token::transfer(transfer_ctx, total_cost)?;
+    }
+
+    emit!(OrderPlacedV2 {
+        market: ctx.accounts.market.key(),
+        owner: ctx.accounts.owner.key(),
+        order_id,
+        side: params.side,
+        outcome: params.outcome,
+        price: params.price,
+        quantity: params.quantity,
+        filled_quantity: total_filled,
+        posted_quantity: remaining_quantity,
+        client_order_id: params.client_order_id,
+    });
+
+    Ok(PlaceOrderResult {
+        order_id,
+        posted_quantity: if order_id.is_some() {
+            remaining_quantity
+        } else {
+            0
+        },
+        filled_quantity: total_filled,
+        total_cost,
+    })
+}
+
+/// Check if prices are compatible for matching
+fn is_price_acceptable(taker_side: OrderSideV2, taker_price: u64, maker_price: u64) -> bool {
+    match taker_side {
+        // Taker buying: maker's ask price must be <= taker's bid
+        OrderSideV2::Buy => maker_price <= taker_price,
+        // Taker selling: maker's bid price must be >= taker's ask
+        OrderSideV2::Sell => maker_price >= taker_price,
+    }
