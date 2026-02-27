@@ -157,3 +157,71 @@ pub fn rotate_api_key(
     let old_key = &mut ctx.accounts.old_key_record;
     let clock = Clock::get()?;
 
+    // Save old key record
+    old_key.tenant = tenant.key();
+    old_key.key_hash = tenant.api_key_hash;
+    old_key.is_active = true;
+    old_key.created_at = clock.unix_timestamp;
+    old_key.expires_at = if old_key_expires_in > 0 {
+        clock.unix_timestamp + old_key_expires_in
+    } else {
+        0
+    };
+    old_key.last_used_at = 0;
+    old_key.bump = ctx.bumps.old_key_record;
+    old_key._padding = [0; 6];
+
+    // Update tenant with new key
+    tenant.api_key_hash = new_api_key_hash;
+    tenant.last_activity_at = clock.unix_timestamp;
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct RecordTenantVolume<'info> {
+    pub authority: Signer<'info>,
+
+    #[account(mut)]
+    pub tenant: Account<'info, EnterpriseTenant>,
+}
+
+pub fn record_tenant_volume(
+    ctx: Context<RecordTenantVolume>,
+    volume: u64,
+    fees: u64,
+) -> Result<()> {
+    let tenant = &mut ctx.accounts.tenant;
+    let clock = Clock::get()?;
+
+    require!(tenant.is_active, EnterpriseError::TenantNotActive);
+    require!(
+        tenant.check_volume_limit(volume),
+        EnterpriseError::DailyVolumeLimitExceeded
+    );
+
+    tenant.record_volume(volume, clock.unix_timestamp);
+    tenant.fees_collected = tenant.fees_collected.saturating_add(fees);
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct IncrementMarketCount<'info> {
+    pub authority: Signer<'info>,
+
+    #[account(mut)]
+    pub tenant: Account<'info, EnterpriseTenant>,
+}
+
+pub fn increment_market_count(ctx: Context<IncrementMarketCount>) -> Result<()> {
+    let tenant = &mut ctx.accounts.tenant;
+
+    require!(tenant.is_active, EnterpriseError::TenantNotActive);
+    require!(tenant.can_create_market(), EnterpriseError::MarketLimitExceeded);
+
+    tenant.markets_created = tenant.markets_created.saturating_add(1);
+
+    Ok(())
+}
+
