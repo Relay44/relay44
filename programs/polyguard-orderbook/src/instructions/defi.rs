@@ -323,3 +323,83 @@ pub fn borrow(
     // Check margin can borrow
     require!(margin.can_borrow(amount), DeFiError::LeverageExceeded);
 
+    // Check pool liquidity
+    require!(pool.can_borrow(amount), DeFiError::UtilizationTooHigh);
+    require!(pool.available_liquidity() >= amount, DeFiError::InsufficientLiquidity);
+
+    // Transfer from pool to borrower
+    let seeds = &[
+        b"pool_authority".as_ref(),
+        pool_key.as_ref(),
+        &[pool_authority_bump],
+    ];
+    let signer = &[&seeds[..]];
+
+    token::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.pool_vault.to_account_info(),
+                to: ctx.accounts.owner_token_account.to_account_info(),
+                authority: ctx.accounts.pool_authority.to_account_info(),
+            },
+            signer,
+        ),
+        amount,
+    )?;
+
+    // Update margin account
+    margin.borrowed = margin.borrowed.saturating_add(amount);
+    margin.total_borrowed = margin.total_borrowed.saturating_add(amount);
+    margin.last_health_update = clock.unix_timestamp;
+
+    // Recalculate health
+    let debt = margin.borrowed.saturating_add(margin.interest_accrued);
+    margin.health_factor = margin.calculate_health(margin.collateral, debt);
+
+    // Check still healthy
+    require!(margin.is_healthy(), DeFiError::PositionUnhealthy);
+
+    // Update pool
+    pool.total_borrowed = pool.total_borrowed.saturating_add(amount);
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct InitializeLendingPool<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    pub asset_mint: Account<'info, token::Mint>,
+
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + LendingPool::INIT_SPACE,
+        seeds = [LendingPool::SEED_PREFIX, asset_mint.key().as_ref()],
+        bump
+    )]
+    pub lending_pool: Account<'info, LendingPool>,
+
+    #[account(
+        init,
+        payer = authority,
+        token::mint = asset_mint,
+        token::authority = pool_authority,
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    /// CHECK: Receipt token mint (would be initialized separately)
+    pub receipt_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Pool authority PDA
+    #[account(
+        seeds = [b"pool_authority", lending_pool.key().as_ref()],
+        bump
+    )]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
