@@ -246,3 +246,80 @@ pub fn deposit_collateral(
     let account = &mut ctx.accounts.margin_account;
     let clock = Clock::get()?;
 
+    token::transfer(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.owner_token_account.to_account_info(),
+                to: ctx.accounts.collateral_vault.to_account_info(),
+                authority: ctx.accounts.owner.to_account_info(),
+            },
+        ),
+        amount,
+    )?;
+
+    account.collateral = account.collateral.saturating_add(amount);
+    account.last_health_update = clock.unix_timestamp;
+
+    // Recalculate health
+    let debt = account.borrowed.saturating_add(account.interest_accrued);
+    account.health_factor = account.calculate_health(account.collateral, debt);
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct Borrow<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [MarginAccount::SEED_PREFIX, owner.key().as_ref()],
+        bump = margin_account.bump,
+        has_one = owner,
+        constraint = margin_account.is_active @ DeFiError::MarginNotActive
+    )]
+    pub margin_account: Account<'info, MarginAccount>,
+
+    #[account(
+        mut,
+        constraint = lending_pool.is_active @ DeFiError::LendingPoolNotActive
+    )]
+    pub lending_pool: Account<'info, LendingPool>,
+
+    #[account(
+        mut,
+        address = lending_pool.vault
+    )]
+    pub pool_vault: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub owner_token_account: Account<'info, TokenAccount>,
+
+    /// CHECK: Pool authority PDA
+    #[account(
+        seeds = [b"pool_authority", lending_pool.key().as_ref()],
+        bump
+    )]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn borrow(
+    ctx: Context<Borrow>,
+    amount: u64,
+) -> Result<()> {
+    let clock = Clock::get()?;
+
+    // Capture immutable values before mutable borrows
+    let pool_key = ctx.accounts.lending_pool.key();
+    let pool_authority_bump = ctx.bumps.pool_authority;
+
+    let margin = &mut ctx.accounts.margin_account;
+    let pool = &mut ctx.accounts.lending_pool;
+
+    // Check margin can borrow
+    require!(margin.can_borrow(amount), DeFiError::LeverageExceeded);
+
