@@ -403,3 +403,82 @@ pub struct InitializeLendingPool<'info> {
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
+
+pub fn initialize_lending_pool(
+    ctx: Context<InitializeLendingPool>,
+    base_rate_bps: u16,
+    utilization_multiplier_bps: u16,
+    protocol_fee_bps: u16,
+    max_utilization_bps: u16,
+    min_deposit: u64,
+) -> Result<()> {
+    let pool = &mut ctx.accounts.lending_pool;
+
+    pool.authority = ctx.accounts.authority.key();
+    pool.asset_mint = ctx.accounts.asset_mint.key();
+    pool.vault = ctx.accounts.vault.key();
+    pool.receipt_mint = ctx.accounts.receipt_mint.key();
+    pool.bump = ctx.bumps.lending_pool;
+    pool.is_active = true;
+    pool._padding = [0; 2];
+    pool.total_deposits = 0;
+    pool.total_borrowed = 0;
+    pool.interest_collected = 0;
+    pool.base_rate_bps = base_rate_bps;
+    pool.utilization_multiplier_bps = utilization_multiplier_bps;
+    pool.protocol_fee_bps = protocol_fee_bps;
+    pool._padding2 = [0; 2];
+    pool.max_utilization_bps = max_utilization_bps;
+    pool.min_deposit = min_deposit;
+    pool._padding3 = [0; 6];
+    pool._reserved = [0; 32];
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct DepositToPool<'info> {
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = lending_pool.is_active @ DeFiError::LendingPoolNotActive
+    )]
+    pub lending_pool: Account<'info, LendingPool>,
+
+    #[account(mut)]
+    pub depositor_token_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        address = lending_pool.vault
+    )]
+    pub vault: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn deposit_to_pool(
+    ctx: Context<DepositToPool>,
+    amount: u64,
+) -> Result<()> {
+    let pool = &mut ctx.accounts.lending_pool;
+
+    token::transfer(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.depositor_token_account.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+                authority: ctx.accounts.depositor.to_account_info(),
+            },
+        ),
+        amount,
+    )?;
+
+    pool.total_deposits = pool.total_deposits.saturating_add(amount);
+
+    Ok(())
+}
+
