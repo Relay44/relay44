@@ -402,3 +402,80 @@ fn is_price_acceptable(taker_side: OrderSideV2, taker_price: u64, maker_price: u
         // Taker selling: maker's bid price must be >= taker's ask
         OrderSideV2::Sell => maker_price >= taker_price,
     }
+}
+
+/// Calculate cost in collateral for a given quantity and price
+fn calculate_cost(quantity: u64, price: u64) -> u64 {
+    (quantity as u128)
+        .checked_mul(price as u128)
+        .and_then(|v| v.checked_div(PRICE_SCALE as u128))
+        .unwrap_or(0) as u64
+}
+
+// Helper trait for BookSide
+impl BookSide {
+    fn find_by_key_index(&self, key: u128) -> Option<u32> {
+        let mut current = self.root;
+        while current != super::super::state::orderbook::FREE_NODE {
+            let current_key = self.nodes[current as usize].key;
+            if key == current_key {
+                return Some(current);
+            } else if key < current_key {
+                current = self.nodes[current as usize].left;
+            } else {
+                current = self.nodes[current as usize].right;
+            }
+        }
+        None
+    }
+}
+
+#[event]
+pub struct OrderPlacedV2 {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub order_id: Option<u128>,
+    pub side: OrderSideV2,
+    pub outcome: OutcomeV2,
+    pub price: u64,
+    pub quantity: u64,
+    pub filled_quantity: u64,
+    pub posted_quantity: u64,
+    pub client_order_id: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_price_acceptable() {
+        // Buyer at 60, seller at 55 -> match
+        assert!(is_price_acceptable(OrderSideV2::Buy, 6000, 5500));
+
+        // Buyer at 50, seller at 55 -> no match
+        assert!(!is_price_acceptable(OrderSideV2::Buy, 5000, 5500));
+
+        // Seller at 45, buyer at 50 -> match
+        assert!(is_price_acceptable(OrderSideV2::Sell, 4500, 5000));
+
+        // Seller at 55, buyer at 50 -> no match
+        assert!(!is_price_acceptable(OrderSideV2::Sell, 5500, 5000));
+    }
+
+    #[test]
+    fn test_calculate_cost() {
+        // 100 tokens at 50% = 50 collateral
+        assert_eq!(calculate_cost(100, 5000), 50);
+
+        // 1000 tokens at 75% = 750 collateral
+        assert_eq!(calculate_cost(1000, 7500), 750);
+
+        // 1 token at 1% = 0 (rounding down)
+        assert_eq!(calculate_cost(1, 100), 0);
+
+        // 100 tokens at 1% = 1
+        assert_eq!(calculate_cost(100, 100), 1);
+    }
+}
+
