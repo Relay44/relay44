@@ -459,3 +459,95 @@ pub fn handler_burn_set(ctx: Context<BurnTokenSet>, amount: u64) -> Result<()> {
 
     let open_orders = &mut ctx.accounts.open_orders;
 
+    // Verify user has enough tokens
+    require!(
+        open_orders.yes_free >= amount,
+        OrderBookError::InsufficientBalance
+    );
+    require!(
+        open_orders.no_free >= amount,
+        OrderBookError::InsufficientBalance
+    );
+
+    // Burn YES tokens
+    let burn_yes_ctx = CpiContext::new(
+        ctx.accounts.token_program.to_account_info(),
+        Burn {
+            mint: ctx.accounts.yes_mint.to_account_info(),
+            from: ctx.accounts.user_yes_account.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info(),
+        },
+    );
+    token::burn(burn_yes_ctx, amount)?;
+
+    // Burn NO tokens
+    let burn_no_ctx = CpiContext::new(
+        ctx.accounts.token_program.to_account_info(),
+        Burn {
+            mint: ctx.accounts.no_mint.to_account_info(),
+            from: ctx.accounts.user_no_account.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info(),
+        },
+    );
+    token::burn(burn_no_ctx, amount)?;
+
+    // Transfer collateral from vault to user
+    let market_key = ctx.accounts.market.key();
+    let seeds = &[
+        b"market_authority".as_ref(),
+        market_key.as_ref(),
+        &[ctx.bumps.market_authority],
+    ];
+    let signer_seeds = &[&seeds[..]];
+
+    let transfer_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        Transfer {
+            from: ctx.accounts.market_vault.to_account_info(),
+            to: ctx.accounts.user_collateral.to_account_info(),
+            authority: ctx.accounts.market_authority.to_account_info(),
+        },
+        signer_seeds,
+    );
+    token::transfer(transfer_ctx, amount)?;
+
+    // Update open orders tracking
+    open_orders.yes_free = open_orders.yes_free.saturating_sub(amount);
+    open_orders.no_free = open_orders.no_free.saturating_sub(amount);
+
+    emit!(TokenSetBurned {
+        market: ctx.accounts.market.key(),
+        owner: ctx.accounts.owner.key(),
+        amount,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct TokenSetMinted {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct TokenSetBurned {
+    pub market: Pubkey,
+    pub owner: Pubkey,
+    pub amount: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolution_outcome_conversion() {
+        assert_eq!(ResolutionOutcome::from(0), ResolutionOutcome::Unresolved);
+        assert_eq!(ResolutionOutcome::from(1), ResolutionOutcome::Yes);
+        assert_eq!(ResolutionOutcome::from(2), ResolutionOutcome::No);
+        assert_eq!(ResolutionOutcome::from(3), ResolutionOutcome::Invalid);
+    }
+}
+
