@@ -370,3 +370,92 @@ pub fn handler_mint_set(ctx: Context<MintTokenSet>, amount: u64) -> Result<()> {
         },
         signer_seeds,
     );
+    token::mint_to(mint_no_ctx, amount)?;
+
+    // Update open orders tracking
+    let open_orders = &mut ctx.accounts.open_orders;
+    open_orders.yes_free = open_orders.yes_free.saturating_add(amount);
+    open_orders.no_free = open_orders.no_free.saturating_add(amount);
+
+    emit!(TokenSetMinted {
+        market: ctx.accounts.market.key(),
+        owner: ctx.accounts.owner.key(),
+        amount,
+    });
+
+    Ok(())
+}
+
+/// Burn token set (YES + NO) to receive collateral
+#[derive(Accounts)]
+pub struct BurnTokenSet<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        seeds = [OrderBookConfig::SEED_PREFIX],
+        bump = config.bump,
+    )]
+    pub config: Account<'info, OrderBookConfig>,
+
+    /// CHECK: Market account
+    pub market: AccountInfo<'info>,
+
+    #[account(
+        mut,
+        seeds = [OpenOrdersAccount::SEED_PREFIX, market.key().as_ref(), owner.key().as_ref()],
+        bump = open_orders.bump,
+        constraint = open_orders.owner == owner.key() @ OrderBookError::UnauthorizedOwner
+    )]
+    pub open_orders: Account<'info, OpenOrdersAccount>,
+
+    /// YES token mint
+    #[account(mut)]
+    pub yes_mint: Account<'info, Mint>,
+
+    /// NO token mint
+    #[account(mut)]
+    pub no_mint: Account<'info, Mint>,
+
+    /// User's YES token account
+    #[account(
+        mut,
+        constraint = user_yes_account.owner == owner.key() @ OrderBookError::UnauthorizedOwner,
+        constraint = user_yes_account.mint == yes_mint.key() @ OrderBookError::InvalidBuyerCollateral
+    )]
+    pub user_yes_account: Account<'info, TokenAccount>,
+
+    /// User's NO token account
+    #[account(
+        mut,
+        constraint = user_no_account.owner == owner.key() @ OrderBookError::UnauthorizedOwner,
+        constraint = user_no_account.mint == no_mint.key() @ OrderBookError::InvalidBuyerCollateral
+    )]
+    pub user_no_account: Account<'info, TokenAccount>,
+
+    /// User's collateral token account
+    #[account(
+        mut,
+        constraint = user_collateral.owner == owner.key() @ OrderBookError::UnauthorizedOwner
+    )]
+    pub user_collateral: Account<'info, TokenAccount>,
+
+    /// Market's collateral vault
+    #[account(mut)]
+    pub market_vault: Account<'info, TokenAccount>,
+
+    /// CHECK: Market authority PDA
+    #[account(
+        seeds = [b"market_authority", market.key().as_ref()],
+        bump
+    )]
+    pub market_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn handler_burn_set(ctx: Context<BurnTokenSet>, amount: u64) -> Result<()> {
+    require!(amount > 0, OrderBookError::InvalidQuantity);
+
+    let open_orders = &mut ctx.accounts.open_orders;
+
