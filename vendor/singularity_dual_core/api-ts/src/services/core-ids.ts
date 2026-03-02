@@ -63,3 +63,22 @@ export function parseMarketRef(rawMarketId: string): ParsedMarketRef {
       legacyMarketId: null,
       namespaced: false,
     };
+  }
+
+  return {
+    raw,
+    chain: null,
+    coreRef: raw,
+    legacyMarketId: null,
+    namespaced: false,
+  };
+}
+
+export function toNamespacedMarketId(chain: CoreChain, marketRef: string): string {
+  if (chain === 'solana') return `sol:${marketRef}`;
+  return `base:${marketRef}`;
+}
+
+export function isLegacyLedgerAlias(source: UnifiedMarketSource): boolean {
+  return source === 'ledger';
+}
