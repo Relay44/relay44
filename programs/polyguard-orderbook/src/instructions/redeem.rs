@@ -281,3 +281,92 @@ pub struct MintTokenSet<'info> {
     )]
     pub open_orders: Account<'info, OpenOrdersAccount>,
 
+    /// YES token mint
+    #[account(mut)]
+    pub yes_mint: Account<'info, Mint>,
+
+    /// NO token mint
+    #[account(mut)]
+    pub no_mint: Account<'info, Mint>,
+
+    /// User's YES token account
+    #[account(
+        mut,
+        constraint = user_yes_account.owner == owner.key() @ OrderBookError::UnauthorizedOwner,
+        constraint = user_yes_account.mint == yes_mint.key() @ OrderBookError::InvalidBuyerCollateral
+    )]
+    pub user_yes_account: Account<'info, TokenAccount>,
+
+    /// User's NO token account
+    #[account(
+        mut,
+        constraint = user_no_account.owner == owner.key() @ OrderBookError::UnauthorizedOwner,
+        constraint = user_no_account.mint == no_mint.key() @ OrderBookError::InvalidBuyerCollateral
+    )]
+    pub user_no_account: Account<'info, TokenAccount>,
+
+    /// User's collateral token account
+    #[account(
+        mut,
+        constraint = user_collateral.owner == owner.key() @ OrderBookError::UnauthorizedOwner
+    )]
+    pub user_collateral: Account<'info, TokenAccount>,
+
+    /// Market's collateral vault
+    #[account(mut)]
+    pub market_vault: Account<'info, TokenAccount>,
+
+    /// CHECK: Mint authority PDA
+    #[account(
+        seeds = [b"mint_authority", market.key().as_ref()],
+        bump
+    )]
+    pub mint_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn handler_mint_set(ctx: Context<MintTokenSet>, amount: u64) -> Result<()> {
+    require!(amount > 0, OrderBookError::InvalidQuantity);
+
+    // Transfer collateral from user to vault
+    let transfer_ctx = CpiContext::new(
+        ctx.accounts.token_program.to_account_info(),
+        Transfer {
+            from: ctx.accounts.user_collateral.to_account_info(),
+            to: ctx.accounts.market_vault.to_account_info(),
+            authority: ctx.accounts.owner.to_account_info(),
+        },
+    );
+    token::transfer(transfer_ctx, amount)?;
+
+    // Mint YES tokens
+    let market_key = ctx.accounts.market.key();
+    let seeds = &[
+        b"mint_authority".as_ref(),
+        market_key.as_ref(),
+        &[ctx.bumps.mint_authority],
+    ];
+    let signer_seeds = &[&seeds[..]];
+
+    let mint_yes_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        token::MintTo {
+            mint: ctx.accounts.yes_mint.to_account_info(),
+            to: ctx.accounts.user_yes_account.to_account_info(),
+            authority: ctx.accounts.mint_authority.to_account_info(),
+        },
+        signer_seeds,
+    );
+    token::mint_to(mint_yes_ctx, amount)?;
+
+    // Mint NO tokens
+    let mint_no_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        token::MintTo {
+            mint: ctx.accounts.no_mint.to_account_info(),
+            to: ctx.accounts.user_no_account.to_account_info(),
+            authority: ctx.accounts.mint_authority.to_account_info(),
+        },
+        signer_seeds,
+    );
