@@ -148,4 +148,3 @@ DROP TRIGGER IF EXISTS update_decision_automation_policies_updated_at ON decisio
 CREATE TRIGGER update_decision_automation_policies_updated_at
     BEFORE UPDATE ON decision_automation_policies
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
