@@ -377,3 +377,80 @@ pub fn handler_deposit_to_copy_vault(
         (amount as u128 * total_shares as u128 / total_deposits as u128) as u64
     };
 
+    // Transfer collateral
+    let cpi_accounts = Transfer {
+        from: ctx.accounts.depositor_token.to_account_info(),
+        to: ctx.accounts.vault_token.to_account_info(),
+        authority: ctx.accounts.depositor.to_account_info(),
+    };
+    let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+    token::transfer(cpi_ctx, amount)?;
+
+    // Mint shares
+    let seeds = &[CopyTradingVault::SEED_PREFIX, leader.as_ref(), &[bump]];
+    let signer_seeds = &[&seeds[..]];
+
+    let mint_accounts = MintTo {
+        mint: ctx.accounts.share_mint.to_account_info(),
+        to: ctx.accounts.depositor_shares.to_account_info(),
+        authority: ctx.accounts.vault.to_account_info(),
+    };
+    let mint_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        mint_accounts,
+        signer_seeds,
+    );
+    token::mint_to(mint_ctx, shares)?;
+
+    // Now do mutable updates
+    let vault = &mut ctx.accounts.vault;
+    let receipt = &mut ctx.accounts.deposit_receipt;
+
+    let is_new_depositor = receipt_shares == 0;
+    vault.total_deposits = vault.total_deposits.saturating_add(amount);
+    vault.total_shares = vault.total_shares.saturating_add(shares);
+    if is_new_depositor {
+        vault.depositor_count = vault.depositor_count.saturating_add(1);
+    }
+    vault.last_action_at = clock.unix_timestamp;
+
+    if vault.total_deposits > vault.high_water_mark {
+        vault.high_water_mark = vault.total_deposits;
+    }
+
+    receipt.depositor = ctx.accounts.depositor.key();
+    receipt.vault = vault_key;
+    receipt.shares = receipt.shares.saturating_add(shares);
+    receipt.deposited_amount = receipt.deposited_amount.saturating_add(amount);
+    if receipt.deposited_at == 0 {
+        receipt.deposited_at = clock.unix_timestamp;
+        receipt.bump = ctx.bumps.deposit_receipt;
+        receipt._padding = [0; 7];
+    }
+
+    emit!(CopyVaultDeposited {
+        vault: vault_key,
+        depositor: ctx.accounts.depositor.key(),
+        amount,
+        shares,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct WithdrawFromCopyVault<'info> {
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+
+    #[account(mut)]
+    pub vault: Account<'info, CopyTradingVault>,
+
+    #[account(
+        mut,
+        seeds = [CopyVaultDeposit::SEED_PREFIX, vault.key().as_ref(), depositor.key().as_ref()],
+        bump = deposit_receipt.bump,
+    )]
+    pub deposit_receipt: Account<'info, CopyVaultDeposit>,
+
