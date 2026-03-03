@@ -227,3 +227,75 @@ pub fn handler(
                 .checked_add(fill_quantity)
                 .ok_or(OrderBookError::ArithmeticOverflow)?;
         }
+    }
+
+    if ctx.accounts.buy_order.status == OrderStatus::Filled {
+        buyer_position.open_order_count = buyer_position.open_order_count.saturating_sub(1);
+    }
+
+    let seller_position = &mut ctx.accounts.seller_position;
+    seller_position.total_trades = seller_position.total_trades
+        .checked_add(1)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+
+    // Debit seller's locked tokens
+    match ctx.accounts.sell_order.outcome {
+        OutcomeType::Yes => {
+            seller_position.locked_yes = seller_position.locked_yes
+                .saturating_sub(fill_quantity);
+            seller_position.yes_balance = seller_position.yes_balance
+                .saturating_sub(fill_quantity);
+        }
+        OutcomeType::No => {
+            seller_position.locked_no = seller_position.locked_no
+                .saturating_sub(fill_quantity);
+            seller_position.no_balance = seller_position.no_balance
+                .saturating_sub(fill_quantity);
+        }
+    }
+
+    if ctx.accounts.sell_order.status == OrderStatus::Filled {
+        seller_position.open_order_count = seller_position.open_order_count.saturating_sub(1);
+    }
+
+    // Update global stats
+    let config = &mut ctx.accounts.config;
+    config.total_trades = config.total_trades
+        .checked_add(1)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+    config.total_volume = config.total_volume
+        .checked_add(collateral_amount)
+        .ok_or(OrderBookError::ArithmeticOverflow)?;
+
+    emit!(TradeFilled {
+        buy_order_id: ctx.accounts.buy_order.order_id,
+        sell_order_id: ctx.accounts.sell_order.order_id,
+        market: ctx.accounts.buy_order.market,
+        outcome: ctx.accounts.buy_order.outcome,
+        buyer: ctx.accounts.buy_order.owner,
+        seller: ctx.accounts.sell_order.owner,
+        fill_price_bps,
+        fill_quantity,
+        collateral_amount,
+        buyer_refund,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct TradeFilled {
+    pub buy_order_id: u64,
+    pub sell_order_id: u64,
+    pub market: Pubkey,
+    pub outcome: OutcomeType,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub fill_price_bps: u16,
+    pub fill_quantity: u64,
+    pub collateral_amount: u64,
+    pub buyer_refund: u64,
+    pub timestamp: i64,
+}
+
