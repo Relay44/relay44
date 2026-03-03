@@ -269,3 +269,82 @@ pub struct ResolveMarketManual<'info> {
     )]
     pub market: Account<'info, MarketV2>,
 }
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
+pub struct ManualResolutionParams {
+    pub outcome: u8, // 1 = Yes, 2 = No
+}
+
+pub fn handler_manual(
+    ctx: Context<ResolveMarketManual>,
+    params: ManualResolutionParams,
+) -> Result<()> {
+    let market = &mut ctx.accounts.market;
+    let clock = Clock::get()?;
+
+    // Validate outcome
+    require!(
+        params.outcome == 1 || params.outcome == 2,
+        OrderBookError::InvalidResolutionOutcome
+    );
+
+    // Update market state
+    market.status = 2; // Resolved
+    market.resolved_outcome = params.outcome;
+    market.resolved_at = clock.unix_timestamp;
+    market.set_resolution_price(0); // No oracle price for manual
+
+    emit!(MarketResolved {
+        market: market.key(),
+        outcome: params.outcome,
+        price: 0,
+        timestamp: clock.unix_timestamp,
+        resolver: ctx.accounts.authority.key(),
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct MarketResolved {
+    pub market: Pubkey,
+    pub outcome: u8,
+    pub price: i128,
+    pub timestamp: i64,
+    pub resolver: Pubkey,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolution_outcome_conversion() {
+        assert_eq!(ResolutionOutcome::from(0), ResolutionOutcome::Unresolved);
+        assert_eq!(ResolutionOutcome::from(1), ResolutionOutcome::Yes);
+        assert_eq!(ResolutionOutcome::from(2), ResolutionOutcome::No);
+        assert_eq!(ResolutionOutcome::from(3), ResolutionOutcome::Invalid);
+        assert_eq!(ResolutionOutcome::from(99), ResolutionOutcome::Unresolved);
+    }
+
+    #[test]
+    fn test_oracle_config_threshold() {
+        // BTC > $50,000 example
+        // $50,000 with 18 decimals = 50_000 * 10^18
+        let threshold = 50_000_000_000_000_000_000_000i128;
+        let config = OracleConfig::new_switchboard(threshold, ComparisonOp::GreaterThan, 150);
+
+        // Price at $55,000
+        let price = 55_000_000_000_000_000_000_000i128;
+        assert!(config.evaluate_threshold(price)); // Yes
+
+        // Price at $45,000
+        let price = 45_000_000_000_000_000_000_000i128;
+        assert!(!config.evaluate_threshold(price)); // No
+
+        // Price exactly at $50,000 (GreaterThan, so No)
+        let price = 50_000_000_000_000_000_000_000i128;
+        assert!(!config.evaluate_threshold(price)); // No (not strictly greater)
+    }
+}
+
