@@ -306,3 +306,74 @@ pub struct DepositToCopyVault<'info> {
     )]
     pub vault: Account<'info, CopyTradingVault>,
 
+    #[account(
+        init_if_needed,
+        payer = depositor,
+        space = 8 + CopyVaultDeposit::INIT_SPACE,
+        seeds = [CopyVaultDeposit::SEED_PREFIX, vault.key().as_ref(), depositor.key().as_ref()],
+        bump,
+    )]
+    pub deposit_receipt: Account<'info, CopyVaultDeposit>,
+
+    #[account(
+        mut,
+        constraint = depositor_token.owner == depositor.key(),
+        constraint = depositor_token.mint == vault.collateral_mint,
+    )]
+    pub depositor_token: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = vault_token.key() == vault.vault,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = share_mint.key() == vault.share_mint,
+    )]
+    pub share_mint: Account<'info, Mint>,
+
+    #[account(
+        init_if_needed,
+        payer = depositor,
+        associated_token::mint = share_mint,
+        associated_token::authority = depositor,
+    )]
+    pub depositor_shares: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, anchor_spl::associated_token::AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handler_deposit_to_copy_vault(
+    ctx: Context<DepositToCopyVault>,
+    amount: u64,
+) -> Result<()> {
+    let clock = Clock::get()?;
+
+    // Get values needed before mutable borrow
+    let min_deposit = ctx.accounts.vault.min_deposit;
+    let max_deposits = ctx.accounts.vault.max_deposits;
+    let total_deposits = ctx.accounts.vault.total_deposits;
+    let total_shares = ctx.accounts.vault.total_shares;
+    let leader = ctx.accounts.vault.leader;
+    let bump = ctx.accounts.vault.bump;
+    let vault_key = ctx.accounts.vault.key();
+    let receipt_shares = ctx.accounts.deposit_receipt.shares;
+
+    // Validate deposit
+    require!(amount >= min_deposit, SocialError::DepositBelowMinimum);
+    require!(
+        total_deposits.saturating_add(amount) <= max_deposits,
+        SocialError::VaultCapacityExceeded
+    );
+
+    // Calculate shares
+    let shares = if total_shares == 0 {
+        amount
+    } else {
+        (amount as u128 * total_shares as u128 / total_deposits as u128) as u64
+    };
+
