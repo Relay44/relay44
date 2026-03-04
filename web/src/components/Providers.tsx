@@ -87,4 +87,3 @@ export const Providers: FC<ProvidersProps> = ({ children }) => {
     </ErrorBoundary>
   );
 };
-
