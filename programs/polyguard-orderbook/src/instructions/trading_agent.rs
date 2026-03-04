@@ -342,3 +342,92 @@ pub struct AgentOrderParams {
     pub order_type: u8,
     pub client_order_id: u64,
 }
+
+pub fn handler_agent_place_order(
+    ctx: Context<AgentPlaceOrder>,
+    params: AgentOrderParams,
+) -> Result<()> {
+    let agent = &mut ctx.accounts.agent;
+    let market_key = ctx.accounts.market.key();
+
+    // Check market is allowed
+    require!(
+        agent.is_market_allowed(&market_key),
+        AgentError::MarketNotAllowed
+    );
+
+    // Run risk checks
+    agent.check_risk(params.quantity, params.price)?;
+
+    // Lock balance for this order
+    let collateral_required = params
+        .quantity
+        .checked_mul(params.price)
+        .and_then(|v| v.checked_div(10000))
+        .ok_or(OrderBookError::Overflow)?;
+
+    require!(
+        agent.available_balance >= collateral_required,
+        AgentError::InsufficientBalance
+    );
+
+    agent.available_balance = agent.available_balance.saturating_sub(collateral_required);
+    agent.locked_balance = agent.locked_balance.saturating_add(collateral_required);
+    agent.active_positions = agent.active_positions.saturating_add(1);
+
+    emit!(AgentOrderPlaced {
+        agent: agent.key(),
+        market: market_key,
+        side: params.side,
+        outcome: params.outcome,
+        price: params.price,
+        quantity: params.quantity,
+        client_order_id: params.client_order_id,
+        timestamp: Clock::get()?.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+/// Record trade result for agent
+#[derive(Accounts)]
+pub struct RecordAgentTrade<'info> {
+    /// Can be called by delegate or crank
+    pub caller: Signer<'info>,
+
+    #[account(mut)]
+    pub agent: Account<'info, TradingAgent>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct TradeResult {
+    pub pnl: i64,
+    pub volume: u64,
+    pub released_collateral: u64,
+}
+
+pub fn handler_record_agent_trade(
+    ctx: Context<RecordAgentTrade>,
+    result: TradeResult,
+) -> Result<()> {
+    let agent = &mut ctx.accounts.agent;
+    let clock = Clock::get()?;
+
+    // Release locked collateral
+    agent.locked_balance = agent
+        .locked_balance
+        .saturating_sub(result.released_collateral);
+
+    // Add back to available (plus/minus PnL)
+    if result.pnl >= 0 {
+        agent.available_balance = agent
+            .available_balance
+            .saturating_add(result.released_collateral)
+            .saturating_add(result.pnl as u64);
+    } else {
+        let loss = (-result.pnl) as u64;
+        agent.available_balance = agent
+            .available_balance
+            .saturating_add(result.released_collateral)
+            .saturating_sub(loss);
+    }
