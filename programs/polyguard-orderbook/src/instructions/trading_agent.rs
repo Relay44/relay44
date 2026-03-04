@@ -255,3 +255,90 @@ pub fn handler_update_agent(ctx: Context<UpdateAgent>, params: UpdateAgentParams
         require!(status != AgentStatus::Stopped as u8, OrderBookError::InvalidInput);
         agent.status = status;
     }
+
+    emit!(AgentUpdated {
+        agent: agent.key(),
+        timestamp: Clock::get()?.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+/// Add markets to whitelist
+#[derive(Accounts)]
+pub struct UpdateAgentMarkets<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = agent.owner == owner.key() @ AgentError::UnauthorizedDelegate,
+    )]
+    pub agent: Account<'info, TradingAgent>,
+}
+
+pub fn handler_add_allowed_market(ctx: Context<UpdateAgentMarkets>, market: Pubkey) -> Result<()> {
+    let agent = &mut ctx.accounts.agent;
+
+    require!(
+        agent.allowed_markets.len() < 16,
+        OrderBookError::InvalidInput
+    );
+
+    if !agent.allowed_markets.contains(&market) {
+        agent.allowed_markets.push(market);
+        agent.allowed_markets_count = agent.allowed_markets.len() as u8;
+    }
+
+    Ok(())
+}
+
+pub fn handler_remove_allowed_market(
+    ctx: Context<UpdateAgentMarkets>,
+    market: Pubkey,
+) -> Result<()> {
+    let agent = &mut ctx.accounts.agent;
+
+    agent.allowed_markets.retain(|m| m != &market);
+    agent.allowed_markets_count = agent.allowed_markets.len() as u8;
+
+    Ok(())
+}
+
+/// Agent executes a trade (delegate calls this)
+#[derive(Accounts)]
+pub struct AgentPlaceOrder<'info> {
+    /// Delegate authorized to trade
+    #[account(
+        mut,
+        constraint = delegate.key() == agent.delegate @ AgentError::UnauthorizedDelegate,
+    )]
+    pub delegate: Signer<'info>,
+
+    #[account(
+        mut,
+        constraint = agent.is_active() @ AgentError::AgentNotActive,
+    )]
+    pub agent: Account<'info, TradingAgent>,
+
+    /// Agent's open orders account for this market
+    #[account(
+        mut,
+        constraint = open_orders.owner == agent.key(),
+    )]
+    pub open_orders: Account<'info, OpenOrdersAccount>,
+
+    /// The market being traded
+    /// CHECK: Validated in handler
+    pub market: AccountInfo<'info>,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct AgentOrderParams {
+    pub side: u8,
+    pub outcome: u8,
+    pub price: u64,
+    pub quantity: u64,
+    pub order_type: u8,
+    pub client_order_id: u64,
+}
