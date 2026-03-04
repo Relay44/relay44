@@ -454,3 +454,77 @@ pub struct WithdrawFromCopyVault<'info> {
     )]
     pub deposit_receipt: Account<'info, CopyVaultDeposit>,
 
+    #[account(
+        mut,
+        constraint = depositor_token.owner == depositor.key(),
+    )]
+    pub depositor_token: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = vault_token.key() == vault.vault,
+    )]
+    pub vault_token: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        constraint = share_mint.key() == vault.share_mint,
+    )]
+    pub share_mint: Account<'info, Mint>,
+
+    #[account(
+        mut,
+        constraint = depositor_shares.owner == depositor.key(),
+        constraint = depositor_shares.mint == vault.share_mint,
+    )]
+    pub depositor_shares: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn handler_withdraw_from_copy_vault(
+    ctx: Context<WithdrawFromCopyVault>,
+    shares: u64,
+) -> Result<()> {
+    let clock = Clock::get()?;
+
+    // Get values before mutable borrow
+    let receipt_shares = ctx.accounts.deposit_receipt.shares;
+    let total_shares = ctx.accounts.vault.total_shares;
+    let total_deposits = ctx.accounts.vault.total_deposits;
+    let leader = ctx.accounts.vault.leader;
+    let bump = ctx.accounts.vault.bump;
+    let vault_key = ctx.accounts.vault.key();
+
+    require!(receipt_shares >= shares, SocialError::InsufficientShares);
+
+    // Calculate withdrawal amount
+    let amount = if total_shares == 0 {
+        0
+    } else {
+        (shares as u128 * total_deposits as u128 / total_shares as u128) as u64
+    };
+
+    // Burn shares
+    let burn_accounts = Burn {
+        mint: ctx.accounts.share_mint.to_account_info(),
+        from: ctx.accounts.depositor_shares.to_account_info(),
+        authority: ctx.accounts.depositor.to_account_info(),
+    };
+    let burn_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), burn_accounts);
+    token::burn(burn_ctx, shares)?;
+
+    // Transfer collateral
+    let seeds = &[CopyTradingVault::SEED_PREFIX, leader.as_ref(), &[bump]];
+    let signer_seeds = &[&seeds[..]];
+
+    let transfer_accounts = Transfer {
+        from: ctx.accounts.vault_token.to_account_info(),
+        to: ctx.accounts.depositor_token.to_account_info(),
+        authority: ctx.accounts.vault.to_account_info(),
+    };
+    let transfer_ctx = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        transfer_accounts,
+        signer_seeds,
+    );
