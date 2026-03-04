@@ -528,3 +528,78 @@ pub fn handler_withdraw_from_copy_vault(
         transfer_accounts,
         signer_seeds,
     );
+    token::transfer(transfer_ctx, amount)?;
+
+    // Now do mutable updates
+    let vault = &mut ctx.accounts.vault;
+    let receipt = &mut ctx.accounts.deposit_receipt;
+
+    vault.total_deposits = vault.total_deposits.saturating_sub(amount);
+    vault.total_shares = vault.total_shares.saturating_sub(shares);
+    vault.last_action_at = clock.unix_timestamp;
+
+    receipt.shares = receipt.shares.saturating_sub(shares);
+    if receipt.shares == 0 {
+        vault.depositor_count = vault.depositor_count.saturating_sub(1);
+    }
+
+    emit!(CopyVaultWithdrawn {
+        vault: vault_key,
+        depositor: ctx.accounts.depositor.key(),
+        amount,
+        shares,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+// ============ Events ============
+
+#[event]
+pub struct ProfileCreated {
+    pub profile: Pubkey,
+    pub owner: Pubkey,
+    pub name: String,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct TraderFollowed {
+    pub follower: Pubkey,
+    pub leader: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct TraderUnfollowed {
+    pub follower: Pubkey,
+    pub leader: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct CopyVaultCreated {
+    pub vault: Pubkey,
+    pub leader: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct CopyVaultDeposited {
+    pub vault: Pubkey,
+    pub depositor: Pubkey,
+    pub amount: u64,
+    pub shares: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct CopyVaultWithdrawn {
+    pub vault: Pubkey,
+    pub depositor: Pubkey,
+    pub amount: u64,
+    pub shares: u64,
+    pub timestamp: i64,
+}
+
