@@ -387,3 +387,80 @@ mod tests {
             _padding2: [0; 6],
             _reserved: [0; 32],
         };
+
+        // 1:1 rate
+        assert_eq!(vault.calculate_base_value(1000, 1_000_000_000), 1000);
+
+        // 1.1:1 rate (10% yield)
+        assert_eq!(vault.calculate_base_value(1000, 1_100_000_000), 1100);
+    }
+
+    #[test]
+    fn test_margin_health() {
+        let account = MarginAccount {
+            owner: Pubkey::new_unique(),
+            collateral_mint: Pubkey::new_unique(),
+            collateral_vault: Pubkey::new_unique(),
+            bump: 0,
+            is_active: true,
+            max_leverage: 3,
+            _padding: [0; 1],
+            collateral: 1000,
+            borrowed: 2000,
+            interest_accrued: 0,
+            health_factor: 15000,
+            liquidation_threshold_bps: 11000,
+            last_health_update: 0,
+            _padding2: [0; 4],
+            total_borrowed: 0,
+            total_interest_paid: 0,
+            liquidation_count: 0,
+            _padding3: [0; 6],
+            _reserved: [0; 32],
+        };
+
+        // 3x leverage (1000 collateral, 2000 borrowed)
+        assert_eq!(account.current_leverage(), 3);
+        assert!(account.is_healthy());
+        assert!(account.can_borrow(0));
+        assert!(!account.can_borrow(1000)); // Would exceed 3x
+    }
+
+    #[test]
+    fn test_lending_pool_rates() {
+        let pool = LendingPool {
+            authority: Pubkey::new_unique(),
+            asset_mint: Pubkey::new_unique(),
+            vault: Pubkey::new_unique(),
+            receipt_mint: Pubkey::new_unique(),
+            bump: 0,
+            is_active: true,
+            _padding: [0; 2],
+            total_deposits: 10000,
+            total_borrowed: 5000,
+            interest_collected: 0,
+            base_rate_bps: 200, // 2%
+            utilization_multiplier_bps: 1000, // 10%
+            protocol_fee_bps: 1000, // 10%
+            _padding2: [0; 2],
+            max_utilization_bps: 9000, // 90%
+            min_deposit: 100,
+            _padding3: [0; 6],
+            _reserved: [0; 32],
+        };
+
+        // 50% utilization
+        assert_eq!(pool.utilization_bps(), 5000);
+
+        // Borrow rate: 2% + (50% * 10%) = 7%
+        assert_eq!(pool.borrow_rate_bps(), 700);
+
+        // Can borrow up to 90% utilization
+        assert!(pool.can_borrow(4000)); // Would be 90%
+        assert!(!pool.can_borrow(5000)); // Would exceed 90%
+
+        // Available liquidity
+        assert_eq!(pool.available_liquidity(), 5000);
+    }
+}
+
