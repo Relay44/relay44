@@ -110,3 +110,49 @@ export class RiskManager {
   }
 }
 
+export interface Position {
+  marketId: bigint;
+  outcome: number;
+  quantity: bigint;
+  avgEntryPriceBps: number;
+  openedAt: number;
+}
+
+export class PositionTracker {
+  private positions = new Map<string, Position>();
+
+  addPosition(next: Position): void {
+    const key = `${next.marketId}_${next.outcome}`;
+    const current = this.positions.get(key);
+    if (!current) {
+      this.positions.set(key, next);
+      return;
+    }
+
+    const total = current.quantity + next.quantity;
+    const weightedPrice = (
+      Number(current.quantity) * current.avgEntryPriceBps +
+      Number(next.quantity) * next.avgEntryPriceBps
+    ) / Number(total);
+
+    this.positions.set(key, {
+      ...current,
+      quantity: total,
+      avgEntryPriceBps: Math.round(weightedPrice),
+    });
+  }
+
+  getAllPositions(): Position[] {
+    return Array.from(this.positions.values());
+  }
+}
+
+export function createDefaultRiskParams(): RiskParams {
+  return {
+    maxDrawdownBps: 2000,
+    maxDailyLoss: 0n,
+    minEdgeBps: 50,
+    positionSizing: PositionSizing.Proportional,
+    sizingParam: 500n,
+  };
+}
