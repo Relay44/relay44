@@ -309,3 +309,81 @@ impl LendingPool {
         rate.min(u16::MAX as u64) as u16
     }
 
+    /// Calculate supply rate (basis points, annualized)
+    pub fn supply_rate_bps(&self) -> u16 {
+        let borrow_rate = self.borrow_rate_bps() as u64;
+        let utilization = self.utilization_bps() as u64;
+        let protocol_cut = self.protocol_fee_bps as u64;
+
+        let gross_yield = borrow_rate * utilization / 10000;
+        let net_yield = gross_yield * (10000 - protocol_cut) / 10000;
+
+        net_yield.min(u16::MAX as u64) as u16
+    }
+
+    /// Check if can borrow
+    pub fn can_borrow(&self, amount: u64) -> bool {
+        if !self.is_active {
+            return false;
+        }
+
+        let new_borrowed = self.total_borrowed.saturating_add(amount);
+        let new_utilization = if self.total_deposits == 0 {
+            10000
+        } else {
+            ((new_borrowed as u128 * 10000 / self.total_deposits as u128) as u16)
+        };
+
+        new_utilization <= self.max_utilization_bps
+    }
+
+    /// Calculate available liquidity
+    pub fn available_liquidity(&self) -> u64 {
+        self.total_deposits.saturating_sub(self.total_borrowed)
+    }
+}
+
+#[error_code]
+pub enum DeFiError {
+    #[msg("Yield vault not active")]
+    YieldVaultNotActive,
+    #[msg("Cannot harvest yet")]
+    HarvestTooSoon,
+    #[msg("Margin account not active")]
+    MarginNotActive,
+    #[msg("Position unhealthy")]
+    PositionUnhealthy,
+    #[msg("Leverage exceeds maximum")]
+    LeverageExceeded,
+    #[msg("Lending pool not active")]
+    LendingPoolNotActive,
+    #[msg("Insufficient liquidity")]
+    InsufficientLiquidity,
+    #[msg("Utilization too high")]
+    UtilizationTooHigh,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_yield_vault_calculations() {
+        let vault = YieldVault {
+            market: Pubkey::new_unique(),
+            yield_mint: Pubkey::new_unique(),
+            vault: Pubkey::new_unique(),
+            authority: Pubkey::new_unique(),
+            yield_source: YieldSource::Marinade as u8,
+            bump: 0,
+            is_active: true,
+            _padding: [0; 1],
+            total_deposited: 1000,
+            yield_accrued: 0,
+            last_harvest: 0,
+            last_exchange_rate: 1_000_000_000,
+            min_harvest_interval: 3600,
+            protocol_fee_bps: 1000,
+            _padding2: [0; 6],
+            _reserved: [0; 32],
+        };
