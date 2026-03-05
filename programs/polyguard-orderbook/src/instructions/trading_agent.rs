@@ -431,3 +431,79 @@ pub fn handler_record_agent_trade(
             .saturating_add(result.released_collateral)
             .saturating_sub(loss);
     }
+
+    // Update active positions
+    if agent.active_positions > 0 {
+        agent.active_positions = agent.active_positions.saturating_sub(1);
+    }
+
+    // Record trade metrics
+    agent.record_trade(result.pnl, result.volume, clock.unix_timestamp);
+
+    emit!(AgentTradeRecorded {
+        agent: agent.key(),
+        pnl: result.pnl,
+        volume: result.volume,
+        total_pnl: agent.total_pnl,
+        trades_count: agent.trades_count,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+// Events
+
+#[event]
+pub struct AgentCreated {
+    pub agent: Pubkey,
+    pub owner: Pubkey,
+    pub delegate: Pubkey,
+    pub name: String,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AgentDeposit {
+    pub agent: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AgentWithdraw {
+    pub agent: Pubkey,
+    pub amount: u64,
+    pub new_balance: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AgentUpdated {
+    pub agent: Pubkey,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AgentOrderPlaced {
+    pub agent: Pubkey,
+    pub market: Pubkey,
+    pub side: u8,
+    pub outcome: u8,
+    pub price: u64,
+    pub quantity: u64,
+    pub client_order_id: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct AgentTradeRecorded {
+    pub agent: Pubkey,
+    pub pnl: i64,
+    pub volume: u64,
+    pub total_pnl: i64,
+    pub trades_count: u64,
+    pub timestamp: i64,
+}
+
