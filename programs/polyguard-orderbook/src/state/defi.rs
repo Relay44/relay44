@@ -233,3 +233,79 @@ pub struct LendingPool {
     /// Pool authority
     pub authority: Pubkey,
 
+    /// Asset mint
+    pub asset_mint: Pubkey,
+
+    /// Pool vault
+    pub vault: Pubkey,
+
+    /// Receipt token mint (representing deposits)
+    pub receipt_mint: Pubkey,
+
+    /// Bump seed
+    pub bump: u8,
+
+    /// Is pool active
+    pub is_active: bool,
+
+    /// Padding
+    pub _padding: [u8; 2],
+
+    // === State ===
+    /// Total deposits
+    pub total_deposits: u64,
+
+    /// Total borrowed
+    pub total_borrowed: u64,
+
+    /// Total interest collected
+    pub interest_collected: u64,
+
+    // === Rates (basis points) ===
+    /// Base borrow rate
+    pub base_rate_bps: u16,
+
+    /// Utilization multiplier
+    pub utilization_multiplier_bps: u16,
+
+    /// Protocol fee on interest
+    pub protocol_fee_bps: u16,
+
+    /// Padding
+    pub _padding2: [u8; 2],
+
+    // === Limits ===
+    /// Maximum utilization (basis points)
+    pub max_utilization_bps: u16,
+
+    /// Minimum deposit
+    pub min_deposit: u64,
+
+    /// Padding
+    pub _padding3: [u8; 6],
+
+    /// Reserved
+    pub _reserved: [u8; 32],
+}
+
+impl LendingPool {
+    pub const SEED_PREFIX: &'static [u8] = b"lending_pool";
+    pub const BPS_SCALE: u64 = 10000;
+
+    /// Calculate utilization rate (basis points)
+    pub fn utilization_bps(&self) -> u16 {
+        if self.total_deposits == 0 {
+            return 0;
+        }
+        ((self.total_borrowed as u128 * 10000 / self.total_deposits as u128) as u16)
+            .min(10000)
+    }
+
+    /// Calculate borrow rate (basis points, annualized)
+    pub fn borrow_rate_bps(&self) -> u16 {
+        let utilization = self.utilization_bps() as u64;
+        let rate = self.base_rate_bps as u64 +
+            (utilization * self.utilization_multiplier_bps as u64 / 10000);
+        rate.min(u16::MAX as u64) as u16
+    }
+
