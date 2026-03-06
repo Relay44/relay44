@@ -392,3 +392,81 @@ impl EventHeap {
     pub fn push_out(&mut self, event: OutEvent) -> Option<u16> {
         let slot = self.allocate_slot()?;
 
+        self.nodes[slot as usize].set_out(&event);
+
+        // Add to used list tail
+        self.nodes[slot as usize].prev = self.used_tail;
+        self.nodes[slot as usize].next = FREE_SLOT;
+
+        if self.used_tail != FREE_SLOT {
+            self.nodes[self.used_tail as usize].next = slot;
+        }
+        self.used_tail = slot;
+
+        if self.used_head == FREE_SLOT {
+            self.used_head = slot;
+        }
+
+        self.count += 1;
+        Some(slot)
+    }
+
+    /// Allocate a slot from the free list
+    fn allocate_slot(&mut self) -> Option<u16> {
+        if self.free_head == FREE_SLOT {
+            return None;
+        }
+
+        let slot = self.free_head;
+        self.free_head = self.nodes[slot as usize].next;
+        self.nodes[slot as usize].next = FREE_SLOT;
+        self.nodes[slot as usize].prev = FREE_SLOT;
+
+        Some(slot)
+    }
+
+    /// Pop the oldest event (from head)
+    pub fn pop(&mut self) -> Option<(u16, EventNode)> {
+        if self.used_head == FREE_SLOT {
+            return None;
+        }
+
+        let slot = self.used_head;
+        let node = self.nodes[slot as usize];
+
+        // Remove from used list
+        self.used_head = node.next;
+        if self.used_head != FREE_SLOT {
+            self.nodes[self.used_head as usize].prev = FREE_SLOT;
+        } else {
+            self.used_tail = FREE_SLOT;
+        }
+
+        // Add to free list
+        self.nodes[slot as usize] = EventNode::default();
+        self.nodes[slot as usize].next = self.free_head;
+        self.free_head = slot;
+
+        self.count = self.count.saturating_sub(1);
+
+        Some((slot, node))
+    }
+
+    /// Delete a specific slot
+    pub fn delete_slot(&mut self, slot: u16) -> Option<EventNode> {
+        if slot as usize >= MAX_EVENTS {
+            return None;
+        }
+
+        let node = self.nodes[slot as usize];
+        if node.is_free() {
+            return None;
+        }
+
+        // Unlink from used list
+        if node.prev != FREE_SLOT {
+            self.nodes[node.prev as usize].next = node.next;
+        } else {
+            self.used_head = node.next;
+        }
+
