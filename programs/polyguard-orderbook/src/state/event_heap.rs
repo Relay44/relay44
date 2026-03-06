@@ -554,3 +554,75 @@ mod tests {
             2,                    // taker_client_order_id
             0,                    // outcome (Yes)
         );
+
+        heap.push_fill(fill);
+        assert_eq!(heap.len(), 1);
+        assert!(!heap.is_empty());
+
+        let (_, node) = heap.pop().unwrap();
+        assert_eq!(node.event_type(), EventType::Fill);
+
+        let fill_data = node.as_fill().unwrap();
+        assert_eq!(fill_data.price, 5000);
+        assert_eq!(fill_data.quantity, 100);
+
+        assert!(heap.is_empty());
+    }
+
+    #[test]
+    fn test_event_heap_fifo() {
+        let mut heap = EventHeap::default();
+        heap.initialize();
+
+        // Push 3 events
+        for i in 0..3 {
+            let fill = FillEvent::new(
+                0,
+                false,
+                0,
+                i as i64,
+                i as u64,
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                5000 + i as u64,
+                100,
+                i as u64,
+                i as u64,
+                0,
+            );
+            heap.push_fill(fill);
+        }
+
+        // Pop should return in FIFO order
+        for i in 0..3 {
+            let (_, node) = heap.pop().unwrap();
+            let fill = node.as_fill().unwrap();
+            assert_eq!(fill.price, 5000 + i as u64);
+        }
+    }
+
+    #[test]
+    fn test_event_heap_out_event() {
+        let mut heap = EventHeap::default();
+        heap.initialize();
+
+        let out = OutEvent::new(
+            1,                    // side (sell)
+            5,                    // owner_slot
+            2000,                 // timestamp
+            10,                   // seq_num
+            Pubkey::new_unique(), // owner
+            50,                   // quantity
+        );
+
+        heap.push_out(out);
+
+        let (_, node) = heap.pop().unwrap();
+        assert_eq!(node.event_type(), EventType::Out);
+
+        let out_data = node.as_out().unwrap();
+        assert_eq!(out_data.quantity, 50);
+        assert_eq!(out_data.owner_slot, 5);
+    }
+}
+
