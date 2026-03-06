@@ -470,3 +470,87 @@ impl EventHeap {
             self.used_head = node.next;
         }
 
+        if node.next != FREE_SLOT {
+            self.nodes[node.next as usize].prev = node.prev;
+        } else {
+            self.used_tail = node.prev;
+        }
+
+        // Add to free list
+        self.nodes[slot as usize] = EventNode::default();
+        self.nodes[slot as usize].next = self.free_head;
+        self.free_head = slot;
+
+        self.count = self.count.saturating_sub(1);
+
+        Some(node)
+    }
+
+    /// Get event at slot
+    pub fn at(&self, slot: u16) -> Option<&EventNode> {
+        if slot as usize >= MAX_EVENTS {
+            return None;
+        }
+        let node = &self.nodes[slot as usize];
+        if node.is_free() {
+            return None;
+        }
+        Some(node)
+    }
+
+    /// Iterate over events from oldest to newest
+    pub fn iter(&self) -> EventHeapIterator {
+        EventHeapIterator {
+            heap: self,
+            current: self.used_head,
+        }
+    }
+}
+
+/// Iterator over event heap
+pub struct EventHeapIterator<'a> {
+    heap: &'a EventHeap,
+    current: u16,
+}
+
+impl<'a> Iterator for EventHeapIterator<'a> {
+    type Item = (u16, &'a EventNode);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current == FREE_SLOT {
+            return None;
+        }
+
+        let slot = self.current;
+        let node = &self.heap.nodes[slot as usize];
+        self.current = node.next;
+
+        Some((slot, node))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_event_heap_push_pop() {
+        let mut heap = EventHeap::default();
+        heap.initialize();
+
+        assert!(heap.is_empty());
+
+        let fill = FillEvent::new(
+            0,                    // taker_side
+            false,                // maker_out
+            0,                    // maker_slot
+            1000,                 // timestamp
+            1,                    // seq_num
+            Pubkey::new_unique(), // maker
+            Pubkey::new_unique(), // taker
+            5000,                 // price
+            100,                  // quantity
+            1,                    // maker_client_order_id
+            2,                    // taker_client_order_id
+            0,                    // outcome (Yes)
+        );
