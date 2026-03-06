@@ -331,4 +331,3 @@ pub struct FinalizeDispute<'info> {
     )]
     pub disputer: UncheckedAccount<'info>,
 }
-
