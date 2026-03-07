@@ -224,4 +224,3 @@ pub fn increment_market_count(ctx: Context<IncrementMarketCount>) -> Result<()> 
 
     Ok(())
 }
-
