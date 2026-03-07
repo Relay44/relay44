@@ -128,4 +128,3 @@ CREATE INDEX IF NOT EXISTS idx_paper_outcomes_owner
 
 CREATE INDEX IF NOT EXISTS idx_paper_outcomes_strategy
     ON paper_outcomes(strategy, closed_at DESC);
-

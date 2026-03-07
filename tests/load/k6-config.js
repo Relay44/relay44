@@ -159,3 +159,160 @@ export default function () {
     });
   });
 
+  group('Markets', () => {
+    const start = Date.now();
+    const resp = http.get(`${BASE_URL}/v1/markets`);
+    marketLatency.add(Date.now() - start);
+
+    const success = check(resp, {
+      'markets status is 200': (r) => r.status === 200,
+      'markets has data': (r) => r.json('markets') !== undefined,
+    });
+
+    errorRate.add(!success);
+  });
+
+  group('Authentication', () => {
+    // Note: In real load tests, use pre-generated valid signatures
+    const token = authenticate(wallet);
+
+    if (token) {
+      group('Authenticated Operations', () => {
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        };
+
+        // List orders
+        const ordersResp = http.get(`${BASE_URL}/v1/orders`, { headers });
+        check(ordersResp, {
+          'orders status is 200': (r) => r.status === 200,
+        });
+
+        // List positions
+        const positionsResp = http.get(`${BASE_URL}/v1/positions`, { headers });
+        check(positionsResp, {
+          'positions status is 200': (r) => r.status === 200,
+        });
+
+        // Place order (if markets available)
+        const marketsResp = http.get(`${BASE_URL}/v1/markets?status=active&limit=1`);
+        const markets = marketsResp.json('markets');
+
+        if (markets && markets.length > 0) {
+          const start = Date.now();
+          const orderResp = http.post(
+            `${BASE_URL}/v1/orders`,
+            JSON.stringify({
+              market_id: markets[0].id,
+              side: Math.random() > 0.5 ? 'buy' : 'sell',
+              outcome: Math.random() > 0.5 ? 'yes' : 'no',
+              price: randomIntBetween(10, 90) / 100,
+              quantity: randomIntBetween(10, 1000),
+              order_type: 'limit',
+            }),
+            {
+              headers: {
+                ...headers,
+                'Idempotency-Key': `load-test-${__VU}-${Date.now()}`,
+              },
+            }
+          );
+
+          orderLatency.add(Date.now() - start);
+
+          const orderSuccess = check(orderResp, {
+            'order placed': (r) => r.status === 201 || r.status === 400, // 400 = validation error, acceptable
+          });
+
+          if (orderResp.status === 201) {
+            ordersPlaced.add(1);
+
+            // Cancel order
+            const orderId = orderResp.json('order_id');
+            if (orderId) {
+              const cancelResp = http.del(`${BASE_URL}/v1/orders/${orderId}`, null, { headers });
+              if (cancelResp.status === 200) {
+                ordersCancelled.add(1);
+              }
+            }
+          }
+
+          errorRate.add(!orderSuccess);
+        }
+      });
+    }
+  });
+
+  // Think time between iterations
+  sleep(randomIntBetween(1, 3));
+}
+
+// Setup function - runs once before all VUs
+export function setup() {
+  console.log(`Starting load test against ${BASE_URL}`);
+
+  // Verify API is accessible
+  const resp = http.get(`${BASE_URL}/health`);
+  if (resp.status !== 200) {
+    throw new Error(`API not accessible: ${resp.status}`);
+  }
+
+  return {
+    startTime: Date.now(),
+  };
+}
+
+// Teardown function - runs once after all VUs
+export function teardown(data) {
+  const duration = (Date.now() - data.startTime) / 1000;
+  console.log(`Load test completed in ${duration}s`);
+}
+
+// Handle summary
+export function handleSummary(data) {
+  return {
+    'tests/load/summary.json': JSON.stringify(data, null, 2),
+    stdout: textSummary(data, { indent: ' ', enableColors: true }),
+  };
+}
+
+function textSummary(data, options) {
+  const lines = [];
+  lines.push('\n=== Load Test Summary ===\n');
+
+  // Scenarios
+  if (data.metrics) {
+    const httpReqs = data.metrics.http_reqs;
+    const httpDuration = data.metrics.http_req_duration;
+    const httpFailed = data.metrics.http_req_failed;
+
+    if (httpReqs) {
+      lines.push(`Total Requests: ${httpReqs.values.count}`);
+      lines.push(`RPS: ${(httpReqs.values.rate).toFixed(2)}`);
+    }
+
+    if (httpDuration) {
+      lines.push(`\nLatency:`);
+      lines.push(`  avg: ${httpDuration.values.avg.toFixed(2)}ms`);
+      lines.push(`  p50: ${httpDuration.values['p(50)'].toFixed(2)}ms`);
+      lines.push(`  p95: ${httpDuration.values['p(95)'].toFixed(2)}ms`);
+      lines.push(`  p99: ${httpDuration.values['p(99)'].toFixed(2)}ms`);
+    }
+
+    if (httpFailed) {
+      lines.push(`\nError Rate: ${(httpFailed.values.rate * 100).toFixed(2)}%`);
+    }
+  }
+
+  // Thresholds
+  if (data.thresholds) {
+    lines.push('\nThresholds:');
+    for (const [name, threshold] of Object.entries(data.thresholds)) {
+      const status = threshold.ok ? 'PASS' : 'FAIL';
+      lines.push(`  ${name}: ${status}`);
+    }
+  }
+
+  return lines.join('\n');
+}
