@@ -202,3 +202,87 @@ mod tests {
             slot: 100,
             timestamp: 1000,
         };
+        assert_eq!(price.to_basis_points(), Some(5000));
+
+        // 1.0 = 10000 bps
+        let price = OraclePrice {
+            price: 1_000_000_000_000_000_000, // 1.0
+            confidence: 0,
+            slot: 100,
+            timestamp: 1000,
+        };
+        assert_eq!(price.to_basis_points(), Some(10000));
+
+        // 0.01 = 100 bps
+        let price = OraclePrice {
+            price: 10_000_000_000_000_000, // 0.01
+            confidence: 0,
+            slot: 100,
+            timestamp: 1000,
+        };
+        assert_eq!(price.to_basis_points(), Some(100));
+    }
+
+    #[test]
+    fn test_staleness_check() {
+        let price = OraclePrice {
+            price: 500_000_000_000_000_000,
+            confidence: 0,
+            slot: 100,
+            timestamp: 1000,
+        };
+
+        // Not stale: current_slot 150, max_staleness 100
+        assert!(!price.is_stale(150, 100));
+
+        // Stale: current_slot 250, max_staleness 100
+        assert!(price.is_stale(250, 100));
+
+        // Staleness disabled
+        assert!(!price.is_stale(1000000, 0));
+    }
+
+    #[test]
+    fn test_comparison_operators() {
+        let threshold = 100i128;
+
+        // >=
+        let mut config = OracleConfig::default();
+        config.operator = ComparisonOp::GreaterThanOrEqual as u8;
+        config.set_threshold(threshold);
+        assert!(config.evaluate_threshold(100));
+        assert!(config.evaluate_threshold(101));
+        assert!(!config.evaluate_threshold(99));
+
+        // >
+        let mut config = OracleConfig::default();
+        config.operator = ComparisonOp::GreaterThan as u8;
+        config.set_threshold(threshold);
+        assert!(!config.evaluate_threshold(100));
+        assert!(config.evaluate_threshold(101));
+
+        // <=
+        let mut config = OracleConfig::default();
+        config.operator = ComparisonOp::LessThanOrEqual as u8;
+        config.set_threshold(threshold);
+        assert!(config.evaluate_threshold(100));
+        assert!(config.evaluate_threshold(99));
+        assert!(!config.evaluate_threshold(101));
+
+        // <
+        let mut config = OracleConfig::default();
+        config.operator = ComparisonOp::LessThan as u8;
+        config.set_threshold(threshold);
+        assert!(!config.evaluate_threshold(100));
+        assert!(config.evaluate_threshold(99));
+
+        // ==
+        let mut config = OracleConfig::default();
+        config.operator = ComparisonOp::Equal as u8;
+        config.set_threshold(threshold);
+        assert!(config.evaluate_threshold(100));
+        assert!(!config.evaluate_threshold(99));
+        assert!(!config.evaluate_threshold(101));
+    }
+}
+
