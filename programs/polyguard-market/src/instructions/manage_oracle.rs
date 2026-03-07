@@ -125,4 +125,3 @@ pub fn set_enforce_validation_handler(
 pub struct EnforceValidationUpdated {
     pub enforce: bool,
 }
-
