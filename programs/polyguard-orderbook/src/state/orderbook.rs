@@ -319,3 +319,86 @@ impl BookSide {
             return;
         }
 
+        self.nodes[node as usize].left = self.nodes[left as usize].right;
+        if self.nodes[left as usize].right != FREE_NODE {
+            self.nodes[self.nodes[left as usize].right as usize].parent = node;
+        }
+
+        self.nodes[left as usize].parent = self.nodes[node as usize].parent;
+        if self.nodes[node as usize].parent == FREE_NODE {
+            self.root = left;
+        } else if self.nodes[self.nodes[node as usize].parent as usize].right == node {
+            self.nodes[self.nodes[node as usize].parent as usize].right = left;
+        } else {
+            self.nodes[self.nodes[node as usize].parent as usize].left = left;
+        }
+
+        self.nodes[left as usize].right = node;
+        self.nodes[node as usize].parent = left;
+    }
+
+    /// Remove an order by its key
+    pub fn remove(&mut self, key: u128) -> Option<OrderNode> {
+        let index = self.find_by_key(key)?;
+        self.remove_at(index)
+    }
+
+    /// Remove an order at a specific index
+    pub fn remove_at(&mut self, index: NodeHandle) -> Option<OrderNode> {
+        if index as usize >= MAX_ORDERS {
+            return None;
+        }
+
+        let node = self.nodes[index as usize];
+        if node.is_free() {
+            return None;
+        }
+
+        // Simple BST removal (not full RB-tree delete for simplicity)
+        // In production, implement proper RB-tree deletion
+        self.simple_remove(index);
+        self.deallocate_node(index);
+        self.order_count = self.order_count.saturating_sub(1);
+        self.update_best();
+
+        Some(node)
+    }
+
+    fn simple_remove(&mut self, index: NodeHandle) {
+        let left = self.nodes[index as usize].left;
+        let right = self.nodes[index as usize].right;
+        let parent = self.nodes[index as usize].parent;
+
+        let replacement = if left == FREE_NODE {
+            right
+        } else if right == FREE_NODE {
+            left
+        } else {
+            // Find in-order successor
+            let mut successor = right;
+            while self.nodes[successor as usize].left != FREE_NODE {
+                successor = self.nodes[successor as usize].left;
+            }
+
+            // Copy successor data to current node
+            self.nodes[index as usize].key = self.nodes[successor as usize].key;
+            self.nodes[index as usize].owner = self.nodes[successor as usize].owner;
+            self.nodes[index as usize].quantity = self.nodes[successor as usize].quantity;
+            self.nodes[index as usize].client_order_id =
+                self.nodes[successor as usize].client_order_id;
+            self.nodes[index as usize].timestamp = self.nodes[successor as usize].timestamp;
+            self.nodes[index as usize].owner_slot = self.nodes[successor as usize].owner_slot;
+
+            // Remove successor instead
+            self.simple_remove(successor);
+            return;
+        };
+
+        // Link parent to replacement
+        if parent == FREE_NODE {
+            self.root = replacement;
+        } else if self.nodes[parent as usize].left == index {
+            self.nodes[parent as usize].left = replacement;
+        } else {
+            self.nodes[parent as usize].right = replacement;
+        }
