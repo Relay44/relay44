@@ -395,4 +395,3 @@ mod tests {
         assert_eq!(collateral, 50);
     }
 }
-

@@ -276,4 +276,3 @@ mod tests {
         assert_eq!(tenant.effective_fee_bps(30), 20);
     }
 }
-
