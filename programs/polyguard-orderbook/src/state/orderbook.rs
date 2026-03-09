@@ -402,3 +402,85 @@ impl BookSide {
         } else {
             self.nodes[parent as usize].right = replacement;
         }
+
+        if replacement != FREE_NODE {
+            self.nodes[replacement as usize].parent = parent;
+        }
+    }
+
+    /// Find node by key
+    fn find_by_key(&self, key: u128) -> Option<NodeHandle> {
+        let mut current = self.root;
+        while current != FREE_NODE {
+            let current_key = self.nodes[current as usize].key;
+            if key == current_key {
+                return Some(current);
+            } else if key < current_key {
+                current = self.nodes[current as usize].left;
+            } else {
+                current = self.nodes[current as usize].right;
+            }
+        }
+        None
+    }
+
+    /// Update the best price cache
+    fn update_best(&mut self) {
+        if self.root == FREE_NODE {
+            self.best = FREE_NODE;
+            return;
+        }
+
+        // For bids: best is maximum (rightmost)
+        // For asks: best is minimum (leftmost)
+        let mut current = self.root;
+        if self.is_bids == 1 {
+            while self.nodes[current as usize].right != FREE_NODE {
+                current = self.nodes[current as usize].right;
+            }
+        } else {
+            while self.nodes[current as usize].left != FREE_NODE {
+                current = self.nodes[current as usize].left;
+            }
+        }
+        self.best = current;
+    }
+
+    /// Get the best order (highest bid or lowest ask)
+    pub fn get_best(&self) -> Option<&OrderNode> {
+        if self.best == FREE_NODE {
+            return None;
+        }
+        Some(&self.nodes[self.best as usize])
+    }
+
+    /// Get best price
+    pub fn best_price(&self) -> Option<u64> {
+        self.get_best().map(|n| n.price())
+    }
+
+    /// Update quantity of an order
+    pub fn update_quantity(&mut self, index: NodeHandle, new_quantity: u64) {
+        if (index as usize) < MAX_ORDERS {
+            self.nodes[index as usize].quantity = new_quantity;
+        }
+    }
+
+    /// Check if a price is acceptable for matching
+    pub fn is_price_acceptable(&self, taker_price: u64, maker_price: u64) -> bool {
+        if self.is_bids == 1 {
+            // Matching against bids: taker is selling, bid price >= taker's ask
+            maker_price >= taker_price
+        } else {
+            // Matching against asks: taker is buying, ask price <= taker's bid
+            maker_price <= taker_price
+        }
+    }
+
+    /// Iterate from best price
+    pub fn iter_from_best(&self) -> BookSideIterator {
+        BookSideIterator {
+            book: self,
+            current: self.best,
+            done: false,
+        }
