@@ -230,3 +230,76 @@ impl TradingAgent {
             new_exposure <= self.max_total_exposure,
             AgentError::ExposureLimitExceeded
         );
+
+        // Check drawdown limit
+        let max_dd_bps = self.risk_params.max_drawdown_bps;
+        if max_dd_bps > 0 && self.high_water_mark > 0 {
+            let dd_bps = self
+                .current_drawdown
+                .saturating_mul(10000)
+                .checked_div(self.high_water_mark)
+                .unwrap_or(0);
+            require!(
+                dd_bps as u16 <= max_dd_bps,
+                AgentError::DrawdownLimitExceeded
+            );
+        }
+
+        // Check daily loss limit
+        let max_daily = self.risk_params.max_daily_loss;
+        if max_daily > 0 {
+            require!(
+                self.daily_loss < max_daily,
+                AgentError::DailyLossLimitExceeded
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Update performance metrics after a trade
+    pub fn record_trade(&mut self, pnl: i64, volume: u64, timestamp: i64) {
+        self.trades_count = self.trades_count.saturating_add(1);
+        self.volume_traded = self.volume_traded.saturating_add(volume);
+        self.last_trade_at = timestamp;
+
+        // Update PnL
+        self.total_pnl = self.total_pnl.saturating_add(pnl);
+
+        if pnl > 0 {
+            self.win_count = self.win_count.saturating_add(1);
+            // Update high water mark
+            let current_value = self.total_deposited.saturating_add(pnl as u64);
+            if current_value > self.high_water_mark {
+                self.high_water_mark = current_value;
+                self.current_drawdown = 0;
+            }
+        } else {
+            // Update drawdown and daily loss
+            let loss = (-pnl) as u64;
+            self.current_drawdown = self.current_drawdown.saturating_add(loss);
+
+            // Track daily loss
+            let current_day = (timestamp as u64) / 86400;
+            if current_day != self.last_day {
+                self.daily_loss = 0;
+                self.last_day = current_day;
+            }
+            self.daily_loss = self.daily_loss.saturating_add(loss);
+
+            // Auto-pause if limits exceeded
+            if self.risk_params.max_daily_loss > 0 && self.daily_loss >= self.risk_params.max_daily_loss
+            {
+                self.status = AgentStatus::Paused as u8;
+            }
+        }
+    }
+
+    /// Calculate win rate (scaled by 10000)
+    pub fn win_rate_bps(&self) -> u16 {
+        if self.trades_count == 0 {
+            return 0;
+        }
+        ((self.win_count * 10000) / self.trades_count) as u16
+    }
+
