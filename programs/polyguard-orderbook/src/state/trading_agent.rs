@@ -303,3 +303,80 @@ impl TradingAgent {
         ((self.win_count * 10000) / self.trades_count) as u16
     }
 
+    /// Calculate average PnL per trade
+    pub fn avg_pnl_per_trade(&self) -> i64 {
+        if self.trades_count == 0 {
+            return 0;
+        }
+        self.total_pnl / (self.trades_count as i64)
+    }
+}
+
+#[error_code]
+pub enum AgentError {
+    #[msg("Agent is not active")]
+    AgentNotActive,
+    #[msg("Position size exceeds limit")]
+    PositionSizeExceeded,
+    #[msg("Total exposure limit exceeded")]
+    ExposureLimitExceeded,
+    #[msg("Drawdown limit exceeded")]
+    DrawdownLimitExceeded,
+    #[msg("Daily loss limit exceeded")]
+    DailyLossLimitExceeded,
+    #[msg("Market not allowed for this agent")]
+    MarketNotAllowed,
+    #[msg("Unauthorized delegate")]
+    UnauthorizedDelegate,
+    #[msg("Insufficient balance")]
+    InsufficientBalance,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_agent() -> TradingAgent {
+        TradingAgent {
+            owner: Pubkey::new_unique(),
+            delegate: Pubkey::new_unique(),
+            name: "Test Agent".to_string(),
+            bump: 0,
+            status: AgentStatus::Active as u8,
+            version: 1,
+            _padding: [0; 1],
+            max_position_size: 10000,
+            max_total_exposure: 100000,
+            risk_params: RiskParams {
+                max_drawdown_bps: 2000, // 20%
+                max_daily_loss: 5000,
+                min_edge_bps: 100,
+                position_sizing: PositionSizing::Proportional as u8,
+                sizing_param: 100, // 1% per trade
+                _padding: [0; 5],
+            },
+            total_deposited: 100000,
+            available_balance: 100000,
+            locked_balance: 0,
+            total_pnl: 0,
+            high_water_mark: 100000,
+            current_drawdown: 0,
+            daily_loss: 0,
+            last_day: 0,
+            active_positions: 0,
+            trades_count: 0,
+            win_count: 0,
+            volume_traded: 0,
+            created_at: 0,
+            last_trade_at: 0,
+            allowed_markets_count: 0,
+            _reserved: [0; 7],
+            allowed_markets: vec![],
+        }
+    }
+
+    #[test]
+    fn test_risk_check_passes() {
+        let agent = create_agent();
+        assert!(agent.check_risk(5000, 5000).is_ok());
+    }
