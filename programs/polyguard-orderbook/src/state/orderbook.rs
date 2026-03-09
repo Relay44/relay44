@@ -484,3 +484,78 @@ impl BookSide {
             current: self.best,
             done: false,
         }
+    }
+}
+
+/// Iterator over BookSide from best price
+pub struct BookSideIterator<'a> {
+    book: &'a BookSide,
+    current: NodeHandle,
+    done: bool,
+}
+
+impl<'a> Iterator for BookSideIterator<'a> {
+    type Item = (NodeHandle, &'a OrderNode);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.done || self.current == FREE_NODE {
+            return None;
+        }
+
+        let index = self.current;
+        let node = &self.book.nodes[index as usize];
+
+        // Move to next node (in-order traversal for asks, reverse for bids)
+        if self.book.is_bids == 1 {
+            // For bids: go to predecessor
+            self.current = self.predecessor(index);
+        } else {
+            // For asks: go to successor
+            self.current = self.successor(index);
+        }
+
+        Some((index, node))
+    }
+}
+
+impl<'a> BookSideIterator<'a> {
+    fn successor(&self, node: NodeHandle) -> NodeHandle {
+        let mut current = node;
+
+        // If right child exists, go right then all the way left
+        if self.book.nodes[current as usize].right != FREE_NODE {
+            current = self.book.nodes[current as usize].right;
+            while self.book.nodes[current as usize].left != FREE_NODE {
+                current = self.book.nodes[current as usize].left;
+            }
+            return current;
+        }
+
+        // Otherwise, go up until we're a left child
+        let mut parent = self.book.nodes[current as usize].parent;
+        while parent != FREE_NODE && current == self.book.nodes[parent as usize].right {
+            current = parent;
+            parent = self.book.nodes[current as usize].parent;
+        }
+
+        parent
+    }
+
+    fn predecessor(&self, node: NodeHandle) -> NodeHandle {
+        let mut current = node;
+
+        // If left child exists, go left then all the way right
+        if self.book.nodes[current as usize].left != FREE_NODE {
+            current = self.book.nodes[current as usize].left;
+            while self.book.nodes[current as usize].right != FREE_NODE {
+                current = self.book.nodes[current as usize].right;
+            }
+            return current;
+        }
+
+        // Otherwise, go up until we're a right child
+        let mut parent = self.book.nodes[current as usize].parent;
+        while parent != FREE_NODE && current == self.book.nodes[parent as usize].left {
+            current = parent;
+            parent = self.book.nodes[current as usize].parent;
+        }
