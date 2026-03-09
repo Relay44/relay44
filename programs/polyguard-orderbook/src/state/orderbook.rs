@@ -559,3 +559,82 @@ impl<'a> BookSideIterator<'a> {
             current = parent;
             parent = self.book.nodes[current as usize].parent;
         }
+
+        parent
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bookside_insert_and_best() {
+        let mut book = BookSide::default();
+        book.initialize(false); // asks
+
+        let owner = Pubkey::new_unique();
+
+        // Insert asks at different prices
+        book.insert(5000, 100, owner, 1, 0, 0); // 50%
+        book.insert(4000, 100, owner, 2, 0, 1); // 40%
+        book.insert(6000, 100, owner, 3, 0, 2); // 60%
+
+        // Best ask should be lowest: 4000
+        assert_eq!(book.best_price(), Some(4000));
+        assert_eq!(book.order_count, 3);
+    }
+
+    #[test]
+    fn test_bookside_bids_best() {
+        let mut book = BookSide::default();
+        book.initialize(true); // bids
+
+        let owner = Pubkey::new_unique();
+
+        // Insert bids at different prices
+        book.insert(5000, 100, owner, 1, 0, 0);
+        book.insert(4000, 100, owner, 2, 0, 1);
+        book.insert(6000, 100, owner, 3, 0, 2);
+
+        // Best bid should be highest: 6000
+        assert_eq!(book.best_price(), Some(6000));
+    }
+
+    #[test]
+    fn test_bookside_remove() {
+        let mut book = BookSide::default();
+        book.initialize(false);
+
+        let owner = Pubkey::new_unique();
+
+        let (_, key1) = book.insert(5000, 100, owner, 1, 0, 0).unwrap();
+        book.insert(4000, 100, owner, 2, 0, 1);
+
+        assert_eq!(book.order_count, 2);
+
+        book.remove(key1);
+        assert_eq!(book.order_count, 1);
+        assert_eq!(book.best_price(), Some(4000));
+    }
+
+    #[test]
+    fn test_price_acceptable() {
+        let mut bids = BookSide::default();
+        bids.initialize(true);
+
+        let mut asks = BookSide::default();
+        asks.initialize(false);
+
+        // Bid at 5000, taker selling at 4500 -> acceptable (bid >= ask)
+        assert!(bids.is_price_acceptable(4500, 5000));
+        // Bid at 5000, taker selling at 5500 -> not acceptable
+        assert!(!bids.is_price_acceptable(5500, 5000));
+
+        // Ask at 5000, taker buying at 5500 -> acceptable (ask <= bid)
+        assert!(asks.is_price_acceptable(5500, 5000));
+        // Ask at 5000, taker buying at 4500 -> not acceptable
+        assert!(!asks.is_price_acceptable(4500, 5000));
+    }
+}
+
