@@ -380,3 +380,77 @@ mod tests {
         let agent = create_agent();
         assert!(agent.check_risk(5000, 5000).is_ok());
     }
+
+    #[test]
+    fn test_risk_check_position_size() {
+        let agent = create_agent();
+        assert!(agent.check_risk(20000, 5000).is_err());
+    }
+
+    #[test]
+    fn test_position_sizing_fixed() {
+        let params = RiskParams {
+            position_sizing: PositionSizing::Fixed as u8,
+            sizing_param: 1000,
+            ..Default::default()
+        };
+        assert_eq!(params.calculate_size(100000, 500, 6000), 1000);
+    }
+
+    #[test]
+    fn test_position_sizing_proportional() {
+        let params = RiskParams {
+            position_sizing: PositionSizing::Proportional as u8,
+            sizing_param: 100, // 1%
+            ..Default::default()
+        };
+        assert_eq!(params.calculate_size(100000, 500, 6000), 1000);
+    }
+
+    #[test]
+    fn test_record_trade_win() {
+        let mut agent = create_agent();
+        agent.record_trade(1000, 5000, 1000);
+        assert_eq!(agent.trades_count, 1);
+        assert_eq!(agent.win_count, 1);
+        assert_eq!(agent.total_pnl, 1000);
+        assert_eq!(agent.high_water_mark, 101000);
+    }
+
+    #[test]
+    fn test_record_trade_loss() {
+        let mut agent = create_agent();
+        agent.record_trade(-1000, 5000, 86400);
+        assert_eq!(agent.trades_count, 1);
+        assert_eq!(agent.win_count, 0);
+        assert_eq!(agent.total_pnl, -1000);
+        assert_eq!(agent.current_drawdown, 1000);
+        assert_eq!(agent.daily_loss, 1000);
+    }
+
+    #[test]
+    fn test_market_whitelist() {
+        let mut agent = create_agent();
+
+        // No whitelist = all allowed
+        let market = Pubkey::new_unique();
+        assert!(agent.is_market_allowed(&market));
+
+        // Add whitelist
+        let allowed_market = Pubkey::new_unique();
+        agent.allowed_markets.push(allowed_market);
+        agent.allowed_markets_count = 1;
+
+        assert!(agent.is_market_allowed(&allowed_market));
+        assert!(!agent.is_market_allowed(&market));
+    }
+
+    #[test]
+    fn test_win_rate() {
+        let mut agent = create_agent();
+        agent.trades_count = 10;
+        agent.win_count = 6;
+        assert_eq!(agent.win_rate_bps(), 6000); // 60%
+    }
+}
+
