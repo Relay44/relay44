@@ -69,3 +69,25 @@ pub mod polyguard_privacy {
             quantity_commitment,
             range_proof,
         )
+    }
+
+    /// Settle a private trade via MXE result
+    pub fn private_settle(
+        ctx: Context<PrivateSettle>,
+        buy_order_id: u64,
+        sell_order_id: u64,
+        mxe_result: [u8; 256],
+        settlement_proof: [u8; 128],
+    ) -> Result<()> {
+        crate::instructions::private_settle::handler(ctx, buy_order_id, sell_order_id, mxe_result, settlement_proof)
+    }
+
+    /// Update MXE authority
+    pub fn update_mxe_authority(
+        ctx: Context<UpdateMxeAuthority>,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        crate::instructions::update_mxe_authority::handler(ctx, new_authority)
+    }
+}
+
