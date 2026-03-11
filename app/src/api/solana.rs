@@ -200,4 +200,3 @@ mod tests {
         assert!(!is_base58_address("invalid@@@"));
     }
 }
-
