@@ -422,3 +422,89 @@ impl EqualityProof {
         // C1 - C2 = (r1 - r2) * H (if values are equal)
         let c_diff = c1 - c2;
 
+        // Recompute R = s * H - c * (C1 - C2)
+        let r_computed = &response * h - challenge * c_diff;
+
+        // Verify challenge
+        let mut transcript = Transcript::new(POLYGUARD_PROOF_DOMAIN);
+        transcript.append_message(b"equality_proof", b"v1");
+        transcript.append_message(b"C1", commitment1.0.as_bytes());
+        transcript.append_message(b"C2", commitment2.0.as_bytes());
+        transcript.append_message(b"R", r_computed.compress().as_bytes());
+
+        let mut expected_bytes = [0u8; 64];
+        transcript.challenge_bytes(b"challenge", &mut expected_bytes);
+        let expected_challenge = Scalar::from_bytes_mod_order_wide(&expected_bytes);
+
+        Ok(constant_time_eq::constant_time_eq(
+            challenge.as_bytes(),
+            expected_challenge.as_bytes(),
+        ))
+    }
+}
+
+/// Deposit proof: proves encrypted_amount correctly encrypts `amount`
+/// This links the plaintext deposit to the ElGamal ciphertext
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct DepositProof {
+    /// Challenge scalar
+    pub challenge: [u8; 32],
+    /// Response for randomness
+    pub response: [u8; 32],
+}
+
+unsafe impl Zeroable for DepositProof {}
+unsafe impl Pod for DepositProof {}
+
+impl DepositProof {
+    /// Size in bytes
+    pub const SIZE: usize = 64;
+
+    /// Prove that ciphertext encrypts the given amount
+    pub fn prove(
+        pubkey: &ElGamalPubkey,
+        amount: u64,
+        randomness: &Scalar,
+    ) -> Result<Self, CryptoError> {
+        // Generate nonce
+        let mut k_bytes = [0u8; 32];
+        #[cfg(feature = "std")]
+        {
+            use rand::RngCore;
+            rand::thread_rng().fill_bytes(&mut k_bytes);
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            let mut hasher = Sha512::new();
+            hasher.update(b"polyguard_deposit_nonce");
+            hasher.update(pubkey.to_bytes().as_slice());
+            hasher.update(&amount.to_le_bytes());
+            hasher.update(randomness.as_bytes());
+            let hash = hasher.finalize();
+            k_bytes.copy_from_slice(&hash[..32]);
+        }
+
+        let k = Scalar::from_bytes_mod_order(k_bytes);
+
+        // R1 = k * G
+        let r1 = k * get_g();
+
+        // R2 = k * P (public key point)
+        let pubkey_point = pubkey.0.decompress()
+            .ok_or(CryptoError::InvalidPublicKey)?;
+        let r2 = &k * pubkey_point;
+
+        // Compute ciphertext for transcript
+        let ciphertext = pubkey.encrypt_with_randomness(amount, randomness)?;
+
+        // Fiat-Shamir
+        let mut transcript = Transcript::new(POLYGUARD_PROOF_DOMAIN);
+        transcript.append_message(b"deposit_proof", b"v1");
+        transcript.append_message(b"pubkey", pubkey.0.as_bytes());
+        transcript.append_u64(b"amount", amount);
+        transcript.append_message(b"C1", ciphertext.c1.as_bytes());
+        transcript.append_message(b"C2", ciphertext.c2.as_bytes());
+        transcript.append_message(b"R1", r1.compress().as_bytes());
+        transcript.append_message(b"R2", r2.compress().as_bytes());
+
