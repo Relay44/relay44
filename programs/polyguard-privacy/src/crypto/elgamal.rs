@@ -343,3 +343,106 @@ fn discrete_log(point: &RistrettoPoint) -> Option<u64> {
             if result <= MAX_DECRYPTABLE_AMOUNT {
                 return Some(result);
             }
+        }
+        gamma += giant_step;
+    }
+
+    None
+}
+
+// Require alloc for the discrete log lookup table
+extern crate alloc;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_keypair_generation() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        // Verify public key is valid
+        assert!(keypair.public.0.decompress().is_some());
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_zero() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        let ciphertext = keypair.public.encrypt_with_randomness(0, &Scalar::from(123u64)).unwrap();
+        let decrypted = keypair.secret.decrypt(&ciphertext).unwrap();
+        assert_eq!(decrypted, 0);
+    }
+
+    #[test]
+    fn test_encrypt_decrypt_small() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        for amount in [1, 10, 100, 1000, 10000] {
+            let ciphertext = keypair.public.encrypt_with_randomness(amount, &Scalar::from(456u64)).unwrap();
+            let decrypted = keypair.secret.decrypt(&ciphertext).unwrap();
+            assert_eq!(decrypted, amount);
+        }
+    }
+
+    #[test]
+    fn test_homomorphic_addition() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        let a = 1000u64;
+        let b = 2000u64;
+
+        let c1 = keypair.public.encrypt_with_randomness(a, &Scalar::from(111u64)).unwrap();
+        let c2 = keypair.public.encrypt_with_randomness(b, &Scalar::from(222u64)).unwrap();
+        let sum = c1.add(&c2).unwrap();
+
+        let decrypted = keypair.secret.decrypt(&sum).unwrap();
+        assert_eq!(decrypted, a + b);
+    }
+
+    #[test]
+    fn test_homomorphic_subtraction() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        let a = 3000u64;
+        let b = 1000u64;
+
+        let c1 = keypair.public.encrypt_with_randomness(a, &Scalar::from(111u64)).unwrap();
+        let c2 = keypair.public.encrypt_with_randomness(b, &Scalar::from(222u64)).unwrap();
+        let diff = c1.subtract(&c2).unwrap();
+
+        let decrypted = keypair.secret.decrypt(&diff).unwrap();
+        assert_eq!(decrypted, a - b);
+    }
+
+    #[test]
+    fn test_serialization() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        let ciphertext = keypair.public.encrypt_with_randomness(42, &Scalar::from(789u64)).unwrap();
+        let bytes = ciphertext.to_bytes();
+        let restored = ElGamalCiphertext::from_bytes(&bytes).unwrap();
+
+        assert_eq!(ciphertext.c1, restored.c1);
+        assert_eq!(ciphertext.c2, restored.c2);
+    }
+
+    #[test]
+    fn test_verify_amount() {
+        let seed = [42u8; 32];
+        let keypair = ElGamalKeypair::from_seed(&seed);
+
+        let amount = 12345u64;
+        let ciphertext = keypair.public.encrypt_with_randomness(amount, &Scalar::from(999u64)).unwrap();
+
+        assert!(keypair.secret.verify_amount(&ciphertext, amount).unwrap());
+        assert!(!keypair.secret.verify_amount(&ciphertext, amount + 1).unwrap());
+    }
+}
+
