@@ -597,3 +597,81 @@ mod tests {
         let opening = test_opening(balance, 111);
         let commitment = opening.to_commitment();
 
+        let proof = BalanceProof::prove(balance, amount, &opening).unwrap();
+        assert!(proof.verify(&commitment, amount).unwrap());
+    }
+
+    #[test]
+    fn test_balance_proof_insufficient() {
+        let balance = 500u64;
+        let amount = 1000u64;
+        let opening = test_opening(balance, 222);
+
+        let result = BalanceProof::prove(balance, amount, &opening);
+        assert!(matches!(result, Err(CryptoError::InsufficientBalance)));
+    }
+
+    #[test]
+    fn test_equality_proof() {
+        let value = 42u64;
+        let opening1 = test_opening(value, 333);
+        let opening2 = test_opening(value, 444);
+
+        let c1 = opening1.to_commitment();
+        let c2 = opening2.to_commitment();
+
+        let proof = EqualityProof::prove(&opening1, &opening2).unwrap();
+        assert!(proof.verify(&c1, &c2).unwrap());
+    }
+
+    #[test]
+    fn test_equality_proof_different_values() {
+        let opening1 = test_opening(100, 555);
+        let opening2 = test_opening(200, 666);
+
+        let result = EqualityProof::prove(&opening1, &opening2);
+        assert!(matches!(result, Err(CryptoError::CommitmentMismatch)));
+    }
+
+    #[test]
+    fn test_deposit_proof() {
+        use super::super::ElGamalKeypair;
+
+        let keypair = ElGamalKeypair::from_seed(&[42u8; 32]);
+        let amount = 1000u64;
+        let randomness = Scalar::from(12345u64);
+
+        let ciphertext = keypair.public.encrypt_with_randomness(amount, &randomness).unwrap();
+        let proof = DepositProof::prove(&keypair.public, amount, &randomness).unwrap();
+
+        assert!(proof.verify(&keypair.public, amount, &ciphertext).unwrap());
+    }
+
+    #[test]
+    fn test_deposit_proof_wrong_amount() {
+        use super::super::ElGamalKeypair;
+
+        let keypair = ElGamalKeypair::from_seed(&[42u8; 32]);
+        let amount = 1000u64;
+        let randomness = Scalar::from(12345u64);
+
+        let ciphertext = keypair.public.encrypt_with_randomness(amount, &randomness).unwrap();
+        let proof = DepositProof::prove(&keypair.public, amount, &randomness).unwrap();
+
+        // Verify with wrong amount should fail
+        assert!(!proof.verify(&keypair.public, amount + 1, &ciphertext).unwrap());
+    }
+
+    #[test]
+    fn test_serialization() {
+        let value = 100u64;
+        let opening = test_opening(value, 777);
+
+        let range_proof = CompactRangeProof::prove(value, &opening).unwrap();
+        let bytes = range_proof.to_bytes();
+        let restored = CompactRangeProof::from_bytes(&bytes).unwrap();
+
+        assert!(restored.verify().unwrap());
+    }
+}
+
