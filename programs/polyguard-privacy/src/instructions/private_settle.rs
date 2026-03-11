@@ -192,3 +192,86 @@ pub fn handler(
         .map_err(|_| PrivacyError::InvalidSettlementProof)?;
     require!(proof_valid, PrivacyError::InvalidSettlementProof);
 
+    // Verify the settlement proof commitment matches the fill quantity commitment
+    require!(
+        settlement_range_proof.commitment == fill_qty_commitment,
+        PrivacyError::InvalidSettlementProof
+    );
+
+    // Validate orders are for same market and outcome
+    require!(
+        ctx.accounts.buy_order.market == ctx.accounts.sell_order.market,
+        PrivacyError::MxeComputationFailed
+    );
+    require!(
+        ctx.accounts.buy_order.outcome == ctx.accounts.sell_order.outcome,
+        PrivacyError::MxeComputationFailed
+    );
+
+    let clock = Clock::get()?;
+
+    // Initialize settlement record
+    let settlement = &mut ctx.accounts.settlement;
+    settlement.buy_order = ctx.accounts.buy_order.key();
+    settlement.sell_order = ctx.accounts.sell_order.key();
+    settlement.market = ctx.accounts.market.key();
+    settlement.mxe_result = mxe_result;
+    settlement.settlement_proof = settlement_proof;
+    settlement.encrypted_fill_quantity = encrypted_fill_quantity;
+    settlement.encrypted_fill_price = encrypted_fill_price;
+    settlement.status = PrivateSettlement::STATUS_COMPLETED;
+    settlement.bump = ctx.bumps.settlement;
+    settlement.settled_at = clock.unix_timestamp;
+
+    // Update orders
+    let buy_order = &mut ctx.accounts.buy_order;
+    buy_order.status = PrivateOrder::STATUS_FILLED;
+    buy_order.settled_at = clock.unix_timestamp;
+
+    let sell_order = &mut ctx.accounts.sell_order;
+    sell_order.status = PrivateOrder::STATUS_FILLED;
+    sell_order.settled_at = clock.unix_timestamp;
+
+    // Update accounts
+    let buyer_account = &mut ctx.accounts.buyer_account;
+    buyer_account.private_settlement_count = buyer_account.private_settlement_count
+        .checked_add(1)
+        .ok_or(PrivacyError::ArithmeticOverflow)?;
+    buyer_account.last_activity = clock.unix_timestamp;
+
+    let seller_account = &mut ctx.accounts.seller_account;
+    seller_account.private_settlement_count = seller_account.private_settlement_count
+        .checked_add(1)
+        .ok_or(PrivacyError::ArithmeticOverflow)?;
+    seller_account.last_activity = clock.unix_timestamp;
+
+    // Update config
+    let config = &mut ctx.accounts.config;
+    config.total_private_settlements = config.total_private_settlements
+        .checked_add(1)
+        .ok_or(PrivacyError::ArithmeticOverflow)?;
+
+    emit!(PrivateTradeSettled {
+        settlement: settlement.key(),
+        buy_order: ctx.accounts.buy_order.key(),
+        sell_order: ctx.accounts.sell_order.key(),
+        market: settlement.market,
+        buyer: ctx.accounts.buy_order.owner,
+        seller: ctx.accounts.sell_order.owner,
+        timestamp: clock.unix_timestamp,
+    });
+
+    Ok(())
+}
+
+#[event]
+pub struct PrivateTradeSettled {
+    pub settlement: Pubkey,
+    pub buy_order: Pubkey,
+    pub sell_order: Pubkey,
+    pub market: Pubkey,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub timestamp: i64,
+}
+
