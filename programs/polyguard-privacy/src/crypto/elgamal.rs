@@ -225,3 +225,121 @@ impl ElGamalCiphertext {
             c1: CompressedRistretto::identity(),
             c2: CompressedRistretto::identity(),
         }
+    }
+
+    /// Homomorphic addition of ciphertexts
+    /// Enc(a) + Enc(b) = Enc(a + b)
+    pub fn add(&self, other: &ElGamalCiphertext) -> Result<Self, CryptoError> {
+        let c1_a = self.c1.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c1_b = other.c1.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c2_a = self.c2.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c2_b = other.c2.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+
+        Ok(Self {
+            c1: (c1_a + c1_b).compress(),
+            c2: (c2_a + c2_b).compress(),
+        })
+    }
+
+    /// Homomorphic subtraction of ciphertexts
+    /// Enc(a) - Enc(b) = Enc(a - b)
+    pub fn subtract(&self, other: &ElGamalCiphertext) -> Result<Self, CryptoError> {
+        let c1_a = self.c1.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c1_b = other.c1.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c2_a = self.c2.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c2_b = other.c2.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+
+        Ok(Self {
+            c1: (c1_a - c1_b).compress(),
+            c2: (c2_a - c2_b).compress(),
+        })
+    }
+
+    /// Scalar multiplication of ciphertext
+    /// k * Enc(a) = Enc(k * a)
+    pub fn scalar_mult(&self, scalar: u64) -> Result<Self, CryptoError> {
+        let c1 = self.c1.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let c2 = self.c2.decompress().ok_or(CryptoError::InvalidCiphertext)?;
+        let k = Scalar::from(scalar);
+
+        Ok(Self {
+            c1: (k * c1).compress(),
+            c2: (k * c2).compress(),
+        })
+    }
+}
+
+/// Cached baby-step lookup table for discrete log
+/// HIGH-011 FIX: Use lazy static initialization to build table once
+#[cfg(feature = "std")]
+mod dlog_cache {
+    use super::*;
+    use std::sync::OnceLock;
+
+    /// Baby step size: sqrt(MAX_DECRYPTABLE_AMOUNT) = 2^16
+    pub const BABY_STEP_SIZE: u64 = 65536;
+
+    /// Cached baby steps table
+    static BABY_STEPS: OnceLock<Vec<(CompressedRistretto, u64)>> = OnceLock::new();
+
+    /// Get or initialize the baby steps table
+    pub fn get_baby_steps() -> &'static [(CompressedRistretto, u64)] {
+        BABY_STEPS.get_or_init(|| {
+            let mut table = Vec::with_capacity(BABY_STEP_SIZE as usize);
+            let mut current = RistrettoPoint::identity();
+            for i in 0..BABY_STEP_SIZE {
+                table.push((current.compress(), i));
+                current += RISTRETTO_BASEPOINT_POINT;
+            }
+            table.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            table
+        })
+    }
+}
+
+/// Baby-step giant-step discrete log solver for small amounts
+/// HIGH-011 FIX: Uses cached lookup table for performance
+fn discrete_log(point: &RistrettoPoint) -> Option<u64> {
+    // Check for zero first
+    if *point == RistrettoPoint::identity() {
+        return Some(0);
+    }
+
+    // Baby step size: sqrt(MAX_DECRYPTABLE_AMOUNT)
+    let baby_step_size = 65536u64; // 2^16
+    let giant_step_size = (MAX_DECRYPTABLE_AMOUNT / baby_step_size) + 1;
+
+    // Base point G
+    let g = RISTRETTO_BASEPOINT_POINT;
+
+    // Get baby steps table (cached in std, built fresh in no_std)
+    #[cfg(feature = "std")]
+    let baby_steps = dlog_cache::get_baby_steps();
+
+    #[cfg(not(feature = "std"))]
+    let baby_steps = {
+        let mut table = alloc::vec::Vec::with_capacity(baby_step_size as usize);
+        let mut current = RistrettoPoint::identity();
+        for i in 0..baby_step_size {
+            table.push((current.compress(), i));
+            current += g;
+        }
+        table.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        table
+    };
+
+    // Giant step: -baby_step_size * G
+    let giant_step = -Scalar::from(baby_step_size) * g;
+
+    // Search
+    let mut gamma = *point;
+    for j in 0..giant_step_size {
+        // Binary search in baby steps
+        if let Ok(idx) = baby_steps.binary_search_by(|probe| {
+            probe.0.as_bytes().cmp(gamma.compress().as_bytes())
+        }) {
+            let i = baby_steps[idx].1;
+            let result = j * baby_step_size + i;
+            if result <= MAX_DECRYPTABLE_AMOUNT {
+                return Some(result);
+            }
