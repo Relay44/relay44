@@ -508,3 +508,92 @@ impl DepositProof {
         transcript.append_message(b"R1", r1.compress().as_bytes());
         transcript.append_message(b"R2", r2.compress().as_bytes());
 
+        let mut challenge_bytes = [0u8; 64];
+        transcript.challenge_bytes(b"challenge", &mut challenge_bytes);
+        let challenge = Scalar::from_bytes_mod_order_wide(&challenge_bytes);
+
+        // Response: s = k + c * r
+        let response = k + challenge * randomness;
+
+        Ok(Self {
+            challenge: challenge.to_bytes(),
+            response: response.to_bytes(),
+        })
+    }
+
+    /// Verify deposit proof
+    pub fn verify(
+        &self,
+        pubkey: &ElGamalPubkey,
+        amount: u64,
+        ciphertext: &ElGamalCiphertext,
+    ) -> Result<bool, CryptoError> {
+        let challenge = Scalar::from_canonical_bytes(self.challenge)
+            .into_option()
+            .ok_or(CryptoError::InvalidProof)?;
+        let response = Scalar::from_canonical_bytes(self.response)
+            .into_option()
+            .ok_or(CryptoError::InvalidProof)?;
+
+        let c1 = ciphertext.c1.decompress()
+            .ok_or(CryptoError::InvalidCiphertext)?;
+        let c2 = ciphertext.c2.decompress()
+            .ok_or(CryptoError::InvalidCiphertext)?;
+        let pubkey_point = pubkey.0.decompress()
+            .ok_or(CryptoError::InvalidPublicKey)?;
+
+        // Recompute R1 = s*G - c*C1
+        let r1_computed = response * get_g() - challenge * c1;
+
+        // Expected C2 for amount: m*G + r*P
+        // R2 = s*P - c*(C2 - m*G) = s*P - c*r*P = (s - c*r)*P
+        // But s = k + c*r, so R2 = k*P
+        let amount_point = Scalar::from(amount) * get_g();
+        let r2_computed = response * pubkey_point - challenge * (c2 - amount_point);
+
+        // Verify challenge
+        let mut transcript = Transcript::new(POLYGUARD_PROOF_DOMAIN);
+        transcript.append_message(b"deposit_proof", b"v1");
+        transcript.append_message(b"pubkey", pubkey.0.as_bytes());
+        transcript.append_u64(b"amount", amount);
+        transcript.append_message(b"C1", ciphertext.c1.as_bytes());
+        transcript.append_message(b"C2", ciphertext.c2.as_bytes());
+        transcript.append_message(b"R1", r1_computed.compress().as_bytes());
+        transcript.append_message(b"R2", r2_computed.compress().as_bytes());
+
+        let mut expected_bytes = [0u8; 64];
+        transcript.challenge_bytes(b"challenge", &mut expected_bytes);
+        let expected_challenge = Scalar::from_bytes_mod_order_wide(&expected_bytes);
+
+        Ok(constant_time_eq::constant_time_eq(
+            challenge.as_bytes(),
+            expected_challenge.as_bytes(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper to create opening with deterministic blinding
+    fn test_opening(value: u64, blinding_seed: u64) -> PedersenOpening {
+        PedersenOpening::new(value, Scalar::from(blinding_seed))
+    }
+
+    #[test]
+    fn test_compact_range_proof() {
+        let value = 12345u64;
+        let opening = test_opening(value, 42);
+
+        let proof = CompactRangeProof::prove(value, &opening).unwrap();
+        assert!(proof.verify().unwrap());
+    }
+
+    #[test]
+    fn test_balance_proof_sufficient() {
+        let balance = 1000u64;
+        let amount = 500u64;
+        let opening = test_opening(balance, 111);
+        let commitment = opening.to_commitment();
+
