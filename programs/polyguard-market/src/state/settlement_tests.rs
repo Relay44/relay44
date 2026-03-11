@@ -301,4 +301,3 @@ mod tests {
         assert_eq!(creator_share, 800);
     }
 }
-
