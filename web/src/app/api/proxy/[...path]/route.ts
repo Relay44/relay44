@@ -116,4 +116,3 @@ export { proxyRequest as POST };
 export { proxyRequest as PATCH };
 export { proxyRequest as PUT };
 export { proxyRequest as DELETE };
-
