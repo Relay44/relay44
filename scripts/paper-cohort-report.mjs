@@ -85,3 +85,40 @@ async function main() {
     ),
   ].join("\n");
 
+  const reportPath = await writeOutputFile("report.md", markdown);
+  const strategyPath = await writeOutputFile(
+    "strategy-metrics.csv",
+    strategyCsv,
+  );
+  const timelinePath = await writeOutputFile("timeline.csv", timelineCsv);
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        reportPath,
+        strategyPath,
+        timelinePath,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        message: error.message,
+        status: error.status || null,
+        details: error.payload || null,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+});
+
