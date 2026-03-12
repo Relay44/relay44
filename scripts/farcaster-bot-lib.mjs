@@ -149,3 +149,62 @@ export function composeMovementCast(market, changePercent, direction) {
     text: `${market.question}\n\nYES price moved ${direction} ${Math.abs(changePercent)}% (now ${yes}%)\n24h volume: $${vol.toLocaleString()}`,
     embedUrl: marketUrl(market.id),
   };
+}
+
+// ── Tech posts (rotating) ───────────────────────────────────────────────────
+
+export const TECH_POSTS = [
+  `relay44 is a Web 4.0 prediction market — where autonomous agents trade alongside humans on Base.\n\nPowered by on-chain settlement, real-time oracles, and agentic infrastructure.`,
+  `What is x402?\n\nIt's a machine-to-machine payment protocol. On relay44, agents pay for API calls with crypto — no API keys, no subscriptions. Just sign and send.\n\nThe internet of value, one request at a time.`,
+  `relay44 supports MCP (Model Context Protocol) — so any AI agent can discover our markets, read orderbooks, and place trades through a standardized interface.\n\nPlug in and trade.`,
+  `On relay44, agents don't just read markets — they create them.\n\nOur agentic pipeline lets autonomous systems propose questions, set parameters, and bootstrap liquidity. Markets made by machines, for everyone.`,
+  `Why Base?\n\nLow fees, fast finality, and EVM compatibility. relay44 settles every trade on Base L2 — giving you on-chain transparency without the gas pain.`,
+  `relay44 uses SIWE (Sign-In With Ethereum) for authentication.\n\nNo passwords. No emails. Just your wallet. One signature and you're in.`,
+  `Every market on relay44 has a live orderbook — not AMM curves.\n\nReal bids, real asks, real price discovery. Central limit order book, fully on-chain settlement.`,
+  `relay44 exposes a full REST API for programmatic trading.\n\nFetch markets, place orders, check positions — all with your wallet signature. Build your own trading bot in minutes.`,
+  `What makes relay44 "agentic"?\n\nAI agents can autonomously discover markets via MCP, analyze probabilities, place trades via API, and pay with x402 — no human in the loop required.`,
+  `relay44 runs on Farcaster Frames.\n\nTrade prediction markets directly inside Warpcast — no app switch needed. See odds, place bets, and track positions without leaving your feed.`,
+  `Resolution on relay44 is oracle-powered.\n\nWhen a market's condition is met, oracles verify the outcome and trigger on-chain settlement. Transparent, trustless, automatic.`,
+  `relay44 paper trading lets you test strategies with zero risk.\n\nSame markets, same orderbook mechanics — but with virtual funds. Perfect for new traders and agent developers.`,
+  `The relay44 Web4 agent card lets any AI discover what our platform can do.\n\nIt's a machine-readable capability manifest — agents read it, understand the API, and start trading autonomously.`,
+  `relay44 is built for composability.\n\nMarkets, agents, payments, and identity — all modular, all interoperable. Plug your agent into our stack or build your own on top.`,
+  `On relay44, your positions are yours.\n\nEvery trade settles on Base. Your wallet holds your shares. No custodial risk, no withdrawal delays. DeFi-native prediction markets.`,
+];
+
+export const TECH_POST_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+export function getNextTechPost(lastIndex) {
+  const nextIndex = (lastIndex + 1) % TECH_POSTS.length;
+  return { text: TECH_POSTS[nextIndex], index: nextIndex };
+}
+
+// ── State management (filesystem) ───────────────────────────────────────────
+
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+
+const STATE_PATH = process.env.FARCASTER_BOT_STATE_PATH || '/var/data/farcaster-bot/state.json';
+
+export function loadState() {
+  try {
+    return JSON.parse(readFileSync(STATE_PATH, 'utf-8'));
+  } catch {
+    return {
+      lastTickAt: null,
+      knownMarketIds: [],
+      lastPrices: {},
+      postedResolutions: [],
+      cooldowns: {},
+    };
+  }
+}
+
+export function saveState(state) {
+  try {
+    mkdirSync(dirname(STATE_PATH), { recursive: true });
+  } catch {
+    // ignore
+  }
+  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+}
+
