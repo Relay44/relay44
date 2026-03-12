@@ -89,3 +89,39 @@ pub struct PrivateSettlement {
     /// Buy order
     pub buy_order: Pubkey,
 
+    /// Sell order
+    pub sell_order: Pubkey,
+
+    /// Market
+    pub market: Pubkey,
+
+    /// MXE computation result
+    pub mxe_result: [u8; 256],
+
+    /// Settlement proof
+    pub settlement_proof: [u8; 128],
+
+    /// Encrypted fill quantity
+    pub encrypted_fill_quantity: [u8; 64],
+
+    /// Encrypted fill price
+    pub encrypted_fill_price: [u8; 64],
+
+    /// Settlement status
+    pub status: u8,
+
+    /// Bump seed
+    pub bump: u8,
+
+    /// Settlement timestamp
+    pub settled_at: i64,
+}
+
+impl PrivateSettlement {
+    pub const SEED_PREFIX: &'static [u8] = b"private_settlement";
+
+    pub const STATUS_PENDING: u8 = 0;
+    pub const STATUS_COMPLETED: u8 = 1;
+    pub const STATUS_FAILED: u8 = 2;
+}
+
