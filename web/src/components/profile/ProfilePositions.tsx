@@ -123,4 +123,3 @@ export function ProfilePositions({ wallet }: ProfilePositionsProps) {
     </Card>
   );
 }
-
