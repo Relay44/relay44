@@ -148,3 +148,63 @@ async function main() {
     } catch (err) {
       results.push({ ok: false, type: cast.type, marketId: cast.marketId, error: err.message });
     }
+  }
+
+  // ── Update state ──────────────────────────────────────────────────────────
+  const updatedPrices = {};
+  for (const market of activeMarkets) {
+    const yesPrice = market.outcomes?.[0]?.probability ?? market.yes_price ?? null;
+    if (yesPrice != null) {
+      updatedPrices[market.id] = yesPrice;
+    }
+  }
+
+  // Clean old cooldowns (older than 24h)
+  const cleanedCooldowns = {};
+  for (const [id, ts] of Object.entries(cooldowns)) {
+    if (now - ts < 24 * 60 * 60 * 1000) {
+      cleanedCooldowns[id] = ts;
+    }
+  }
+
+  saveState({
+    lastTickAt: new Date().toISOString(),
+    knownMarketIds: activeMarkets.map((m) => m.id),
+    lastPrices: updatedPrices,
+    postedResolutions: [...postedResolutions].slice(-500),
+    cooldowns: cleanedCooldowns,
+    lastTechPostAt: state._nextTechPostIndex != null ? new Date().toISOString() : (state.lastTechPostAt || null),
+    techPostIndex: state._nextTechPostIndex ?? (state.techPostIndex ?? -1),
+  });
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        activeMarkets: activeMarkets.length,
+        resolvedMarkets: resolvedMarkets.length,
+        castsAttempted: casts.length,
+        results,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        message: error.message,
+        status: error.status || null,
+        details: error.payload || null,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+});
+
