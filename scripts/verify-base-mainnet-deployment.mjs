@@ -143,3 +143,62 @@ async function main() {
     if (checks.some((entry) => !entry)) {
       failures.push(`pauser wallet missing PAUSER_ROLE on one or more contracts: ${address}`);
     }
+  }
+
+  for (const address of expectedCreators) {
+    const allowed = await publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [MARKET_CREATOR_ROLE, address] });
+    if (!allowed) {
+      failures.push(`market creator wallet missing MARKET_CREATOR_ROLE: ${address}`);
+    }
+  }
+
+  for (const address of expectedResolvers) {
+    const allowed = await publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [RESOLVER_ROLE, address] });
+    if (!allowed) {
+      failures.push(`resolver wallet missing RESOLVER_ROLE: ${address}`);
+    }
+  }
+
+  const summary = {
+    ok: failures.length === 0,
+    network: production.name,
+    chainId: production.chainId,
+    contracts,
+    bytecode: {
+      marketCore: marketCoreCode !== '0x',
+      orderBook: orderBookCode !== '0x',
+      collateralVault: collateralVaultCode !== '0x',
+      agentRuntime: agentRuntimeCode !== '0x',
+      collateralToken: usdcCode !== '0x',
+    },
+    wiring: {
+      orderBookMarketCore: wiredMarketCore,
+      orderBookCollateralVault: wiredVault,
+      collateralVaultToken: wiredCollateral,
+      agentRuntimeOrderBook: wiredOrderBook,
+      agentRuntimeIdentityRegistry: wiredIdentityRegistry,
+      orderBookRuntimeRole,
+      vaultOperatorRole,
+    },
+    runtime: {
+      agentCount: agentCount.toString(),
+    },
+    collateralToken: {
+      symbol: tokenSymbol,
+      decimals: Number(tokenDecimals),
+    },
+    expectedAdmins: adminChecks,
+    failures,
+  };
+
+  console.log(JSON.stringify(summary, null, 2));
+  if (failures.length > 0) {
+    process.exit(1);
+  }
+}
+
+main().catch((error) => {
+  console.error(JSON.stringify({ ok: false, message: error instanceof Error ? error.message : String(error) }, null, 2));
+  process.exit(1);
+});
+
