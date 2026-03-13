@@ -203,3 +203,92 @@ export class TradingAgent {
         value: BigInt(prepared.value),
       });
 
+      const receipt = await this.options.publicClient.waitForTransactionReceipt({ hash: txHash });
+      const [event] = parseEventLogs({
+        abi: ORDER_PLACED_EVENT,
+        eventName: 'OrderPlaced',
+        logs: receipt.logs,
+      });
+
+      this.tradesCount += 1n;
+      this.positionTracker.addPosition({
+        marketId: order.marketId,
+        outcome: order.outcome,
+        quantity: order.quantity,
+        avgEntryPriceBps: order.priceBps,
+        openedAt: Date.now(),
+      });
+
+      return {
+        success: true,
+        txHash,
+        orderId: event?.args.orderId,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async cancelOrder(orderId: bigint): Promise<Hex> {
+    const account = this.requireAccount();
+    const prepared = await this.callWriteApi<PreparedEvmWriteTx>('/evm/write/orders/cancel', {
+      from: account,
+      orderId: Number(orderId),
+    });
+    const txHash = await this.options.walletClient.sendTransaction({
+      account,
+      chain: this.options.walletClient.chain,
+      to: prepared.to,
+      data: prepared.data,
+      value: BigInt(prepared.value),
+    });
+    await this.options.publicClient.waitForTransactionReceipt({ hash: txHash });
+    return txHash;
+  }
+
+  async claim(marketId: bigint): Promise<Hex> {
+    const account = this.requireAccount();
+    const prepared = await this.callWriteApi<PreparedEvmWriteTx>('/evm/write/positions/claim', {
+      from: account,
+      marketId: Number(marketId),
+    });
+    const txHash = await this.options.walletClient.sendTransaction({
+      account,
+      chain: this.options.walletClient.chain,
+      to: prepared.to,
+      data: prepared.data,
+      value: BigInt(prepared.value),
+    });
+    await this.options.publicClient.waitForTransactionReceipt({ hash: txHash });
+    return txHash;
+  }
+
+  async claimFor(owner: Address, marketId: bigint): Promise<Hex> {
+    const account = this.requireAccount();
+    const prepared = await this.callWriteApi<PreparedEvmWriteTx>('/evm/write/positions/claim-for', {
+      from: account,
+      user: owner,
+      marketId: Number(marketId),
+    });
+    const txHash = await this.options.walletClient.sendTransaction({
+      account,
+      chain: this.options.walletClient.chain,
+      to: prepared.to,
+      data: prepared.data,
+      value: BigInt(prepared.value),
+    });
+    await this.options.publicClient.waitForTransactionReceipt({ hash: txHash });
+    return txHash;
+  }
+
+  async fetchMarketData(marketId: bigint): Promise<MarketData> {
+    const [, , , , resolved, outcome] = await this.options.publicClient.readContract({
+      address: this.options.marketCoreAddress,
+      abi: MARKET_CORE_ABI,
+      functionName: 'markets',
+      args: [marketId],
+    });
+
