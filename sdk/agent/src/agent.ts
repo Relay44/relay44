@@ -292,3 +292,93 @@ export class TradingAgent {
       args: [marketId],
     });
 
+    return {
+      marketId,
+      yesPriceBps: 5000,
+      noPriceBps: 5000,
+      matchedVolume: 0n,
+      lastUpdate: Date.now(),
+      resolved,
+      outcome: resolved ? (outcome ? Outcome.Yes : Outcome.No) : undefined,
+    };
+  }
+
+  async start(markets: bigint[], pollIntervalMs = 5_000): Promise<void> {
+    if (!this.strategy) {
+      throw new Error('No strategy configured');
+    }
+    if (this.status === AgentStatus.Active) return;
+
+    this.status = AgentStatus.Active;
+    this.pollHandle = setInterval(async () => {
+      if (this.status !== AgentStatus.Active || !this.strategy) return;
+
+      for (const marketId of markets) {
+        try {
+          const marketData = await this.fetchMarketData(marketId);
+          const signal = this.strategy.analyze(marketData);
+          if (!signal) continue;
+
+          const order = this.strategy.toOrder(signal, this.options.config.availableBalance);
+          if (!order) continue;
+          await this.placeOrder(order);
+        } catch (error) {
+          console.error('agent loop error', marketId.toString(), error);
+        }
+      }
+    }, pollIntervalMs);
+  }
+
+  stop(): void {
+    this.status = AgentStatus.Stopped;
+    if (this.pollHandle) {
+      clearInterval(this.pollHandle);
+      this.pollHandle = null;
+    }
+  }
+
+  async getMetrics(): Promise<AgentMetrics> {
+    const avgPnlPerTrade = this.tradesCount > 0n
+      ? this.options.config.totalPnl / this.tradesCount
+      : 0n;
+    return {
+      totalPnl: this.options.config.totalPnl,
+      winRate: 0,
+      tradesCount: this.tradesCount,
+      avgPnlPerTrade,
+      maxDrawdownBps: this.options.config.riskParams.maxDrawdownBps,
+    };
+  }
+
+  private requireAccount(): Address {
+    const account = this.options.walletClient.account?.address;
+    if (!account) {
+      throw new Error('walletClient account is required');
+    }
+    return account;
+  }
+
+  private async callWriteApi<T>(path: string, payload: unknown): Promise<T> {
+    const fetchImpl = (globalThis as unknown as { fetch?: (url: string, init: unknown) => Promise<{ ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<T> }> }).fetch;
+    if (!fetchImpl) {
+      throw new Error('Global fetch is required for SDK write API calls');
+    }
+
+    const response = await fetchImpl(`${this.writeApiUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Write API request failed (${response.status}): ${text}`);
+    }
+    return response.json();
+  }
+}
+
+export function createAgent(options: TradingAgentOptions): TradingAgent {
+  return new TradingAgent(options);
+}
+
