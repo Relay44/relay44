@@ -85,3 +85,21 @@ async function main() {
       2,
     ),
   );
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        message: error.message,
+        status: error.status || null,
+        details: error.payload || null,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+});
+
