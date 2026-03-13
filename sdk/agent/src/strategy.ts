@@ -97,3 +97,44 @@ export class CompositeStrategy implements Strategy {
     }
     if (weightedSignals.length === 0) return null;
 
+    let yesScore = 0;
+    let noScore = 0;
+    for (const { signal, weight } of weightedSignals) {
+      if (signal.direction === 'buy_yes') yesScore += signal.confidence * weight;
+      else noScore += signal.confidence * weight;
+    }
+
+    const totalWeight = this.strategies.reduce((sum, entry) => sum + entry.weight, 0) || 1;
+    const normalizedYes = yesScore / totalWeight;
+    const normalizedNo = noScore / totalWeight;
+    if (Math.max(normalizedYes, normalizedNo) < 0.3) return null;
+
+    const direction = normalizedYes >= normalizedNo ? 'buy_yes' : 'buy_no';
+    const averageTarget = Math.round(
+      weightedSignals.reduce((sum, item) => sum + item.signal.targetPriceBps * item.weight, 0) /
+      weightedSignals.reduce((sum, item) => sum + item.weight, 0)
+    );
+
+    return {
+      marketId: data.marketId,
+      direction,
+      confidence: Math.max(normalizedYes, normalizedNo),
+      targetPriceBps: averageTarget,
+      reason: `${weightedSignals.length} strategy consensus`,
+    };
+  }
+
+  toOrder(signal: Signal, bankroll: bigint): OrderParams | null {
+    const quantity = (bankroll * BigInt(Math.floor(signal.confidence * 1000))) / 10000n;
+    if (quantity <= 0n) return null;
+
+    return {
+      marketId: signal.marketId,
+      outcome: signal.direction === 'buy_yes' ? Outcome.Yes : Outcome.No,
+      priceBps: signal.targetPriceBps,
+      quantity,
+      orderType: OrderType.Limit,
+    };
+  }
+}
+
