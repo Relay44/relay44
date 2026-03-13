@@ -107,3 +107,44 @@ else
   done < <(git ls-files)
 fi
 
+if [[ ${#paths[@]} -eq 0 ]]; then
+  echo "Internal asset boundary check passed."
+  exit 0
+fi
+
+violations=()
+for p in "${paths[@]}"; do
+  if [[ ! -e "$p" ]]; then
+    continue
+  fi
+
+  for prefix in "${BLOCKED_PREFIXES[@]}"; do
+    if [[ "$p" == "$prefix"* ]]; then
+      violations+=("$p :: blocked private docs path")
+      continue 2
+    fi
+  done
+
+  for file in "${BLOCKED_FILES[@]}"; do
+    if [[ "$p" == "$file" ]]; then
+      violations+=("$p :: blocked private docs file")
+      continue 2
+    fi
+  done
+
+  if [[ "$p" == edge/* ]]; then
+    if ! is_allowed_edge_path "$p"; then
+      violations+=("$p :: closed-edge runtime code must stay private")
+      continue
+    fi
+  fi
+done
+
+if [[ ${#violations[@]} -gt 0 ]]; then
+  echo "Boundary check failed: private edge/internal assets detected in open repository."
+  printf ' - %s\n' "${violations[@]}"
+  exit 1
+fi
+
+echo "Internal asset boundary check passed."
+
