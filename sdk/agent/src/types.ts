@@ -60,3 +60,29 @@ export interface Signal {
   targetPriceBps: number;
   reason?: string;
 }
+
+export interface MarketData {
+  marketId: bigint;
+  yesPriceBps: number;
+  noPriceBps: number;
+  matchedVolume: bigint;
+  lastUpdate: number;
+  resolved: boolean;
+  outcome?: Outcome;
+}
+
+export interface TradeResult {
+  success: boolean;
+  txHash?: string;
+  orderId?: bigint;
+  error?: string;
+}
+
+export interface AgentMetrics {
+  totalPnl: bigint;
+  winRate: number;
+  tradesCount: bigint;
+  avgPnlPerTrade: bigint;
+  maxDrawdownBps: number;
+}
+
