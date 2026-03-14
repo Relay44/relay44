@@ -333,4 +333,3 @@ export function MiniAppOrderForm({ market, onSuccess }: MiniAppOrderFormProps) {
     </Card>
   );
 }
-
