@@ -203,3 +203,4 @@ app.listen(PORT, HOST, () => {
   // eslint-disable-next-line no-console
   console.log(`xmtp bridge listening on http://${HOST}:${PORT}`);
 });
+
