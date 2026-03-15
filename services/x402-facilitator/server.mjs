@@ -114,3 +114,47 @@ app.get('/health', async (_req, res) => {
       facilitatorAddress: account.address,
     });
   }
+});
+
+app.get('/supported', requireSharedSecret, async (_req, res) => {
+  try {
+    res.json(jsonSafe(facilitator.getSupported()));
+  } catch (error) {
+    res.status(500).json({ error: normalizeError(error) });
+  }
+});
+
+app.post('/verify', requireSharedSecret, async (req, res) => {
+  try {
+    const { paymentPayload, paymentRequirements } = req.body || {};
+    const result = await facilitator.verify(paymentPayload, paymentRequirements);
+    res.status(result.isValid ? 200 : 402).json(jsonSafe(result));
+  } catch (error) {
+    res.status(400).json({
+      isValid: false,
+      invalidReason: 'invalid_request',
+      invalidMessage: normalizeError(error),
+    });
+  }
+});
+
+app.post('/settle', requireSharedSecret, async (req, res) => {
+  try {
+    const { paymentPayload, paymentRequirements } = req.body || {};
+    const result = await facilitator.settle(paymentPayload, paymentRequirements);
+    res.status(result.success ? 200 : 402).json(jsonSafe(result));
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      errorReason: 'invalid_request',
+      errorMessage: normalizeError(error),
+      transaction: '',
+      network: NETWORK,
+    });
+  }
+});
+
+app.listen(PORT, HOST, () => {
+  console.log(`x402 facilitator listening on http://${HOST}:${PORT}`);
+});
+
