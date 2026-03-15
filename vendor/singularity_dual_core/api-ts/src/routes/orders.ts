@@ -596,3 +596,142 @@ ordersRouter.post(
       if (message.toLowerCase().includes('synthetic ledger writes disabled')) {
         return c.json({ error: message, source: 'core', chain: 'solana' }, 503);
       }
+      if (message.toLowerCase().includes('base core order execution adapter')) {
+        return c.json({ error: message, source: 'core', chain: 'base' }, 503);
+      }
+      if (message.toLowerCase().includes('unsupported provider/source')) {
+        return c.json({ error: message }, 400);
+      }
+      if (
+        payload.provider === 'limitless' ||
+        limitlessMarketService.isLocalMarketId(payload.marketId) ||
+        message.toLowerCase().includes('limitless')
+      ) {
+        const parsed = parseLimitlessError(err);
+        return c.json(parsed.payload, parsed.status);
+      }
+      if (
+        payload.provider === 'pnp' ||
+        pnpMarketService.isLocalMarketId(payload.marketId) ||
+        message.toLowerCase().includes('pnp')
+      ) {
+        const parsed = parsePnpError(err);
+        return c.json(parsed.payload, parsed.status);
+      }
+      const parsed = parseJupiterError(err);
+      return c.json(parsed.payload, parsed.status);
+    }
+  }
+);
+
+ordersRouter.post(
+  '/agent',
+  verifyWalletSignatureStrict,
+  requireFeatureEnabled('ORDERS_WRITE_ENABLED', { feature: 'orders.write' }),
+  requireStakeEligible('orders.place_agent'),
+  requireIdempotencyKey,
+  walletActionRateLimit('orders.place_agent'),
+  zValidator('json', AgentPlaceOrderSchema),
+  async (c) => {
+    const walletAddress = getAuthContext(c)?.walletAddress?.trim();
+    if (!walletAddress) return c.json({ error: 'Missing signed wallet auth' }, 401);
+    const idempotencyKey = getIdempotencyKey(c);
+    if (!idempotencyKey) return c.json({ error: 'Missing idempotency key' }, 400);
+
+    const existing = await executionService.getExecutionByIdempotencyKey(idempotencyKey);
+    if (existing?.response) {
+      return c.json(existing.response, existing.status === 'confirmed' ? 201 : 409);
+    }
+
+    const payload = c.req.valid('json');
+    const agent = agentService.getById(payload.agentId);
+    if (!agent) return c.json({ error: 'Agent not found' }, 404);
+    if (!agent.isActive) return c.json({ error: 'Agent is inactive' }, 403);
+    if (agent.walletAddress !== walletAddress) {
+      return c.json({ error: 'Agent wallet must match signed wallet' }, 403);
+    }
+
+    const maxOrderQuantity = agent.policy?.maxOrderQuantity ?? 100_000;
+    if (payload.quantity > maxOrderQuantity) {
+      return c.json({ error: 'Order quantity exceeds agent policy limit' }, 403);
+    }
+
+    const effectivePrice = payload.price ?? 0.5;
+    const orderNotional = Math.round(payload.quantity * effectivePrice * 1_000_000);
+    const maxOrderNotional = agent.policy?.maxOrderNotional ?? 250_000_000;
+    if (orderNotional > maxOrderNotional) {
+      return c.json({ error: 'Order notional exceeds agent policy limit' }, 403);
+    }
+
+    const execution = await executionService.begin({
+      idempotencyKey,
+      walletAddress,
+      action: 'orders.place_agent',
+      resourceId: payload.marketId,
+      request: payload as unknown as Record<string, unknown>,
+    });
+
+    try {
+      const preferredProvider = payload.provider || payload.source || 'ledger';
+      const coreTarget = await resolveCoreRoutingTarget({
+        marketId: payload.marketId,
+        source: payload.source,
+        provider: payload.provider,
+        chain: payload.chain,
+      });
+      const isLimitlessMarket = limitlessMarketService.isLocalMarketId(payload.marketId);
+      const isPnpMarket = pnpMarketService.isLocalMarketId(payload.marketId);
+      const isJupiterMarket = jupiterPredictionService.isLocalMarketId(payload.marketId);
+      const shouldRouteLimitless = preferredProvider === 'limitless' || isLimitlessMarket;
+      const shouldRoutePnp = preferredProvider === 'pnp' || isPnpMarket;
+      const shouldRouteJupiter = preferredProvider === 'jupiter_prediction' || isJupiterMarket;
+      const shouldRouteCoreSolana =
+        coreTarget.isCore &&
+        coreTarget.chain === 'solana' &&
+        !shouldRouteLimitless &&
+        !shouldRoutePnp &&
+        !shouldRouteJupiter;
+      if (coreTarget.isCore && coreTarget.chain === 'base' && !shouldRouteLimitless) {
+        throw new Error('Base core order execution adapter is not configured');
+      }
+      if (
+        shouldRouteCoreSolana &&
+        requireSignedTxInProduction &&
+        !payload.txSignature
+      ) {
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'failed',
+          error: 'txSignature is required in production',
+        });
+        return c.json({ error: 'txSignature is required in production' }, 400);
+      }
+
+      if (shouldRouteLimitless) {
+        if (!isLimitlessMarket) {
+          throw new Error('Limitless order requires a Limitless market id');
+        }
+        const blocked = requireProviderAllowed(c, 'limitless', 'trade_open');
+        if (blocked) {
+          await executionService.complete({
+            executionId: execution.id,
+            status: 'failed',
+            error: 'Limitless trade_open blocked by region policy',
+          });
+          return blocked;
+        }
+        if ((payload.executionMode || 'server_custody') !== 'server_custody') {
+          throw new Error('Agent Limitless orders require executionMode=server_custody');
+        }
+
+        const created = await limitlessExecutionService.placeAgentOrder({
+          ownerWallet: walletAddress,
+          agentId: payload.agentId,
+          marketId: payload.marketId,
+          side: payload.side,
+          outcome: payload.outcome,
+          orderType: payload.orderType,
+          quantity: payload.quantity,
+          price: payload.price,
+        });
+
