@@ -878,3 +878,149 @@ ordersRouter.post(
           positionPubkey,
         });
 
+        const upstreamOrderPubkey = created.response.order?.orderPubkey || null;
+        const receipt = await receiptService.create({
+          agent,
+          kind: 'trade_executed',
+          summary: `agent placed ${payload.side} Jupiter order on ${payload.marketId}`,
+          payload: {
+            marketId: payload.marketId,
+            side: payload.side,
+            outcome: payload.outcome,
+            quantity: payload.quantity,
+            price: payload.price ?? null,
+            orderType: payload.orderType,
+            orderNotional,
+            orderId: upstreamOrderPubkey,
+            provider: 'jupiter_prediction',
+            transaction: created.response.transaction ?? null,
+            txMeta: created.response.txMeta ?? null,
+            executionId: execution.id,
+            txSignature: null,
+          },
+          idempotencyKey,
+        });
+
+        const response = {
+          orderId: upstreamOrderPubkey
+            ? jupiterPredictionService.toLocalOrderId(upstreamOrderPubkey)
+            : `jup_pending_${Date.now().toString(36)}`,
+          status: 'pending_signature' as const,
+          provider: 'jupiter_prediction' as const,
+          marketId: created.localMarketId,
+          upstreamMarketId: created.upstreamMarketId,
+          transaction: created.response.transaction ?? undefined,
+          txMeta: created.response.txMeta ?? undefined,
+          order: created.response.order ?? undefined,
+          externalOrderId: created.response.externalOrderId ?? undefined,
+          receipt,
+          executionId: execution.id,
+          idempotencyKey,
+        };
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'confirmed',
+          response: response as unknown as Record<string, unknown>,
+        });
+        return c.json(response, 201);
+      }
+
+      if (!shouldRouteCoreSolana) {
+        throw new Error('Unsupported provider/source for order placement');
+      }
+      if (!isSyntheticLedgerWriteEnabled()) {
+        throw new Error(syntheticLedgerWriteBlockReason('orders.place_agent'));
+      }
+
+      const ledgerPayload = {
+        ...payload,
+        marketId: coreTarget.marketId,
+      };
+      const result = await tradingLedgerService.placeOrder(walletAddress, ledgerPayload, payload.txSignature);
+      const receipt = await receiptService.create({
+        agent,
+        kind: 'trade_executed',
+        summary: `agent placed ${payload.side} order on ${coreTarget.responseMarketId}`,
+        payload: {
+          marketId: coreTarget.responseMarketId,
+          side: payload.side,
+          outcome: payload.outcome,
+          quantity: payload.quantity,
+          price: payload.price ?? null,
+          orderType: payload.orderType,
+          orderNotional,
+          orderId: result.orderId,
+          executionId: execution.id,
+          txSignature: result.txSignature ?? null,
+        },
+        idempotencyKey,
+      });
+
+      const response = {
+        ...result,
+        source: 'core' as const,
+        chain: 'solana' as const,
+        provider: 'core_solana' as const,
+        marketId: coreTarget.responseMarketId,
+        receipt,
+        executionId: execution.id,
+        idempotencyKey,
+      };
+      await executionService.complete({
+        executionId: execution.id,
+        status: 'confirmed',
+        txSignature: result.txSignature,
+        response: response as unknown as Record<string, unknown>,
+      });
+      return c.json(response, 201);
+    } catch (err) {
+      const message = getErrorMessage(err, 'Failed to place order');
+      await executionService.complete({
+        executionId: execution.id,
+        status: 'failed',
+        error: message,
+      });
+      if (message.toLowerCase().includes('synthetic ledger writes disabled')) {
+        return c.json({ error: message, source: 'core', chain: 'solana' }, 503);
+      }
+      if (message.toLowerCase().includes('base core order execution adapter')) {
+        return c.json({ error: message, source: 'core', chain: 'base' }, 503);
+      }
+      if (message.toLowerCase().includes('unsupported provider/source')) {
+        return c.json({ error: message }, 400);
+      }
+      if (
+        payload.provider === 'limitless' ||
+        limitlessMarketService.isLocalMarketId(payload.marketId) ||
+        message.toLowerCase().includes('limitless')
+      ) {
+        const parsed = parseLimitlessError(err);
+        return c.json(parsed.payload, parsed.status);
+      }
+      if (
+        payload.provider === 'pnp' ||
+        pnpMarketService.isLocalMarketId(payload.marketId) ||
+        message.toLowerCase().includes('pnp')
+      ) {
+        const parsed = parsePnpError(err);
+        return c.json(parsed.payload, parsed.status);
+      }
+      const parsed = parseJupiterError(err);
+      return c.json(parsed.payload, parsed.status);
+    }
+  }
+);
+
+ordersRouter.delete(
+  '/:id',
+  verifyWalletSignatureStrict,
+  requireFeatureEnabled('ORDERS_WRITE_ENABLED', { feature: 'orders.write' }),
+  requireStakeEligible('orders.cancel'),
+  requireIdempotencyKey,
+  walletActionRateLimit('orders.cancel'),
+  async (c) => {
+    const walletAddress = getAuthContext(c)?.walletAddress?.trim();
+    if (!walletAddress) return c.json({ error: 'Missing signed wallet auth' }, 401);
+    const idempotencyKey = getIdempotencyKey(c);
+    if (!idempotencyKey) return c.json({ error: 'Missing idempotency key' }, 400);
+
