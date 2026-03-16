@@ -735,3 +735,146 @@ ordersRouter.post(
           price: payload.price,
         });
 
+        const receipt = await receiptService.create({
+          agent,
+          kind: 'trade_executed',
+          summary: `agent placed ${payload.side} Limitless order on ${payload.marketId}`,
+          payload: {
+            marketId: payload.marketId,
+            side: payload.side,
+            outcome: payload.outcome,
+            quantity: payload.quantity,
+            price: payload.price ?? null,
+            orderType: payload.orderType,
+            orderNotional,
+            orderId: created.orderId,
+            provider: 'limitless',
+            executionMode: created.executionMode,
+            upstreamMarketId: created.upstreamMarketId,
+            externalOrderId: created.externalOrderId,
+            executionId: execution.id,
+          },
+          idempotencyKey,
+        });
+
+        const response = {
+          orderId: created.orderId,
+          status: created.status,
+          provider: 'limitless' as const,
+          marketId: created.marketId,
+          upstreamMarketId: created.upstreamMarketId,
+          externalOrderId: created.externalOrderId,
+          executionMode: created.executionMode,
+          receipt,
+          executionId: execution.id,
+          idempotencyKey,
+        };
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'confirmed',
+          response: response as unknown as Record<string, unknown>,
+        });
+        return c.json(response, 201);
+      }
+
+      if (shouldRoutePnp) {
+        if (!isPnpMarket) {
+          throw new Error('PNP order requires a PNP market id');
+        }
+        const created = await pnpExecutionService.placeOrder({
+          walletAddress,
+          marketId: payload.marketId,
+          side: payload.side,
+          outcome: payload.outcome,
+          quantity: payload.quantity,
+          price: payload.price,
+          executionMode: payload.executionMode || 'user_signed',
+        });
+        const receipt = await receiptService.create({
+          agent,
+          kind: 'trade_executed',
+          summary: `agent placed ${payload.side} PNP order on ${payload.marketId}`,
+          payload: {
+            marketId: payload.marketId,
+            side: payload.side,
+            outcome: payload.outcome,
+            quantity: payload.quantity,
+            price: payload.price ?? null,
+            orderType: payload.orderType,
+            orderNotional,
+            orderId: created.id,
+            provider: 'pnp',
+            executionMode: created.executionMode,
+            marketModel: created.marketModel,
+            upstreamMarketId: created.upstreamMarketId,
+            executionId: execution.id,
+            txSignature: created.txSignature ?? null,
+          },
+          idempotencyKey,
+        });
+
+        const response = {
+          orderId: created.id,
+          status: created.status,
+          provider: 'pnp' as const,
+          marketId: created.marketId,
+          txSignature: created.txSignature,
+          executionMode: created.executionMode,
+          marketModel: created.marketModel,
+          upstreamMarketId: created.upstreamMarketId,
+          receipt,
+          executionId: execution.id,
+          idempotencyKey,
+        };
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'confirmed',
+          txSignature: created.txSignature,
+          response: response as unknown as Record<string, unknown>,
+        });
+        return c.json(response, 201);
+      }
+
+      if (shouldRouteJupiter) {
+        const blocked = requireProviderAllowed(c, 'jupiter_prediction', 'trade_open');
+        if (blocked) {
+          await executionService.complete({
+            executionId: execution.id,
+            status: 'failed',
+            error: 'Jupiter Prediction trade_open blocked by region policy',
+          });
+          return blocked;
+        }
+
+        const upstreamMarketId = jupiterPredictionService.toUpstreamMarketId(payload.marketId);
+        if (!upstreamMarketId) {
+          throw new Error('Invalid Jupiter market id');
+        }
+
+        const isYes = payload.outcome === 'yes';
+        const isBuy = payload.side === 'buy';
+        let positionPubkey: string | undefined;
+        if (!isBuy) {
+          const positions = await jupiterPredictionService.listPositions({
+            ownerPubkey: walletAddress,
+            upstreamMarketId,
+            isYes,
+          });
+          positionPubkey = positions[0]?.positionPubkey;
+          if (!positionPubkey) {
+            throw new Error('No matching Jupiter position found for sell order');
+          }
+        }
+
+        const depositAmountMicro = Math.max(1, Math.round(payload.quantity * effectivePrice * 1_000_000));
+        const contracts = Math.max(1, Math.round(payload.quantity));
+        const created = await jupiterPredictionService.createOrder({
+          ownerPubkey: walletAddress,
+          marketId: upstreamMarketId,
+          isYes,
+          isBuy,
+          contracts: isBuy ? undefined : String(contracts),
+          depositAmount: isBuy ? String(depositAmountMicro) : undefined,
+          positionPubkey,
+        });
+
