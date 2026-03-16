@@ -1024,3 +1024,139 @@ ordersRouter.delete(
     const idempotencyKey = getIdempotencyKey(c);
     if (!idempotencyKey) return c.json({ error: 'Missing idempotency key' }, 400);
 
+    const existing = await executionService.getExecutionByIdempotencyKey(idempotencyKey);
+    if (existing?.response) {
+      return c.json(existing.response, existing.status === 'confirmed' ? 200 : 409);
+    }
+
+    const orderId = c.req.param('id');
+    const txSignatureHeader = c.req.header('x-tx-signature')?.trim();
+    const execution = await executionService.begin({
+      idempotencyKey,
+      walletAddress,
+      action: 'orders.cancel',
+      resourceId: orderId,
+    });
+
+    if (orderId.startsWith('pnpord_')) {
+      await executionService.complete({
+        executionId: execution.id,
+        status: 'failed',
+        error: 'PNP market orders are immediate fills and cannot be cancelled',
+      });
+      return c.json({ error: 'PNP market orders are immediate fills and cannot be cancelled' }, 400);
+    }
+
+    if (isLimitlessLocalOrderId(orderId)) {
+      const blocked = requireProviderAllowed(c, 'limitless', 'trade_close');
+      if (blocked) {
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'failed',
+          error: 'Limitless trade_close blocked by region policy',
+        });
+        return blocked;
+      }
+
+      try {
+        const cancelled = await limitlessExecutionService.cancelOrder(walletAddress, orderId);
+        const response = {
+          ...cancelled,
+          executionId: execution.id,
+          idempotencyKey,
+        };
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'confirmed',
+          response: response as unknown as Record<string, unknown>,
+        });
+        return c.json(response);
+      } catch (err) {
+        const parsed = parseLimitlessError(err);
+        const message = getErrorMessage(err, 'Order cannot be cancelled');
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'failed',
+          error: message,
+        });
+        return c.json(parsed.payload, parsed.status);
+      }
+    }
+
+    if (jupiterPredictionService.isLocalOrderId(orderId)) {
+      const blocked = requireProviderAllowed(c, 'jupiter_prediction', 'trade_close');
+      if (blocked) {
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'failed',
+          error: 'Jupiter Prediction trade_close blocked by region policy',
+        });
+        return blocked;
+      }
+
+      try {
+        const closed = await jupiterPredictionService.closeOrder(orderId, walletAddress);
+        const response = {
+          success: true,
+          provider: 'jupiter_prediction' as const,
+          orderId,
+          orderPubkey: closed.orderPubkey,
+          transaction: closed.response.transaction ?? undefined,
+          blockhash: closed.response.blockhash ?? undefined,
+          latestBlockhash: closed.response.latestBlockhash ?? undefined,
+          lastValidBlockHeight: closed.response.lastValidBlockHeight ?? undefined,
+          executionId: execution.id,
+          idempotencyKey,
+        };
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'confirmed',
+          response: response as unknown as Record<string, unknown>,
+        });
+        return c.json(response);
+      } catch (err) {
+        const parsed = parseJupiterError(err);
+        const message = getErrorMessage(err, 'Order cannot be cancelled');
+        await executionService.complete({
+          executionId: execution.id,
+          status: 'failed',
+          error: message,
+        });
+        return c.json(parsed.payload, parsed.status);
+      }
+    }
+
+    if (requireSignedTxInProduction && !txSignatureHeader) {
+      await executionService.complete({
+        executionId: execution.id,
+        status: 'failed',
+        error: 'x-tx-signature is required in production',
+      });
+      return c.json({ error: 'x-tx-signature is required in production' }, 400);
+    }
+
+    const result = await tradingLedgerService.cancelOrder(walletAddress, orderId, txSignatureHeader);
+    if (!result.success) {
+      await executionService.complete({
+        executionId: execution.id,
+        status: 'failed',
+        error: 'Order cannot be cancelled',
+      });
+      return c.json({ error: 'Order cannot be cancelled' }, 400);
+    }
+
+    const response = {
+      ...result,
+      executionId: execution.id,
+      idempotencyKey,
+    };
+    await executionService.complete({
+      executionId: execution.id,
+      status: 'confirmed',
+      txSignature: result.txSignature,
+      response: response as unknown as Record<string, unknown>,
+    });
+    return c.json(response);
+  }
+);
+
