@@ -64,3 +64,30 @@ contract SingularityOracleCommittee is RoleAuth {
         } else {
             tally.cancelVotes += 1;
         }
+
+        emit VoteCast(marketId, msg.sender, outcomeVote, evidenceHash);
+
+        uint32 maxVotes = _max(tally.yesVotes, tally.noVotes, tally.cancelVotes);
+        if (maxVotes < quorum) return;
+
+        tally.finalized = true;
+
+        if (tally.cancelVotes >= tally.yesVotes && tally.cancelVotes >= tally.noVotes) {
+            marketCore.cancelMarket(marketId);
+            emit VoteFinalized(marketId, 2, oracleSource);
+            return;
+        }
+
+        uint8 outcome = tally.yesVotes >= tally.noVotes ? 0 : 1;
+        marketCore.resolveMarket(marketId, outcome, msg.sender, evidenceHash, oracleSource);
+        emit VoteFinalized(marketId, outcome, oracleSource);
+    }
+
+    function _max(uint32 a, uint32 b, uint32 c) internal pure returns (uint32) {
+        uint32 m = a;
+        if (b > m) m = b;
+        if (c > m) m = c;
+        return m;
+    }
+}
+
