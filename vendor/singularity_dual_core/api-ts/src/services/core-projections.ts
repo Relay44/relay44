@@ -309,3 +309,82 @@ export const coreProjectionService = {
     return mapProjectedMarket(row.payload, row);
   },
 
+  async upsertBaseMarket(marketRef: string, payload: Record<string, unknown>, legacyMarketId?: string | null) {
+    const normalized: CoreProjectedMarket = {
+      id: toNamespacedMarketId('base', marketRef),
+      chain: 'base',
+      marketRef,
+      legacyMarketId: legacyMarketId || null,
+      address: typeof payload.address === 'string' ? payload.address : marketRef,
+      question: typeof payload.question === 'string' ? payload.question : '',
+      description: typeof payload.description === 'string' ? payload.description : '',
+      category: typeof payload.category === 'string' ? payload.category : 'uncategorized',
+      status:
+        typeof payload.status === 'string'
+          ? (payload.status as CoreProjectedMarket['status'])
+          : 'active',
+      yesPrice: Number(payload.yesPrice ?? 0.5),
+      noPrice: Number(payload.noPrice ?? 0.5),
+      yesSupply: Number(payload.yesSupply ?? 0),
+      noSupply: Number(payload.noSupply ?? 0),
+      volume24h: Number(payload.volume24h ?? 0),
+      totalVolume: Number(payload.totalVolume ?? 0),
+      totalCollateral: Number(payload.totalCollateral ?? 0),
+      feeBps: Number(payload.feeBps ?? 50),
+      oracle: typeof payload.oracle === 'string' ? payload.oracle : 'committee',
+      resolutionMode:
+        typeof payload.resolutionMode === 'string'
+          ? (payload.resolutionMode as CoreProjectedMarket['resolutionMode'])
+          : 'committee_manual',
+      collateralMint: typeof payload.collateralMint === 'string' ? payload.collateralMint : 'USDC',
+      yesMint: typeof payload.yesMint === 'string' ? payload.yesMint : `${marketRef}:yes`,
+      noMint: typeof payload.noMint === 'string' ? payload.noMint : `${marketRef}:no`,
+      resolutionDeadline:
+        typeof payload.resolutionDeadline === 'string'
+          ? payload.resolutionDeadline
+          : new Date(Date.now() + 86_400_000).toISOString(),
+      tradingEnd:
+        typeof payload.tradingEnd === 'string'
+          ? payload.tradingEnd
+          : new Date(Date.now() + 43_200_000).toISOString(),
+      createdAt: typeof payload.createdAt === 'string' ? payload.createdAt : new Date().toISOString(),
+      resolvedOutcome:
+        payload.resolvedOutcome === 'yes' || payload.resolvedOutcome === 'no'
+          ? (payload.resolvedOutcome as CoreProjectedMarket['resolvedOutcome'])
+          : undefined,
+      resolvedAt: typeof payload.resolvedAt === 'string' ? payload.resolvedAt : undefined,
+      resolutionTx: typeof payload.resolutionTx === 'string' ? payload.resolutionTx : undefined,
+      evidenceHash: typeof payload.evidenceHash === 'string' ? payload.evidenceHash : undefined,
+      oracleSource: typeof payload.oracleSource === 'string' ? payload.oracleSource : undefined,
+      resolverIdentity: typeof payload.resolverIdentity === 'string' ? payload.resolverIdentity : undefined,
+      source: 'core',
+      provider: 'core_base',
+    };
+
+    if (!usePostgres) {
+      baseProjectionMemory.set(marketRef, normalized);
+      return normalized;
+    }
+
+    await ensureInit();
+    await getPool().query(
+      `
+      INSERT INTO keiro_core_market_projection (chain, market_ref, legacy_market_id, payload, updated_at)
+      VALUES ('base', $1, $2, $3::jsonb, now())
+      ON CONFLICT (chain, market_ref)
+      DO UPDATE SET
+        legacy_market_id = EXCLUDED.legacy_market_id,
+        payload = EXCLUDED.payload,
+        updated_at = now()
+      `,
+      [marketRef, legacyMarketId || null, JSON.stringify(payload)]
+    );
+
+    return normalized;
+  },
+
+  async mapLegacyMarket(legacyMarketId: string, solMarketId: string): Promise<void> {
+    if (!legacyMarketId || !solMarketId) return;
+
+    legacyMarketMapMemory.set(legacyMarketId, solMarketId);
+
