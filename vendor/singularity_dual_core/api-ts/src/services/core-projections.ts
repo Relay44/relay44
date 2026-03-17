@@ -388,3 +388,79 @@ export const coreProjectionService = {
 
     legacyMarketMapMemory.set(legacyMarketId, solMarketId);
 
+    if (!usePostgres) return;
+    await ensureInit();
+
+    await getPool().query(
+      `
+      INSERT INTO keiro_legacy_market_map (legacy_market_id, sol_market_id, created_at, updated_at)
+      VALUES ($1, $2, now(), now())
+      ON CONFLICT (legacy_market_id)
+      DO UPDATE SET sol_market_id = EXCLUDED.sol_market_id, updated_at = now()
+      `,
+      [legacyMarketId, solMarketId]
+    );
+  },
+
+  async resolveLegacyMarket(legacyMarketId: string): Promise<string | null> {
+    if (!legacyMarketId) return null;
+
+    const memory = legacyMarketMapMemory.get(legacyMarketId);
+    if (memory) return memory;
+
+    if (!usePostgres) return null;
+    await ensureInit();
+
+    const result = await getPool().query<{ sol_market_id: string }>(
+      `SELECT sol_market_id FROM keiro_legacy_market_map WHERE legacy_market_id = $1 LIMIT 1`,
+      [legacyMarketId]
+    );
+
+    return result.rows[0]?.sol_market_id || null;
+  },
+
+  async setCheckpoint(engine: string, chain: CoreChain, cursor: string): Promise<void> {
+    const key = `${engine}:${chain}`;
+    checkpointMemory.set(key, cursor);
+
+    if (!usePostgres) return;
+    await ensureInit();
+
+    await getPool().query(
+      `
+      INSERT INTO keiro_chain_checkpoints (engine, chain, cursor, updated_at)
+      VALUES ($1, $2, $3, now())
+      ON CONFLICT (engine, chain)
+      DO UPDATE SET cursor = EXCLUDED.cursor, updated_at = now()
+      `,
+      [engine, chain, cursor]
+    );
+  },
+
+  async healthcheck(): Promise<{ ok: boolean; mode: 'memory' | 'postgres'; error?: string }> {
+    if (!usePostgres) {
+      return { ok: true, mode: 'memory' };
+    }
+
+    try {
+      await ensureInit();
+      await getPool().query('SELECT 1');
+      return { ok: true, mode: 'postgres' };
+    } catch (error) {
+      return {
+        ok: false,
+        mode: 'postgres',
+        error: error instanceof Error ? error.message : 'projection healthcheck failed',
+      };
+    }
+  },
+
+  async close(): Promise<void> {
+    if (pool) {
+      await pool.end();
+      pool = null;
+      initPromise = null;
+    }
+  },
+};
+
