@@ -124,4 +124,3 @@ impl PrivateSettlement {
     pub const STATUS_COMPLETED: u8 = 1;
     pub const STATUS_FAILED: u8 = 2;
 }
-
