@@ -347,4 +347,3 @@ mod tests {
         assert!(!config.evaluate_threshold(price)); // No (not strictly greater)
     }
 }
-
