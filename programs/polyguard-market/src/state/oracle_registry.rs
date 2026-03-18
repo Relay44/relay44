@@ -129,4 +129,3 @@ pub enum OracleRegistryError {
     #[msg("Oracle not approved for market resolution")]
     OracleNotApproved,
 }
-
