@@ -157,4 +157,3 @@ app.post('/settle', requireSharedSecret, async (req, res) => {
 app.listen(PORT, HOST, () => {
   console.log(`x402 facilitator listening on http://${HOST}:${PORT}`);
 });
-
