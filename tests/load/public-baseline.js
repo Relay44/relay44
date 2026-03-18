@@ -73,3 +73,35 @@ export function handleSummary(data) {
   };
 }
 
+function summaryText(data) {
+  const lines = ['\n=== Public Baseline Summary ==='];
+  const metrics = data.metrics || {};
+  const req = metrics.http_reqs?.values;
+  const duration = metrics.http_req_duration?.values;
+  const failed = metrics.http_req_failed?.values;
+
+  if (req) {
+    lines.push(`requests: ${req.count}`);
+    lines.push(`rps: ${req.rate.toFixed(2)}`);
+  }
+
+  if (duration) {
+    lines.push(`latency avg: ${duration.avg.toFixed(2)}ms`);
+    lines.push(`latency p95: ${duration['p(95)'].toFixed(2)}ms`);
+    lines.push(`latency p99: ${duration['p(99)'].toFixed(2)}ms`);
+  }
+
+  if (failed) {
+    lines.push(`http error rate: ${(failed.rate * 100).toFixed(2)}%`);
+  }
+
+  if (data.thresholds) {
+    lines.push('thresholds:');
+    for (const [name, threshold] of Object.entries(data.thresholds)) {
+      lines.push(`- ${name}: ${threshold.ok ? 'PASS' : 'FAIL'}`);
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
