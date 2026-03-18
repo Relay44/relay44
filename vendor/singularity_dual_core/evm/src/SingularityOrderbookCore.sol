@@ -234,3 +234,76 @@ contract SingularityOrderbookCore is RoleAuth {
         if (a.marketId != b.marketId || a.outcome != b.outcome) revert InvalidOrder();
         if (a.side == b.side) revert InvalidOrder();
 
+        Order storage buyOrder = a.side == Side.Buy ? a : b;
+        Order storage sellOrder = a.side == Side.Sell ? a : b;
+
+        uint128 buyRemaining = buyOrder.quantity - buyOrder.filledQuantity;
+        uint128 sellRemaining = sellOrder.quantity - sellOrder.filledQuantity;
+        if (quantity > buyRemaining || quantity > sellRemaining) revert InvalidQuantity();
+
+        buyOrder.filledQuantity += quantity;
+        sellOrder.filledQuantity += quantity;
+
+        _syncOrderStatus(buyOrder);
+        _syncOrderStatus(sellOrder);
+
+        (uint256 yesTokenId, uint256 noTokenId) = marketCore.getOutcomeTokenIds(buyOrder.marketId);
+
+        if (buyOrder.outcome == 0) {
+            outcomeToken.mint(buyOrder.owner, yesTokenId, quantity);
+            outcomeToken.mint(sellOrder.owner, noTokenId, quantity);
+        } else {
+            outcomeToken.mint(buyOrder.owner, noTokenId, quantity);
+            outcomeToken.mint(sellOrder.owner, yesTokenId, quantity);
+        }
+
+        emit OrdersMatched(buyOrder.id, sellOrder.id, buyOrder.marketId, buyOrder.outcome, executionPriceBps, quantity);
+    }
+
+    function claim(uint256 marketId, uint128 quantity) external {
+        if (quantity == 0) revert InvalidQuantity();
+
+        (bool resolved, uint8 resolvedOutcome) = marketCore.isResolved(marketId);
+        if (!resolved || resolvedOutcome > 1) revert InvalidState();
+
+        (uint256 yesTokenId, uint256 noTokenId) = marketCore.getOutcomeTokenIds(marketId);
+        uint256 winningTokenId = resolvedOutcome == 0 ? yesTokenId : noTokenId;
+
+        outcomeToken.burn(msg.sender, winningTokenId, quantity);
+        (uint256 netAmount, uint256 feeAmount) = collateralVault.payoutTo(msg.sender, quantity);
+
+        emit WinningsClaimed(marketId, msg.sender, resolvedOutcome, quantity, netAmount + feeAmount, feeAmount);
+    }
+
+    function _syncOrderStatus(Order storage order) internal {
+        uint128 remaining = order.quantity - order.filledQuantity;
+        if (remaining == 0) {
+            order.status = OrderStatus.Filled;
+            if (openOrderCountByOwner[order.owner] > 0) {
+                openOrderCountByOwner[order.owner] -= 1;
+            }
+            return;
+        }
+        order.status = OrderStatus.PartiallyFilled;
+    }
+
+    function _isExpired(Order storage order) internal view returns (bool) {
+        return order.expiresAt != 0 && block.timestamp >= order.expiresAt;
+    }
+
+    function _isOpen(Order storage order) internal view returns (bool) {
+        return order.status == OrderStatus.Open || order.status == OrderStatus.PartiallyFilled;
+    }
+
+    function _collateralRequired(Side side, uint16 priceBps, uint128 quantity) internal pure returns (uint256) {
+        if (side == Side.Buy) {
+            return (uint256(quantity) * priceBps) / 10_000;
+        }
+        return (uint256(quantity) * (10_000 - priceBps)) / 10_000;
+    }
+
+    function _orderReason(uint256 marketId, string memory suffix) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("SINGULARITY_ORDERBOOK", marketId, suffix));
+    }
+}
+
