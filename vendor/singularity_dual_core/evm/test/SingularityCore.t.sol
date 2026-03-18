@@ -142,3 +142,52 @@ contract SingularityCoreTest {
             agent: address(0)
         });
 
+        uint256 before = collateral.balanceOf(address(traderA));
+        uint256 orderId = traderA.placeOrder(address(orderbook), buyOrder);
+
+        orderbook.cancelOrder(orderId);
+
+        uint256 afterBalance = collateral.balanceOf(address(traderA));
+        _assertEq(afterBalance, before, "cancel should refund full collateral");
+    }
+
+    function testAgentPolicyBlocksOversizedOrder() public {
+        agentPolicy.setPolicy(
+            address(0xA11CE),
+            SingularityAgentPolicy.Policy({
+                enabled: true,
+                maxOrderQuantity: 10_000_000,
+                maxOrderNotional: 10_000_000,
+                maxOpenOrders: 1
+            })
+        );
+
+        uint256 marketId = marketCore.createMarket(
+            address(this),
+            "Will policy enforce limits?",
+            keccak256("policy-meta"),
+            uint64(block.timestamp + 3 days),
+            uint64(block.timestamp + 6 days)
+        );
+
+        SingularityOrderbookCore.PlaceOrderParams memory orderParams = SingularityOrderbookCore.PlaceOrderParams({
+            marketId: marketId,
+            side: SingularityOrderbookCore.Side.Buy,
+            outcome: 0,
+            priceBps: 9_000,
+            quantity: 20_000_000,
+            expiresAt: uint64(block.timestamp + 1 days),
+            agent: address(0xA11CE)
+        });
+
+        (bool ok,) = address(traderA).call(
+            abi.encodeWithSelector(TraderProxy.placeOrder.selector, address(orderbook), orderParams)
+        );
+        require(!ok, "expected policy revert");
+    }
+
+    function _assertEq(uint256 left, uint256 right, string memory reason) internal pure {
+        require(left == right, reason);
+    }
+}
+
