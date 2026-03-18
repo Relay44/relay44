@@ -238,3 +238,82 @@ export default function () {
             }
           }
 
+          errorRate.add(!orderSuccess);
+        }
+      });
+    }
+  });
+
+  // Think time between iterations
+  sleep(randomIntBetween(1, 3));
+}
+
+// Setup function - runs once before all VUs
+export function setup() {
+  console.log(`Starting load test against ${BASE_URL}`);
+
+  // Verify API is accessible
+  const resp = http.get(`${BASE_URL}/health`);
+  if (resp.status !== 200) {
+    throw new Error(`API not accessible: ${resp.status}`);
+  }
+
+  return {
+    startTime: Date.now(),
+  };
+}
+
+// Teardown function - runs once after all VUs
+export function teardown(data) {
+  const duration = (Date.now() - data.startTime) / 1000;
+  console.log(`Load test completed in ${duration}s`);
+}
+
+// Handle summary
+export function handleSummary(data) {
+  return {
+    'tests/load/summary.json': JSON.stringify(data, null, 2),
+    stdout: textSummary(data, { indent: ' ', enableColors: true }),
+  };
+}
+
+function textSummary(data, options) {
+  const lines = [];
+  lines.push('\n=== Load Test Summary ===\n');
+
+  // Scenarios
+  if (data.metrics) {
+    const httpReqs = data.metrics.http_reqs;
+    const httpDuration = data.metrics.http_req_duration;
+    const httpFailed = data.metrics.http_req_failed;
+
+    if (httpReqs) {
+      lines.push(`Total Requests: ${httpReqs.values.count}`);
+      lines.push(`RPS: ${(httpReqs.values.rate).toFixed(2)}`);
+    }
+
+    if (httpDuration) {
+      lines.push(`\nLatency:`);
+      lines.push(`  avg: ${httpDuration.values.avg.toFixed(2)}ms`);
+      lines.push(`  p50: ${httpDuration.values['p(50)'].toFixed(2)}ms`);
+      lines.push(`  p95: ${httpDuration.values['p(95)'].toFixed(2)}ms`);
+      lines.push(`  p99: ${httpDuration.values['p(99)'].toFixed(2)}ms`);
+    }
+
+    if (httpFailed) {
+      lines.push(`\nError Rate: ${(httpFailed.values.rate * 100).toFixed(2)}%`);
+    }
+  }
+
+  // Thresholds
+  if (data.thresholds) {
+    lines.push('\nThresholds:');
+    for (const [name, threshold] of Object.entries(data.thresholds)) {
+      const status = threshold.ok ? 'PASS' : 'FAIL';
+      lines.push(`  ${name}: ${status}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
