@@ -159,3 +159,78 @@ contract SingularityOrderbookCore is RoleAuth {
             status: OrderStatus.Open
         });
 
+        openOrderCountByOwner[msg.sender] += 1;
+
+        emit OrderPlaced(
+            orderId,
+            params.marketId,
+            msg.sender,
+            params.agent,
+            params.side,
+            params.outcome,
+            params.priceBps,
+            params.quantity,
+            params.expiresAt,
+            collateralToLock
+        );
+    }
+
+    function cancelOrder(uint256 orderId) external {
+        Order storage order = orders[orderId];
+        if (order.id == 0) revert InvalidOrder();
+        if (order.owner != msg.sender && !hasRole(OPERATOR_ROLE, msg.sender)) revert NotOrderOwner();
+
+        if (_isExpired(order)) {
+            order.status = OrderStatus.Expired;
+        }
+
+        if (order.status != OrderStatus.Open && order.status != OrderStatus.PartiallyFilled) {
+            revert OrderNotOpen();
+        }
+
+        uint128 unfilledQty = order.quantity - order.filledQuantity;
+        uint256 refundCollateral = _collateralRequired(order.side, order.priceBps, unfilledQty);
+
+        order.filledQuantity = order.quantity;
+        order.status = OrderStatus.Cancelled;
+        if (openOrderCountByOwner[order.owner] > 0) {
+            openOrderCountByOwner[order.owner] -= 1;
+        }
+
+        collateralVault.refundTo(order.owner, refundCollateral, _orderReason(order.marketId, "CANCEL"));
+
+        emit OrderCancelled(order.id, order.marketId, order.owner, unfilledQty, refundCollateral);
+    }
+
+    function expireOrder(uint256 orderId) external {
+        Order storage order = orders[orderId];
+        if (order.id == 0) revert InvalidOrder();
+        if (!_isExpired(order)) revert OrderNotOpen();
+        if (order.status != OrderStatus.Open && order.status != OrderStatus.PartiallyFilled) revert OrderNotOpen();
+
+        uint128 unfilledQty = order.quantity - order.filledQuantity;
+        uint256 refundCollateral = _collateralRequired(order.side, order.priceBps, unfilledQty);
+        order.filledQuantity = order.quantity;
+        order.status = OrderStatus.Expired;
+        if (openOrderCountByOwner[order.owner] > 0) {
+            openOrderCountByOwner[order.owner] -= 1;
+        }
+
+        collateralVault.refundTo(order.owner, refundCollateral, _orderReason(order.marketId, "EXPIRE"));
+    }
+
+    function matchOrders(uint256 orderAId, uint256 orderBId, uint128 quantity, uint16 executionPriceBps)
+        external
+        onlyRole(OPERATOR_ROLE)
+    {
+        if (quantity == 0) revert InvalidQuantity();
+        if (executionPriceBps == 0 || executionPriceBps >= 10_000) revert InvalidPrice();
+
+        Order storage a = orders[orderAId];
+        Order storage b = orders[orderBId];
+        if (a.id == 0 || b.id == 0) revert InvalidOrder();
+        if (_isExpired(a) || _isExpired(b)) revert OrderExpired();
+        if (!_isOpen(a) || !_isOpen(b)) revert OrderNotOpen();
+        if (a.marketId != b.marketId || a.outcome != b.outcome) revert InvalidOrder();
+        if (a.side == b.side) revert InvalidOrder();
+
