@@ -376,4 +376,3 @@ pub struct WsAuthQuery {
     /// JWT token for authentication (optional - can authenticate via first message)
     pub token: Option<String>,
 }
-
