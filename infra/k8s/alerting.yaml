@@ -202,3 +202,88 @@ spec:
             summary: "High CPU usage"
             description: "Pod {{ $labels.pod }} CPU at {{ $value | humanizePercentage }}"
 
+        # High Memory
+        - alert: Relay44HighMemory
+          expr: |
+            container_memory_usage_bytes{namespace="relay44"}
+            / on(pod) kube_pod_container_resource_limits{resource="memory"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44
+          annotations:
+            summary: "High memory usage"
+            description: "Pod {{ $labels.pod }} memory at {{ $value | humanizePercentage }}"
+
+        # OOM Killed
+        - alert: Relay44OOMKilled
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="relay44", reason="OOMKilled"}[1h]) > 0
+          labels:
+            severity: critical
+            service: relay44
+          annotations:
+            summary: "Pod killed due to OOM"
+            description: "Pod {{ $labels.pod }} was OOM killed"
+
+---
+# AlertManager Configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-relay44
+  namespace: relay44
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+    route:
+      group_by: ['alertname', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'slack-default'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'pagerduty-critical'
+          continue: true
+        - match:
+            severity: warning
+          receiver: 'slack-warning'
+
+    receivers:
+      - name: 'slack-default'
+        slack_configs:
+          - channel: '#relay44-alerts'
+            send_resolved: true
+            title: '{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+      - name: 'slack-warning'
+        slack_configs:
+          - channel: '#relay44-alerts'
+            send_resolved: true
+            color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+            title: '{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+      - name: 'pagerduty-critical'
+        pagerduty_configs:
+          - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+            description: '{{ .CommonLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+            details:
+              severity: '{{ .CommonLabels.severity }}'
+              service: '{{ .CommonLabels.service }}'
+              description: '{{ .CommonAnnotations.description }}'
+
+    inhibit_rules:
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['alertname', 'service']
+
