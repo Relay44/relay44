@@ -124,3 +124,56 @@ Use `workflow_dispatch` for:
 
 ## Monitoring Deployments
 
+### GitHub Actions
+
+Check workflow status at:
+```
+https://github.com/OWNER/REPO/actions
+```
+
+### Kubernetes
+
+```bash
+# Check deployment status
+kubectl get deployments -n relay44-production
+
+# Check pod status
+kubectl get pods -n relay44-production
+
+# View logs
+kubectl logs -f deployment/relay44-api-blue -n relay44-production
+
+# View rollout history
+kubectl rollout history deployment/relay44-api-blue -n relay44-production
+```
+
+### Solana Program
+
+```bash
+# Verify deployment
+cast code <CONTRACT_ADDRESS> --rpc-url https://mainnet.base.org
+```
+
+## Emergency Procedures
+
+### API Rollback
+
+1. Go to Actions > Rollback
+2. Select environment: production
+3. Select rollback type: previous
+4. Enter reason
+5. Run workflow
+
+Or via kubectl:
+```bash
+kubectl rollout undo deployment/relay44-api-blue -n relay44-production
+```
+
+### Program Upgrade Failure
+
+Solana programs cannot be rolled back. Options:
+
+1. Deploy a fixed version as an upgrade
+2. If authority allows, close and redeploy (loses state)
+3. Transfer upgrade authority to multisig for future safety
+
