@@ -625,4 +625,3 @@ mod tests {
         assert_eq!(out_data.owner_slot, 5);
     }
 }
-
