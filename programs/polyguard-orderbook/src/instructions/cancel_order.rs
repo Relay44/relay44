@@ -128,4 +128,3 @@ pub struct OrderCancelled {
     pub remaining_quantity: u64,
     pub cancelled_at: i64,
 }
-
