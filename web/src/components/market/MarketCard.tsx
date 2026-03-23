@@ -129,4 +129,3 @@ export function MarketCard({ market }: MarketCardProps) {
     </Link>
   );
 }
-
