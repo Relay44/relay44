@@ -236,4 +236,3 @@ pub async fn get_trades(
 
     Ok(HttpResponse::Ok().json(TradeListResponse { trades, cursor }))
 }
-
