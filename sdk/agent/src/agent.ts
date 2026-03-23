@@ -381,4 +381,3 @@ export class TradingAgent {
 export function createAgent(options: TradingAgentOptions): TradingAgent {
   return new TradingAgent(options);
 }
-
