@@ -104,4 +104,3 @@ function summaryText(data) {
 
   return `${lines.join('\n')}\n`;
 }
-

@@ -152,4 +152,3 @@ COMMENT ON TABLE orders IS 'Order book entries';
 COMMENT ON TABLE trades IS 'Executed trades';
 COMMENT ON TABLE positions IS 'User positions per market';
 COMMENT ON TABLE private_accounts IS 'Confidential trading accounts';
-
