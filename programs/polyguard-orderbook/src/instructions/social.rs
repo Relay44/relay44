@@ -602,4 +602,3 @@ pub struct CopyVaultWithdrawn {
     pub shares: u64,
     pub timestamp: i64,
 }
-

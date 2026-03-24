@@ -396,4 +396,3 @@ mod tests {
         assert_eq!(MarketStatus::default(), MarketStatus::Active);
     }
 }
-

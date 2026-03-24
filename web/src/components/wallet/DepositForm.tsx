@@ -227,4 +227,3 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
     </div>
   );
 }
-

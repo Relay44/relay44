@@ -531,4 +531,3 @@ mod tests {
         assert_eq!(service.list_key_ids().len(), 2);
     }
 }
-

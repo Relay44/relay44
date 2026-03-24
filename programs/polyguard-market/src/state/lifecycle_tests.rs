@@ -439,4 +439,3 @@ mod tests {
         assert!(!market.is_trading_active(i64::MAX));
     }
 }
-

@@ -149,4 +149,3 @@ pub struct FeesWithdrawn {
     pub protocol_fees_withdrawn: u64,
     pub creator_fees_withdrawn: u64,
 }
-

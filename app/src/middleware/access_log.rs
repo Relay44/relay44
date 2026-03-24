@@ -72,3 +72,30 @@ where
             if (path == "/health" || path == "/health/detailed") && status == 200 {
                 return Ok(res);
             }
+
+            let level = if status >= 500 {
+                "ERROR"
+            } else if status >= 400 {
+                "WARN"
+            } else {
+                "INFO"
+            };
+
+            log::log!(
+                match level {
+                    "ERROR" => log::Level::Error,
+                    "WARN" => log::Level::Warn,
+                    _ => log::Level::Info,
+                },
+                "request method={} path={} status={} latency_ms={:.2} request_id={}",
+                method,
+                path,
+                status,
+                latency_ms,
+                request_id
+            );
+
+            Ok(res)
+        })
+    }
+}

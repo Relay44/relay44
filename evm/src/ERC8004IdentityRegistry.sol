@@ -339,4 +339,3 @@ contract ERC8004IdentityRegistry is ERC721URIStorage, AccessControl, Pausable, E
         _unpause();
     }
 }
-

@@ -253,4 +253,3 @@ export function NotificationSettings() {
     </Card>
   );
 }
-

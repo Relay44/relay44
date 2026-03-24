@@ -453,4 +453,3 @@ mod tests {
         assert_eq!(agent.win_rate_bps(), 6000); // 60%
     }
 }
-

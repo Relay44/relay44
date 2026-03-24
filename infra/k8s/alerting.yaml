@@ -286,4 +286,3 @@ stringData:
         target_match:
           severity: 'warning'
         equal: ['alertname', 'service']
-

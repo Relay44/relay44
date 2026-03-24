@@ -231,4 +231,3 @@ export function PriceChart({
     </div>
   );
 }
-

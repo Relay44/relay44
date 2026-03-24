@@ -285,4 +285,3 @@ mod tests {
         assert!(!config.evaluate_threshold(101));
     }
 }
-

@@ -115,4 +115,3 @@ contract CollateralVault is AccessControl, Pausable, ReentrancyGuard {
         _unpause();
     }
 }
-

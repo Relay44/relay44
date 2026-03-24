@@ -674,4 +674,3 @@ mod tests {
         assert!(restored.verify().unwrap());
     }
 }
-

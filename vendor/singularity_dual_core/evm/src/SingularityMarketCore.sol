@@ -181,4 +181,3 @@ contract SingularityMarketCore is RoleAuth {
         if (!market.exists) revert MarketNotFound();
     }
 }
-

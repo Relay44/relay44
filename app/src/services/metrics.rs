@@ -622,4 +622,3 @@ mod tests {
         assert!((avg - 20.0).abs() < 0.1);
     }
 }
-

@@ -106,4 +106,3 @@ pub fn mask_secret(value: &str) -> String {
     let suffix = &trimmed[trimmed.len() - 4..];
     format!("{}****{}", prefix, suffix)
 }
-

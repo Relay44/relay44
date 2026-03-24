@@ -1159,4 +1159,3 @@ ordersRouter.delete(
     return c.json(response);
   }
 );
-

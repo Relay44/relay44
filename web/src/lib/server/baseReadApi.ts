@@ -574,4 +574,3 @@ export function toApiErrorPayload(error: unknown) {
     payload: { code: 'INTERNAL_ERROR', error: error instanceof Error ? error.message : 'Internal error' },
   };
 }
-

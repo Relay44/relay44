@@ -190,4 +190,3 @@ contract SingularityCoreTest {
         require(left == right, reason);
     }
 }
-

@@ -188,4 +188,3 @@ export function OrderHistory({ marketId }: OrderHistoryProps) {
     </Card>
   );
 }
-

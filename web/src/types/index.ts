@@ -549,4 +549,3 @@ export interface ProfileActivity {
   pnl?: number;
   createdAt: string;
 }
-

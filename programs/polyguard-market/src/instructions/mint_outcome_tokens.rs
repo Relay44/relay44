@@ -171,4 +171,3 @@ pub struct OutcomeTokensMinted {
     pub fee: u64,
     pub total_collateral: u64,
 }
-

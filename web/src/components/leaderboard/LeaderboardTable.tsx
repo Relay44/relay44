@@ -307,4 +307,3 @@ function LeaderboardRow({ entry, formatValue, metric, compact }: LeaderboardRowP
     </Link>
   );
 }
-

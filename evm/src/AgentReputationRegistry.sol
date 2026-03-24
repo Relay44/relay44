@@ -247,4 +247,3 @@ contract AgentReputationRegistry is AccessControl, Pausable {
         feedback.feedbackHash = input.feedbackHash;
     }
 }
-

@@ -130,4 +130,3 @@ contract ERC8004ValidationRegistryTest is Test {
         validationRegistry.validationResponse(requestHash, 80, "ipfs://bad", keccak256("bad"), bytes32(0));
     }
 }
-

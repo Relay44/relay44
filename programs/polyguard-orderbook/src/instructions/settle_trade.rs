@@ -298,4 +298,3 @@ pub struct TradeFilled {
     pub buyer_refund: u64,
     pub timestamp: i64,
 }
-

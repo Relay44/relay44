@@ -1020,4 +1020,3 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     </PageShell>
   );
 }
-

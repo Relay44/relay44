@@ -221,4 +221,3 @@ pub struct TransactionExecuted {
     pub executor: Pubkey,
     pub target: Pubkey,
 }
-

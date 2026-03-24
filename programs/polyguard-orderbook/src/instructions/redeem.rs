@@ -550,4 +550,3 @@ mod tests {
         assert_eq!(ResolutionOutcome::from(3), ResolutionOutcome::Invalid);
     }
 }
-

@@ -142,4 +142,3 @@ contract MarketCoreTest is Test {
         marketCore.resolveMarket(marketId, true);
     }
 }
-

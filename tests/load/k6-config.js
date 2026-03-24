@@ -316,4 +316,3 @@ function textSummary(data, options) {
 
   return lines.join('\n');
 }
-

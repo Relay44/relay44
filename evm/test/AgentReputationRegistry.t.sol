@@ -134,4 +134,3 @@ contract AgentReputationRegistryTest is Test {
         reputationRegistry.updateMetrics(agentId, 500, 1000, 10, 6, 4, 900);
     }
 }
-

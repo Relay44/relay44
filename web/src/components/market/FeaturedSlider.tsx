@@ -162,4 +162,3 @@ export function FeaturedSlider({ markets, title }: FeaturedSliderProps) {
     </div>
   );
 }
-

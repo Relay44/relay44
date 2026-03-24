@@ -274,4 +274,3 @@ pub struct PrivateTradeSettled {
     pub seller: Pubkey,
     pub timestamp: i64,
 }
-

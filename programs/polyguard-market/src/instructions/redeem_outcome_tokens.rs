@@ -182,4 +182,3 @@ pub struct OutcomeTokensRedeemed {
     pub net_amount: u64,
     pub total_collateral: u64,
 }
-

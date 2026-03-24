@@ -637,4 +637,3 @@ mod tests {
         assert!(!asks.is_price_acceptable(4500, 5000));
     }
 }
-

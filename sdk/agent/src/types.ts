@@ -85,4 +85,3 @@ export interface AgentMetrics {
   avgPnlPerTrade: bigint;
   maxDrawdownBps: number;
 }
-

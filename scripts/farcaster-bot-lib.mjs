@@ -207,4 +207,3 @@ export function saveState(state) {
   }
   writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 }
-

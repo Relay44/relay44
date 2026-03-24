@@ -146,4 +146,3 @@ function formatQuantity(quantity: number): string {
   }
   return quantity.toString();
 }
-

@@ -2042,4 +2042,3 @@ pub async fn list_xmtp_swarm_messages(
     let response = xmtp_swarm::list_messages(&state, path.as_str(), query.into_inner()).await?;
     Ok(HttpResponse::Ok().json(response))
 }
-

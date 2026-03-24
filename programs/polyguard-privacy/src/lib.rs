@@ -90,4 +90,3 @@ pub mod polyguard_privacy {
         crate::instructions::update_mxe_authority::handler(ctx, new_authority)
     }
 }
-

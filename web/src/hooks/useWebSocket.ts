@@ -161,4 +161,3 @@ export function usePriceSubscription(marketId: string) {
     };
   }, [isConnected, marketId, subscribe, send, queryClient]);
 }
-

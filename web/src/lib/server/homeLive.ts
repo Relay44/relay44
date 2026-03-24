@@ -716,4 +716,3 @@ export async function getHomeLiveFeed(): Promise<HomeLiveFeed> {
     fetchedAt: new Date().toISOString(),
   };
 }
-

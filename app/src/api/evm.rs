@@ -3761,4 +3761,3 @@ mod tests {
         assert_eq!(warning.message, "internal Base feed unavailable");
     }
 }
-

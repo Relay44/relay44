@@ -171,4 +171,3 @@ contract MarketCore is AccessControl, Pausable {
         emit MarketMetadataSet(marketId, question, description, category, resolutionSource);
     }
 }
-

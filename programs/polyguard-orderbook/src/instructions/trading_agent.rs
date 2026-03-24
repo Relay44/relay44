@@ -506,4 +506,3 @@ pub struct AgentTradeRecorded {
     pub trades_count: u64,
     pub timestamp: i64,
 }
-

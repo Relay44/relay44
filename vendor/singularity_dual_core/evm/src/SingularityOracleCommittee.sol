@@ -90,4 +90,3 @@ contract SingularityOracleCommittee is RoleAuth {
         return m;
     }
 }
-

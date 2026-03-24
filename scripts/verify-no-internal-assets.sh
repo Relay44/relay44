@@ -147,4 +147,3 @@ if [[ ${#violations[@]} -gt 0 ]]; then
 fi
 
 echo "Internal asset boundary check passed."
-

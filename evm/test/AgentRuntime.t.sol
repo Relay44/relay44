@@ -136,4 +136,3 @@ contract AgentRuntimeTest is Test {
         assertEq(identityRegistry.ownerOf(identityId), alice);
     }
 }
-

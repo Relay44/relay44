@@ -124,4 +124,3 @@ pub struct PrivateDeposited {
     pub new_encrypted_balance: [u8; 64],
     pub timestamp: i64,
 }
-

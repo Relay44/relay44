@@ -178,4 +178,3 @@ pub struct CancelledMarketRefund {
     pub refund_amount: u64,
     pub remaining_collateral: u64,
 }
-

@@ -121,4 +121,3 @@ export function ProfileStats({ wallet }: ProfileStatsProps) {
     </Card>
   );
 }
-

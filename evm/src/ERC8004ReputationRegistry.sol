@@ -514,4 +514,3 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
         _unpause();
     }
 }
-

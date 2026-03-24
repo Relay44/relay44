@@ -306,4 +306,3 @@ contract SingularityOrderbookCore is RoleAuth {
         return keccak256(abi.encodePacked("SINGULARITY_ORDERBOOK", marketId, suffix));
     }
 }
-

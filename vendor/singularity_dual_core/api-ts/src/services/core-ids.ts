@@ -82,4 +82,3 @@ export function toNamespacedMarketId(chain: CoreChain, marketRef: string): strin
 export function isLegacyLedgerAlias(source: UnifiedMarketSource): boolean {
   return source === 'ledger';
 }
-

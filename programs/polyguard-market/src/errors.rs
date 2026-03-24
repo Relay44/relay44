@@ -95,4 +95,3 @@ pub enum MarketError {
     #[msg("Insufficient vault balance for transfer")]
     InsufficientVaultBalance,
 }
-

@@ -137,4 +137,3 @@ export class CompositeStrategy implements Strategy {
     };
   }
 }
-

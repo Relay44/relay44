@@ -244,4 +244,3 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
     </div>
   );
 }
-

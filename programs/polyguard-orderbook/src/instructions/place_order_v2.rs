@@ -478,4 +478,3 @@ mod tests {
         assert_eq!(calculate_cost(100, 100), 1);
     }
 }
-

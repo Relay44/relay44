@@ -1279,4 +1279,3 @@ mod tests {
         assert_eq!(OrderType::from(255u8), OrderType::Limit);
     }
 }
-

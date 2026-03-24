@@ -445,4 +445,3 @@ mod tests {
         assert!(!keypair.secret.verify_amount(&ciphertext, amount + 1).unwrap());
     }
 }
-

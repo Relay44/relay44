@@ -188,4 +188,3 @@ export function assertContractAddress(address: string, envName: string): `0x${st
   }
   return address as `0x${string}`;
 }
-

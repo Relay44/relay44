@@ -205,4 +205,3 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
         if (size == 0 || cadence == 0 || expiryWindow == 0) revert InvalidConfig();
     }
 }
-

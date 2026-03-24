@@ -176,4 +176,3 @@ Solana programs cannot be rolled back. Options:
 1. Deploy a fixed version as an upgrade
 2. If authority allows, close and redeploy (loses state)
 3. Transfer upgrade authority to multisig for future safety
-
