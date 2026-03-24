@@ -211,4 +211,3 @@ export function ProfileHeader({ wallet }: ProfileHeaderProps) {
     </Card>
   );
 }
-
