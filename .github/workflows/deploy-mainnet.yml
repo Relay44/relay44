@@ -1,0 +1,242 @@
+name: Deploy Base
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deployment target'
+        required: true
+        type: choice
+        options:
+          - 'api-only'
+          - 'contracts-only'
+          - 'full'
+        default: 'api-only'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - 'staging'
+          - 'production'
+        default: 'staging'
+      image_tag:
+        description: 'Docker image tag (leave empty for latest commit SHA)'
+        required: false
+        type: string
+      skip_tests:
+        description: 'Skip pre-deployment tests'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Dry run (no actual deployment)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/backend
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set-tag.outputs.image_tag }}
+      should_deploy_api: ${{ steps.targets.outputs.deploy_api }}
+      should_deploy_contracts: ${{ steps.targets.outputs.deploy_contracts }}
+      chain_network: ${{ steps.network.outputs.chain_network }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine image tag
+        id: set-tag
+        run: |
+          if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
+            echo "image_tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "image_tag=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine deployment targets
+        id: targets
+        run: |
+          case "${{ github.event.inputs.deploy_target }}" in
+            "api-only")
+              echo "deploy_api=true" >> $GITHUB_OUTPUT
+              echo "deploy_contracts=false" >> $GITHUB_OUTPUT
+              ;;
+            "contracts-only")
+              echo "deploy_api=false" >> $GITHUB_OUTPUT
+              echo "deploy_contracts=true" >> $GITHUB_OUTPUT
+              ;;
+            "full")
+              echo "deploy_api=true" >> $GITHUB_OUTPUT
+              echo "deploy_contracts=true" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Map target network
+        id: network
+        run: |
+          if [[ "${{ github.event.inputs.environment }}" == "production" ]]; then
+            echo "chain_network=mainnet" >> $GITHUB_OUTPUT
+          else
+            echo "chain_network=sepolia" >> $GITHUB_OUTPUT
+          fi
+
+  pre-deploy-tests:
+    name: Pre-Deployment Tests
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.skip_tests != 'true'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: relay44
+          POSTGRES_PASSWORD: relay44
+          POSTGRES_DB: relay44_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run clippy
+        run: cargo clippy --manifest-path app/Cargo.toml --all-targets -- -D clippy::correctness
+
+      - name: Run backend tests
+        env:
+          DATABASE_URL: postgres://relay44:relay44@localhost:5432/relay44_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-ci
+          EVM_ENABLED: "true"
+          EVM_READS_ENABLED: "true"
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres || true
+          sqlx database create || true
+          sqlx migrate run --source migrations || true
+          cargo test --manifest-path app/Cargo.toml --release
+
+      - name: Run EVM tests
+        run: forge test --root evm
+
+      - name: Security audit
+        run: |
+          cargo install cargo-audit || true
+          cargo audit --ignore RUSTSEC-2024-0344 --ignore RUSTSEC-2022-0093 --ignore RUSTSEC-2023-0071
+
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [validate, pre-deploy-tests]
+    if: |
+      always() &&
+      needs.validate.outputs.should_deploy_api == 'true' &&
+      (needs.pre-deploy-tests.result == 'success' || needs.pre-deploy-tests.result == 'skipped')
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=${{ needs.validate.outputs.image_tag }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-contracts:
+    name: Deploy EVM Contracts (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [validate, pre-deploy-tests]
+    if: |
+      always() &&
+      needs.validate.outputs.should_deploy_contracts == 'true' &&
+      (needs.pre-deploy-tests.result == 'success' || needs.pre-deploy-tests.result == 'skipped')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Dry-run deployment plan
+        run: |
+          echo "target network: ${{ needs.validate.outputs.chain_network }}"
+          echo "dry run: ${{ github.event.inputs.dry_run }}"
+
+      - name: Deploy contracts
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          bash scripts/base-deploy-programs.sh --network "${{ needs.validate.outputs.chain_network }}"
+
+  deploy-api:
+    name: Deploy API (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: [validate, build-image]
+    if: needs.validate.outputs.should_deploy_api == 'true'
+    steps:
+      - name: Deployment handoff
+        run: |
+          echo "Image digest: ${{ needs.build-image.outputs.image_digest }}"
+          echo "Image tag: ${{ needs.validate.outputs.image_tag }}"
+          echo "Deploy this image with your platform rollout process"

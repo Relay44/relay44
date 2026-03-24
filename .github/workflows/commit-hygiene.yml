@@ -1,0 +1,49 @@
+name: commit-hygiene
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  commit-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve commit range
+        id: commit-range
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          range=""
+          event_name="${{ github.event_name }}"
+
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            if [[ -n "$base_sha" && -n "$head_sha" ]]; then
+              range="$base_sha..$head_sha"
+            fi
+          elif [[ "$event_name" == "push" ]]; then
+            before_sha="${{ github.event.before }}"
+            after_sha="${{ github.sha }}"
+            if [[ -n "$before_sha" && "$before_sha" != "0000000000000000000000000000000000000000" ]]; then
+              range="$before_sha..$after_sha"
+            fi
+          fi
+
+          if [[ -z "$range" ]]; then
+            range="HEAD"
+          fi
+
+          echo "range=$range" >> "$GITHUB_OUTPUT"
+
+      - name: Verify commit hygiene
+        run: bash ./scripts/verify-commit-hygiene.sh --history-range "${{ steps.commit-range.outputs.range }}"

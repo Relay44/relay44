@@ -1,0 +1,106 @@
+name: Launch Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "web/**"
+      - "scripts/**"
+      - "docs/**"
+      - ".github/workflows/launch-readiness.yml"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launch-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  readiness:
+    name: Readiness Gates
+    if: endsWith(github.repository, '/relay44-core')
+    runs-on: ubuntu-latest
+    env:
+      CHAIN_MODE: base
+      DATABASE_URL: postgres://relay44:relay44@localhost:5432/relay44_test
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: launch-readiness-static-secret-32-bytes-minimum
+      BLINDFOLD_WEBHOOK_SECRET: launch-readiness-blindfold-secret
+      EVM_ENABLED: "true"
+      EVM_READS_ENABLED: "true"
+      EVM_WRITES_ENABLED: "true"
+      BASE_AGENT_RUNTIME_OPERATOR_PRIVATE_KEY: 0xdeadbeef
+      NEXT_PUBLIC_API_URL: https://relay44.com/v1
+      NEXT_PUBLIC_CHAIN_MODE: base
+      AUTH_ALLOWED_ORIGINS: https://relay44.com
+      CORS_ORIGINS: https://relay44.com
+      BASE_RPC_URL: https://mainnet.base.org
+      BASE_WS_URL: wss://mainnet.base.org
+      BASE_CHAIN_ID: "8453"
+      SIWE_DOMAIN: relay44.com
+      MARKET_CORE_ADDRESS: "0x0000000000000000000000000000000000000101"
+      ORDER_BOOK_ADDRESS: "0x0000000000000000000000000000000000000102"
+      COLLATERAL_VAULT_ADDRESS: "0x0000000000000000000000000000000000000104"
+      AGENT_RUNTIME_ADDRESS: "0x0000000000000000000000000000000000000103"
+      ERC8004_IDENTITY_REGISTRY_ADDRESS: "0x0000000000000000000000000000000000000001"
+      ERC8004_REPUTATION_REGISTRY_ADDRESS: "0x0000000000000000000000000000000000000002"
+      X402_ENABLED: "true"
+      X402_SIGNING_KEY: launch-readiness-x402-signing-key
+      X402_RECEIVER_ADDRESS: "0x0000000000000000000000000000000000000003"
+      XMTP_SWARM_ENABLED: "true"
+      XMTP_SWARM_SIGNING_KEY: launch-readiness-xmtp-signing-key
+      XMTP_SWARM_TRANSPORT: xmtp_http
+      XMTP_SWARM_BRIDGE_URL: https://relay44.com
+      NEXT_PUBLIC_BASE_RPC_URL: https://mainnet.base.org
+      NEXT_PUBLIC_BASE_CHAIN_ID: "8453"
+      NEXT_PUBLIC_SIWE_DOMAIN: relay44.com
+      NEXT_PUBLIC_MARKET_CORE_ADDRESS: "0x0000000000000000000000000000000000000101"
+      NEXT_PUBLIC_ORDER_BOOK_ADDRESS: "0x0000000000000000000000000000000000000102"
+      NEXT_PUBLIC_AGENT_RUNTIME_ADDRESS: "0x0000000000000000000000000000000000000103"
+      NEXT_PUBLIC_COLLATERAL_TOKEN_ADDRESS: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      NEXT_PUBLIC_COLLATERAL_VAULT_ADDRESS: "0x0000000000000000000000000000000000000104"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install web dependencies
+        run: npm ci --prefix web
+
+      - name: Validate launch config
+        run: npm run launch:config:prod-strict
+
+      - name: Run strict production gates
+        env:
+          PRODUCTION_GATE_TIMEOUT_MS: "900000"
+        run: npm run production:gates:strict
+
+      - name: Generate launch summary
+        run: npm run launch:summary
+
+      - name: Upload readiness reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-readiness-reports
+          path: |
+            docs/reports/*.json
+            docs/reports/*.md
+          if-no-files-found: warn

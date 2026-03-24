@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'Relay44'
+    orgId: 1
+    folder: 'Relay44'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

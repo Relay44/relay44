@@ -1,0 +1,182 @@
+# Relay44 Kubernetes Namespaces
+# Environment separation with resource quotas and network policies
+
+---
+# Staging namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: relay44-staging
+  labels:
+    environment: staging
+    app: relay44
+
+---
+# Production namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: relay44-production
+  labels:
+    environment: production
+    app: relay44
+
+---
+# Staging resource quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: staging-quota
+  namespace: relay44-staging
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+    services: "10"
+    persistentvolumeclaims: "5"
+
+---
+# Production resource quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: relay44-production
+spec:
+  hard:
+    requests.cpu: "16"
+    requests.memory: 32Gi
+    limits.cpu: "32"
+    limits.memory: 64Gi
+    pods: "100"
+    services: "20"
+    persistentvolumeclaims: "20"
+
+---
+# Staging limit range
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: staging-limits
+  namespace: relay44-staging
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "2"
+        memory: 4Gi
+      min:
+        cpu: 50m
+        memory: 64Mi
+
+---
+# Production limit range
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limits
+  namespace: relay44-production
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "1"
+        memory: 1Gi
+      defaultRequest:
+        cpu: 250m
+        memory: 256Mi
+      max:
+        cpu: "4"
+        memory: 8Gi
+      min:
+        cpu: 100m
+        memory: 128Mi
+
+---
+# Network policy for staging - allow internal traffic only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: staging-network-policy
+  namespace: relay44-staging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              environment: staging
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              environment: staging
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379
+
+---
+# Network policy for production - stricter isolation
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: production-network-policy
+  namespace: relay44-production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              environment: production
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              environment: production
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 6379

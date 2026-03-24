@@ -1,0 +1,170 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/backend
+
+jobs:
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+
+  test-suite:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    needs: validate-release
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: relay44
+          POSTGRES_PASSWORD: relay44
+          POSTGRES_DB: relay44_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path app/Cargo.toml -- --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path app/Cargo.toml --all-targets -- -D clippy::correctness
+
+      - name: Run backend tests
+        env:
+          DATABASE_URL: postgres://relay44:relay44@localhost:5432/relay44_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key-for-ci
+          EVM_ENABLED: "true"
+          EVM_READS_ENABLED: "true"
+        run: |
+          cargo install sqlx-cli --no-default-features --features postgres || true
+          sqlx database create || true
+          sqlx migrate run --source migrations || true
+          cargo test --manifest-path app/Cargo.toml --release
+
+      - name: Run EVM tests
+        run: forge test --root evm
+
+      - name: Security audit
+        run: |
+          cargo install cargo-audit || true
+          cargo audit --ignore RUSTSEC-2024-0344 --ignore RUSTSEC-2022-0093 --ignore RUSTSEC-2023-0071
+
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [validate-release, test-suite]
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [validate-release, build-image]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ needs.validate-release.outputs.is_prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

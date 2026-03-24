@@ -1,0 +1,2 @@
+source_repo=local-mirror
+snapshot_utc=2026-03-02T13:47:15Z

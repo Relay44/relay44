@@ -1,0 +1,127 @@
+{
+  "generatedAt": "2026-02-28T00:00:00Z",
+  "network": "base-mainnet",
+  "defaultCloseDelaySec": 2592000,
+  "markets": [
+    {
+      "question": "Which crypto exchange will ZachXBT investigate next for insider trading by June 2026?",
+      "description": "Outcomes: Axiom | Meteora | Polymarket | Coinbase | None. Context: speculation around exchange-linked insider behavior.",
+      "category": "crypto",
+      "resolutionSource": "public investigator reports and official statements"
+    },
+    {
+      "question": "Will Coffeezilla expose a major AI deepfake scam involving a celebrity endorsement by April 2026?",
+      "description": "Outcomes: Yes | No. Context: rising AI deepfake scam volume across social channels.",
+      "category": "tech",
+      "resolutionSource": "published investigations and verifiable media reports"
+    },
+    {
+      "question": "Which DeFi protocol will be the next rug pull target exposed by on-chain sleuths?",
+      "description": "Outcomes: specific protocol | none by date. Context: elevated rug-pull losses in 2026.",
+      "category": "crypto",
+      "resolutionSource": "on-chain forensic reports and incident disclosures"
+    },
+    {
+      "question": "Will ZachXBT link a major 2026 crypto hack to a privacy coin before year-end?",
+      "description": "Outcomes: Yes | No. Context: growing concerns over laundering pathways.",
+      "category": "crypto",
+      "resolutionSource": "investigator threads and exchange/law-enforcement disclosures"
+    },
+    {
+      "question": "Which tech giant will face an EU antitrust investigation for AI practices next?",
+      "description": "Outcomes: Meta | Microsoft | ByteDance | None. Context: active scrutiny around AI tooling practices.",
+      "category": "companies",
+      "resolutionSource": "EU regulatory announcements and enforcement actions"
+    },
+    {
+      "question": "Will a whistleblower reveal quantum attack vulnerabilities in a major bank by September 2026?",
+      "description": "Outcomes: Yes | No. Context: increasing focus on post-quantum migration risk.",
+      "category": "financials",
+      "resolutionSource": "bank disclosures, regulator notices, and verified investigative reporting"
+    },
+    {
+      "question": "Which politician implicated in Epstein file releases will be arrested next?",
+      "description": "Outcomes: named figure | none by date. Context: ongoing political/legal fallout.",
+      "category": "politics",
+      "resolutionSource": "court records and law-enforcement announcements"
+    },
+    {
+      "question": "Will JP on Chain expose a pig butchering scam tied to a Cambodian compound in 2026?",
+      "description": "Outcomes: Yes | No. Context: transnational fraud rings remain active.",
+      "category": "crypto",
+      "resolutionSource": "investigative reports and enforcement updates"
+    },
+    {
+      "question": "Which crypto ATM operator will be sued for facilitating scams next?",
+      "description": "Outcomes: Bitcoin Depot | other operator | none. Context: escalating kiosk-fraud enforcement.",
+      "category": "crypto",
+      "resolutionSource": "state/federal legal filings and regulator releases"
+    },
+    {
+      "question": "Will Coffeezilla investigate a fake investment platform promising 10-50% returns by May 2026?",
+      "description": "Outcomes: Yes | No. Context: persistent high-yield fraud narratives.",
+      "category": "financials",
+      "resolutionSource": "published investigations and platform takedown notices"
+    },
+    {
+      "question": "Which company will ZachXBT probe for phishing attacks targeting hardware wallets next?",
+      "description": "Outcomes: Ledger | other company | none. Context: wallet-phishing losses remain severe.",
+      "category": "crypto",
+      "resolutionSource": "on-chain traces and verified incident statements"
+    },
+    {
+      "question": "Will a major media outlet expose Trump pardon-related corruption by election time?",
+      "description": "Outcomes: Yes | No. Context: active policy and ethics scrutiny.",
+      "category": "politics",
+      "resolutionSource": "published investigative reporting from recognized outlets"
+    },
+    {
+      "question": "Which Solana project will be the next insider trading scandal uncovered by ZachXBT?",
+      "description": "Outcomes: Step Finance | other project | none. Context: recurring governance and leak allegations.",
+      "category": "crypto",
+      "resolutionSource": "investigator publications and project incident reports"
+    },
+    {
+      "question": "Will Bellingcat investigate AI malware used in a cyberattack on critical infrastructure?",
+      "description": "Outcomes: Yes | No. Context: AI-assisted intrusion tooling is increasing.",
+      "category": "tech",
+      "resolutionSource": "Bellingcat publications and confirmed incident records"
+    },
+    {
+      "question": "Which celebrity will be linked to an Epstein scandal in new file releases by July 2026?",
+      "description": "Outcomes: named figure | none. Context: continued release-driven allegations.",
+      "category": "politics",
+      "resolutionSource": "court document releases and official legal filings"
+    },
+    {
+      "question": "Will ZachXBT expose a romance scam using AI voices/videos targeting seniors?",
+      "description": "Outcomes: Yes | No. Context: AI-enabled social engineering remains elevated.",
+      "category": "culture",
+      "resolutionSource": "investigator reports and public fraud advisories"
+    },
+    {
+      "question": "Which tech firm will face a class-action over non-consensual AI imagery generation?",
+      "description": "Outcomes: xAI (Grok) | other firm | none by date. Context: mounting legal pressure on image-gen misuse.",
+      "category": "tech",
+      "resolutionSource": "court dockets and official plaintiff filings"
+    },
+    {
+      "question": "Will a grand jury indict more Democrats in Trump administration probes by mid-2026?",
+      "description": "Outcomes: Yes | No. Context: ongoing legal and institutional investigations.",
+      "category": "politics",
+      "resolutionSource": "grand jury outcomes and official DOJ/court records"
+    },
+    {
+      "question": "Which offshore exchange will be dismantled for scam facilitation next?",
+      "description": "Outcomes: TradeOgre | other exchange | none. Context: escalating cross-border enforcement.",
+      "category": "crypto",
+      "resolutionSource": "law-enforcement seizure notices and court orders"
+    },
+    {
+      "question": "Will Coffeezilla reveal a pyramid scheme disguised as a crypto investment club?",
+      "description": "Outcomes: Yes | No. Context: recurring ponzi-like structures in social investment groups.",
+      "category": "financials",
+      "resolutionSource": "investigative publication and corroborated enforcement outcomes"
+    }
+  ]
+}

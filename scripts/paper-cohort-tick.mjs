@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+
+import { apiPost, loginAdmin } from "./paper-cohort-lib.mjs";
+
+function isEnabled(raw, fallback = true) {
+  if (raw == null || raw === "") {
+    return fallback;
+  }
+
+  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
+}
+
+async function main() {
+  if (!isEnabled(process.env.PAPER_COHORT_ENABLED, true)) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          skipped: true,
+          reason: "paper cohort disabled",
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  const { accessToken } = await loginAdmin();
+  const limit = Number(process.env.PAPER_RUNNER_TICK_LIMIT || 200);
+  const payload = await apiPost("/external/agents/runner/tick", accessToken, {
+    limit,
+  });
+
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        message: error.message,
+        status: error.status || null,
+        details: error.payload || null,
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+});

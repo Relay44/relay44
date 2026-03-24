@@ -1,0 +1,222 @@
+# Database Backup Configuration
+#
+# Automated PostgreSQL backups to S3-compatible storage
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: relay44
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          serviceAccountName: relay44-backup
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:15-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  # Variables
+                  TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+                  BACKUP_FILE="relay44-${TIMESTAMP}.sql.gz"
+
+                  echo "Starting backup: ${BACKUP_FILE}"
+
+                  # Create backup
+                  pg_dump "$DATABASE_URL" | gzip > /tmp/${BACKUP_FILE}
+
+                  # Calculate checksum
+                  sha256sum /tmp/${BACKUP_FILE} > /tmp/${BACKUP_FILE}.sha256
+
+                  # Upload to S3
+                  aws s3 cp /tmp/${BACKUP_FILE} s3://${S3_BUCKET}/postgres/${BACKUP_FILE}
+                  aws s3 cp /tmp/${BACKUP_FILE}.sha256 s3://${S3_BUCKET}/postgres/${BACKUP_FILE}.sha256
+
+                  # Update latest pointer
+                  echo "${BACKUP_FILE}" | aws s3 cp - s3://${S3_BUCKET}/postgres/LATEST
+
+                  echo "Backup completed: ${BACKUP_FILE}"
+
+                  # Cleanup old backups (keep last 30 days)
+                  aws s3 ls s3://${S3_BUCKET}/postgres/ | \
+                    awk '{print $4}' | \
+                    grep -E 'relay44-[0-9]{8}' | \
+                    sort | \
+                    head -n -120 | \
+                    xargs -I {} aws s3 rm s3://${S3_BUCKET}/postgres/{}
+
+                  echo "Cleanup completed"
+
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: relay44-secrets
+                      key: database-url
+                - name: S3_BUCKET
+                  value: relay44-backups
+                - name: AWS_DEFAULT_REGION
+                  value: us-east-1
+
+              resources:
+                requests:
+                  memory: "256Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 10Gi
+
+---
+# Point-in-time recovery backup (WAL archiving)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-wal-backup
+  namespace: relay44
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: wal-backup
+              image: postgres:15-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # Trigger WAL archive
+                  psql "$DATABASE_URL" -c "SELECT pg_switch_wal();" || true
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: relay44-secrets
+                      key: database-url
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+
+---
+# Service Account for backup jobs
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: relay44-backup
+  namespace: relay44
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/relay44-backup
+
+---
+# Backup verification job (weekly)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-verification
+  namespace: relay44
+spec:
+  schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: verify
+              image: postgres:15-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  # Download latest backup
+                  LATEST=$(aws s3 cp s3://${S3_BUCKET}/postgres/LATEST -)
+                  aws s3 cp s3://${S3_BUCKET}/postgres/${LATEST} /tmp/backup.sql.gz
+                  aws s3 cp s3://${S3_BUCKET}/postgres/${LATEST}.sha256 /tmp/backup.sha256
+
+                  # Verify checksum
+                  cd /tmp && sha256sum -c backup.sha256
+
+                  # Test restore to temp database
+                  createdb -h localhost test_restore
+                  gunzip -c /tmp/backup.sql.gz | psql -h localhost test_restore
+
+                  # Basic data verification
+                  psql -h localhost test_restore -c "SELECT COUNT(*) FROM orders;"
+                  psql -h localhost test_restore -c "SELECT COUNT(*) FROM positions;"
+                  psql -h localhost test_restore -c "SELECT COUNT(*) FROM markets;"
+
+                  # Cleanup
+                  dropdb -h localhost test_restore
+
+                  echo "Backup verification successful"
+
+              env:
+                - name: S3_BUCKET
+                  value: relay44-backups
+                - name: PGHOST
+                  value: postgres-test
+                - name: PGUSER
+                  value: postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-test-secret
+                      key: password
+
+              resources:
+                requests:
+                  memory: "1Gi"
+                  cpu: "500m"
+
+---
+# Network policy to allow backup jobs
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backup-to-postgres
+  namespace: relay44
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              job-name: postgres-backup
+      ports:
+        - protocol: TCP
+          port: 5432

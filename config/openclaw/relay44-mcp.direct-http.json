@@ -1,0 +1,17 @@
+{
+  "profile": "direct_http",
+  "description": "Direct HTTP JSON-RPC transport to the relay44 MCP endpoint.",
+  "mcpServers": {
+    "relay44": {
+      "transport": "http_jsonrpc",
+      "url": "${RELAY44_API_URL}/v1/web4/mcp",
+      "headers": {
+        "content-type": "application/json",
+        "x-client-id": "openclaw-partner"
+      }
+    }
+  },
+  "requiredEnv": [
+    "RELAY44_API_URL"
+  ]
+}

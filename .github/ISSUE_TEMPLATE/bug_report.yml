@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible defect in relay44 open core.
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provide a minimal, reproducible report.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Exact steps and inputs needed to reproduce.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - API (app)
+        - Contracts (evm)
+        - Solana programs (programs)
+        - Web (web)
+        - SDK (sdk)
+        - CI/CD
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs/errors
+      description: Paste relevant logs, traces, or screenshots.
+      render: shell
