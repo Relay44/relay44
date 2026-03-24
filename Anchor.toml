@@ -1,0 +1,31 @@
+[toolchain]
+anchor_version = "0.31.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.mainnet]
+# Generated at deploy time - update after running scripts/deploy-mainnet.sh
+polyguard_market = "98jqxMe88XGjXzCY3bwV1Kuqzj32fcwdhPZa193RUffQ"
+polyguard_orderbook = "59LqZtVU2YBrhv8B2E1iASJMzcyBHWhY2JuaJsCXkAS8"
+
+[programs.devnet]
+polyguard_market = "98jqxMe88XGjXzCY3bwV1Kuqzj32fcwdhPZa193RUffQ"
+polyguard_orderbook = "59LqZtVU2YBrhv8B2E1iASJMzcyBHWhY2JuaJsCXkAS8"
+polyguard_privacy = "GD6mf6Fg4MLEqn6pc5ZzKXWaPNumod5PF38qbus2EN3M"
+
+[programs.localnet]
+polyguard_market = "98jqxMe88XGjXzCY3bwV1Kuqzj32fcwdhPZa193RUffQ"
+polyguard_orderbook = "59LqZtVU2YBrhv8B2E1iASJMzcyBHWhY2JuaJsCXkAS8"
+polyguard_privacy = "GD6mf6Fg4MLEqn6pc5ZzKXWaPNumod5PF38qbus2EN3M"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "npx ts-mocha -p ./tsconfig.json -t 1000000 tests/polyguard.ts tests/security.ts"

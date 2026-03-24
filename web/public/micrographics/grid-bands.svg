@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 236.24 93.15">
+  <defs>
+    <style>
+      .cls-1 {
+        font-family: RobotoMono-Bold, 'Roboto Mono';
+        font-size: 8px;
+        font-variation-settings: 'wght' 700;
+        font-weight: 700;
+      }
+
+      .cls-2 {
+        font-size: 36px;
+        letter-spacing: -.1em;
+      }
+
+      .cls-2, .cls-3 {
+        font-family: RobotoMono-Regular, 'Roboto Mono';
+        font-variation-settings: 'wght' 400;
+      }
+
+      .cls-4 {
+        letter-spacing: 1.12em;
+      }
+
+      .cls-5 {
+        letter-spacing: 1.12em;
+      }
+
+      .cls-6 {
+        letter-spacing: .91em;
+      }
+
+      .cls-3 {
+        font-size: 12px;
+        letter-spacing: -.05em;
+      }
+
+      .cls-7 {
+        letter-spacing: 2.29em;
+      }
+
+      .cls-8 {
+        fill: none;
+        stroke: #000;
+        stroke-miterlimit: 10;
+        stroke-width: .75px;
+      }
+
+      .cls-9 {
+        letter-spacing: -.05em;
+      }
+
+      .cls-10 {
+        letter-spacing: -.05em;
+      }
+    </style>
+  </defs>
+  <g id="Layer_1-2" data-name="Layer 1">
+    <g>
+      <g>
+        <line class="cls-8" x1="3.22" y1="13.22" x2="73.72" y2="13.22"/>
+        <path d="M50.67,13.22h-16.62c1.63-1.63,2.54-2.54,4.17-4.17h8.29c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="7.64" x2="73.72" y2="7.64"/>
+        <line class="cls-8" x1="3.22" y1="18.8" x2="73.72" y2="18.8"/>
+        <path d="M59.03,18.8H13.74c1.63-1.63,2.54-2.54,4.17-4.17h36.96c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="24.37" x2="73.72" y2="24.37"/>
+        <path d="M63.2,24.37H26.24c1.63-1.63,2.54-2.54,4.17-4.17h28.63l4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="29.95" x2="73.72" y2="29.95"/>
+        <path d="M67.37,29.95H17.91c1.63-1.63,2.54-2.54,4.17-4.17h41.13c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="35.53" x2="73.72" y2="35.53"/>
+        <path d="M63.2,35.53H13.74c1.63-1.63,2.54-2.54,4.17-4.17h41.13c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="41.11" x2="73.72" y2="41.11"/>
+        <path d="M35.92,41.11H9.57c1.63-1.63,2.54-2.54,4.17-4.17h18.01c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="46.69" x2="73.72" y2="46.69"/>
+        <path d="M45.74,46.69h-19.64c1.63-1.63,2.54-2.54,4.17-4.17h11.3c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="52.26" x2="73.72" y2="52.26"/>
+        <path d="M22.24,52.26h-12.67s0,0,0,0l4.17-4.17h4.34l4.17,4.17h0Z"/>
+        <path d="M34.44,52.26h-8.33s0,0,0,0c1.63-1.63,2.54-2.54,4.17-4.17h0c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <path d="M46.53,7.64h-8.33s0,0,0,0c1.63-1.63,2.54-2.54,4.17-4.17h0c1.63,1.63,2.54,2.54,4.17,4.17h0Z"/>
+        <line class="cls-8" x1="3.22" y1="2.06" x2="73.72" y2="2.06"/>
+      </g>
+      <text class="cls-1" transform="translate(113.45 63.75)"><tspan class="cls-6" x="0" y="0">DIAGNOS</tspan><tspan class="cls-10" x="84.76" y="0">E</tspan><tspan class="cls-10" x="0" y="9.8">TARGET:</tspan><tspan class="cls-4" x="30.81" y="9.8"> </tspan><tspan class="cls-10" x="44.58" y="9.8">MODULE</tspan><tspan class="cls-5" x="70.99" y="9.8"> </tspan><tspan class="cls-10" x="84.76" y="9.8">B</tspan><tspan class="cls-10" x="0" y="19.6">STATE:</tspan><tspan class="cls-7" x="26.4" y="19.6"> </tspan><tspan class="cls-9" x="49.55" y="19.6">ANALYZING</tspan></text>
+      <text class="cls-2" transform="translate(0 83.4)"><tspan x="0" y="0">ECHO</tspan></text>
+      <text class="cls-3" transform="translate(78.01 10.27)"><tspan x="0" y="0">RESTORE</tspan><tspan x="0" y="10">TARGET: BACKUP UNIT</tspan><tspan x="0" y="20">STATE: PROCESSING</tspan><tspan x="0" y="30">7 “ 88 • 88 “ 14</tspan></text>
+      <g>
+        <line class="cls-8" x1="92.17" y1="57.75" x2="92.17" y2="83.41"/>
+        <line class="cls-8" x1="79.35" y1="70.58" x2="106.28" y2="70.58"/>
+        <line class="cls-8" x1="83.1" y1="61.51" x2="101.24" y2="79.65"/>
+        <line class="cls-8" x1="83.1" y1="79.65" x2="101.24" y2="61.51"/>
+      </g>
+      <path d="M223.21,58.5c6.77,0,12.28,5.51,12.28,12.28s-5.51,12.28-12.28,12.28-12.28-5.51-12.28-12.28,5.51-12.28,12.28-12.28M223.21,57.75c-7.19,0-13.03,5.83-13.03,13.03s5.83,13.03,13.03,13.03,13.03-5.83,13.03-13.03-5.83-13.03-13.03-13.03h0Z"/>
+      <path d="M223.21,2.35c6.77,0,12.28,5.51,12.28,12.28s-5.51,12.28-12.28,12.28-12.28-5.51-12.28-12.28,5.51-12.28,12.28-12.28M223.21,1.6c-7.19,0-13.03,5.83-13.03,13.03s5.83,13.03,13.03,13.03,13.03-5.83,13.03-13.03-5.83-13.03-13.03-13.03h0Z"/>
+      <path d="M223.21,30.43c6.77,0,12.28,5.51,12.28,12.28s-5.51,12.28-12.28,12.28-12.28-5.51-12.28-12.28,5.51-12.28,12.28-12.28M223.21,29.68c-7.19,0-13.03,5.83-13.03,13.03s5.83,13.03,13.03,13.03,13.03-5.83,13.03-13.03-5.83-13.03-13.03-13.03h0Z"/>
+      <line class="cls-8" x1="223.21" y1="14.63" x2="223.21" y2="42.7"/>
+    </g>
+  </g>
+</svg>

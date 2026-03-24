@@ -1,0 +1,19 @@
+{
+  "profile": "stdio_bridge",
+  "description": "Stdio MCP bridge profile for OpenClaw via local relay44 MCP server process.",
+  "mcpServers": {
+    "relay44": {
+      "command": "node",
+      "args": [
+        "scripts/mcp-server.mjs"
+      ],
+      "cwd": ".",
+      "env": {
+        "RELAY44_API_BASE_URL": "${RELAY44_API_URL}/v1"
+      }
+    }
+  },
+  "requiredEnv": [
+    "RELAY44_API_URL"
+  ]
+}
