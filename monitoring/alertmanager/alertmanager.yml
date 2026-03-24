@@ -1,0 +1,47 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical'
+      repeat_interval: 1h
+    - match:
+        severity: warning
+      receiver: 'warning'
+      repeat_interval: 4h
+
+receivers:
+  - name: 'default'
+    # Configure actual receivers in production:
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/...'
+    #     channel: '#relay44-alerts'
+    # email_configs:
+    #   - to: 'alerts@relay44.com'
+    #     from: 'alertmanager@relay44.com'
+    #     smarthost: 'smtp.example.com:587'
+
+  - name: 'critical'
+    # Pagerduty/Opsgenie for critical alerts
+    # pagerduty_configs:
+    #   - service_key: 'xxx'
+
+  - name: 'warning'
+    # Slack for warnings
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/...'
+    #     channel: '#relay44-alerts'
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname']

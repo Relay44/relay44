@@ -1,0 +1,288 @@
+# Relay44 Prometheus Alerting Rules
+#
+# Deploy with: kubectl apply -f alerting.yaml
+# Requires Prometheus Operator
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: relay44-alerts
+  namespace: relay44
+  labels:
+    release: prometheus
+spec:
+  groups:
+    # API Health Alerts
+    - name: relay44.api
+      rules:
+        # High Error Rate
+        - alert: Relay44HighErrorRate
+          expr: |
+            sum(rate(http_requests_total{job="relay44-api", status=~"5.."}[5m]))
+            / sum(rate(http_requests_total{job="relay44-api"}[5m]))
+            > 0.05
+          for: 2m
+          labels:
+            severity: critical
+            service: relay44-api
+          annotations:
+            summary: "High API error rate"
+            description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+
+        # High Latency
+        - alert: Relay44HighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{job="relay44-api"}[5m])) by (le)
+            ) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44-api
+          annotations:
+            summary: "High API latency"
+            description: "95th percentile latency is {{ $value | humanizeDuration }}"
+
+        # P99 Latency Critical
+        - alert: Relay44CriticalLatency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{job="relay44-api"}[5m])) by (le)
+            ) > 2
+          for: 2m
+          labels:
+            severity: critical
+            service: relay44-api
+          annotations:
+            summary: "Critical API latency"
+            description: "99th percentile latency is {{ $value | humanizeDuration }}"
+
+        # Pod Not Ready
+        - alert: Relay44PodNotReady
+          expr: |
+            kube_pod_status_ready{namespace="relay44", condition="true"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44-api
+          annotations:
+            summary: "Pod not ready"
+            description: "Pod {{ $labels.pod }} is not ready"
+
+        # All Pods Down
+        - alert: Relay44AllPodsDown
+          expr: |
+            sum(kube_pod_status_ready{namespace="relay44", condition="true"}) == 0
+          for: 1m
+          labels:
+            severity: critical
+            service: relay44-api
+          annotations:
+            summary: "All API pods are down"
+            description: "No healthy pods available"
+
+    # Database Alerts
+    - name: relay44.database
+      rules:
+        # Database Connection Pool Exhaustion
+        - alert: Relay44DBPoolExhausted
+          expr: |
+            relay44_db_pool_available{job="relay44-api"} < 2
+          for: 2m
+          labels:
+            severity: critical
+            service: relay44-database
+          annotations:
+            summary: "Database connection pool nearly exhausted"
+            description: "Only {{ $value }} connections available"
+
+        # Database Latency
+        - alert: Relay44DBHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum(rate(relay44_db_query_duration_seconds_bucket[5m])) by (le)
+            ) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44-database
+          annotations:
+            summary: "High database query latency"
+            description: "95th percentile query time is {{ $value | humanizeDuration }}"
+
+        # Database Down
+        - alert: Relay44DBDown
+          expr: |
+            relay44_health_database{job="relay44-api"} != 1
+          for: 1m
+          labels:
+            severity: critical
+            service: relay44-database
+          annotations:
+            summary: "Database health check failing"
+            description: "Database is unhealthy or unreachable"
+
+    # Redis Alerts
+    - name: relay44.redis
+      rules:
+        - alert: Relay44RedisDown
+          expr: |
+            relay44_health_redis{job="relay44-api"} != 1
+          for: 1m
+          labels:
+            severity: warning
+            service: relay44-redis
+          annotations:
+            summary: "Redis health check failing"
+            description: "Redis is unhealthy or unreachable"
+
+        - alert: Relay44RedisHighMemory
+          expr: |
+            redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44-redis
+          annotations:
+            summary: "Redis memory usage high"
+            description: "Redis memory usage is {{ $value | humanizePercentage }}"
+
+    # Business Metrics Alerts
+    - name: relay44.business
+      rules:
+        # Order Settlement Failures
+        - alert: Relay44SettlementFailures
+          expr: |
+            rate(relay44_settlement_failures_total[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44-settlement
+          annotations:
+            summary: "High settlement failure rate"
+            description: "Settlement failures: {{ $value }} per second"
+
+        # Order Queue Buildup
+        - alert: Relay44OrderQueueHigh
+          expr: |
+            relay44_pending_settlements > 100
+          for: 10m
+          labels:
+            severity: warning
+            service: relay44-settlement
+          annotations:
+            summary: "Order settlement queue building up"
+            description: "{{ $value }} orders pending settlement"
+
+        # Rate Limiting Excessive
+        - alert: Relay44ExcessiveRateLimiting
+          expr: |
+            sum(rate(relay44_rate_limited_requests_total[5m])) > 10
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44-api
+          annotations:
+            summary: "Excessive rate limiting"
+            description: "{{ $value }} requests/sec being rate limited"
+
+    # Resource Alerts
+    - name: relay44.resources
+      rules:
+        # High CPU
+        - alert: Relay44HighCPU
+          expr: |
+            rate(container_cpu_usage_seconds_total{namespace="relay44"}[5m])
+            / on(pod) kube_pod_container_resource_limits{resource="cpu"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44
+          annotations:
+            summary: "High CPU usage"
+            description: "Pod {{ $labels.pod }} CPU at {{ $value | humanizePercentage }}"
+
+        # High Memory
+        - alert: Relay44HighMemory
+          expr: |
+            container_memory_usage_bytes{namespace="relay44"}
+            / on(pod) kube_pod_container_resource_limits{resource="memory"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            service: relay44
+          annotations:
+            summary: "High memory usage"
+            description: "Pod {{ $labels.pod }} memory at {{ $value | humanizePercentage }}"
+
+        # OOM Killed
+        - alert: Relay44OOMKilled
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="relay44", reason="OOMKilled"}[1h]) > 0
+          labels:
+            severity: critical
+            service: relay44
+          annotations:
+            summary: "Pod killed due to OOM"
+            description: "Pod {{ $labels.pod }} was OOM killed"
+
+---
+# AlertManager Configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-relay44
+  namespace: relay44
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+    route:
+      group_by: ['alertname', 'service']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'slack-default'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'pagerduty-critical'
+          continue: true
+        - match:
+            severity: warning
+          receiver: 'slack-warning'
+
+    receivers:
+      - name: 'slack-default'
+        slack_configs:
+          - channel: '#relay44-alerts'
+            send_resolved: true
+            title: '{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+      - name: 'slack-warning'
+        slack_configs:
+          - channel: '#relay44-alerts'
+            send_resolved: true
+            color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+            title: '{{ .Status | toUpper }}: {{ .CommonLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+      - name: 'pagerduty-critical'
+        pagerduty_configs:
+          - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+            description: '{{ .CommonLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+            details:
+              severity: '{{ .CommonLabels.severity }}'
+              service: '{{ .CommonLabels.service }}'
+              description: '{{ .CommonAnnotations.description }}'
+
+    inhibit_rules:
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['alertname', 'service']

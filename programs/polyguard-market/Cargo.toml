@@ -1,0 +1,23 @@
+[package]
+name = "polyguard-market"
+version = "0.1.0"
+description = "Polyguard Market Factory - Prediction market creation and resolution"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "polyguard_market"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+anchor-spl = { version = "0.31.1", features = ["token", "associated_token"] }
+blake3 = { workspace = true }
+constant_time_eq = { workspace = true }

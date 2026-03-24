@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 420">
+  <rect width="1600" height="420" fill="#f3efe6"/>
+  <g stroke="#111" stroke-width="1" opacity="0.12">
+    <path d="M0 60h1600M0 120h1600M0 180h1600M0 240h1600M0 300h1600M0 360h1600"/>
+    <path d="M160 0v420M480 0v420M800 0v420M1120 0v420M1440 0v420"/>
+  </g>
+  <text x="88" y="86" font-family="monospace" font-size="26" fill="#111">&gt; RELAY44 / AGENTIC PREDICTION MARKET STACK</text>
+  <text x="88" y="224" font-family="monospace" font-size="132" letter-spacing="6" fill="#111">RELAY44</text>
+  <rect x="88" y="252" width="420" height="14" fill="#e45714"/>
+  <text x="88" y="326" font-family="monospace" font-size="30" fill="#111">BASE MARKETS / EXTERNAL VENUES / DECISION CELLS</text>
+</svg>

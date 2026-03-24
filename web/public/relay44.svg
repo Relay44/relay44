@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Relay44 mark</title>
+  <desc id="desc">Relay44 geometric monogram.</desc>
+  <rect width="256" height="256" fill="#f6f1e8"/>
+  <path d="M36 36h72c31 0 52 20 52 48 0 22-12 37-31 44l39 92h-37l-35-84H72v84H36V36Zm36 31v38h34c12 0 19-7 19-19s-7-19-19-19H72Z" fill="#111111"/>
+  <path d="M170 69h18v50h32V69h18v121h-18v-54h-32v54h-18V69Z" fill="#e45714"/>
+</svg>

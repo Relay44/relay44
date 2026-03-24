@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a scoped feature for relay44 open core.
+title: "[feature] "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user or developer problem are you solving?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the expected behavior and API/UX impact.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - API (app)
+        - Contracts (evm)
+        - Solana programs (programs)
+        - Web (web)
+        - SDK (sdk)
+        - Docs/tooling
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Readiness
+      options:
+        - label: I reviewed existing issues and discussions for duplicates.
+          required: true
+        - label: This request targets open-core code only.
+          required: true
