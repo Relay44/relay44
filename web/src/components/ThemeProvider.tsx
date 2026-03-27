@@ -13,8 +13,8 @@ interface ThemeContextValue {
 }
 
 const defaultContext: ThemeContextValue = {
-  theme: 'light',
-  resolvedTheme: 'light',
+  theme: 'dark',
+  resolvedTheme: 'dark',
   setTheme: () => {},
   toggleTheme: () => {},
   mounted: false,
@@ -25,13 +25,13 @@ const ThemeContext = createContext<ThemeContextValue>(defaultContext);
 const STORAGE_KEY = 'relay44-theme';
 
 function getSystemTheme(): 'dark' | 'light' {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined') return 'dark';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
-  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('light');
+  const [theme, setThemeState] = useState<Theme>('dark');
+  const [resolvedTheme, setResolvedTheme] = useState<'dark' | 'light'>('dark');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -50,10 +50,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
-
-    if (resolved === 'dark') {
-      root.classList.add('dark');
-    }
+    root.classList.add(resolved);
   }, [theme, mounted]);
 
   useEffect(() => {
