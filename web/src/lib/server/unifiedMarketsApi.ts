@@ -558,14 +558,22 @@ export async function readUnifiedMarkets(searchParams: URLSearchParams) {
   const fetchWindow = Math.min(limit + offset, MAX_MARKETS_PAGE_SIZE);
 
   const markets: BaseMarketSnapshot[] = [];
+  let internalError: unknown = null;
 
   if (source === 'all' || source === 'internal') {
     const internalParams = new URLSearchParams({
       limit: String(fetchWindow),
       offset: '0',
     });
-    const internalResponse = await readBaseMarkets(internalParams);
-    markets.push(...internalResponse.markets);
+    try {
+      const internalResponse = await readBaseMarkets(internalParams);
+      markets.push(...internalResponse.markets);
+    } catch (error) {
+      if (source === 'internal') {
+        throw error;
+      }
+      internalError = error;
+    }
   }
 
   const externalFetches: Array<Promise<BaseMarketSnapshot[]>> = [];
@@ -577,12 +585,23 @@ export async function readUnifiedMarkets(searchParams: URLSearchParams) {
   }
 
   const externalResults = await Promise.allSettled(externalFetches);
+  let externalFailures = 0;
   for (const result of externalResults) {
     if (result.status === 'fulfilled') {
       markets.push(...result.value);
     } else if (source !== 'all') {
-      throw new BaseApiError(502, 'EXTERNAL_MARKETS_FAILED', result.reason instanceof Error ? result.reason.message : 'failed to load external markets');
+      throw new BaseApiError(
+        502,
+        'EXTERNAL_MARKETS_FAILED',
+        result.reason instanceof Error ? result.reason.message : 'failed to load external markets'
+      );
+    } else {
+      externalFailures += 1;
     }
+  }
+
+  if (source === 'all' && markets.length === 0 && internalError && externalFailures === externalFetches.length) {
+    throw internalError;
   }
 
   const filtered = markets.filter((market) => includeMarket(tradable, market));

@@ -83,9 +83,9 @@ export default function MarketsClient({
     : 'No markets found in this category';
 
   return (
-    <div className="min-h-screen pt-14">
+    <div className="min-h-screen pt-header">
       <Header />
-      <div className="sticky top-14 z-40 bg-bg-primary border-b border-border">
+      <div className="top-header sticky z-40 bg-bg-primary border-b border-border">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
           <div className="flex items-center gap-4 py-3 overflow-x-auto scrollbar-hide">
             <div className="flex items-center gap-1 flex-shrink-0">
