@@ -164,7 +164,32 @@ function DataRow({ label, value }: DataRowProps) {
   );
 }
 
-export function HeroTicket() {
+export interface HeroTicketRow {
+  label: string;
+  value: string;
+}
+
+interface HeroTicketProps {
+  accessValue?: string;
+  statusValue?: string;
+  networkValue?: string;
+  modeValue?: string;
+  detailRows?: HeroTicketRow[];
+}
+
+const DEFAULT_DETAIL_ROWS: HeroTicketRow[] = [
+  { label: 'AGENTS', value: 'NONE LIVE' },
+  { label: 'MARKETS', value: '0 TRACKED' },
+  { label: 'FEEDS', value: '0/0 LIVE' },
+];
+
+export function HeroTicket({
+  accessValue = 'PUBLIC WEB',
+  statusValue = 'LIVE',
+  networkValue = 'BASE L2',
+  modeValue = 'MARKET MONITOR',
+  detailRows = DEFAULT_DETAIL_ROWS,
+}: HeroTicketProps) {
   const [isDesktop, setIsDesktop] = useState(false);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
@@ -256,11 +281,11 @@ export function HeroTicket() {
       >
         <div style={dataGrid}>
           <DataRow label="TYPE" value="PREDICTION MARKET" />
-          <DataRow label="ACCESS" value="ALL CHAINS" />
+          <DataRow label="ACCESS" value={accessValue} />
           <div style={{ gridColumn: '1/-1', height: '8px' }} />
-          <DataRow label="STATUS" value="LIVE" />
-          <DataRow label="NETWORK" value="BASE L2" />
-          <DataRow label="MODE" value="AUTONOMOUS AGENTS" />
+          <DataRow label="STATUS" value={statusValue} />
+          <DataRow label="NETWORK" value={networkValue} />
+          <DataRow label="MODE" value={modeValue} />
         </div>
 
         <div
@@ -278,9 +303,9 @@ export function HeroTicket() {
         </div>
 
         <div style={dataGrid}>
-          <DataRow label="AGENT 01" value="OSPREY-7" />
-          <DataRow label="AGENT 02" value="MANTIS-V" />
-          <DataRow label="AGENT 03" value="KESTREL-3" />
+          {detailRows.slice(0, 3).map((row) => (
+            <DataRow key={row.label} label={row.label} value={row.value} />
+          ))}
         </div>
 
         <div

@@ -178,7 +178,7 @@ export default function ExternalCredentialsPage() {
     event.preventDefault();
 
     if (readOnly) {
-      addToast('Credential writes are disabled in read-only mode', 'error');
+      addToast('Credential changes are unavailable in this environment', 'error');
       return;
     }
     if (!canManage) {
@@ -218,7 +218,7 @@ export default function ExternalCredentialsPage() {
 
   async function handleDelete(credentialId: string) {
     if (readOnly) {
-      addToast('Credential writes are disabled in read-only mode', 'error');
+      addToast('Credential changes are unavailable in this environment', 'error');
       return;
     }
 
@@ -289,7 +289,7 @@ export default function ExternalCredentialsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-text-primary">External Credentials</h1>
           <p className="mt-2 max-w-3xl text-sm text-text-secondary">
-            Manage BYOK venue credentials for live external trading and external agents. These values are encrypted at rest.
+            Manage venue credentials for live external trading and external agents. These values are encrypted at rest.
           </p>
         </div>
         <div className="flex gap-2">
@@ -302,8 +302,8 @@ export default function ExternalCredentialsPage() {
       {readOnly ? (
         <div className="mb-6">
           <ReadOnlyNotice
-            title="Credential management is disabled"
-            body="This surface is visible, but all writes stay blocked while the app is in read-only mode."
+            title="Credential management is currently unavailable"
+            body="Saved credentials remain visible, but changes are unavailable in this environment."
           />
         </div>
       ) : null}

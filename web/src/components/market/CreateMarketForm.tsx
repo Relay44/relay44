@@ -439,8 +439,8 @@ export function CreateMarketForm({
   if (readOnly) {
     return (
       <ReadOnlyNotice
-        title="Market creation is disabled"
-        body="This preview keeps market discovery live while all market creation flows stay locked."
+        title="Market creation is currently unavailable"
+        body="Market discovery stays live, but market creation is unavailable in this environment."
         actionHref="/markets"
         actionLabel="Browse markets"
       />
@@ -453,7 +453,7 @@ export function CreateMarketForm({
         <CardTitle>{draftSlide ? "Draft Market" : "Create Market"}</CardTitle>
         <p className="mt-2 text-sm text-text-secondary">
           {draftSlide
-            ? "Review the AI draft, confirm the resolution logic, and only then publish."
+            ? "Review the draft, confirm the resolution logic, and only then publish."
             : "Define a clear, resolvable question before publishing."}
         </p>
         <div className="mt-4 flex gap-2">
@@ -474,7 +474,7 @@ export function CreateMarketForm({
           <div className="space-y-4 border border-accent/20 bg-accent/5 p-4">
             <div className="flex flex-wrap items-center gap-3">
               <span className="border border-accent/30 bg-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-accent">
-                AI-drafted from live news
+                Drafted from live news
               </span>
               <span className="text-[11px] uppercase tracking-[0.16em] text-text-muted">
                 {draftSlide.kicker}

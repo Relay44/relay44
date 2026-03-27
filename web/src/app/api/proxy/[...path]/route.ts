@@ -84,7 +84,7 @@ async function proxyRequest(
 
   if (READ_ONLY_MODE && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     return NextResponse.json(
-      { error: 'This action is disabled in read-only mode' },
+      { error: 'This action is unavailable in this environment' },
       { status: 403 }
     );
   }

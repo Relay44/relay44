@@ -32,7 +32,7 @@ export function OrderList({ marketId }: OrderListProps) {
     <div className="space-y-3">
       {readOnly ? (
         <div className="border border-border bg-bg-secondary px-3 py-2 text-xs text-text-secondary">
-          Order cancellation is disabled in read-only mode.
+          Order cancellation is unavailable in this environment.
         </div>
       ) : null}
       {orders.map((order) => (
