@@ -89,7 +89,7 @@ export function WorldDeskHero({ slides }: WorldDeskHeroProps) {
           <div className="flex h-full flex-col">
             <div className="flex flex-wrap items-center gap-3">
               <span className="border border-accent/30 bg-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-accent">
-                World desk
+                Current coverage
               </span>
             </div>
 
@@ -115,7 +115,7 @@ export function WorldDeskHero({ slides }: WorldDeskHeroProps) {
                   }}
                   className="mt-1 text-[11px] uppercase tracking-[0.16em] text-accent transition-colors hover:text-accent/80"
                 >
-                  read more...
+                  Read article
                 </button>
               </div>
               <p className="border-l border-accent/30 pl-3 leading-6 truncate">
@@ -139,10 +139,10 @@ export function WorldDeskHero({ slides }: WorldDeskHeroProps) {
                   rel="noreferrer"
                   className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
                 >
-                  Open source
+                  Original source
                 </a>
                 <span className="text-[11px] uppercase tracking-[0.16em] text-text-muted">
-                  AI-drafted from live news | 3 market angles ready
+                  Three draft questions available
                 </span>
               </div>
 
@@ -170,7 +170,7 @@ export function WorldDeskHero({ slides }: WorldDeskHeroProps) {
 
         <aside className="hidden h-full max-h-[500px] overflow-hidden border border-border bg-bg-primary px-5 py-5 brutal-shadow lg:flex lg:flex-col sm:px-6 sm:py-6">
           <div className="shrink-0">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">Desk controls</p>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">Coverage</p>
             <div className="mt-4 flex items-center gap-3">
               <button
                 type="button"
@@ -255,7 +255,7 @@ export function WorldDeskHero({ slides }: WorldDeskHeroProps) {
                 rel="noreferrer"
                 className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
               >
-                Open source
+                Original source
               </a>
             </div>
           </div>

@@ -1,8 +1,4 @@
-import {
-  normalizeBaseMarketsResponse,
-  type BaseMarketsResponse,
-} from '@/lib/api';
-import type { Market, PaginatedResponse } from '@/types';
+import { fetchLiveBaseMarkets } from '@/lib/server/baseMarketData';
 
 export interface MarketDraftOption {
   id: string;
@@ -80,7 +76,6 @@ interface SignalCapabilities {
 
 const NEWS_CACHE_TTL_MS = 15 * 60 * 1000;
 const SIGNAL_CACHE_TTL_MS = 60 * 1000;
-const DEFAULT_API_BASE = 'http://localhost:8080/v1';
 const FEED_TIMEOUT_MS = 4_000;
 const RSS_FEEDS: RssFeedConfig[] = [
   {
@@ -170,45 +165,9 @@ let newsCache: CacheEntry<NewsSlide[]> | null = null;
 let signalCache: CacheEntry<SignalSnapshot> | null = null;
 
 function getApiBases(): string[] {
-  const primary = process.env.NEXT_PUBLIC_API_URL?.trim() || DEFAULT_API_BASE;
+  const primary = process.env.NEXT_PUBLIC_API_URL?.trim() || 'http://localhost:8080/v1';
   const fallback = process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || '';
   return [...new Set([primary, fallback].filter(Boolean))];
-}
-
-async function fetchMarketsFromBase(
-  base: string,
-  limit = 24
-): Promise<PaginatedResponse<Market> | null> {
-  const query = new URLSearchParams({
-    limit: String(limit),
-    offset: '0',
-    source: 'all',
-    tradable: 'all',
-  });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
-
-  try {
-    const res = await fetch(`${base}/evm/markets?${query.toString()}`, {
-      method: 'GET',
-      signal: controller.signal,
-      next: { revalidate: 60 },
-    });
-    if (!res.ok) {
-      return null;
-    }
-
-    const payload = (await res.json()) as BaseMarketsResponse;
-    if (!Array.isArray(payload.markets)) {
-      return null;
-    }
-
-    return normalizeBaseMarketsResponse(payload);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 async function fetchCapabilitiesFromBase(base: string): Promise<SignalCapabilities | null> {
@@ -245,27 +204,13 @@ async function fetchSignalSnapshot(): Promise<SignalSnapshot> {
 
   const startedAt = Date.now();
   const bases = getApiBases();
-  let markets: PaginatedResponse<Market> | null = null;
+  const markets = await fetchLiveBaseMarkets({ limit: 32, revalidateSeconds: 60 });
   let capabilities: SignalCapabilities | null = null;
 
   for (const base of bases) {
-    const [marketResult, capabilitiesResult] = await Promise.all([
-      fetchMarketsFromBase(base, 32),
-      fetchCapabilitiesFromBase(base),
-    ]);
-
-    if (!capabilities && capabilitiesResult) {
+    const capabilitiesResult = await fetchCapabilitiesFromBase(base);
+    if (capabilitiesResult) {
       capabilities = capabilitiesResult;
-    }
-
-    if (marketResult) {
-      markets = marketResult;
-    }
-
-    if (marketResult?.data.length) {
-      if (capabilitiesResult) {
-        capabilities = capabilitiesResult;
-      }
       break;
     }
   }
@@ -484,7 +429,7 @@ function buildMarketDrafts(story: FeedStory, headline: string): MarketDraftOptio
         deadline
       ),
       description:
-        `AI-drafted from live news. Resolve YES if a government, company, court, or institutional source materially confirms the core claim behind "${headline}" by ${deadlineLabel}. ` +
+        `Generated from live news. Resolve YES if a government, company, court, or institutional source materially confirms the core claim behind "${headline}" by ${deadlineLabel}. ` +
         `Resolve NO otherwise. Primary resolution source: official statements, filings, or institutional releases. Seed source: ${story.link}`,
       resolutionSource: 'official',
       tradingEnd: deadline.toISOString(),
@@ -500,7 +445,7 @@ function buildMarketDrafts(story: FeedStory, headline: string): MarketDraftOptio
         deadline
       ),
       description:
-        `AI-drafted from live news. Resolve YES if Reuters, BBC, AP, or The New York Times publishes a new follow-up article that materially advances this story by ${deadlineLabel}. ` +
+        `Generated from live news. Resolve YES if Reuters, BBC, AP, or The New York Times publishes a new follow-up article that materially advances this story by ${deadlineLabel}. ` +
         `Resolve NO otherwise. Primary resolution source: named outlet coverage and archived article URLs. Seed source: ${story.link}`,
       resolutionSource: 'news',
       tradingEnd: deadline.toISOString(),
@@ -516,7 +461,7 @@ function buildMarketDrafts(story: FeedStory, headline: string): MarketDraftOptio
         deadline
       ),
       description:
-        `AI-drafted from live news. Resolve YES if an official source materially denies, reverses, or contradicts the core claim behind "${headline}" by ${deadlineLabel}. ` +
+        `Generated from live news. Resolve YES if an official source materially denies, reverses, or contradicts the core claim behind "${headline}" by ${deadlineLabel}. ` +
         `Resolve NO otherwise. Primary resolution source: official statements, filings, or institutional releases. Seed source: ${story.link}`,
       resolutionSource: 'official',
       tradingEnd: deadline.toISOString(),
@@ -623,7 +568,7 @@ function scoreStory(story: FeedStory): number {
 
 function buildNewsSlide(story: FeedStory): NewsSlide {
   const headline = trimSentence(story.title, 108);
-  const description = story.description || `${story.source} moved this story into the live desk.`;
+  const description = story.description || `${story.source} added this story to current coverage.`;
   const body = description.replace(/\s+/g, ' ').trim();
   const relativeTime = formatRelativeTime(story.publishedAt);
 

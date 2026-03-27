@@ -4,7 +4,7 @@ import DecisionCellPageClient from './DecisionCellPageClient';
 
 export const metadata = buildPageMetadata({
   title: 'Decision cell',
-  description: 'Inspect a private decision cell, its linked nodes, thresholds, and external-agent automation.',
+  description: 'Review a private decision cell, linked markets, alerts, and agent actions.',
   path: '/decisions',
   noIndex: true,
 });

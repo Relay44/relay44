@@ -4,7 +4,7 @@ import CreateDecisionCellClient from './CreateDecisionCellClient';
 
 export const metadata = buildPageMetadata({
   title: 'Create decision cell',
-  description: 'Create a private decision cell with linked markets, thresholds, and external-agent automation.',
+  description: 'Create a private decision cell with linked markets, alerts, and agent actions.',
   path: '/decisions/create',
   noIndex: true,
 });

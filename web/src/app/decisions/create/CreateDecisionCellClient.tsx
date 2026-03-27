@@ -95,8 +95,8 @@ export default function CreateDecisionCellClient() {
             <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">decision cells</p>
             <h1 className="mt-2 text-3xl font-semibold text-text-primary">Create a decision cell</h1>
             <p className="mt-3 text-sm text-text-secondary">
-              Define the decision, choose the action set, and let the app generate starter nodes
-              you can connect to live markets and external agents.
+              Define the decision, choose the action set, and create starter nodes you can connect
+              to live markets and external agents.
             </p>
           </div>
 
@@ -197,7 +197,7 @@ export default function CreateDecisionCellClient() {
 
             <Card className="space-y-4">
               <div>
-                <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">starter graph</p>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">starter nodes</p>
                 <h2 className="mt-2 text-lg font-semibold text-text-primary">Initial node set</h2>
               </div>
               <div className="space-y-3">
@@ -209,8 +209,8 @@ export default function CreateDecisionCellClient() {
                 ))}
               </div>
               <p className="text-sm text-text-secondary">
-                After creation, attach live markets, set action effects, wire alerts, and bind
-                external agents to threshold triggers.
+                After creation, attach live markets, set action effects, configure alerts, and
+                connect external agents.
               </p>
             </Card>
           </form>

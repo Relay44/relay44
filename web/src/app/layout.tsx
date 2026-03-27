@@ -44,7 +44,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   applicationName: SITE_NAME,
   title: {
-    default: 'Relay44 | agentic prediction markets and decision automation',
+    default: 'Relay44 | prediction markets and agent execution',
     template: '%s | Relay44',
   },
   description: DEFAULT_DESCRIPTION,
@@ -86,7 +86,7 @@ export const metadata: Metadata = {
     ],
   },
   openGraph: {
-    title: 'Relay44 | agentic prediction markets and decision automation',
+    title: 'Relay44 | prediction markets and agent execution',
     description: DEFAULT_DESCRIPTION,
     url: SITE_URL,
     siteName: SITE_NAME,
@@ -103,7 +103,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Relay44 | agentic prediction markets and decision automation',
+    title: 'Relay44 | prediction markets and agent execution',
     description: DEFAULT_DESCRIPTION,
     creator: SITE_HANDLE,
     site: SITE_HANDLE,
@@ -143,7 +143,7 @@ export default function RootLayout({
             version: '1',
             imageUrl: `${SITE_URL}/og-miniapp-relay44.svg`,
             button: {
-              title: 'Open Relay44',
+              title: 'Open app',
               action: {
                 type: 'launch_miniapp',
                 name: 'Relay44',

@@ -251,7 +251,7 @@ export default function AgentsPage() {
     event.preventDefault();
 
     if (readOnly) {
-      addToast('Agent launch is disabled in read-only mode', 'error');
+      addToast('Agent launch is unavailable in this environment', 'error');
       return;
     }
     if (!wallet.isConnected) {
@@ -284,7 +284,7 @@ export default function AgentsPage() {
     event.preventDefault();
 
     if (readOnly) {
-      addToast('External agent launch is disabled in read-only mode', 'error');
+      addToast('External agent launch is unavailable in this environment', 'error');
       return;
     }
     if (!wallet.isConnected) {
@@ -331,7 +331,7 @@ export default function AgentsPage() {
 
   const onExecuteAgent = async (agentId: string) => {
     if (readOnly) {
-      addToast('Agent execution is disabled in read-only mode', 'error');
+      addToast('Agent execution is unavailable in this environment', 'error');
       return;
     }
     if (!wallet.isConnected) {
@@ -350,7 +350,7 @@ export default function AgentsPage() {
 
   const onExecuteExternalAgent = async (agentId: string) => {
     if (readOnly) {
-      addToast('External agent execution is disabled in read-only mode', 'error');
+      addToast('External agent execution is unavailable in this environment', 'error');
       return;
     }
     if (!canManageExternal) {
@@ -370,10 +370,9 @@ export default function AgentsPage() {
     <TooltipProvider delayDuration={200}>
       <PageShell>
         <section className="mb-6">
-          <h1 className="text-2xl font-semibold text-text-primary">Web4 Agent Grid</h1>
+          <h1 className="text-2xl font-semibold text-text-primary">Agents</h1>
           <p className="text-sm text-text-secondary mt-2 max-w-3xl">
-            Launch autonomous market agents, monitor execution windows, and operate machine-native
-            strategies on Base.
+            Launch, monitor, and manage market agents across onchain and external venues.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link
@@ -386,8 +385,8 @@ export default function AgentsPage() {
           {readOnly ? (
             <div className="mt-4">
               <ReadOnlyNotice
-                title="Agent control is disabled"
-                body="You can inspect agent directories and market coverage here, but launch and execute actions are locked in this preview."
+                title="Agent control is currently unavailable"
+                body="You can inspect agent status and market coverage here, but launch and execute actions are unavailable in this environment."
               />
             </div>
           ) : null}
@@ -422,12 +421,12 @@ export default function AgentsPage() {
           <Card className="space-y-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text-primary">
-                {mode === 'onchain' ? 'Onchain lane guide' : 'External lane guide'}
+                {mode === 'onchain' ? 'Onchain guide' : 'External guide'}
               </h2>
               <span className="text-xs text-text-muted">
                 {mode === 'onchain'
-                  ? 'Uses Base-native market execution.'
-                  : 'Uses BYOK venue credentials and provider-native execution.'}
+                  ? 'Runs on Base markets.'
+                  : 'Uses saved venue credentials and provider order APIs.'}
               </span>
             </div>
             {mode === 'onchain' ? (
@@ -484,7 +483,7 @@ export default function AgentsPage() {
             <section className="grid lg:grid-cols-2 gap-6 mb-8">
             {readOnly ? (
               <ReadOnlyNotice
-                title="Onchain agent launch is disabled"
+                title="Onchain agent launch is currently unavailable"
                 body="Directory data remains live, but new onchain agents cannot be launched or forced from this environment."
               />
             ) : (
@@ -585,11 +584,11 @@ export default function AgentsPage() {
             )}
 
             <Card>
-              <h2 className="text-lg font-semibold mb-4">Web4 Operating Notes</h2>
+              <h2 className="text-lg font-semibold mb-4">Operating notes</h2>
               <ul className="space-y-3 text-sm text-text-secondary">
                 <li>Agents are persisted in `AgentRuntime` and executable by the network.</li>
-                <li>Execution status is calculated from cadence and last execution timestamp.</li>
-                <li>Use this directory as the control plane for autonomous market participation.</li>
+                <li>Run status is derived from cadence and the last execution timestamp.</li>
+                <li>Use this directory to monitor market participation and execution state.</li>
               </ul>
               <div className="mt-6 pt-4 border-t border-border text-sm">
                 <div className="flex flex-wrap gap-3">
@@ -708,8 +707,8 @@ export default function AgentsPage() {
             <section className="grid lg:grid-cols-2 gap-6 mb-8">
             {readOnly ? (
               <ReadOnlyNotice
-                title="External agent launch is disabled"
-                body="Venue market data remains visible, but credential-backed agent execution is locked in this preview."
+                title="External agent launch is currently unavailable"
+                body="Venue market data remains visible, but credential-backed agent execution is unavailable in this environment."
               />
             ) : (
               <Card>
@@ -878,9 +877,9 @@ export default function AgentsPage() {
             <Card>
               <h2 className="text-lg font-semibold mb-4">External Execution Notes</h2>
               <ul className="space-y-3 text-sm text-text-secondary">
-                <li>External agents use BYOK credentials and venue-native execution paths.</li>
-                <li>Funding and allowance checks are surfaced via preflight on each execution intent.</li>
-                <li>Launch scope is binary YES/NO markets only.</li>
+                <li>External agents use saved venue credentials and provider order APIs.</li>
+                <li>Funding and allowance checks run before each execution request.</li>
+                <li>Launch scope is currently limited to YES/NO markets.</li>
               </ul>
             </Card>
           </section>

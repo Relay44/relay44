@@ -72,5 +72,5 @@ export function assertWritesEnabled(
     return;
   }
 
-  throw new Error(`${action} is disabled in read-only mode`);
+  throw new Error(`${action} is unavailable in this environment`);
 }
