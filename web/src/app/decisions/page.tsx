@@ -4,7 +4,7 @@ import DecisionsPageClient from './DecisionsPageClient';
 
 export const metadata = buildPageMetadata({
   title: 'Decision cells',
-  description: 'Private decision systems driven by linked markets, thresholds, and external-agent automation.',
+  description: 'Private decision cells for linking markets, alerts, and agent actions.',
   path: '/decisions',
   noIndex: true,
 });

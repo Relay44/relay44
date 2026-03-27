@@ -72,8 +72,8 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
   if (readOnly) {
     return (
       <ReadOnlyNotice
-        title="Deposits are disabled"
-        body="This preview exposes wallet state without allowing new deposits."
+        title="Deposits are currently unavailable"
+        body="Deposits are unavailable in this environment."
       />
     );
   }

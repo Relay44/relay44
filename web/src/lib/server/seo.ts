@@ -1,9 +1,4 @@
-import {
-  mapBaseSnapshotToMarket,
-  normalizeBaseMarketsResponse,
-  type BaseMarketSnapshot,
-  type BaseMarketsResponse,
-} from '@/lib/api';
+import { fetchLiveBaseMarket, fetchLiveBaseMarkets } from '@/lib/server/baseMarketData';
 import type { Leaderboard, LeaderboardEntry, Market, PublicProfile } from '@/types';
 
 const DEFAULT_API_BASE = 'http://localhost:8080/v1';
@@ -54,19 +49,11 @@ export async function fetchSeoMarketsPage(
   limit = 100,
   offset = 0
 ): Promise<{ data: Market[]; hasMore: boolean; total: number; limit: number; offset: number } | null> {
-  const query = new URLSearchParams({
-    limit: String(limit),
-    offset: String(offset),
-    source: 'all',
-    tradable: 'all',
+  return fetchLiveBaseMarkets({
+    limit,
+    offset,
+    revalidateSeconds: SEO_REVALIDATE_SECONDS,
   });
-  const payload = await fetchJsonFromBases<BaseMarketsResponse>(`/evm/markets?${query.toString()}`);
-
-  if (!payload || !Array.isArray(payload.markets)) {
-    return null;
-  }
-
-  return normalizeBaseMarketsResponse(payload);
 }
 
 export async function fetchSeoMarkets(limit = 50): Promise<Market[]> {
@@ -96,15 +83,7 @@ export async function fetchAllSeoMarkets(limit = 100, maxPages = 10): Promise<Ma
 }
 
 export async function fetchSeoMarket(id: string): Promise<Market | null> {
-  const payload = await fetchJsonFromBases<BaseMarketSnapshot>(
-    `/evm/markets/${encodeURIComponent(id)}`
-  );
-
-  if (!payload || typeof payload.id !== 'string') {
-    return null;
-  }
-
-  return mapBaseSnapshotToMarket(payload);
+  return fetchLiveBaseMarket(id, SEO_REVALIDATE_SECONDS);
 }
 
 export async function fetchSeoLeaderboard(limit = 25): Promise<LeaderboardEntry[]> {

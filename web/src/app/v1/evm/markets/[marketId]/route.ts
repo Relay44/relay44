@@ -1,14 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { toApiErrorPayload } from '@/lib/server/baseReadApi';
-import { readUnifiedOrderbook } from '@/lib/server/unifiedMarketsApi';
+import { readUnifiedMarket } from '@/lib/server/unifiedMarketsApi';
 
 export async function GET(
-  request: NextRequest,
+  _request: Request,
   context: { params: Promise<{ marketId: string }> }
 ) {
   try {
     const { marketId } = await context.params;
-    return NextResponse.json(await readUnifiedOrderbook(marketId, request.nextUrl.searchParams));
+    return NextResponse.json(await readUnifiedMarket(marketId));
   } catch (error) {
     const mapped = toApiErrorPayload(error);
     return NextResponse.json(mapped.payload, { status: mapped.status });

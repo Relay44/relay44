@@ -16,39 +16,39 @@ import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
-  { href: "/", label: "Home", note: "Live desk and signal feed" },
+  { href: "/", label: "Home", note: "Markets and live activity" },
   {
     href: "/how-it-works",
     label: "How it works",
-    note: "Resolution rules, launch status, FAQ",
+    note: "Platform overview and rules",
   },
   {
     href: "/markets",
     label: "Markets",
-    note: "Browse live rails and outcomes",
+    note: "Browse markets and prices",
   },
   {
     href: "/decisions",
     label: "Decisions",
-    note: "Threshold-driven cells and automation",
+    note: "Private decision workflows",
   },
-  { href: "/agents", label: "Agents", note: "Inspect autonomous lanes" },
-  { href: "/portfolio", label: "Portfolio", note: "Holdings and open orders" },
-  { href: "/wallet", label: "Wallet", note: "Vault state and history" },
-  { href: "/docs/api", label: "API", note: "Machine-readable endpoints" },
+  { href: "/agents", label: "Agents", note: "Manage market agents" },
+  { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
+  { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
+  { href: "/docs/api", label: "API", note: "Developer endpoints" },
 ];
 
 const externalLinks = [
   {
     href: "https://x.com/relay44",
     label: "X",
-    note: "Live channel and announcements",
+    note: "Updates and announcements",
     icon: XIcon,
   },
   {
     href: "https://github.com/Relay44",
     label: "GitHub",
-    note: "Source code and contributions",
+    note: "Source code and issues",
     icon: Github,
   },
 ];
@@ -133,14 +133,14 @@ export function SidebarMenu() {
         >
           <div className="border-b border-border px-5 pb-5 pt-6">
             <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
-              navigation grid
+              navigation
             </p>
             <div className="mt-3">
               <BrandLogo />
             </div>
             {readOnly ? (
               <div className="mt-4 inline-flex border border-accent/30 bg-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-accent">
-                Read-only preview
+                Read only
               </div>
             ) : null}
           </div>

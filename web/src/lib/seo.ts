@@ -8,14 +8,13 @@ export const SITE_HANDLE = '@relay44';
 export const SITE_IMAGE_PATH = '/og-share-relay44.svg';
 export const SITE_IMAGE_ALT = 'Relay44 share image';
 export const DEFAULT_DESCRIPTION =
-  'Relay44 is a Base-native prediction market platform for live markets, external venue execution, agent automation, and threshold-driven decision cells.';
+  'Relay44 is a prediction market app on Base with live markets, agent execution, and market data across connected venues.';
 export const DEFAULT_KEYWORDS = [
   'prediction markets',
-  'agentic prediction markets',
-  'decision automation',
-  'decision cells',
-  'autonomous agents',
-  'market intelligence',
+  'market trading',
+  'agents',
+  'trading agents',
+  'decision workflows',
   'forecasting markets',
   'Base prediction markets',
   'crypto prediction markets',
@@ -193,10 +192,10 @@ export function buildWebApplicationStructuredData(): StructuredDataNode {
     description: DEFAULT_DESCRIPTION,
     image: absoluteUrl(SITE_IMAGE_PATH),
     featureList: [
-      'Live prediction market feeds',
-      'Decision cells with threshold automation',
-      'Agent execution surfaces',
-      'Market discovery and draft workflows',
+      'Live prediction markets and pricing',
+      'Agent management across onchain and external venues',
+      'Private decision workflows',
+      'Market discovery and portfolio tools',
     ],
     offers: {
       '@type': 'Offer',

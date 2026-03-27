@@ -164,8 +164,8 @@ export function NotificationSettings() {
   if (readOnly) {
     return (
       <ReadOnlyNotice
-        title="Notification settings are locked"
-        body="Preference writes are disabled in read-only mode."
+        title="Notification settings are currently unavailable"
+        body="Notification preferences cannot be changed in this environment."
       />
     );
   }

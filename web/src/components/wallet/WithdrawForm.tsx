@@ -130,8 +130,8 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
   if (readOnly) {
     return (
       <ReadOnlyNotice
-        title="Withdrawals are disabled"
-        body="This preview keeps balances and history visible while withdrawal execution stays locked."
+        title="Withdrawals are currently unavailable"
+        body="Withdrawals are unavailable in this environment."
       />
     );
   }
