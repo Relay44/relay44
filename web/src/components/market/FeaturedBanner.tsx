@@ -185,7 +185,7 @@ export function SignalChart({ initialSignal }: SignalChartProps) {
   }, [phase, signal.latencyMs, signal.marketsTracked, signal.points]);
 
   return (
-    <div className="grid gap-3 border border-border bg-bg-primary px-4 py-3 brutal-shadow sm:h-20 sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)_minmax(0,240px)] sm:items-center sm:gap-4 sm:px-5 sm:py-0">
+    <div className="grid gap-3 border border-border bg-bg-primary px-4 py-3 sm:h-20 sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)_minmax(0,240px)] sm:items-center sm:gap-4 sm:px-5 sm:py-0">
       <div className="min-w-0">
         <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">
           SIGNAL_INPUT: {signal.label}
