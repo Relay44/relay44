@@ -16,12 +16,15 @@ function FeaturedCard({ market }: { market: Market }) {
   const noPrice = Math.round(market.noPrice * 100);
 
   return (
-    <Link href={`/markets/${encodeURIComponent(market.id)}`} className="block group flex-shrink-0 w-[33.333vw] md:w-[33.333vw] max-w-[33.333%] h-[560px] md:h-[600px]">
+    <Link
+      href={`/markets/${encodeURIComponent(market.id)}`}
+      className="block group h-[320px] w-[76vw] flex-shrink-0 sm:h-[340px] sm:w-[48vw] lg:h-[360px] lg:w-[240px] xl:w-[260px]"
+    >
       <div
         className={cn(
           'h-full overflow-hidden flex flex-col',
           'bg-bg-primary border border-border hover:border-text-muted',
-          'p-6',
+          'p-5',
           'transition-colors duration-fast'
         )}
       >
@@ -31,7 +34,7 @@ function FeaturedCard({ market }: { market: Market }) {
           </span>
         </div>
 
-        <h3 className="text-base font-medium text-text-primary mb-auto line-clamp-3 group-hover:underline transition-colors min-h-[72px]" style={{ fontFamily: 'var(--font-display)' }}>
+        <h3 className="text-base font-medium text-text-primary mb-auto line-clamp-3 group-hover:underline transition-colors min-h-[60px]" style={{ fontFamily: 'var(--font-display)' }}>
           {market.question}
         </h3>
 
@@ -43,7 +46,7 @@ function FeaturedCard({ market }: { market: Market }) {
               e.stopPropagation();
             }}
             className={cn(
-              'flex-1 py-2 px-3 font-mono text-[0.8rem] font-bold',
+              'flex-1 py-2 px-3 font-mono text-[0.7rem] font-bold',
               'border border-border text-text-primary',
               'hover:bg-text-primary hover:text-text-inverse',
               'transition-colors cursor-pointer',
@@ -60,7 +63,7 @@ function FeaturedCard({ market }: { market: Market }) {
               e.stopPropagation();
             }}
             className={cn(
-              'flex-1 py-2 px-3 font-mono text-[0.8rem] font-bold',
+              'flex-1 py-2 px-3 font-mono text-[0.7rem] font-bold',
               'border border-border text-text-primary',
               'hover:bg-text-primary hover:text-text-inverse',
               'transition-colors cursor-pointer',
@@ -85,7 +88,7 @@ export function FeaturedSlider({ markets, title }: FeaturedSliderProps) {
 
   const scroll = (direction: 'left' | 'right') => {
     if (!scrollRef.current) return;
-    const scrollAmount = 360;
+    const scrollAmount = Math.max(280, Math.round(scrollRef.current.clientWidth * 0.6));
     scrollRef.current.scrollBy({
       left: direction === 'left' ? -scrollAmount : scrollAmount,
       behavior: 'smooth',
@@ -102,7 +105,10 @@ export function FeaturedSlider({ markets, title }: FeaturedSliderProps) {
         )}
         <div className="flex gap-3 overflow-hidden px-4 sm:px-6 md:px-8">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="flex-shrink-0 w-[33.333vw] md:w-[33.333vw] max-w-[33.333%] h-[560px] md:h-[600px] bg-bg-secondary animate-pulse" />
+            <div
+              key={i}
+              className="h-[320px] w-[76vw] flex-shrink-0 bg-bg-secondary animate-pulse sm:h-[340px] sm:w-[48vw] lg:h-[360px] lg:w-[240px] xl:w-[260px]"
+            />
           ))}
         </div>
       </div>
@@ -113,7 +119,7 @@ export function FeaturedSlider({ markets, title }: FeaturedSliderProps) {
     <div className="relative">
       {title && (
         <div className="flex items-center justify-between mb-3 px-4 sm:px-6 md:px-8">
-          <h2 className="text-[0.7rem] font-mono uppercase tracking-wider text-text-muted">{title}</h2>
+          <h2 className="text-[1.4rem] font-mono uppercase tracking-wider text-text-muted">{title}</h2>
           <div className="flex gap-1">
             <button
               onClick={() => scroll('left')}

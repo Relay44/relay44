@@ -34,6 +34,16 @@
     scroll-behavior: smooth;
   }
 
+  :root {
+    --app-header-offset: 74px;
+  }
+
+  @media (min-width: 640px) {
+    :root {
+      --app-header-offset: 82px;
+    }
+  }
+
   body {
     @apply text-text-primary;
     background-color: var(--color-bg-base);
@@ -241,6 +251,14 @@
 
   .grain-texture {
     background-image: var(--texture-grain);
+  }
+
+  .pt-header {
+    padding-top: var(--app-header-offset);
+  }
+
+  .top-header {
+    top: var(--app-header-offset);
   }
 }
 

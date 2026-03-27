@@ -15,6 +15,9 @@ interface HomePageClientProps {
   initialLiveFeed: HomeLiveFeed;
 }
 
+const HOME_MARKET_LIMIT = 16;
+const FEATURED_MARKET_COUNT = 16;
+
 function formatAgentSize(size: string): string {
   const parsed = Number(size) / 1_000_000;
   if (!Number.isFinite(parsed) || parsed <= 0) return "0";
@@ -91,7 +94,7 @@ function AgentPanel({
   const headerState = liveAgents.length > 0 ? `${liveAgents.length} live` : error ? "degraded" : isLoading ? "loading" : "standby";
 
   return (
-    <aside className="hidden lg:flex w-[300px] shrink-0 flex-col border-r border-border">
+    <aside className="hidden lg:flex w-[375px] shrink-0 flex-col border-r border-border">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border font-mono text-[0.75rem]">
         <span className="text-text-muted uppercase tracking-wider">
           {liveAgents.length > 0 ? "Agent Runtime" : "Runtime Status"}
@@ -278,7 +281,7 @@ export default function HomePageClient({
   const { data: marketsData, isLoading } = useMarkets(
     {
       sort: "volume",
-      limit: 12,
+      limit: HOME_MARKET_LIMIT,
     },
     {
       initialData: initialMarkets || undefined,
@@ -340,7 +343,7 @@ export default function HomePageClient({
     <div className="h-screen flex flex-col overflow-hidden">
       <Header />
 
-      <div className="flex flex-1 overflow-hidden pt-[73px] sm:pt-[81px]">
+      <div className="pt-header flex flex-1 overflow-hidden">
         <AgentPanel
           agents={liveAgents}
           isLoading={isLoadingAgents}
@@ -361,7 +364,7 @@ export default function HomePageClient({
           </section>
 
           <section className="py-5 border-b border-border">
-            <FeaturedSlider markets={markets.slice(0, 8)} title="Signal Relay" />
+            <FeaturedSlider markets={markets.slice(0, FEATURED_MARKET_COUNT)} title="Signal Relay" />
           </section>
 
           <MarketTable markets={markets} isLoading={isLoading} />

@@ -1,11 +1,11 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 
-import { DecisionAccessGate, DecisionScoreBar } from '@/components/decision';
-import { PageShell } from '@/components/layout';
-import { Button, Card, Input, Select, useToast } from '@/components/ui';
+import { DecisionAccessGate, DecisionScoreBar } from "@/components/decision";
+import { PageShell } from "@/components/layout";
+import { Button, Card, Input, Select, useToast } from "@/components/ui";
 import {
   useAddDecisionNode,
   useAttachDecisionAgent,
@@ -18,8 +18,22 @@ import {
   useUpdateDecisionAutomation,
   useUpdateDecisionNode,
   useUpsertDecisionAlert,
-} from '@/hooks';
-import type { ExternalAgentRecord } from '@/lib/api';
+} from "@/hooks";
+import type { ExternalAgentRecord } from "@/lib/api";
+import {
+  ACTION_EFFECT_OPTIONS,
+  NODE_SOURCE_OPTIONS,
+  TRIGGER_MODE_OPTIONS,
+  contributorSummary,
+  decisionTypeLabel,
+  formatPercentFromBps,
+  humanizeDecisionValue,
+  nodeSignalLabel,
+  nodeSourceLabel,
+  nodeSourceTypeLabel,
+  recommendationLabel,
+  triggerModeLabel,
+} from "@/lib/decisionCells";
 import type {
   DecisionAutomationPolicy,
   DecisionCell,
@@ -27,40 +41,18 @@ import type {
   DecisionNodeEffect,
   DecisionNodeSourceType,
   DecisionTriggerMode,
-} from '@/types';
-
-const SOURCE_TYPE_OPTIONS = [
-  { value: 'draft_market', label: 'Draft node' },
-  { value: 'internal_market', label: 'Internal market' },
-  { value: 'external_market', label: 'External market' },
-] as const;
-
-const EFFECT_OPTIONS = [
-  { value: 'support', label: 'Support' },
-  { value: 'oppose', label: 'Oppose' },
-  { value: 'neutral', label: 'Neutral' },
-] as const;
-
-const TRIGGER_MODE_OPTIONS = [
-  { value: 'on_recommendation_gain', label: 'Recommendation gain' },
-  { value: 'on_threshold_cross', label: 'Threshold cross' },
-  { value: 'on_confidence_gain', label: 'Confidence gain' },
-] as const;
+} from "@/types";
 
 const PROVIDER_OPTIONS = [
-  { value: 'all', label: 'Any provider' },
-  { value: 'limitless', label: 'Limitless' },
-  { value: 'polymarket', label: 'Polymarket' },
+  { value: "all", label: "Any provider" },
+  { value: "limitless", label: "Limitless" },
+  { value: "polymarket", label: "Polymarket" },
 ] as const;
 
 const DIRECTION_OPTIONS = [
-  { value: 'above', label: 'Cross above' },
-  { value: 'below', label: 'Cross below' },
+  { value: "above", label: "Cross above" },
+  { value: "below", label: "Cross below" },
 ] as const;
-
-function toPercent(bps: number) {
-  return (bps / 100).toFixed(1);
-}
 
 function parsePercent(value: string, fallback = 0) {
   const parsed = Number(value);
@@ -70,20 +62,22 @@ function parsePercent(value: string, fallback = 0) {
   return Math.max(0, Math.min(10000, Math.round(parsed * 100)));
 }
 
-function formatState(state: string) {
-  return state.replace(/_/g, ' ');
-}
-
 function summarizePayload(payload: Record<string, unknown>) {
   const pairs = Object.entries(payload)
     .slice(0, 3)
-    .map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`);
-  return pairs.join(' • ');
+    .map(
+      ([key, value]) =>
+        `${key}: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`,
+    );
+  return pairs.join(" • ");
 }
 
 function defaultNodeEffects(cell: DecisionCell) {
   return Object.fromEntries(
-    cell.actions.map((action, index) => [action.label, index === 0 ? 'support' : 'neutral']),
+    cell.actions.map((action, index) => [
+      action.label,
+      index === 0 ? "support" : "neutral",
+    ]),
   ) as Record<string, DecisionNodeEffect>;
 }
 
@@ -110,15 +104,20 @@ function DecisionNodeCard({
   const [label, setLabel] = useState(node.label);
   const [description, setDescription] = useState(node.description);
   const [weightBps, setWeightBps] = useState(String(node.weightBps));
-  const [sourceType, setSourceType] = useState<DecisionNodeSourceType>(node.sourceType);
-  const [sourceRef, setSourceRef] = useState(node.sourceRef || '');
-  const [selectedAgentId, setSelectedAgentId] = useState('');
-  const [triggerMode, setTriggerMode] = useState<DecisionTriggerMode>('on_threshold_cross');
-  const [actionEffects, setActionEffects] = useState<Record<string, DecisionNodeEffect>>(() => {
+  const [sourceType, setSourceType] = useState<DecisionNodeSourceType>(
+    node.sourceType,
+  );
+  const [sourceRef, setSourceRef] = useState(node.sourceRef || "");
+  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [triggerMode, setTriggerMode] =
+    useState<DecisionTriggerMode>("on_threshold_cross");
+  const [actionEffects, setActionEffects] = useState<
+    Record<string, DecisionNodeEffect>
+  >(() => {
     const next = { ...defaultNodeEffects(cell) };
     for (const action of cell.actions) {
       const effect = node.actionEffects[action.label];
-      if (effect === 'support' || effect === 'oppose' || effect === 'neutral') {
+      if (effect === "support" || effect === "oppose" || effect === "neutral") {
         next[action.label] = effect;
       }
     }
@@ -130,21 +129,24 @@ function DecisionNodeCard({
     setDescription(node.description);
     setWeightBps(String(node.weightBps));
     setSourceType(node.sourceType);
-    setSourceRef(node.sourceRef || '');
+    setSourceRef(node.sourceRef || "");
     setActionEffects((current) => {
       const next = { ...current };
       for (const action of cell.actions) {
         const effect = node.actionEffects[action.label];
         next[action.label] =
-          effect === 'support' || effect === 'oppose' || effect === 'neutral'
+          effect === "support" || effect === "oppose" || effect === "neutral"
             ? effect
-            : next[action.label] || 'neutral';
+            : next[action.label] || "neutral";
       }
       return next;
     });
   }, [cell.actions, node]);
 
-  const marketOptions = sourceType === 'internal_market' ? internalMarketOptions : externalMarketOptions;
+  const marketOptions =
+    sourceType === "internal_market"
+      ? internalMarketOptions
+      : externalMarketOptions;
 
   const handleSaveNode = async () => {
     try {
@@ -152,33 +154,39 @@ function DecisionNodeCard({
         label,
         description,
         weightBps: Math.max(0, Math.min(10000, Number(weightBps) || 0)),
-        sourceType: sourceType === 'draft_market' ? 'draft_market' : undefined,
-        sourceRef: sourceType === 'draft_market' ? undefined : node.sourceRef,
+        sourceType: sourceType === "draft_market" ? "draft_market" : undefined,
+        sourceRef: sourceType === "draft_market" ? undefined : node.sourceRef,
         actionEffects,
       });
-      addToast('Node updated.', 'success');
+      addToast("Node updated.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to update node.', 'error');
+      addToast(
+        error instanceof Error ? error.message : "Failed to update node.",
+        "error",
+      );
     }
   };
 
   const handleAttachMarket = async () => {
-    if (sourceType === 'draft_market' || !sourceRef) {
-      addToast('Choose a live market before attaching.', 'error');
+    if (sourceType === "draft_market" || !sourceRef) {
+      addToast("Choose a live market before attaching.", "error");
       return;
     }
 
     try {
       await attachMarket.mutateAsync({ sourceType, sourceRef });
-      addToast('Market attached to node.', 'success');
+      addToast("Market attached to node.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to attach market.', 'error');
+      addToast(
+        error instanceof Error ? error.message : "Failed to attach market.",
+        "error",
+      );
     }
   };
 
   const handleAttachAgent = async () => {
     if (!selectedAgentId) {
-      addToast('Choose an external agent first.', 'error');
+      addToast("Choose an external agent first.", "error");
       return;
     }
 
@@ -188,10 +196,15 @@ function DecisionNodeCard({
         triggerMode,
         active: true,
       });
-      setSelectedAgentId('');
-      addToast('External agent attached.', 'success');
+      setSelectedAgentId("");
+      addToast("External agent attached.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to attach external agent.', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to attach external agent.",
+        "error",
+      );
     }
   };
 
@@ -199,21 +212,31 @@ function DecisionNodeCard({
     <Card className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">{formatState(node.sourceType)}</p>
-          <h3 className="mt-2 text-lg font-semibold text-text-primary">{node.label}</h3>
+          <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
+            {nodeSourceTypeLabel(node.sourceType)}
+          </p>
+          <h3 className="mt-2 text-lg font-semibold text-text-primary">
+            {node.label}
+          </h3>
           <p className="mt-2 text-sm text-text-secondary">{node.description}</p>
         </div>
         <div className="text-right text-sm">
-          <div className="text-text-secondary">Weight</div>
-          <div className="font-semibold text-text-primary">{toPercent(node.weightBps)}%</div>
-          {typeof node.lastProbabilityBps === 'number' ? (
-            <div className="mt-1 text-text-secondary">P(yes): {toPercent(node.lastProbabilityBps)}%</div>
-          ) : null}
+          <div className="text-text-secondary">{nodeSourceLabel(node)}</div>
+          <div className="font-semibold text-text-primary">
+            {formatPercentFromBps(node.weightBps)}
+          </div>
+          <div className="mt-1 text-text-secondary">
+            {nodeSignalLabel(node)}
+          </div>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Input label="Node label" value={label} onChange={(event) => setLabel(event.target.value)} />
+        <Input
+          label="Node label"
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+        />
         <Input
           label="Weight (%)"
           type="number"
@@ -221,12 +244,18 @@ function DecisionNodeCard({
           max="100"
           step="0.1"
           value={String((Number(weightBps) || 0) / 100)}
-          onChange={(event) => setWeightBps(String(parsePercent(event.target.value, node.weightBps)))}
+          onChange={(event) =>
+            setWeightBps(
+              String(parsePercent(event.target.value, node.weightBps)),
+            )
+          }
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="block text-sm font-medium text-text-primary">Description</label>
+        <label className="block text-sm font-medium text-text-primary">
+          Description
+        </label>
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
@@ -237,16 +266,22 @@ function DecisionNodeCard({
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-text-primary">Source type</label>
+          <label className="block text-sm font-medium text-text-primary">
+            Source type
+          </label>
           <Select
             value={sourceType}
-            onChange={(event) => setSourceType(event.target.value as DecisionNodeSourceType)}
-            options={SOURCE_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+            onChange={(event) =>
+              setSourceType(event.target.value as DecisionNodeSourceType)
+            }
+            options={NODE_SOURCE_OPTIONS}
           />
         </div>
-        {sourceType === 'draft_market' ? (
+        {sourceType === "draft_market" ? (
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-text-primary">Draft market</label>
+            <label className="block text-sm font-medium text-text-primary">
+              Draft market
+            </label>
             <Link
               href={`/markets/create?question=${encodeURIComponent(label)}&description=${encodeURIComponent(description)}`}
               className="inline-flex h-10 items-center border border-accent px-4 text-sm uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
@@ -256,7 +291,9 @@ function DecisionNodeCard({
           </div>
         ) : (
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-text-primary">Linked market</label>
+            <label className="block text-sm font-medium text-text-primary">
+              Linked market
+            </label>
             <Select
               value={sourceRef}
               onChange={(event) => setSourceRef(event.target.value)}
@@ -270,38 +307,49 @@ function DecisionNodeCard({
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {cell.actions.map((action) => (
           <div key={action.id} className="space-y-1.5">
-            <label className="block text-sm font-medium text-text-primary">{action.label}</label>
+            <label className="block text-sm font-medium text-text-primary">
+              {action.label}
+            </label>
             <Select
-              value={actionEffects[action.label] || 'neutral'}
+              value={actionEffects[action.label] || "neutral"}
               onChange={(event) => {
                 const next = event.target.value as DecisionNodeEffect;
-                setActionEffects((current) => ({ ...current, [action.label]: next }));
+                setActionEffects((current) => ({
+                  ...current,
+                  [action.label]: next,
+                }));
               }}
-              options={EFFECT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              options={ACTION_EFFECT_OPTIONS}
             />
           </div>
         ))}
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <Button type="button" onClick={() => void handleSaveNode()} loading={updateNode.isPending}>
+        <Button
+          type="button"
+          onClick={() => void handleSaveNode()}
+          loading={updateNode.isPending}
+        >
           Save node
         </Button>
-        {sourceType !== 'draft_market' ? (
+        {sourceType !== "draft_market" ? (
           <button
             type="button"
             onClick={() => void handleAttachMarket()}
             disabled={attachMarket.isPending}
             className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {attachMarket.isPending ? 'Attaching...' : 'Attach market'}
+            {attachMarket.isPending ? "Attaching..." : "Attach market"}
           </button>
         ) : null}
       </div>
 
       <div className="space-y-3 border-t border-border pt-4">
         <div>
-          <h4 className="text-sm font-medium text-text-primary">Attached automations</h4>
+          <h4 className="text-sm font-medium text-text-primary">
+            Attached automations
+          </h4>
           <p className="mt-1 text-sm text-text-secondary">
             Only attached external agents can auto-trigger from this node.
           </p>
@@ -310,29 +358,39 @@ function DecisionNodeCard({
         {node.agents.length > 0 ? (
           <div className="space-y-2">
             {node.agents.map((agent) => (
-              <div key={agent.id} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
+              <div
+                key={agent.id}
+                className="border border-border bg-bg-secondary px-4 py-3 text-sm"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="font-medium text-text-primary">{agent.name || agent.externalAgentId}</div>
+                    <div className="font-medium text-text-primary">
+                      {agent.name || agent.externalAgentId}
+                    </div>
                     <div className="mt-1 text-text-secondary">
-                      {agent.provider || 'unknown'} • {formatState(agent.triggerMode)} •{' '}
-                      {agent.active ? 'active' : 'inactive'}
+                      {agent.provider || "unknown"} •{" "}
+                      {triggerModeLabel(agent.triggerMode)} •{" "}
+                      {agent.active ? "active" : "inactive"}
                     </div>
                   </div>
                   <div className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
-                    {agent.agentActive ? 'agent live' : 'agent paused'}
+                    {agent.agentActive ? "agent live" : "agent paused"}
                   </div>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-sm text-text-secondary">No external agents attached to this node yet.</div>
+          <div className="text-sm text-text-secondary">
+            No external agents attached to this node yet.
+          </div>
         )}
 
         <div className="grid gap-4 md:grid-cols-[minmax(0,2fr),minmax(0,1fr),auto] md:items-end">
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-text-primary">External agent</label>
+            <label className="block text-sm font-medium text-text-primary">
+              External agent
+            </label>
             <Select
               value={selectedAgentId}
               onChange={(event) => setSelectedAgentId(event.target.value)}
@@ -344,14 +402,22 @@ function DecisionNodeCard({
             />
           </div>
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-text-primary">Trigger mode</label>
+            <label className="block text-sm font-medium text-text-primary">
+              Trigger mode
+            </label>
             <Select
               value={triggerMode}
-              onChange={(event) => setTriggerMode(event.target.value as DecisionTriggerMode)}
-              options={TRIGGER_MODE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+              onChange={(event) =>
+                setTriggerMode(event.target.value as DecisionTriggerMode)
+              }
+              options={TRIGGER_MODE_OPTIONS}
             />
           </div>
-          <Button type="button" onClick={() => void handleAttachAgent()} loading={attachAgent.isPending}>
+          <Button
+            type="button"
+            onClick={() => void handleAttachAgent()}
+            loading={attachAgent.isPending}
+          >
             Attach agent
           </Button>
         </div>
@@ -367,7 +433,7 @@ interface AutomationEditorProps {
     maxAgentNotionalUsdc: number;
     maxTriggersPerDay: number;
     minTriggerIntervalSeconds: number;
-    allowedProvider?: 'limitless' | 'polymarket';
+    allowedProvider?: "limitless" | "polymarket";
     requireConfidenceBps: number;
     active: boolean;
   }) => Promise<void>;
@@ -375,15 +441,25 @@ interface AutomationEditorProps {
 }
 
 function AutomationEditor({ policy, onSave, saving }: AutomationEditorProps) {
-  const [automationEnabled, setAutomationEnabled] = useState(policy.automationEnabled);
+  const [automationEnabled, setAutomationEnabled] = useState(
+    policy.automationEnabled,
+  );
   const [active, setActive] = useState(policy.active);
-  const [maxAgentNotionalUsdc, setMaxAgentNotionalUsdc] = useState(String(policy.maxAgentNotionalUsdc));
-  const [maxTriggersPerDay, setMaxTriggersPerDay] = useState(String(policy.maxTriggersPerDay));
+  const [maxAgentNotionalUsdc, setMaxAgentNotionalUsdc] = useState(
+    String(policy.maxAgentNotionalUsdc),
+  );
+  const [maxTriggersPerDay, setMaxTriggersPerDay] = useState(
+    String(policy.maxTriggersPerDay),
+  );
   const [minTriggerIntervalSeconds, setMinTriggerIntervalSeconds] = useState(
     String(policy.minTriggerIntervalSeconds),
   );
-  const [requireConfidenceBps, setRequireConfidenceBps] = useState(String(policy.requireConfidenceBps / 100));
-  const [allowedProvider, setAllowedProvider] = useState(policy.allowedProvider || 'all');
+  const [requireConfidenceBps, setRequireConfidenceBps] = useState(
+    String(policy.requireConfidenceBps / 100),
+  );
+  const [allowedProvider, setAllowedProvider] = useState(
+    policy.allowedProvider || "all",
+  );
 
   useEffect(() => {
     setAutomationEnabled(policy.automationEnabled);
@@ -392,17 +468,21 @@ function AutomationEditor({ policy, onSave, saving }: AutomationEditorProps) {
     setMaxTriggersPerDay(String(policy.maxTriggersPerDay));
     setMinTriggerIntervalSeconds(String(policy.minTriggerIntervalSeconds));
     setRequireConfidenceBps(String(policy.requireConfidenceBps / 100));
-    setAllowedProvider(policy.allowedProvider || 'all');
+    setAllowedProvider(policy.allowedProvider || "all");
   }, [policy]);
 
   return (
     <Card className="space-y-4">
       <div>
-        <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">automation policy</p>
-        <h2 className="mt-2 text-xl font-semibold text-text-primary">External-agent trigger limits</h2>
+        <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+          automation policy
+        </p>
+        <h2 className="mt-2 text-xl font-semibold text-text-primary">
+          External-agent trigger limits
+        </h2>
         <p className="mt-2 text-sm text-text-secondary">
-          Decision cells can only auto-trigger attached external agents in V1. They cannot place
-          direct user trades or move funds.
+          Decision cells can only auto-trigger attached external agents in V1.
+          They cannot place direct user trades or move funds.
         </p>
       </div>
 
@@ -465,11 +545,16 @@ function AutomationEditor({ policy, onSave, saving }: AutomationEditorProps) {
           onChange={(event) => setRequireConfidenceBps(event.target.value)}
         />
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-text-primary">Allowed provider</label>
+          <label className="block text-sm font-medium text-text-primary">
+            Allowed provider
+          </label>
           <Select
             value={allowedProvider}
             onChange={(event) => setAllowedProvider(event.target.value)}
-            options={PROVIDER_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+            options={PROVIDER_OPTIONS.map((option) => ({
+              value: option.value,
+              label: option.label,
+            }))}
           />
         </div>
       </div>
@@ -481,11 +566,22 @@ function AutomationEditor({ policy, onSave, saving }: AutomationEditorProps) {
           void onSave({
             automationEnabled,
             maxAgentNotionalUsdc: Number(maxAgentNotionalUsdc) || 0,
-            maxTriggersPerDay: Math.max(0, Math.round(Number(maxTriggersPerDay) || 0)),
-            minTriggerIntervalSeconds: Math.max(0, Math.round(Number(minTriggerIntervalSeconds) || 0)),
+            maxTriggersPerDay: Math.max(
+              0,
+              Math.round(Number(maxTriggersPerDay) || 0),
+            ),
+            minTriggerIntervalSeconds: Math.max(
+              0,
+              Math.round(Number(minTriggerIntervalSeconds) || 0),
+            ),
             allowedProvider:
-              allowedProvider === 'all' ? undefined : (allowedProvider as 'limitless' | 'polymarket'),
-            requireConfidenceBps: parsePercent(requireConfidenceBps, policy.requireConfidenceBps),
+              allowedProvider === "all"
+                ? undefined
+                : (allowedProvider as "limitless" | "polymarket"),
+            requireConfidenceBps: parsePercent(
+              requireConfidenceBps,
+              policy.requireConfidenceBps,
+            ),
             active,
           })
         }
@@ -499,14 +595,18 @@ function AutomationEditor({ policy, onSave, saving }: AutomationEditorProps) {
 export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
   const { addToast } = useToast();
   const { hasSession, sessionRestored } = useSessionState();
-  const { data: cell, isLoading, error } = useDecisionCell(cellId, hasSession && sessionRestored);
+  const {
+    data: cell,
+    isLoading,
+    error,
+  } = useDecisionCell(cellId, hasSession && sessionRestored);
   const recalculate = useRecalculateDecisionCell(cellId);
   const updateAutomation = useUpdateDecisionAutomation(cellId);
   const upsertAlert = useUpsertDecisionAlert(cellId);
   const addNode = useAddDecisionNode(cellId);
 
   const { data: marketsData } = useMarkets(
-    { limit: 200, source: 'all', includeLowLiquidity: true, sort: 'newest' },
+    { limit: 200, source: "all", includeLowLiquidity: true, sort: "newest" },
     { enabled: hasSession && sessionRestored },
   );
   const { data: externalAgentsData } = useExternalAgents({
@@ -514,45 +614,68 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     enabled: hasSession && sessionRestored,
   });
 
-  const [newNodeLabel, setNewNodeLabel] = useState('');
-  const [newNodeDescription, setNewNodeDescription] = useState('');
-  const [newNodeWeight, setNewNodeWeight] = useState('20');
-  const [newNodeSourceType, setNewNodeSourceType] = useState<DecisionNodeSourceType>('draft_market');
+  const [newNodeLabel, setNewNodeLabel] = useState("");
+  const [newNodeDescription, setNewNodeDescription] = useState("");
+  const [newNodeWeight, setNewNodeWeight] = useState("20");
+  const [newNodeSourceType, setNewNodeSourceType] =
+    useState<DecisionNodeSourceType>("draft_market");
 
-  const [recommendationAlertActive, setRecommendationAlertActive] = useState(true);
+  const [recommendationAlertActive, setRecommendationAlertActive] =
+    useState(true);
   const [confidenceAlertActive, setConfidenceAlertActive] = useState(false);
-  const [confidenceAlertThreshold, setConfidenceAlertThreshold] = useState('55');
+  const [confidenceAlertThreshold, setConfidenceAlertThreshold] =
+    useState("55");
   const [leadAlertActive, setLeadAlertActive] = useState(false);
-  const [leadAlertThreshold, setLeadAlertThreshold] = useState('7.5');
+  const [leadAlertThreshold, setLeadAlertThreshold] = useState("7.5");
   const [nodeAlertActive, setNodeAlertActive] = useState(false);
-  const [nodeAlertThreshold, setNodeAlertThreshold] = useState('65');
-  const [nodeAlertNodeId, setNodeAlertNodeId] = useState('');
-  const [nodeAlertDirection, setNodeAlertDirection] = useState<'above' | 'below'>('above');
+  const [nodeAlertThreshold, setNodeAlertThreshold] = useState("65");
+  const [nodeAlertNodeId, setNodeAlertNodeId] = useState("");
+  const [nodeAlertDirection, setNodeAlertDirection] = useState<
+    "above" | "below"
+  >("above");
 
   useEffect(() => {
     if (!cell) {
       return;
     }
 
-    const recommendationAlert = cell.alerts.find((alert) => alert.kind === 'recommendation_changed');
-    const confidenceAlert = cell.alerts.find((alert) => alert.kind === 'confidence_below');
-    const leadAlert = cell.alerts.find((alert) => alert.kind === 'action_lead_above');
-    const probabilityAlert = cell.alerts.find((alert) => alert.kind === 'node_probability_cross');
+    const recommendationAlert = cell.alerts.find(
+      (alert) => alert.kind === "recommendation_changed",
+    );
+    const confidenceAlert = cell.alerts.find(
+      (alert) => alert.kind === "confidence_below",
+    );
+    const leadAlert = cell.alerts.find(
+      (alert) => alert.kind === "action_lead_above",
+    );
+    const probabilityAlert = cell.alerts.find(
+      (alert) => alert.kind === "node_probability_cross",
+    );
 
     setRecommendationAlertActive(recommendationAlert?.active ?? true);
     setConfidenceAlertActive(confidenceAlert?.active ?? false);
     setConfidenceAlertThreshold(
-      String(((Number(confidenceAlert?.threshold?.bps) || 5500) / 100).toFixed(1)),
+      String(
+        ((Number(confidenceAlert?.threshold?.bps) || 5500) / 100).toFixed(1),
+      ),
     );
     setLeadAlertActive(leadAlert?.active ?? false);
-    setLeadAlertThreshold(String(((Number(leadAlert?.threshold?.bps) || 750) / 100).toFixed(1)));
+    setLeadAlertThreshold(
+      String(((Number(leadAlert?.threshold?.bps) || 750) / 100).toFixed(1)),
+    );
     setNodeAlertActive(probabilityAlert?.active ?? false);
     setNodeAlertThreshold(
-      String(((Number(probabilityAlert?.threshold?.bps) || 6500) / 100).toFixed(1)),
+      String(
+        ((Number(probabilityAlert?.threshold?.bps) || 6500) / 100).toFixed(1),
+      ),
     );
-    setNodeAlertNodeId(String(probabilityAlert?.threshold?.nodeId || cell.nodes[0]?.id || ''));
+    setNodeAlertNodeId(
+      String(probabilityAlert?.threshold?.nodeId || cell.nodes[0]?.id || ""),
+    );
     setNodeAlertDirection(
-      String(probabilityAlert?.threshold?.direction || 'above') === 'below' ? 'below' : 'above',
+      String(probabilityAlert?.threshold?.direction || "above") === "below"
+        ? "below"
+        : "above",
     );
   }, [cell]);
 
@@ -560,7 +683,10 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     () =>
       (marketsData?.data || [])
         .filter((market) => !market.isExternal)
-        .map((market) => ({ value: market.id, label: `${market.question} • ${market.category}` })),
+        .map((market) => ({
+          value: market.id,
+          label: `${market.question} • ${market.category}`,
+        })),
     [marketsData],
   );
 
@@ -568,7 +694,10 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     () =>
       (marketsData?.data || [])
         .filter((market) => market.isExternal)
-        .map((market) => ({ value: market.id, label: `${market.question} • ${market.provider}` })),
+        .map((market) => ({
+          value: market.id,
+          label: `${market.question} • ${market.provider}`,
+        })),
     [marketsData],
   );
 
@@ -576,7 +705,11 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
   const attachedAutomations = useMemo(
     () =>
       (cell?.nodes || []).flatMap((node) =>
-        node.agents.map((agent) => ({ nodeId: node.id, nodeLabel: node.label, ...agent })),
+        node.agents.map((agent) => ({
+          nodeId: node.id,
+          nodeLabel: node.label,
+          ...agent,
+        })),
       ),
     [cell],
   );
@@ -584,9 +717,12 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
   const handleRecalculate = async () => {
     try {
       await recalculate.mutateAsync();
-      addToast('Decision cell recalculated.', 'success');
+      addToast("Decision cell recalculated.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to recalculate cell.', 'error');
+      addToast(
+        error instanceof Error ? error.message : "Failed to recalculate cell.",
+        "error",
+      );
     }
   };
 
@@ -595,21 +731,26 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     maxAgentNotionalUsdc: number;
     maxTriggersPerDay: number;
     minTriggerIntervalSeconds: number;
-    allowedProvider?: 'limitless' | 'polymarket';
+    allowedProvider?: "limitless" | "polymarket";
     requireConfidenceBps: number;
     active: boolean;
   }) => {
     try {
       await updateAutomation.mutateAsync(payload);
-      addToast('Automation policy saved.', 'success');
+      addToast("Automation policy saved.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to save automation policy.', 'error');
+      addToast(
+        error instanceof Error
+          ? error.message
+          : "Failed to save automation policy.",
+        "error",
+      );
     }
   };
 
   const handleAddNode = async () => {
     if (!cell || !newNodeLabel.trim()) {
-      addToast('Node label is required.', 'error');
+      addToast("Node label is required.", "error");
       return;
     }
 
@@ -619,25 +760,35 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
         description: newNodeDescription.trim(),
         weightBps: parsePercent(newNodeWeight, 2000),
         sourceType: newNodeSourceType,
-        status: newNodeSourceType === 'draft_market' ? 'draft' : 'live',
+        status: newNodeSourceType === "draft_market" ? "draft" : "live",
         actionEffects: defaultNodeEffects(cell),
       });
-      setNewNodeLabel('');
-      setNewNodeDescription('');
-      setNewNodeWeight('20');
-      setNewNodeSourceType('draft_market');
-      addToast('Node added.', 'success');
+      setNewNodeLabel("");
+      setNewNodeDescription("");
+      setNewNodeWeight("20");
+      setNewNodeSourceType("draft_market");
+      addToast("Node added.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to add node.', 'error');
+      addToast(
+        error instanceof Error ? error.message : "Failed to add node.",
+        "error",
+      );
     }
   };
 
-  const saveAlert = async (kind: string, threshold?: Record<string, unknown>, active = true) => {
+  const saveAlert = async (
+    kind: string,
+    threshold?: Record<string, unknown>,
+    active = true,
+  ) => {
     try {
       await upsertAlert.mutateAsync({ kind, threshold, active });
-      addToast('Alert updated.', 'success');
+      addToast("Alert updated.", "success");
     } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Failed to update alert.', 'error');
+      addToast(
+        error instanceof Error ? error.message : "Failed to update alert.",
+        "error",
+      );
     }
   };
 
@@ -648,11 +799,15 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
           <Card>Loading decision cell...</Card>
         ) : error ? (
           <Card className="text-ask">
-            {error instanceof Error ? error.message : 'Failed to load decision cell'}
+            {error instanceof Error
+              ? error.message
+              : "Failed to load decision cell"}
           </Card>
         ) : !cell ? (
           <Card className="space-y-3">
-            <h1 className="text-xl font-semibold text-text-primary">Decision cell not found</h1>
+            <h1 className="text-xl font-semibold text-text-primary">
+              Decision cell not found
+            </h1>
             <Link
               href="/decisions"
               className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
@@ -670,15 +825,22 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                 >
                   decision cells
                 </Link>
-                <h1 className="mt-2 text-3xl font-semibold text-text-primary">{cell.title}</h1>
-                <p className="mt-3 text-sm text-text-secondary">{cell.statement}</p>
+                <h1 className="mt-2 text-3xl font-semibold text-text-primary">
+                  {cell.title}
+                </h1>
+                <p className="mt-3 text-sm text-text-secondary">
+                  {cell.statement}
+                </p>
                 <div className="mt-4 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.16em] text-text-muted">
-                  <span className="border border-border bg-bg-secondary px-2 py-1">{cell.decisionType}</span>
                   <span className="border border-border bg-bg-secondary px-2 py-1">
-                    {formatState(cell.recommendation.state)}
+                    {decisionTypeLabel(cell.decisionType)}
                   </span>
                   <span className="border border-border bg-bg-secondary px-2 py-1">
-                    confidence {toPercent(cell.recommendation.confidenceBps)}%
+                    {recommendationLabel(cell.recommendation.state)}
+                  </span>
+                  <span className="border border-border bg-bg-secondary px-2 py-1">
+                    confidence{" "}
+                    {formatPercentFromBps(cell.recommendation.confidenceBps)}
                   </span>
                   {cell.horizonAt ? (
                     <span className="border border-border bg-bg-secondary px-2 py-1">
@@ -687,7 +849,11 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                   ) : null}
                 </div>
               </div>
-              <Button type="button" onClick={() => void handleRecalculate()} loading={recalculate.isPending}>
+              <Button
+                type="button"
+                onClick={() => void handleRecalculate()}
+                loading={recalculate.isPending}
+              >
                 Recalculate
               </Button>
             </div>
@@ -696,9 +862,15 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
               <div className="space-y-6">
                 <Card className="space-y-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">recommendation</p>
-                    <h2 className="mt-2 text-xl font-semibold text-text-primary">{formatState(cell.recommendation.state)}</h2>
-                    <p className="mt-2 text-sm text-text-secondary">{cell.recommendation.whyChanged}</p>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                      recommendation
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">
+                      {recommendationLabel(cell.recommendation.state)}
+                    </h2>
+                    <p className="mt-2 text-sm text-text-secondary">
+                      {cell.recommendation.whyChanged}
+                    </p>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2">
@@ -714,31 +886,47 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
 
                   {cell.recommendation.topContributors.length > 0 ? (
                     <div className="space-y-3 border-t border-border pt-4">
-                      <h3 className="text-sm font-medium text-text-primary">Top contributing nodes</h3>
-                      {cell.recommendation.topContributors.map((contributor) => (
-                        <div key={contributor.nodeId} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <div className="font-medium text-text-primary">{contributor.label}</div>
-                              <div className="mt-1 text-text-secondary">
-                                {contributor.actionLabel} • {toPercent(contributor.probabilityBps)}%
+                      <h3 className="text-sm font-medium text-text-primary">
+                        Top contributing nodes
+                      </h3>
+                      {cell.recommendation.topContributors.map(
+                        (contributor) => (
+                          <div
+                            key={contributor.nodeId}
+                            className="border border-border bg-bg-secondary px-4 py-3 text-sm"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <div className="font-medium text-text-primary">
+                                  {contributor.label}
+                                </div>
+                                <div className="mt-1 text-text-secondary">
+                                  {contributorSummary(contributor)}
+                                </div>
+                              </div>
+                              <div className="font-medium text-text-primary">
+                                {formatPercentFromBps(contributor.scoreBps)}
                               </div>
                             </div>
-                            <div className="font-medium text-text-primary">{toPercent(contributor.scoreBps)}%</div>
                           </div>
-                        </div>
-                      ))}
+                        ),
+                      )}
                     </div>
                   ) : null}
                 </Card>
 
                 <Card className="space-y-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">nodes</p>
-                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Decision graph</h2>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                      nodes
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">
+                      Decision graph
+                    </h2>
                     <p className="mt-2 text-sm text-text-secondary">
-                      Each node can stay as a draft, attach to an internal market, or attach to an
-                      external venue market. Only live nodes contribute to scores.
+                      Each node can stay as a draft, attach to an internal
+                      market, or attach to an external venue market. Only live
+                      nodes contribute to scores.
                     </p>
                   </div>
 
@@ -758,8 +946,12 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
 
                 <Card className="space-y-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">new node</p>
-                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Add node</h2>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                      new node
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">
+                      Add node
+                    </h2>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Input
@@ -779,23 +971,37 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-text-primary">Description</label>
+                    <label className="block text-sm font-medium text-text-primary">
+                      Description
+                    </label>
                     <textarea
                       value={newNodeDescription}
-                      onChange={(event) => setNewNodeDescription(event.target.value)}
+                      onChange={(event) =>
+                        setNewNodeDescription(event.target.value)
+                      }
                       rows={3}
                       className="flex w-full border border-border bg-bg-secondary px-3 py-2 text-base text-text-primary placeholder:text-text-muted transition-all duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-base focus-visible:border-accent"
                     />
                   </div>
                   <div className="space-y-1.5 md:max-w-sm">
-                    <label className="block text-sm font-medium text-text-primary">Source type</label>
+                    <label className="block text-sm font-medium text-text-primary">
+                      Source type
+                    </label>
                     <Select
                       value={newNodeSourceType}
-                      onChange={(event) => setNewNodeSourceType(event.target.value as DecisionNodeSourceType)}
-                      options={SOURCE_TYPE_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                      onChange={(event) =>
+                        setNewNodeSourceType(
+                          event.target.value as DecisionNodeSourceType,
+                        )
+                      }
+                      options={NODE_SOURCE_OPTIONS}
                     />
                   </div>
-                  <Button type="button" onClick={() => void handleAddNode()} loading={addNode.isPending}>
+                  <Button
+                    type="button"
+                    onClick={() => void handleAddNode()}
+                    loading={addNode.isPending}
+                  >
                     Add node
                   </Button>
                 </Card>
@@ -810,8 +1016,12 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
 
                 <Card className="space-y-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">alerts</p>
-                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Threshold rules</h2>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                      alerts
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">
+                      Threshold rules
+                    </h2>
                   </div>
 
                   <div className="space-y-4">
@@ -820,14 +1030,22 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                         <input
                           type="checkbox"
                           checked={recommendationAlertActive}
-                          onChange={(event) => setRecommendationAlertActive(event.target.checked)}
+                          onChange={(event) =>
+                            setRecommendationAlertActive(event.target.checked)
+                          }
                           className="h-4 w-4 accent-[var(--accent)]"
                         />
                         Fire when the recommendation changes
                       </label>
                       <button
                         type="button"
-                        onClick={() => void saveAlert('recommendation_changed', undefined, recommendationAlertActive)}
+                        onClick={() =>
+                          void saveAlert(
+                            "recommendation_changed",
+                            undefined,
+                            recommendationAlertActive,
+                          )
+                        }
                         className="mt-3 inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-primary hover:text-text-primary"
                       >
                         Save
@@ -839,7 +1057,9 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                         <input
                           type="checkbox"
                           checked={confidenceAlertActive}
-                          onChange={(event) => setConfidenceAlertActive(event.target.checked)}
+                          onChange={(event) =>
+                            setConfidenceAlertActive(event.target.checked)
+                          }
                           className="h-4 w-4 accent-[var(--accent)]"
                         />
                         Fire when confidence falls below threshold
@@ -852,15 +1072,19 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                           max="100"
                           step="0.1"
                           value={confidenceAlertThreshold}
-                          onChange={(event) => setConfidenceAlertThreshold(event.target.value)}
+                          onChange={(event) =>
+                            setConfidenceAlertThreshold(event.target.value)
+                          }
                         />
                       </div>
                       <button
                         type="button"
                         onClick={() =>
                           void saveAlert(
-                            'confidence_below',
-                            { bps: parsePercent(confidenceAlertThreshold, 5500) },
+                            "confidence_below",
+                            {
+                              bps: parsePercent(confidenceAlertThreshold, 5500),
+                            },
                             confidenceAlertActive,
                           )
                         }
@@ -875,7 +1099,9 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                         <input
                           type="checkbox"
                           checked={leadAlertActive}
-                          onChange={(event) => setLeadAlertActive(event.target.checked)}
+                          onChange={(event) =>
+                            setLeadAlertActive(event.target.checked)
+                          }
                           className="h-4 w-4 accent-[var(--accent)]"
                         />
                         Fire when the action lead exceeds threshold
@@ -888,14 +1114,16 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                           max="100"
                           step="0.1"
                           value={leadAlertThreshold}
-                          onChange={(event) => setLeadAlertThreshold(event.target.value)}
+                          onChange={(event) =>
+                            setLeadAlertThreshold(event.target.value)
+                          }
                         />
                       </div>
                       <button
                         type="button"
                         onClick={() =>
                           void saveAlert(
-                            'action_lead_above',
+                            "action_lead_above",
                             { bps: parsePercent(leadAlertThreshold, 750) },
                             leadAlertActive,
                           )
@@ -911,27 +1139,45 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                         <input
                           type="checkbox"
                           checked={nodeAlertActive}
-                          onChange={(event) => setNodeAlertActive(event.target.checked)}
+                          onChange={(event) =>
+                            setNodeAlertActive(event.target.checked)
+                          }
                           className="h-4 w-4 accent-[var(--accent)]"
                         />
                         Fire when a node probability crosses a threshold
                       </label>
                       <div className="mt-3 grid gap-4">
                         <div className="space-y-1.5">
-                          <label className="block text-sm font-medium text-text-primary">Node</label>
+                          <label className="block text-sm font-medium text-text-primary">
+                            Node
+                          </label>
                           <Select
                             value={nodeAlertNodeId}
-                            onChange={(event) => setNodeAlertNodeId(event.target.value)}
-                            options={cell.nodes.map((node) => ({ value: node.id, label: node.label }))}
+                            onChange={(event) =>
+                              setNodeAlertNodeId(event.target.value)
+                            }
+                            options={cell.nodes.map((node) => ({
+                              value: node.id,
+                              label: node.label,
+                            }))}
                           />
                         </div>
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div className="space-y-1.5">
-                            <label className="block text-sm font-medium text-text-primary">Direction</label>
+                            <label className="block text-sm font-medium text-text-primary">
+                              Direction
+                            </label>
                             <Select
                               value={nodeAlertDirection}
-                              onChange={(event) => setNodeAlertDirection(event.target.value as 'above' | 'below')}
-                              options={DIRECTION_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+                              onChange={(event) =>
+                                setNodeAlertDirection(
+                                  event.target.value as "above" | "below",
+                                )
+                              }
+                              options={DIRECTION_OPTIONS.map((option) => ({
+                                value: option.value,
+                                label: option.label,
+                              }))}
                             />
                           </div>
                           <Input
@@ -941,7 +1187,9 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                             max="100"
                             step="0.1"
                             value={nodeAlertThreshold}
-                            onChange={(event) => setNodeAlertThreshold(event.target.value)}
+                            onChange={(event) =>
+                              setNodeAlertThreshold(event.target.value)
+                            }
                           />
                         </div>
                       </div>
@@ -949,7 +1197,7 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
                         type="button"
                         onClick={() =>
                           void saveAlert(
-                            'node_probability_cross',
+                            "node_probability_cross",
                             {
                               nodeId: nodeAlertNodeId,
                               direction: nodeAlertDirection,
@@ -968,48 +1216,73 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
 
                 <Card className="space-y-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">attached automations</p>
-                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Node-driven agent triggers</h2>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                      attached automations
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">
+                      Node-driven agent triggers
+                    </h2>
                   </div>
                   {attachedAutomations.length > 0 ? (
                     <div className="space-y-3">
                       {attachedAutomations.map((agent) => (
-                        <div key={agent.id} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
-                          <div className="font-medium text-text-primary">{agent.name || agent.externalAgentId}</div>
+                        <div
+                          key={agent.id}
+                          className="border border-border bg-bg-secondary px-4 py-3 text-sm"
+                        >
+                          <div className="font-medium text-text-primary">
+                            {agent.name || agent.externalAgentId}
+                          </div>
                           <div className="mt-1 text-text-secondary">
-                            {agent.nodeLabel} • {agent.provider || 'unknown'} • {formatState(agent.triggerMode)}
+                            {agent.nodeLabel} • {agent.provider || "unknown"} •{" "}
+                            {triggerModeLabel(agent.triggerMode)}
                           </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-text-secondary">No external agents are attached to this cell yet.</p>
+                    <p className="text-sm text-text-secondary">
+                      No external agents are attached to this cell yet.
+                    </p>
                   )}
                 </Card>
 
                 <Card className="space-y-4">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">event log</p>
-                    <h2 className="mt-2 text-xl font-semibold text-text-primary">Recent events</h2>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
+                      event log
+                    </p>
+                    <h2 className="mt-2 text-xl font-semibold text-text-primary">
+                      Recent events
+                    </h2>
                   </div>
                   {cell.events.length > 0 ? (
                     <div className="space-y-3">
                       {cell.events.map((event) => (
-                        <div key={event.id} className="border border-border bg-bg-secondary px-4 py-3 text-sm">
+                        <div
+                          key={event.id}
+                          className="border border-border bg-bg-secondary px-4 py-3 text-sm"
+                        >
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="font-medium uppercase tracking-[0.12em] text-text-primary">
-                              {formatState(event.kind)}
+                              {humanizeDecisionValue(event.kind)}
                             </div>
-                            <div className="text-text-muted">{new Date(event.createdAt).toLocaleString()}</div>
+                            <div className="text-text-muted">
+                              {new Date(event.createdAt).toLocaleString()}
+                            </div>
                           </div>
                           {Object.keys(event.payload).length > 0 ? (
-                            <p className="mt-2 text-text-secondary">{summarizePayload(event.payload)}</p>
+                            <p className="mt-2 text-text-secondary">
+                              {summarizePayload(event.payload)}
+                            </p>
                           ) : null}
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-text-secondary">No events recorded yet.</p>
+                    <p className="text-sm text-text-secondary">
+                      No events recorded yet.
+                    </p>
                   )}
                 </Card>
               </div>

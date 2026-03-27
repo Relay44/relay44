@@ -10,7 +10,7 @@ export function PageShell({ children }: PageShellProps) {
   return (
     <div className="min-h-screen">
       <Header />
-      <main className="container-app pb-24 pt-20 md:pb-6">{children}</main>
+      <main className="container-app pt-header pb-24 md:pb-6">{children}</main>
       <BottomNav />
     </div>
   );

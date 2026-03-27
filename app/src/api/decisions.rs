@@ -33,6 +33,7 @@ const SOURCE_TYPE_DRAFT_MARKET: &str = "draft_market";
 
 const NODE_STATUS_DRAFT: &str = "draft";
 const NODE_STATUS_LIVE: &str = "live";
+const NODE_STATUS_INACTIVE: &str = "inactive";
 
 const TRIGGER_ON_RECOMMENDATION_GAIN: &str = "on_recommendation_gain";
 const TRIGGER_ON_THRESHOLD_CROSS: &str = "on_threshold_cross";
@@ -327,6 +328,15 @@ struct CellGraph {
 struct ResolvedNodeMarket {
     probability_bps: i32,
     snapshot: Value,
+}
+
+#[derive(Debug, Clone)]
+struct DecisionNodeChange {
+    node_id: String,
+    label: String,
+    source_ref: Option<String>,
+    previous_probability_bps: Option<i32>,
+    current_probability_bps: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1136,6 +1146,47 @@ async fn resolve_node_market(
     }
 }
 
+fn snapshot_is_available(snapshot: &Value) -> bool {
+    snapshot.get("error").is_none()
+        && snapshot.get("status").and_then(Value::as_str) != Some("unavailable")
+}
+
+fn unresolved_snapshot(node: &DecisionNodeRecord, snapshot: Option<&Value>) -> Value {
+    let mut next = serde_json::Map::new();
+    if let Some(source_ref) = node.source_ref.as_deref() {
+        next.insert("id".to_string(), json!(source_ref));
+    }
+    next.insert(
+        "provider".to_string(),
+        json!(match node.source_type.as_str() {
+            SOURCE_TYPE_INTERNAL_MARKET => "internal",
+            SOURCE_TYPE_EXTERNAL_MARKET => "external",
+            SOURCE_TYPE_DRAFT_MARKET => "draft",
+            _ => node.source_type.as_str(),
+        }),
+    );
+    next.insert("status".to_string(), json!("unavailable"));
+
+    if let Some(raw) = snapshot {
+        if let Some(error) = raw.get("error") {
+            next.insert("error".to_string(), error.clone());
+        }
+        if let Some(message) = raw.get("message") {
+            next.insert("message".to_string(), message.clone());
+        }
+    }
+
+    Value::Object(next)
+}
+
+fn resolved_probability(resolved: &ResolvedNodeMarket) -> Option<i32> {
+    if snapshot_is_available(&resolved.snapshot) {
+        Some(resolved.probability_bps)
+    } else {
+        None
+    }
+}
+
 fn build_recommendation(
     cell: &DecisionCellRecord,
     actions: &[DecisionActionRecord],
@@ -1148,51 +1199,51 @@ fn build_recommendation(
     let mut active_weight_bps = 0_i32;
     let mut live_nodes = 0_usize;
     let mut top_contributors = Vec::new();
-    let mut last_changed_node: Option<DecisionContributor> = None;
+    let mut last_changed_node: Option<DecisionNodeChange> = None;
     let mut max_delta = -1_i32;
 
     for node in nodes {
-        let Some(Some(resolved)) = resolved_nodes.get(node.id.as_str()) else {
-            continue;
-        };
-
         if matches!(node.source_type.as_str(), SOURCE_TYPE_DRAFT_MARKET) {
             continue;
         }
 
-        if resolved.snapshot.get("error").is_some() {
-            continue;
+        let resolved = resolved_nodes
+            .get(node.id.as_str())
+            .and_then(|entry| entry.as_ref());
+        let current_probability_bps = resolved.and_then(resolved_probability);
+        let previous_probability_bps = node.last_probability_bps;
+
+        if let Some(probability_bps) = current_probability_bps {
+            live_nodes += 1;
+            active_weight_bps += node.weight_bps.max(0);
+            let centered_signal = (probability_bps as f64 - 5_000.0) / 5_000.0;
+            let weighted_signal = centered_signal * node.weight_bps as f64;
+
+            for (index, action) in actions.iter().enumerate() {
+                let contribution = match action_effect_for_label(&node.action_effects, action.label.as_str()) {
+                    EFFECT_SUPPORT => weighted_signal,
+                    EFFECT_OPPOSE => -weighted_signal,
+                    _ => 0.0,
+                };
+                raw_scores[index] += contribution;
+            }
         }
 
-        live_nodes += 1;
-        active_weight_bps += node.weight_bps.max(0);
-        let centered_signal = (resolved.probability_bps as f64 - 5_000.0) / 5_000.0;
-        let weighted_signal = centered_signal * node.weight_bps as f64;
-        let delta = node
-            .last_probability_bps
-            .map(|previous| (resolved.probability_bps - previous).abs())
-            .unwrap_or_default();
+        let delta = match (previous_probability_bps, current_probability_bps) {
+            (Some(previous), Some(current)) => (current - previous).abs(),
+            (Some(previous), None) => previous.abs(),
+            (None, Some(current)) => current.abs(),
+            (None, None) => 0,
+        };
 
-        for (index, action) in actions.iter().enumerate() {
-            let contribution = match action_effect_for_label(&node.action_effects, action.label.as_str()) {
-                EFFECT_SUPPORT => weighted_signal,
-                EFFECT_OPPOSE => -weighted_signal,
-                _ => 0.0,
-            };
-            raw_scores[index] += contribution;
-        }
-
-        if delta >= max_delta {
+        if delta >= max_delta && (previous_probability_bps.is_some() || current_probability_bps.is_some()) {
             max_delta = delta;
-            let top_action = actions.first().map(|entry| entry.label.clone()).unwrap_or_default();
-            last_changed_node = Some(DecisionContributor {
+            last_changed_node = Some(DecisionNodeChange {
                 node_id: node.id.clone(),
                 label: node.label.clone(),
-                action_label: top_action,
-                score_bps: 0,
-                probability_bps: resolved.probability_bps,
-                delta_bps: Some(delta),
                 source_ref: node.source_ref.clone(),
+                previous_probability_bps,
+                current_probability_bps,
             });
         }
     }
@@ -1248,13 +1299,14 @@ fn build_recommendation(
         .unwrap_or_default();
 
     for node in nodes {
-        let Some(Some(resolved)) = resolved_nodes.get(node.id.as_str()) else {
+        let probability_bps = resolved_nodes
+            .get(node.id.as_str())
+            .and_then(|entry| entry.as_ref())
+            .and_then(resolved_probability);
+        let Some(probability_bps) = probability_bps else {
             continue;
         };
-        if resolved.snapshot.get("error").is_some() {
-            continue;
-        }
-        let centered_signal = (resolved.probability_bps as f64 - 5_000.0) / 5_000.0;
+        let centered_signal = (probability_bps as f64 - 5_000.0) / 5_000.0;
         let weighted_signal = centered_signal * node.weight_bps as f64;
         let contribution = match action_effect_for_label(&node.action_effects, winning_label.as_str()) {
             EFFECT_SUPPORT => weighted_signal,
@@ -1269,8 +1321,8 @@ fn build_recommendation(
             label: node.label.clone(),
             action_label: winning_label.clone(),
             score_bps: ((contribution / active_weight_bps.max(1) as f64) * 10_000.0).round() as i32,
-            probability_bps: resolved.probability_bps,
-            delta_bps: node.last_probability_bps.map(|previous| resolved.probability_bps - previous),
+            probability_bps,
+            delta_bps: node.last_probability_bps.map(|previous| probability_bps - previous),
             source_ref: node.source_ref.clone(),
         });
     }
@@ -1278,33 +1330,64 @@ fn build_recommendation(
     top_contributors.sort_by(|left, right| right.score_bps.abs().cmp(&left.score_bps.abs()));
     top_contributors.truncate(3);
 
-    if let Some(last_changed) = last_changed_node.as_mut() {
-        last_changed.action_label = winning_label.clone();
-        last_changed.score_bps = top_contributors
+    let removed_last_changed_node = last_changed_node.as_ref().is_some_and(|change| {
+        change.current_probability_bps.is_none() && change.previous_probability_bps.is_some()
+    });
+
+    let last_changed_node = last_changed_node.map(|change| {
+        let score_bps = top_contributors
             .iter()
-            .find(|entry| entry.node_id == last_changed.node_id)
+            .find(|entry| entry.node_id == change.node_id)
             .map(|entry| entry.score_bps)
             .unwrap_or_default();
-    }
+        let probability_bps = change
+            .current_probability_bps
+            .or(change.previous_probability_bps)
+            .unwrap_or_default();
+        let delta_bps = match (change.previous_probability_bps, change.current_probability_bps) {
+            (Some(previous), Some(current)) => Some(current - previous),
+            (Some(previous), None) => Some(-previous),
+            (None, Some(current)) => Some(current),
+            (None, None) => None,
+        };
+
+        DecisionContributor {
+            node_id: change.node_id,
+            label: change.label,
+            action_label: winning_label.clone(),
+            score_bps,
+            probability_bps,
+            delta_bps,
+            source_ref: change.source_ref,
+        }
+    });
 
     let why_changed = if let Some(last_changed) = last_changed_node.as_ref() {
-        if previous_summary.why_changed.is_empty() || cell.current_recommendation != state {
+        if removed_last_changed_node {
             format!(
-                "{} moved to {:.1}% and pushed the cell toward {}.",
-                last_changed.label,
-                last_changed.probability_bps as f64 / 100.0,
-                if state == RECOMMENDATION_INSUFFICIENT_SIGNAL {
-                    "insufficient signal"
-                } else {
-                    state.as_str()
-                }
+                "{} no longer has a live market signal and was removed from the current decision surface.",
+                last_changed.label
             )
         } else {
-            format!(
-                "{} remains the most recent moving input at {:.1}%.",
-                last_changed.label,
-                last_changed.probability_bps as f64 / 100.0,
-            )
+            let probability_bps = last_changed.probability_bps;
+            if previous_summary.why_changed.is_empty() || cell.current_recommendation != state {
+                format!(
+                    "{} moved to {:.1}% and pushed the cell toward {}.",
+                    last_changed.label,
+                    probability_bps as f64 / 100.0,
+                    if state == RECOMMENDATION_INSUFFICIENT_SIGNAL {
+                        "insufficient signal"
+                    } else {
+                        state.as_str()
+                    }
+                )
+            } else {
+                format!(
+                    "{} remains the most recent moving input at {:.1}%.",
+                    last_changed.label,
+                    probability_bps as f64 / 100.0,
+                )
+            }
         }
     } else if total_nodes == 0 {
         "Add nodes to start scoring this decision cell.".to_string()
@@ -1345,29 +1428,33 @@ async fn persist_node_snapshots(
         let Some(value) = resolved_nodes.get(node.id.as_str()) else {
             continue;
         };
-        let (probability, snapshot) = if let Some(resolved) = value {
-            (
-                Some(resolved.probability_bps),
-                resolved.snapshot.clone(),
-            )
+        let (probability, snapshot, status) = if matches!(node.source_type.as_str(), SOURCE_TYPE_DRAFT_MARKET) {
+            (None, json!({ "status": "draft" }), NODE_STATUS_DRAFT)
+        } else if let Some(resolved) = value.as_ref() {
+            if let Some(probability_bps) = resolved_probability(resolved) {
+                (Some(probability_bps), resolved.snapshot.clone(), NODE_STATUS_LIVE)
+            } else {
+                (
+                    None,
+                    unresolved_snapshot(node, Some(&resolved.snapshot)),
+                    NODE_STATUS_INACTIVE,
+                )
+            }
         } else {
-            (None, json!({ "status": "draft" }))
+            (None, unresolved_snapshot(node, None), NODE_STATUS_INACTIVE)
         };
         sqlx::query(
             "UPDATE decision_nodes
              SET last_probability_bps = $2,
                  last_market_snapshot = $3,
-                 status = $4
+                 status = $4,
+                 updated_at = NOW()
              WHERE id = $1",
         )
         .bind(node.id.as_str())
         .bind(probability)
         .bind(snapshot)
-        .bind(if matches!(node.source_type.as_str(), SOURCE_TYPE_DRAFT_MARKET) {
-            NODE_STATUS_DRAFT
-        } else {
-            NODE_STATUS_LIVE
-        })
+        .bind(status)
         .execute(state.db.pool())
         .await
         .map_err(|err| ApiError::internal(&err.to_string()))?;
@@ -1538,22 +1625,26 @@ async fn evaluate_and_record_alerts(
                     .and_then(Value::as_str)
                     .unwrap_or("above");
                 if let Some(node) = graph.nodes.iter().find(|entry| entry.id == node_id) {
-                    let previous = node.last_probability_bps.unwrap_or_default();
+                    let previous = node.last_probability_bps;
                     let current = resolved_nodes
                         .get(node.id.as_str())
                         .and_then(|entry| entry.as_ref())
-                        .map(|entry| entry.probability_bps)
-                        .unwrap_or_default();
-                    fired = match direction {
-                        "below" => previous >= threshold && current < threshold,
-                        _ => previous < threshold && current >= threshold,
+                        .and_then(resolved_probability);
+                    fired = match (previous, current, direction) {
+                        (Some(previous), Some(current), "below") => {
+                            previous >= threshold && current < threshold
+                        }
+                        (Some(previous), Some(current), _) => {
+                            previous < threshold && current >= threshold
+                        }
+                        _ => false,
                     };
                     if fired {
                         payload = json!({
                             "nodeId": node.id,
                             "nodeLabel": node.label,
                             "thresholdBps": threshold,
-                            "currentProbabilityBps": current,
+                            "currentProbabilityBps": current.unwrap_or_default(),
                             "direction": direction,
                         });
                         flags.threshold_crossed = true;
@@ -1672,17 +1763,17 @@ async fn maybe_run_automation(
         }
     }
 
+    let changed_node_id = recommendation
+        .last_changed_node
+        .as_ref()
+        .map(|node| node.node_id.as_str());
+
     for attachment in &graph.node_agents {
         if !attachment.active {
             continue;
         }
 
-        let trigger_matches = match attachment.trigger_mode.as_str() {
-            TRIGGER_ON_RECOMMENDATION_GAIN => flags.recommendation_changed,
-            TRIGGER_ON_CONFIDENCE_GAIN => flags.confidence_gain,
-            _ => flags.threshold_crossed,
-        };
-        if !trigger_matches {
+        if !attachment_matches_trigger(attachment, flags, changed_node_id) {
             continue;
         }
 
@@ -1834,6 +1925,24 @@ async fn maybe_run_automation(
     }
 
     Ok((events, executed, skipped))
+}
+
+fn attachment_matches_trigger(
+    attachment: &DecisionNodeAgentRecord,
+    flags: &RecalculationFlags,
+    changed_node_id: Option<&str>,
+) -> bool {
+    let trigger_matches = match attachment.trigger_mode.as_str() {
+        TRIGGER_ON_RECOMMENDATION_GAIN => flags.recommendation_changed,
+        TRIGGER_ON_CONFIDENCE_GAIN => flags.confidence_gain,
+        _ => flags.threshold_crossed,
+    };
+
+    trigger_matches
+        && matches!(
+            changed_node_id,
+            Some(node_id) if node_id == attachment.node_id.as_str()
+        )
 }
 
 fn recommendation_from_cell(cell: &DecisionCellRecord) -> DecisionRecommendation {
@@ -2745,7 +2854,7 @@ pub async fn run_decision_cells_tick(
     let rows = sqlx::query(
         "SELECT id, owner
          FROM decision_cells
-         WHERE status = 'active'
+         WHERE status = 'active' AND automation_enabled = TRUE
          ORDER BY updated_at DESC
          LIMIT $1",
     )
@@ -2790,6 +2899,25 @@ pub async fn run_decision_cells_tick(
 mod tests {
     use super::*;
 
+    fn sample_cell() -> DecisionCellRecord {
+        let now = Utc::now();
+        DecisionCellRecord {
+            id: "cell-1".to_string(),
+            owner: "owner-1".to_string(),
+            title: "Decision".to_string(),
+            statement: "Test decision".to_string(),
+            decision_type: DECISION_TYPE_TIMING.to_string(),
+            horizon_at: None,
+            status: "active".to_string(),
+            automation_enabled: false,
+            current_recommendation: RECOMMENDATION_INSUFFICIENT_SIGNAL.to_string(),
+            confidence_bps: 0,
+            summary: json!({}),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
     fn sample_actions() -> Vec<DecisionActionRecord> {
         vec![
             DecisionActionRecord {
@@ -2803,6 +2931,44 @@ mod tests {
                 rank: 1,
             },
         ]
+    }
+
+    fn sample_node(
+        id: &str,
+        label: &str,
+        source_type: &str,
+        source_ref: Option<&str>,
+        probability_bps: Option<i32>,
+        effects: Value,
+    ) -> DecisionNodeRecord {
+        let now = Utc::now();
+        DecisionNodeRecord {
+            id: id.to_string(),
+            label: label.to_string(),
+            description: String::new(),
+            weight_bps: 5000,
+            source_type: source_type.to_string(),
+            source_ref: source_ref.map(ToOwned::to_owned),
+            status: NODE_STATUS_LIVE.to_string(),
+            last_probability_bps: probability_bps,
+            last_market_snapshot: json!({}),
+            action_effects: effects,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn sample_attachment(node_id: &str, trigger_mode: &str) -> DecisionNodeAgentRecord {
+        DecisionNodeAgentRecord {
+            id: "attach-1".to_string(),
+            node_id: node_id.to_string(),
+            external_agent_id: "agent-1".to_string(),
+            trigger_mode: trigger_mode.to_string(),
+            active: true,
+            agent_name: Some("agent".to_string()),
+            provider: Some("limitless".to_string()),
+            agent_active: Some(true),
+        }
     }
 
     #[test]
@@ -2826,5 +2992,134 @@ mod tests {
         assert_eq!(starters.len(), 3);
         assert_eq!(starters[0].1.get("act now").and_then(Value::as_str), Some(EFFECT_SUPPORT));
         assert_eq!(starters[0].1.get("wait").and_then(Value::as_str), Some(EFFECT_OPPOSE));
+    }
+
+    #[test]
+    fn unresolved_snapshot_marks_market_unavailable() {
+        let node = sample_node(
+            "n1",
+            "Catalyst confirmed",
+            SOURCE_TYPE_INTERNAL_MARKET,
+            Some("market-1"),
+            Some(7000),
+            json!({ "act now": EFFECT_SUPPORT, "wait": EFFECT_OPPOSE }),
+        );
+
+        let snapshot = unresolved_snapshot(
+            &node,
+            Some(&json!({
+                "status": "missing",
+                "error": "market_not_found",
+                "message": "missing"
+            })),
+        );
+
+        assert_eq!(snapshot.get("id"), Some(&json!("market-1")));
+        assert_eq!(snapshot.get("provider"), Some(&json!("internal")));
+        assert_eq!(snapshot.get("status"), Some(&json!("unavailable")));
+        assert_eq!(snapshot.get("error"), Some(&json!("market_not_found")));
+    }
+
+    #[test]
+    fn unavailable_nodes_are_removed_from_live_signal_and_change_summary() {
+        let cell = sample_cell();
+        let actions = sample_actions();
+        let nodes = vec![
+            sample_node(
+                "n1",
+                "Catalyst confirmed",
+                SOURCE_TYPE_INTERNAL_MARKET,
+                Some("market-1"),
+                Some(7000),
+                json!({ "act now": EFFECT_SUPPORT, "wait": EFFECT_OPPOSE }),
+            ),
+            sample_node(
+                "n2",
+                "Negative blocker",
+                SOURCE_TYPE_EXTERNAL_MARKET,
+                Some("limitless:market-2"),
+                Some(2500),
+                json!({ "act now": EFFECT_OPPOSE, "wait": EFFECT_SUPPORT }),
+            ),
+        ];
+        let resolved_nodes = HashMap::from([
+            (
+                "n1".to_string(),
+                Some(ResolvedNodeMarket {
+                    probability_bps: 0,
+                    snapshot: json!({
+                        "status": "unavailable",
+                        "error": "market_not_found"
+                    }),
+                }),
+            ),
+            (
+                "n2".to_string(),
+                Some(ResolvedNodeMarket {
+                    probability_bps: 2500,
+                    snapshot: json!({ "status": "active" }),
+                }),
+            ),
+        ]);
+
+        let recommendation = build_recommendation(
+            &cell,
+            &actions,
+            &nodes,
+            &DecisionSummary::default(),
+            &resolved_nodes,
+            Utc::now(),
+        );
+
+        assert_eq!(recommendation.live_nodes, 1);
+        assert_eq!(recommendation.state, RECOMMENDATION_INSUFFICIENT_SIGNAL);
+        assert!(recommendation
+            .why_changed
+            .contains("removed from the current decision surface"));
+        assert_eq!(
+            recommendation
+                .last_changed_node
+                .as_ref()
+                .map(|node| node.node_id.as_str()),
+            Some("n1")
+        );
+        assert_eq!(
+            recommendation
+                .last_changed_node
+                .as_ref()
+                .and_then(|node| node.delta_bps),
+            Some(-7000)
+        );
+    }
+
+    #[test]
+    fn attachment_triggers_require_the_changed_node() {
+        let flags = RecalculationFlags {
+            recommendation_changed: true,
+            threshold_crossed: false,
+            confidence_dropped: false,
+            confidence_gain: false,
+        };
+
+        assert!(attachment_matches_trigger(
+            &sample_attachment("n1", TRIGGER_ON_RECOMMENDATION_GAIN),
+            &flags,
+            Some("n1"),
+        ));
+        assert!(!attachment_matches_trigger(
+            &sample_attachment("n2", TRIGGER_ON_RECOMMENDATION_GAIN),
+            &flags,
+            Some("n1"),
+        ));
+        assert!(!attachment_matches_trigger(
+            &sample_attachment("n1", TRIGGER_ON_THRESHOLD_CROSS),
+            &flags,
+            Some("n1"),
+        ));
+        assert!(!attachment_matches_trigger(
+            &sample_attachment("n1", TRIGGER_ON_RECOMMENDATION_GAIN),
+            &flags,
+            None,
+        ));
     }
 }
