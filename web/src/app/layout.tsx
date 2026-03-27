@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Doto } from 'next/font/google';
+import { Space_Grotesk, JetBrains_Mono, Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { StructuredData } from '@/components/seo/StructuredData';
@@ -17,9 +17,22 @@ import {
   SITE_URL,
 } from '@/lib/seo';
 
-const brandFont = Doto({
+const displayFont = Space_Grotesk({
   subsets: ['latin'],
-  variable: '--font-brand',
+  weight: ['500', '700'],
+  variable: '--font-display-family',
+});
+
+const monoFont = JetBrains_Mono({
+  subsets: ['latin'],
+  weight: ['400', '700', '800'],
+  variable: '--font-mono-family',
+});
+
+const bodyFont = Inter({
+  subsets: ['latin'],
+  weight: ['400', '600'],
+  variable: '--font-body-family',
 });
 
 const googleVerification = process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION?.trim();
@@ -109,7 +122,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: '#e4470b',
+  themeColor: '#030303',
 };
 
 export default function RootLayout({
@@ -118,9 +131,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" data-scroll-behavior="smooth">
+    <html lang="en" className="dark" data-scroll-behavior="smooth">
       <head>
-        <link rel="mask-icon" href="/relay44.svg" color="#e4470b" />
+        <link rel="mask-icon" href="/relay44-logo-w.svg" color="#ffffff" />
         <meta name="msapplication-config" content="/browserconfig.xml" />
         <meta name="base:app_id" content="69b6fceed6271e8cedf2ada0" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -136,7 +149,7 @@ export default function RootLayout({
                 name: 'Relay44',
                 url: `${SITE_URL}/miniapp`,
                 splashImageUrl: `${SITE_URL}/favicon.png`,
-                splashBackgroundColor: '#0d1217',
+                splashBackgroundColor: '#030303',
               },
             },
           })}
@@ -149,7 +162,14 @@ export default function RootLayout({
           ]}
         />
       </head>
-      <body className={`${brandFont.variable} font-mono antialiased`}>
+      <body
+        className={`${displayFont.variable} ${monoFont.variable} ${bodyFont.variable} antialiased`}
+        style={{
+          '--font-display': `${displayFont.style.fontFamily}, "Space Grotesk", sans-serif`,
+          '--font-mono': `${monoFont.style.fontFamily}, "JetBrains Mono", ui-monospace, monospace`,
+          '--font-sans': `${bodyFont.style.fontFamily}, "Inter", system-ui, sans-serif`,
+        } as React.CSSProperties}
+      >
         <Providers>{children}</Providers>
       </body>
     </html>

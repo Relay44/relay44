@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 const primaryLinks = [
   { href: "/markets", label: "Markets" },
   { href: "/decisions", label: "Decisions" },
-  { href: "/how-it-works", label: "How it works" },
+  { href: "/agents", label: "Swarm" },
   { href: "/portfolio", label: "Portfolio" },
 ];
 
@@ -64,10 +64,7 @@ function ConnectWalletButton() {
       href="https://phantom.app/"
       target="_blank"
       rel="noreferrer"
-      className={cn(
-        "h-9 px-5 text-sm font-medium inline-flex items-center",
-        "border border-accent text-accent bg-transparent hover:bg-accent/10 transition-colors",
-      )}
+      className="h-9 px-4 text-[0.75rem] font-mono inline-flex items-center border border-border text-text-primary bg-transparent hover:bg-bg-hover transition-colors"
     >
       Install Phantom
     </a>
@@ -82,10 +79,7 @@ function ConnectWalletButton() {
     return (
       <button
         onClick={handleBaseClick}
-        className={cn(
-          "h-9 max-w-[8.5rem] border border-accent bg-transparent px-3 text-xs font-medium text-accent transition-colors cursor-pointer sm:max-w-none sm:px-5 sm:text-sm",
-          "hover:bg-accent/10",
-        )}
+        className="h-9 max-w-[8.5rem] border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors cursor-pointer sm:max-w-none sm:px-4 hover:bg-bg-hover"
       >
         <span className="truncate sm:hidden">{compactLabel}</span>
         <span className="hidden sm:inline">
@@ -104,10 +98,7 @@ function ConnectWalletButton() {
     return (
       <button
         onClick={handleSolanaClick}
-        className={cn(
-          "h-9 max-w-[8.5rem] border border-accent bg-transparent px-3 text-xs font-medium text-accent transition-colors cursor-pointer sm:max-w-none sm:px-5 sm:text-sm",
-          "hover:bg-accent/10",
-        )}
+        className="h-9 max-w-[8.5rem] border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors cursor-pointer sm:max-w-none sm:px-4 hover:bg-bg-hover"
       >
         <span className="truncate sm:hidden">
           {solanaWallet.isConnected && solanaWallet.address
@@ -128,10 +119,7 @@ function ConnectWalletButton() {
       {baseEnabled && (
         <button
           onClick={handleBaseClick}
-          className={cn(
-            "h-9 border border-accent bg-transparent px-3 text-xs font-medium text-accent transition-colors",
-            "hover:bg-accent/10",
-          )}
+          className="h-9 border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors hover:bg-bg-hover"
         >
           {baseWallet.isConnected && baseWallet.address
             ? `Base ${truncateAddress(baseWallet.address)}`
@@ -142,10 +130,7 @@ function ConnectWalletButton() {
         (solanaAvailable ? (
           <button
             onClick={handleSolanaClick}
-            className={cn(
-              "h-9 border border-accent bg-transparent px-3 text-xs font-medium text-accent transition-colors",
-              "hover:bg-accent/10",
-            )}
+            className="h-9 border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors hover:bg-bg-hover"
           >
             {solanaWallet.isConnected && solanaWallet.address
               ? `Sol ${truncateAddress(solanaWallet.address)}`
@@ -156,10 +141,7 @@ function ConnectWalletButton() {
             href="https://phantom.app/"
             target="_blank"
             rel="noreferrer"
-            className={cn(
-              "h-9 px-3 text-xs font-medium border border-border inline-flex items-center",
-              "text-text-primary bg-bg-secondary hover:bg-bg-hover transition-colors",
-            )}
+            className="h-9 px-3 text-[0.75rem] font-mono border border-border inline-flex items-center text-text-primary bg-transparent hover:bg-bg-hover transition-colors"
           >
             Install Solana Wallet
           </a>
@@ -214,80 +196,61 @@ export function Header() {
   };
 
   return (
-    <header className="fixed inset-x-0 top-0 z-sticky border-b border-border bg-bg-primary text-text-primary">
-      <div className="shell-frame">
-        <div className="flex min-w-0 items-center gap-2 py-2 sm:h-14 sm:py-0">
-          <div className="flex min-w-0 items-center gap-2.5 sm:gap-4">
-            <SidebarMenu />
-            <Link href="/" className="flex min-w-0 items-center group">
-              <BrandLogo compact />
-            </Link>
-            <nav className="hidden lg:flex items-center gap-2">
-              {primaryLinks.map(({ href, label }) => {
-                const active =
-                  pathname === href ||
-                  (href !== "/" && pathname.startsWith(href));
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={cn(
-                      "inline-flex h-9 items-center border px-3 text-xs font-medium uppercase tracking-[0.14em] transition-colors",
-                      active
-                        ? "border-border-hover bg-bg-secondary text-text-primary"
-                        : "border-transparent text-text-muted hover:border-border hover:bg-bg-secondary hover:text-text-primary",
-                    )}
-                  >
-                    {label}
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
-
-          <div className="hidden lg:flex min-w-0 flex-1 justify-center px-4">
-            <form
-              onSubmit={handleSearchSubmit}
-              className="relative w-full max-w-[420px]"
-            >
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Search markets..."
-                aria-label="Search markets"
+    <header className="fixed inset-x-0 top-0 z-sticky border-b border-border bg-bg-base text-text-primary">
+      <div className="flex min-w-0 items-center justify-between px-4 py-3 sm:px-8 sm:py-4">
+        <Link href="/" className="flex shrink-0 items-center group">
+          <BrandLogo compact />
+        </Link>
+        <nav className="hidden lg:flex items-center gap-6 ml-5">
+          {primaryLinks.map(({ href, label }) => {
+            const active =
+              pathname === href ||
+              (href !== "/" && pathname.startsWith(href));
+            return (
+              <Link
+                key={href}
+                href={href}
                 className={cn(
-                  "w-full h-9 pl-9 pr-12 text-sm",
-                  "bg-bg-secondary border border-border",
-                  "text-text-primary placeholder:text-text-muted",
-                  "focus:outline-none focus:border-border-hover focus:ring-1 focus:ring-accent/20",
-                  "transition-colors",
-                )}
-              />
-              <button
-                type="submit"
-                aria-label="Run market search"
-                className={cn(
-                  "absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center border border-transparent text-text-muted transition-colors",
-                  "hover:border-border hover:bg-bg-primary hover:text-text-primary",
+                  "font-mono text-[0.85rem] uppercase leading-none transition-colors",
+                  active
+                    ? "text-text-primary"
+                    : "text-text-muted hover:text-text-primary",
                 )}
               >
-                <Search className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
 
-          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
-            {beta ? (
-              <span className="hidden sm:inline-flex h-9 items-center border border-border bg-bg-secondary px-3 text-xs font-medium uppercase tracking-[0.18em] text-text-secondary">
-                Beta
-              </span>
-            ) : null}
-            {sessionRestored && hasSession ? <NotificationBell /> : null}
-            <ConnectWalletButton />
-          </div>
+        <div className="hidden lg:flex min-w-0 flex-1 justify-center px-8">
+          <form
+            onSubmit={handleSearchSubmit}
+            className="relative w-full max-w-[420px]"
+          >
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="Search markets..."
+              aria-label="Search markets"
+              className={cn(
+                "w-full h-9 pl-9 pr-12 text-sm font-mono",
+                "bg-transparent border border-border",
+                "text-text-primary placeholder:text-text-muted",
+                "focus:outline-none focus:border-border-hover",
+                "transition-colors",
+              )}
+            />
+          </form>
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+          {sessionRestored && hasSession ? <NotificationBell /> : null}
+          <ConnectWalletButton />
+          <SidebarMenu />
         </div>
       </div>
     </header>

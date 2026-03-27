@@ -3,19 +3,134 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Header, BottomNav } from "@/components/layout";
-import { WorldDeskHero } from "@/components/home/WorldDeskHero";
-import { MarketRow } from "@/components/market";
-import { SignalChart } from "@/components/market/FeaturedBanner";
+import { HeroTicket } from "@/components/home/HeroTicket";
+import { MarketRow, FeaturedSlider } from "@/components/market";
 import { useMarkets } from "@/hooks";
 import type { HomeLiveFeed } from "@/lib/server/homeLive";
 import type { Market, PaginatedResponse } from "@/types";
 
-const TICKER_TEXT =
-  "RELAY44 PROTOCOL LIVE ___ AGENT 004 PREDICTING ___ BTC $92,000 [72%] ___ AGI 2026 [14%] ___ MARS LANDING 2029 [61%] ___ SUPERCONDUCTOR LK-99 [08%] ___ NETWORK LATENCY 4MS ___ SETTLEMENT: BASE L2 ___ ";
-
 interface HomePageClientProps {
   initialMarkets?: PaginatedResponse<Market> | null;
   initialLiveFeed: HomeLiveFeed;
+}
+
+const AGENT_LOGS = [
+  { time: "14:02:11", text: 'Agent <span class="text-text-primary">Osprey-7</span> executing arb strategy.' },
+  { time: "14:02:08", text: '<span class="text-text-primary">BOUGHT 4,500 YES</span> @ 68\u00A2 [GPT-5]' },
+  { time: "14:01:45", text: '<span class="text-text-primary">Mantis-V</span> detected sentiment shift.' },
+  { time: "14:01:22", text: '<span class="text-text-primary">Kestrel-3</span> liquidated short position.' },
+  { time: "14:00:58", text: 'Signal confidence above threshold. <span class="text-text-primary">AUTO-BID</span> triggered.' },
+  { time: "14:00:31", text: '<span class="text-text-primary">Osprey-7</span> scanning new feeds.' },
+];
+
+function AgentPanel() {
+  return (
+    <aside className="hidden lg:flex w-[300px] shrink-0 flex-col border-r border-border">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border font-mono text-[0.75rem]">
+        <span className="text-text-muted uppercase tracking-wider">Swarm Telemetry</span>
+        <span className="text-text-primary">LIVE</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {AGENT_LOGS.map((log, i) => (
+          <div key={i} className="font-mono text-[0.7rem] text-text-muted border-l-2 border-border pl-2">
+            <span className="text-text-muted/50">{log.time}</span>
+            <br />
+            <span dangerouslySetInnerHTML={{ __html: log.text }} />
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+
+function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="p-6 sm:p-8 space-y-0">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-6 py-5 border-b border-border animate-pulse"
+          >
+            <div className="w-12 h-4 bg-bg-secondary hidden sm:block" />
+            <div className="flex-1 h-5 bg-bg-secondary" />
+            <div className="w-16 h-4 bg-bg-secondary hidden md:block" />
+            <div className="w-20 h-4 bg-bg-secondary hidden md:block" />
+            <div className="w-16 h-8 bg-bg-secondary" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (markets.length === 0) {
+    return (
+      <div className="py-16 text-center text-text-muted text-sm font-mono uppercase tracking-wider">
+        No active markets
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 sm:p-6 md:p-8">
+      <table className="w-full font-mono border-collapse">
+        <thead>
+          <tr>
+            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase">Active Markets</th>
+            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase hidden md:table-cell">Volume</th>
+            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase hidden md:table-cell">Ends</th>
+            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase">Pricing</th>
+          </tr>
+        </thead>
+        <tbody>
+          {markets.map((market) => {
+            const yesPrice = market.yesPrice != null ? `${Math.round(market.yesPrice * 100)}\u00A2` : '—';
+            const noPrice = market.noPrice != null ? `${Math.round(market.noPrice * 100)}\u00A2` : '—';
+            const endDate = market.tradingEnd
+              ? new Date(market.tradingEnd).toISOString().slice(0, 10).replace(/-/g, '.')
+              : '—';
+
+            return (
+              <tr
+                key={market.id}
+                className="border-b border-border transition-colors hover:bg-bg-hover group"
+              >
+                <td className="py-5 px-4" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem' }}>
+                  <Link href={`/markets/${market.id}`} className="flex items-center gap-2">
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                    <span className="group-hover:underline">{market.question}</span>
+                  </Link>
+                </td>
+                <td className="py-5 px-4 text-[0.85rem] hidden md:table-cell">
+                  ${market.volume != null ? (market.volume / 1_000_000 >= 1 ? `${(market.volume / 1_000_000).toFixed(1)}M` : `${(market.volume / 1_000).toFixed(0)}K`) : '—'}
+                </td>
+                <td className="py-5 px-4 text-[0.85rem] hidden md:table-cell">{endDate}</td>
+                <td className="py-5 px-4">
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/markets/${market.id}`}
+                      className="flex items-center justify-between gap-2 border border-border px-3 py-2 w-20 text-[0.8rem] font-bold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                    >
+                      <span>YES</span>
+                      <span>{yesPrice}</span>
+                    </Link>
+                    <Link
+                      href={`/markets/${market.id}`}
+                      className="flex items-center justify-between gap-2 border border-border px-3 py-2 w-20 text-[0.8rem] font-bold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                    >
+                      <span>NO</span>
+                      <span>{noPrice}</span>
+                    </Link>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export default function HomePageClient({
@@ -44,15 +159,10 @@ export default function HomePageClient({
     const refresh = async () => {
       try {
         const response = await fetch("/api/home/live", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-
+        if (!response.ok) return;
         const payload = (await response.json()) as HomeLiveFeed;
         setLiveFeed(payload);
-      } catch {
-        // Keep the last successful payload.
-      }
+      } catch {}
     };
 
     const interval = window.setInterval(() => {
@@ -65,134 +175,23 @@ export default function HomePageClient({
   }, []);
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden">
+    <div className="h-screen flex flex-col overflow-hidden">
       <Header />
 
-      <div
-        className="fixed hero-glyph leading-none"
-        style={{ right: "calc(-7rem + 40px)", top: "calc(3rem - 130px)" }}
-        aria-hidden
-      >
-        <span className="block">&gt;&gt;&gt;</span>
-        <span className="block">nm</span>
-      </div>
+      <div className="flex flex-1 overflow-hidden pt-[73px] sm:pt-[81px]">
+        <AgentPanel />
 
-      <div
-        className="fixed left-5 top-1/2 -translate-y-1/2 writing-mode-vertical text-[11px] uppercase tracking-[0.3em] text-text-muted font-mono hidden lg:block"
-        aria-hidden
-      >
-        STATUS: &gt; ACTIVE / SN: • OPERATION WEB-04.01 • FWD
-      </div>
+        <main className="flex-1 overflow-y-auto">
+          <section className="border-b border-border h-[280px] sm:h-[320px]">
+            <HeroTicket />
+          </section>
 
-      <div
-        className="fixed right-5 top-1/2 -translate-y-1/2 writing-mode-vertical text-[11px] uppercase tracking-[0.3em] text-text-muted font-mono hidden lg:block"
-        aria-hidden
-      >
-        SYSTEM_STATUS_OK
-      </div>
+          <section className="py-5 border-b border-border">
+            <FeaturedSlider markets={markets.slice(0, 8)} title="Signal Relay" />
+          </section>
 
-      <main className="container-app relative z-10 mb-12 pt-20">
-        <WorldDeskHero slides={liveFeed.news} />
-
-        <section className="border-b border-border py-6">
-          <SignalChart initialSignal={liveFeed.signal} />
-        </section>
-
-        <section className="border-b border-border py-6">
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
-            <div className="border border-border bg-bg-primary p-5 brutal-shadow">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-accent">
-                Launch primer
-              </p>
-              <h2 className="mt-3 text-2xl font-semibold uppercase tracking-[-0.03em] text-text-primary">
-                Know the market rules before you trade.
-              </h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-                relay44 is live market infrastructure on Base. Browse,
-                inspect resolution logic, and check risk disclosures before you
-                connect, trade, or publish a new market.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <Link
-                  href="/how-it-works"
-                  className="inline-flex h-10 items-center border border-accent px-4 text-sm uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
-                >
-                  How it works
-                </Link>
-                <Link
-                  href="/legal/disclaimer"
-                  className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
-                >
-                  Risk disclosure
-                </Link>
-              </div>
-            </div>
-
-            <div className="border border-border bg-bg-primary p-5 brutal-shadow">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
-                Live now
-              </p>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-text-secondary">
-                <li>Browse live markets, prices, and order books.</li>
-                <li>Inspect portfolio and wallet state after sign-in.</li>
-                <li>
-                  Draft markets from live news and publish when write rails are
-                  available.
-                </li>
-              </ul>
-            </div>
-
-            <div className="border border-border bg-bg-primary p-5 brutal-shadow">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-text-muted">
-                Before you publish
-              </p>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-text-secondary">
-                <li>Use one objective yes or no outcome.</li>
-                <li>Name a source that can resolve the market cleanly.</li>
-                <li>
-                  Set a deadline that matches the question and settlement
-                  window.
-                </li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <section className="py-8 pb-16">
-          {isLoading ? (
-            <div className="space-y-0">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-6 py-5 border-b border-border animate-pulse"
-                >
-                  <div className="w-12 h-4 bg-bg-secondary hidden sm:block" />
-                  <div className="flex-1 h-5 bg-bg-secondary" />
-                  <div className="w-16 h-4 bg-bg-secondary hidden md:block" />
-                  <div className="w-20 h-4 bg-bg-secondary hidden md:block" />
-                  <div className="w-16 h-8 bg-bg-secondary" />
-                </div>
-              ))}
-            </div>
-          ) : markets.length > 0 ? (
-            markets.map((market, i) => (
-              <MarketRow key={market.id} market={market} index={i} />
-            ))
-          ) : (
-            <div className="py-12 text-center text-text-muted text-sm uppercase tracking-[0.16em]">
-              No active markets
-            </div>
-          )}
-        </section>
-      </main>
-
-      <div className="fixed bottom-0 left-0 right-0 bg-bg-primary border-t border-border overflow-hidden z-30 md:z-40">
-        <div className="py-2.5 whitespace-nowrap overflow-hidden">
-          <span className="animate-marquee text-[11px] text-accent uppercase tracking-[0.16em] font-mono">
-            {TICKER_TEXT}
-            {TICKER_TEXT}
-          </span>
-        </div>
+          <MarketTable markets={markets} isLoading={isLoading} />
+        </main>
       </div>
 
       <BottomNav />
