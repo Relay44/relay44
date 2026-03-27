@@ -9,10 +9,11 @@ import {
 import { getHomeLiveFeed } from '@/lib/server/homeLive';
 
 export const revalidate = 5;
+const HOME_MARKET_LIMIT = 16;
 
 export default async function HomePage() {
   const [initialMarkets, initialLiveFeed] = await Promise.all([
-    fetchLiveBaseMarkets({ limit: 12, revalidateSeconds: 5 }),
+    fetchLiveBaseMarkets({ limit: HOME_MARKET_LIMIT, revalidateSeconds: 5 }),
     getHomeLiveFeed(),
   ]);
   const marketItems = (initialMarkets?.data ?? []).map((market) => ({

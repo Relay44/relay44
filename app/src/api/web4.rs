@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 use crate::api::ApiError;
+use crate::config::ExternalExecutionMode;
 use crate::services::x402::{
     api_origin_from_request, build_quote_for_origin, encode_payment_signature_header,
     X402PaymentPayload, X402Resource,
@@ -77,6 +78,22 @@ fn configured_chains(state: &AppState) -> Vec<Value> {
         }));
     }
     chains
+}
+
+fn polymarket_trading_ready(
+    polymarket_enabled: bool,
+    external_markets_enabled: bool,
+    external_trading_enabled: bool,
+    execution_mode: ExternalExecutionMode,
+    gamma_api_base: &str,
+    clob_api_base: &str,
+) -> bool {
+    polymarket_enabled
+        && external_markets_enabled
+        && external_trading_enabled
+        && !execution_mode.is_paper()
+        && !gamma_api_base.trim().is_empty()
+        && !clob_api_base.trim().is_empty()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1608,7 +1625,14 @@ pub async fn get_web4_capabilities(state: web::Data<Arc<AppState>>) -> impl Resp
     let limitless_trading_ready = state.config.limitless_enabled
         && state.config.external_trading_enabled
         && !state.config.limitless_api_key.trim().is_empty();
-    let polymarket_trading_ready = false;
+    let polymarket_trading_ready = polymarket_trading_ready(
+        state.config.polymarket_enabled,
+        state.config.external_markets_enabled,
+        state.config.external_trading_enabled,
+        state.config.external_execution_mode,
+        state.config.polymarket_gamma_api_base.as_str(),
+        state.config.polymarket_clob_api_base.as_str(),
+    );
     let beta = (state.config.limitless_enabled && !limitless_trading_ready)
         || (state.config.polymarket_enabled && !polymarket_trading_ready);
     let erc8004_ready = is_hex_address(state.config.erc8004_identity_registry_address.as_str())
@@ -2041,4 +2065,45 @@ pub async fn list_xmtp_swarm_messages(
 ) -> Result<impl Responder, ApiError> {
     let response = xmtp_swarm::list_messages(&state, path.as_str(), query.into_inner()).await?;
     Ok(HttpResponse::Ok().json(response))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polymarket_trading_ready_requires_live_execution_and_api_bases() {
+        assert!(polymarket_trading_ready(
+            true,
+            true,
+            true,
+            ExternalExecutionMode::Live,
+            "https://gamma-api.polymarket.com",
+            "https://clob.polymarket.com",
+        ));
+        assert!(!polymarket_trading_ready(
+            true,
+            true,
+            true,
+            ExternalExecutionMode::Paper,
+            "https://gamma-api.polymarket.com",
+            "https://clob.polymarket.com",
+        ));
+        assert!(!polymarket_trading_ready(
+            true,
+            true,
+            true,
+            ExternalExecutionMode::Live,
+            "",
+            "https://clob.polymarket.com",
+        ));
+        assert!(!polymarket_trading_ready(
+            true,
+            false,
+            true,
+            ExternalExecutionMode::Live,
+            "https://gamma-api.polymarket.com",
+            "https://clob.polymarket.com",
+        ));
+    }
 }
