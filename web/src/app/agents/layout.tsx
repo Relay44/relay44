@@ -7,9 +7,9 @@ import {
 
 export const metadata = buildPageMetadata({
   title: 'Agents',
-  description: 'Explore autonomous agent lanes, execution surfaces, and external-agent workflows on relay44.',
+  description: 'Launch, monitor, and manage market agents across onchain and external venues on Relay44.',
   path: '/agents',
-  keywords: ['agents', 'autonomous trading agents', 'external agents'],
+  keywords: ['agents', 'trading agents', 'external agents'],
 });
 
 export default function AgentsLayout({ children }: { children: React.ReactNode }) {
@@ -19,9 +19,8 @@ export default function AgentsLayout({ children }: { children: React.ReactNode }
         data={[
           buildWebPageStructuredData({
             path: '/agents',
-            name: 'relay44 agents',
-            description:
-              'Explore autonomous agent lanes, execution surfaces, and external-agent workflows on relay44.',
+            name: 'Relay44 agents',
+            description: 'Launch, monitor, and manage market agents across onchain and external venues on Relay44.',
           }),
           buildBreadcrumbStructuredData([
             { name: 'Home', url: '/' },

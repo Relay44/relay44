@@ -11,10 +11,10 @@ interface ReadOnlyNoticeProps {
 }
 
 const DEFAULT_BODY =
-  'Browsing stays live, but trading, agent execution, and wallet actions are disabled in this environment.';
+  'This action is not available in the current environment.';
 
 export function ReadOnlyNotice({
-  title = 'Read-only preview',
+  title = 'Currently unavailable',
   body = DEFAULT_BODY,
   actionHref,
   actionLabel,
@@ -25,7 +25,7 @@ export function ReadOnlyNotice({
       <div className="space-y-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-[0.18em] text-accent">
-            Preview Mode
+            Availability
           </p>
           <h2 className="mt-2 text-lg font-semibold text-text-primary">{title}</h2>
         </div>

@@ -47,6 +47,8 @@ const PRIMARY_API_BASE =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   '/api/proxy';
 const FALLBACK_API_BASE = process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || '';
+const LOCAL_BASE_READ_API_BASE =
+  process.env.NEXT_PUBLIC_LOCAL_BASE_READ_API_URL?.trim() || '/v1';
 
 export interface BaseTokenState {
   chain_id: number;
@@ -89,6 +91,10 @@ export interface BaseMarketSnapshot {
   execution_users?: boolean;
   execution_agents?: boolean;
   outcomes?: Array<{ label: string; probability: number }>;
+  yes_price?: number;
+  no_price?: number;
+  volume?: number;
+  provider_market_ref?: string;
 }
 
 export interface BaseMarketsResponse {
@@ -466,9 +472,29 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
   const resolvedOutcome = snapshot.outcome === 'yes' || snapshot.outcome === 'no'
     ? snapshot.outcome
     : undefined;
+  const derivedYesPrice = snapshot.outcomes?.find(
+    (outcome) => outcome.label.trim().toLowerCase() === 'yes'
+  )?.probability;
+  const derivedNoPrice = snapshot.outcomes?.find(
+    (outcome) => outcome.label.trim().toLowerCase() === 'no'
+  )?.probability;
 
-  const yesPrice = resolvedOutcome === 'yes' ? 1 : resolvedOutcome === 'no' ? 0 : 0.5;
-  const noPrice = 1 - yesPrice;
+  let yesPrice = toNumber(
+    snapshot.yes_price,
+    derivedYesPrice ?? (resolvedOutcome === 'yes' ? 1 : resolvedOutcome === 'no' ? 0 : 0.5)
+  );
+  let noPrice = toNumber(
+    snapshot.no_price,
+    derivedNoPrice ?? (resolvedOutcome === 'yes' ? 0 : resolvedOutcome === 'no' ? 1 : 1 - yesPrice)
+  );
+
+  if (resolvedOutcome === 'yes') {
+    yesPrice = 1;
+    noPrice = 0;
+  } else if (resolvedOutcome === 'no') {
+    yesPrice = 0;
+    noPrice = 1;
+  }
 
   const tradingEnd = fromUnixSeconds(snapshot.close_time);
   const resolutionDeadline = fromUnixSeconds(snapshot.resolve_time || snapshot.close_time);
@@ -481,6 +507,7 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
     sourceRaw === 'limitless' || sourceRaw === 'polymarket' || sourceRaw === 'all'
       ? sourceRaw
       : 'internal';
+  const totalVolume = toNumber(snapshot.volume, 0);
 
   return {
     id: snapshot.id,
@@ -502,8 +529,8 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
     noPrice,
     yesSupply: 0,
     noSupply: 0,
-    volume24h: 0,
-    totalVolume: 0,
+    volume24h: totalVolume,
+    totalVolume,
     totalCollateral: 0,
     feeBps: 0,
     oracle: snapshot.resolver,
@@ -772,18 +799,68 @@ class ApiClient {
     return res.json();
   }
 
+  private async requestFromBase<T>(
+    base: string,
+    path: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const headers: HeadersInit = {
+      ...options.headers,
+    };
+
+    if (options.body !== undefined && !('Content-Type' in (headers as Record<string, string>))) {
+      (headers as Record<string, string>)['Content-Type'] = 'application/json';
+    }
+
+    if (this.accessToken) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    const response = await fetch(`${base}${path}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new ApiError(response.status, text || response.statusText);
+    }
+
+    if (response.status === 204) {
+      return {} as T;
+    }
+
+    return response.json();
+  }
+
+  private async requestBaseRead<T>(path: string): Promise<T> {
+    try {
+      return await this.request<T>(path);
+    } catch (primaryError) {
+      if (!LOCAL_BASE_READ_API_BASE) {
+        throw primaryError;
+      }
+
+      try {
+        return await this.requestFromBase<T>(LOCAL_BASE_READ_API_BASE, path);
+      } catch {
+        throw primaryError;
+      }
+    }
+  }
+
   private async assertRequestWritable(method: string) {
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
       return;
     }
 
     if (readOnlyPreviewEnabled || isReadOnlyMode(this.capabilities)) {
-      throw new ApiError(403, 'This action is disabled in read-only mode');
+      throw new ApiError(403, 'This action is unavailable in this environment');
     }
 
     const capabilities = await this.loadCapabilities();
     if (isReadOnlyMode(capabilities)) {
-      throw new ApiError(403, 'This action is disabled in read-only mode');
+      throw new ApiError(403, 'This action is unavailable in this environment');
     }
   }
 
@@ -1010,7 +1087,7 @@ class ApiClient {
     includeLowLiquidity?: boolean;
   }): Promise<PaginatedResponse<Market>> {
     const query = this.buildQuery(params || {});
-    const response = await this.request<BaseMarketsResponse>(`/evm/markets${query}`);
+    const response = await this.requestBaseRead<BaseMarketsResponse>(`/evm/markets${query}`);
     return normalizeBaseMarketsResponse(response);
   }
 
@@ -1021,7 +1098,7 @@ class ApiClient {
   ): Promise<OrderBook> {
     const query = this.buildQuery({ outcome, depth });
     const encodedMarketId = encodeURIComponent(marketId);
-    const response = await this.request<BaseOrderBookResponse>(
+    const response = await this.requestBaseRead<BaseOrderBookResponse>(
       `/evm/markets/${encodedMarketId}/orderbook${query}`
     );
 
@@ -1044,7 +1121,7 @@ class ApiClient {
       offset: params?.offset,
     });
     const encodedMarketId = encodeURIComponent(marketId);
-    const response = await this.request<BaseTradesResponse>(
+    const response = await this.requestBaseRead<BaseTradesResponse>(
       `/evm/markets/${encodedMarketId}/trades${query}`
     );
     const data = (response.trades ?? []).map(mapBaseTradeToTrade);
@@ -1062,7 +1139,9 @@ class ApiClient {
   }
 
   async getBaseMarket(id: string): Promise<Market> {
-    const response = await this.request<BaseMarketSnapshot>(`/evm/markets/${encodeURIComponent(id)}`);
+    const response = await this.requestBaseRead<BaseMarketSnapshot>(
+      `/evm/markets/${encodeURIComponent(id)}`
+    );
     return mapBaseSnapshotToMarket(response);
   }
 

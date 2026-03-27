@@ -188,10 +188,10 @@ export function SignalChart({ initialSignal }: SignalChartProps) {
     <div className="grid gap-3 border border-border bg-bg-primary px-4 py-3 sm:h-20 sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)_minmax(0,240px)] sm:items-center sm:gap-4 sm:px-5 sm:py-0">
       <div className="min-w-0">
         <p className="text-[11px] uppercase tracking-[0.18em] text-text-secondary">
-          SIGNAL_INPUT: {signal.label}
+          Market coverage
         </p>
         <p className="mt-1 truncate text-[11px] uppercase tracking-[0.18em] text-text-muted">
-          LATENCY: {signal.latencyMs}MS
+          Refresh latency: {signal.latencyMs} ms
         </p>
       </div>
 
@@ -252,7 +252,7 @@ export function SignalChart({ initialSignal }: SignalChartProps) {
           {signal.source}
         </p>
         <p className="mt-1 truncate text-[11px] uppercase tracking-[0.18em] text-text-muted">
-          {signal.marketsTracked} live markets | {signal.feedsLive}/{signal.feedsExpected} feeds live | {signal.stageLabel} | {formatTimestamp(signal.updatedAt)}
+          {signal.marketsTracked} markets tracked | {signal.feedsLive} of {signal.feedsExpected} sources live | updated {formatTimestamp(signal.updatedAt)}
         </p>
       </div>
     </div>

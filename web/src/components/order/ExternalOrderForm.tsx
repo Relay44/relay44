@@ -136,8 +136,8 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
   if (readOnly) {
     return (
       <ReadOnlyNotice
-        title="External trading is disabled"
-        body="External venue execution stays locked in read-only mode."
+        title="External trading is currently unavailable"
+        body="External venue data remains available."
       />
     );
   }

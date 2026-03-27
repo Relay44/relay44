@@ -168,8 +168,8 @@ export default function MarketDetailPage() {
         {market.status === "active" ? (
           readOnly ? (
             <ReadOnlyNotice
-              title="Trading is disabled in this preview"
-              body="Market data stays live, but order placement and execution are turned off in this environment."
+              title="Trading is currently unavailable"
+              body="Market data stays live, but order placement and execution are unavailable in this environment."
               actionHref="/markets"
               actionLabel="Browse more markets"
               className="h-full"
