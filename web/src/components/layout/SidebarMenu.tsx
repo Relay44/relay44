@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   ChevronDown,
+  Github,
   Settings2,
   SquareArrowOutUpRight,
   SquareDashedMousePointer,
@@ -45,10 +46,10 @@ const externalLinks = [
     icon: XIcon,
   },
   {
-    href: "mailto:support@relay44.com",
-    label: "Support",
-    note: "Direct support and operator contact",
-    icon: Settings2,
+    href: "https://github.com/Relay44",
+    label: "GitHub",
+    note: "Source code and contributions",
+    icon: Github,
   },
 ];
 
@@ -98,7 +99,7 @@ export function SidebarMenu() {
         type="button"
         onClick={() => setOpen(true)}
         className={cn(
-          "inline-flex h-10 w-10 shrink-0 items-center justify-center border border-border text-text-primary transition-colors",
+          "inline-flex h-9 w-9 shrink-0 items-center justify-center border border-border text-text-primary transition-colors",
           open
             ? "pointer-events-none opacity-0"
             : "bg-bg-secondary hover:bg-bg-hover",
@@ -126,13 +127,13 @@ export function SidebarMenu() {
 
         <aside
           className={cn(
-            "absolute left-0 top-0 flex h-full w-[min(360px,92vw)] flex-col border-r border-border bg-bg-primary brutal-shadow transition-transform duration-normal",
-            open ? "translate-x-0" : "-translate-x-full",
+            "absolute right-0 top-0 flex h-full w-[min(360px,92vw)] flex-col border-l border-border bg-bg-primary transition-transform duration-normal",
+            open ? "translate-x-0" : "translate-x-full",
           )}
         >
           <div className="border-b border-border px-5 pb-5 pt-6">
             <p className="text-[11px] uppercase tracking-[0.22em] text-text-muted">
-              navigation deck
+              navigation grid
             </p>
             <div className="mt-3">
               <BrandLogo />
@@ -238,7 +239,7 @@ export function SidebarMenu() {
                       Appearance
                     </p>
                     <p className="mt-1 text-sm text-text-primary">
-                      Night / day switch
+                      Dark / light switch
                     </p>
                   </div>
                   <ThemeToggle iconless className="bg-transparent" />

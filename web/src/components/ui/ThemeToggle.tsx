@@ -11,7 +11,7 @@ interface ThemeToggleProps {
 
 export function ThemeToggle({ className, iconless = false }: ThemeToggleProps) {
   const { resolvedTheme, toggleTheme, mounted } = useTheme();
-  const nextThemeLabel = resolvedTheme === 'dark' ? 'Day' : 'Night';
+  const nextThemeLabel = resolvedTheme === 'dark' ? 'Light' : 'Dark';
 
   // Render placeholder during SSR to prevent hydration mismatch
   if (!mounted) {
