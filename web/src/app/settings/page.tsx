@@ -158,7 +158,7 @@ export default function SettingsPage() {
             <span className="text-text-secondary">External Credentials</span>
             <Link
               href="/settings/credentials"
-              className="border border-border px-3 py-1 text-xs uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              className="inline-flex h-10 items-center border border-border px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
             >
               Open vault
             </Link>

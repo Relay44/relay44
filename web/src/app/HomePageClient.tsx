@@ -161,13 +161,13 @@ function AgentPanel({
             <div className="mt-4 flex gap-2">
               <Link
                 href="/agents"
-                className="inline-flex h-9 items-center border border-accent px-3 text-[0.72rem] uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
+                className="inline-flex h-10 items-center border border-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
               >
                 Open agents
               </Link>
               <Link
                 href="/markets"
-                className="inline-flex h-9 items-center border border-border px-3 text-[0.72rem] uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-hover hover:text-text-primary"
+                className="inline-flex h-10 items-center border border-border px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-hover hover:text-text-primary"
               >
                 View markets
               </Link>
@@ -249,14 +249,14 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
                   <div className="flex gap-2">
                     <Link
                       href={`/markets/${market.id}`}
-                      className="flex items-center justify-between gap-2 border border-border px-3 py-2 w-20 text-[0.8rem] font-bold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-sm font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
                     >
                       <span>YES</span>
                       <span>{yesPrice}</span>
                     </Link>
                     <Link
                       href={`/markets/${market.id}`}
-                      className="flex items-center justify-between gap-2 border border-border px-3 py-2 w-20 text-[0.8rem] font-bold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-sm font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
                     >
                       <span>NO</span>
                       <span>{noPrice}</span>
@@ -343,7 +343,7 @@ export default function HomePageClient({
     <div className="h-screen flex flex-col overflow-hidden">
       <Header />
 
-      <div className="pt-header flex flex-1 overflow-hidden">
+      <div className="pt-page flex flex-1 overflow-hidden">
         <AgentPanel
           agents={liveAgents}
           isLoading={isLoadingAgents}

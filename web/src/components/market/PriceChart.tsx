@@ -109,7 +109,7 @@ export function PriceChart({
               className={cn(
                 'px-3 py-1 text-sm  transition-colors duration-fast cursor-pointer',
                 timeRange === range.id
-                  ? 'bg-accent text-white'
+                  ? 'bg-accent text-text-inverse'
                   : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
               )}
             >

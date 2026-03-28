@@ -29,7 +29,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
     const variants = {
       primary: cn(
-        'bg-accent text-white',
+        'bg-accent text-text-inverse',
         'hover:bg-accent-hover'
       ),
       secondary: cn(
@@ -45,7 +45,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         'border border-accent hover:bg-accent-muted'
       ),
       success: cn(
-        'bg-accent text-white',
+        'bg-accent text-text-inverse',
         'hover:bg-accent-hover'
       ),
       danger: cn(
@@ -53,20 +53,20 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         'border border-border hover:bg-bg-secondary'
       ),
       bid: cn(
-        'bg-bid text-white font-semibold',
+        'bg-bid text-text-inverse font-semibold',
         'hover:bg-bid-hover'
       ),
       ask: cn(
-        'bg-ask text-white font-semibold',
+        'bg-ask text-text-inverse font-semibold',
         'hover:bg-ask-hover'
       ),
     };
 
     const sizes = {
       sm: 'h-8 px-3 text-sm gap-1.5',
-      md: 'h-10 px-4 text-base gap-2',
-      lg: 'h-12 px-6 text-lg gap-2',
-      xl: 'h-14 px-8 text-lg gap-2.5',
+      md: 'h-10 px-4 text-sm gap-2',
+      lg: 'h-12 px-6 text-sm gap-2',
+      xl: 'h-14 px-8 text-sm gap-2.5',
     };
 
     return (
