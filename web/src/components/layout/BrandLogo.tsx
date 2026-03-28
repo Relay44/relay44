@@ -10,8 +10,8 @@ interface BrandLogoProps {
 export function BrandLogo({ compact = false }: BrandLogoProps) {
   const { resolvedTheme } = useTheme();
   const logoSrc = resolvedTheme === 'dark' ? '/relay44-logo-w.svg' : '/relay44-logo-b.svg';
-  const logoWidth = 1793;
-  const logoHeight = 1005;
+  const logoWidth = 644;
+  const logoHeight = 401;
 
   return (
     <Image
