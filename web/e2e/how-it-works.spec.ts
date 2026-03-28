@@ -43,6 +43,7 @@ test.describe("How It Works", () => {
 
   test("create market flow shows launch guidance", async ({ page }) => {
     await page.goto("/markets/create", { waitUntil: "domcontentloaded" });
+    expect(await page.getByRole("button", { name: /create market/i }).count()).toBe(0);
     await expect(
       page.getByRole("heading", { name: /market creation is currently unavailable/i }),
     ).toBeVisible();

@@ -1,14 +1,24 @@
 const TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
 
 interface RuntimeFlags {
+  evm_reads_enabled: boolean;
   evm_writes_enabled: boolean;
+  solana_reads_enabled: boolean;
   solana_writes_enabled: boolean;
+  external_markets_enabled: boolean;
   external_trading_enabled: boolean;
   external_agents_enabled: boolean;
+  limitless_enabled?: boolean;
+  polymarket_enabled?: boolean;
 }
 
 export interface RuntimeCapabilities {
   runtime: RuntimeFlags;
+  launch?: {
+    beta: boolean;
+    limitless_trading_ready: boolean;
+    polymarket_trading_ready: boolean;
+  };
   wallet?: {
     read_enabled: boolean;
     deposit_enabled: boolean;
@@ -68,7 +78,17 @@ export function assertWritesEnabled(
   action: string,
   capabilities?: RuntimeCapabilities | null
 ) {
-  if (!isReadOnlyMode(capabilities ?? currentCapabilities)) {
+  if (readOnlyPreviewEnabled) {
+    throw new Error(`${action} is unavailable in this environment`);
+  }
+
+  const resolvedCapabilities = capabilities ?? currentCapabilities;
+
+  if (!resolvedCapabilities) {
+    throw new Error(`${action} is unavailable until runtime status loads`);
+  }
+
+  if (!isReadOnlyMode(resolvedCapabilities)) {
     return;
   }
 
