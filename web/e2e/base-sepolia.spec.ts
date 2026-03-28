@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const apiUrl = process.env.E2E_API_URL?.replace(//+$/, '');
+const apiUrl = process.env.E2E_API_URL?.replace(/\/+$/, '');
 
 test.describe('Base Sepolia smoke @base-sepolia', () => {
   test.skip(!apiUrl, 'E2E_API_URL must be set for Base Sepolia smoke tests');

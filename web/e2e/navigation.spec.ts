@@ -7,10 +7,13 @@ test.describe("Navigation", () => {
 
   test("navigates to markets page via header link", async ({ page }) => {
     await page.goto("/");
-    await page
-      .getByRole("banner")
-      .getByRole("link", { name: "Markets", exact: true })
-      .click();
+    await Promise.all([
+      page.waitForURL("**/markets"),
+      page
+        .getByRole("banner")
+        .getByRole("link", { name: "Markets", exact: true })
+        .click(),
+    ]);
     await expect(page).toHaveURL("/markets");
     await expect(
       page.getByRole("heading", { name: /all markets/i }),
@@ -19,31 +22,40 @@ test.describe("Navigation", () => {
 
   test("navigates to portfolio page via header link", async ({ page }) => {
     await page.goto("/");
-    await page
-      .getByRole("banner")
-      .getByRole("link", { name: "Portfolio", exact: true })
-      .click();
+    await Promise.all([
+      page.waitForURL("**/portfolio"),
+      page
+        .getByRole("banner")
+        .getByRole("link", { name: "Portfolio", exact: true })
+        .click(),
+    ]);
     await expect(page).toHaveURL("/portfolio");
   });
 
   test("navigates to how it works page via header link", async ({ page }) => {
     await page.goto("/");
-    await page
-      .getByRole("banner")
-      .getByRole("link", { name: "How it works", exact: true })
-      .click();
+    await Promise.all([
+      page.waitForURL("**/how-it-works"),
+      page
+        .getByRole("banner")
+        .getByRole("link", { name: "How it works", exact: true })
+        .click(),
+    ]);
     await expect(page).toHaveURL("/how-it-works");
     await expect(
-      page.getByRole("heading", { name: /how relay44 works/i }),
+      page.getByRole("heading", { name: "How It Works" }),
     ).toBeVisible();
   });
 
   test("navigates home via logo click", async ({ page }) => {
-    await page.goto("/markets");
-    await page
-      .getByRole("banner")
-      .getByRole("link", { name: /relay44/i })
-      .click();
+    await page.goto("/markets", { waitUntil: "domcontentloaded" });
+    await Promise.all([
+      page.waitForURL("**/"),
+      page
+        .getByRole("banner")
+        .getByRole("link", { name: /relay44/i })
+        .click(),
+    ]);
     await expect(page).toHaveURL("/");
   });
 

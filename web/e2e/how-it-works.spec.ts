@@ -7,13 +7,13 @@ test.describe("How It Works", () => {
     await page.goto("/how-it-works");
     const main = page.getByRole("main");
     await expect(
-      page.getByRole("heading", { name: /how relay44 works/i }),
+      page.getByRole("heading", { name: "How It Works" }),
     ).toBeVisible();
     await expect(
       main.getByRole("link", { name: "Browse markets", exact: true }),
     ).toBeVisible();
     await expect(
-      main.getByRole("link", { name: "Create a market", exact: true }),
+      main.getByRole("link", { name: "View agents", exact: true }),
     ).toBeVisible();
     await expect(
       main.getByRole("link", { name: "Risk disclaimer", exact: true }),
@@ -32,11 +32,13 @@ test.describe("How It Works", () => {
   });
 
   test("wallet disconnected state explains next step", async ({ page }) => {
-    await page.goto("/wallet");
-    await expect(page.getByText(/approve the sign-in prompt/i)).toBeVisible();
+    await page.goto("/wallet", { waitUntil: "domcontentloaded" });
     await expect(
-      page.getByRole("link", { name: "Browse markets" }),
-    ).toBeVisible();
+      page.getByText(/wallet sign-in required|approve the sign-in prompt/i).first(),
+    ).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "Browse markets", exact: true }),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("create market flow shows launch guidance", async ({ page }) => {

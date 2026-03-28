@@ -6,6 +6,8 @@ Cargo.lock
 # Project-specific
 CLAUDE.md
 docs/
+!web/src/app/docs/
+!web/src/app/docs/**
 
 # Local ledgers
 test-ledger/

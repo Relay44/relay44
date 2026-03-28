@@ -11,10 +11,10 @@ test.describe("Responsive launch surfaces", () => {
       page.getByRole("button", { name: "Open navigation menu" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "How it works" }).first(),
+      page.getByRole("link", { name: "How it works", exact: true }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Risk disclosure" }),
+      page.getByRole("link", { name: "Risk disclosure", exact: true }),
     ).toBeVisible();
   });
 });

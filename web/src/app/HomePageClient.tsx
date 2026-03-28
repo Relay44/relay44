@@ -384,6 +384,29 @@ export default function HomePageClient({
             <FeaturedSlider markets={markets.slice(0, FEATURED_MARKET_COUNT)} title="Signal Relay" />
           </section>
 
+          <section className="border-b border-border px-4 py-4 sm:px-6">
+            <div className="flex flex-wrap gap-3">
+              <Link
+                href="/markets"
+                className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              >
+                Browse markets
+              </Link>
+              <Link
+                href="/how-it-works"
+                className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+              >
+                How it works
+              </Link>
+              <Link
+                href="/legal/disclaimer"
+                className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+              >
+                Risk disclosure
+              </Link>
+            </div>
+          </section>
+
           <MarketTable markets={markets} isLoading={isLoading} />
         </main>
       </div>
