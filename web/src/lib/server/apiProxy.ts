@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveApiProxyTarget } from '@/lib/server/apiTarget';
 
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -12,23 +13,6 @@ const HOP_BY_HOP_HEADERS = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
-
-function normalizeTarget(raw: string | undefined) {
-  const trimmed = String(raw || '').trim().replace(/\/$/, '');
-  if (!trimmed) {
-    return '';
-  }
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
-  }
-  return `http://${trimmed}`;
-}
-
-const API_PROXY_TARGET = normalizeTarget(
-  process.env.API_PROXY_TARGET ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    'http://localhost:8080/v1'
-);
 
 function buildProxyHeaders(request: NextRequest) {
   const headers = new Headers();
@@ -60,11 +44,13 @@ export async function proxyApiPost(request: NextRequest, path: string) {
 }
 
 export async function proxyApiRequest(request: NextRequest, path: string) {
-  if (!API_PROXY_TARGET) {
+  const proxyTarget = resolveApiProxyTarget();
+
+  if (!proxyTarget) {
     return NextResponse.json({ error: 'API proxy target is not configured' }, { status: 500 });
   }
 
-  const target = new URL(`${API_PROXY_TARGET}/${path}`);
+  const target = new URL(`${proxyTarget}/${path}`);
   request.nextUrl.searchParams.forEach((value, key) => {
     target.searchParams.append(key, value);
   });

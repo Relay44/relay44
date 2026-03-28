@@ -48,6 +48,23 @@ function formatRelativeTimestamp(value: string): string {
   return diffMs >= 0 ? `next in ${absDays}d` : `last ${absDays}d ago`;
 }
 
+function formatUtcTimestamp(value: string): string {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return "unknown";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  }).format(timestamp) + " UTC";
+}
+
 function buildHeroRows(
   agents: Agent[],
   signal: HomeLiveFeed["signal"],
@@ -156,7 +173,7 @@ function AgentPanel({
             <div className="mt-4 space-y-2 font-mono text-[0.72rem] text-text-muted">
               <div>markets tracked: {signal.marketsTracked}</div>
               <div>feeds live: {signal.feedsLive}/{signal.feedsExpected}</div>
-              <div>updated: {new Date(signal.updatedAt).toLocaleString()}</div>
+              <div>updated: {formatUtcTimestamp(signal.updatedAt)}</div>
             </div>
             <div className="mt-4 flex gap-2">
               <Link
