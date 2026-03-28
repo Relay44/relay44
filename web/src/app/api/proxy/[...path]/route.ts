@@ -34,7 +34,12 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
 
 function buildLocalTargetUrl(request: NextRequest, path: string[]) {
   const normalizedPath = path[0] === 'v1' ? path.join('/') : `v1/${path.join('/')}`;
-  const target = new URL(`/${normalizedPath}`, request.nextUrl.origin);
+  const port = process.env.PORT || '3000';
+  const localOrigin =
+    process.env.NODE_ENV === 'production'
+      ? `http://127.0.0.1:${port}`
+      : request.nextUrl.origin;
+  const target = new URL(`/${normalizedPath}`, localOrigin);
   request.nextUrl.searchParams.forEach((value, key) => {
     target.searchParams.append(key, value);
   });
