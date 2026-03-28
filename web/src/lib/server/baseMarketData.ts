@@ -19,7 +19,10 @@ interface FetchBaseMarketsOptions {
 }
 
 function getApiBases(): string[] {
-  const primary = process.env.NEXT_PUBLIC_API_URL?.trim() || DEFAULT_API_BASE;
+  const primary =
+    process.env.API_PROXY_TARGET?.trim()
+    || process.env.NEXT_PUBLIC_API_URL?.trim()
+    || DEFAULT_API_BASE;
   const fallback = process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || '';
   return [...new Set([primary, fallback].filter(Boolean))];
 }
