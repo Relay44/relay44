@@ -30,7 +30,8 @@ test.describe('Wallet Required Pages', () => {
   test('market detail shows connect prompt when not connected', async ({ page }) => {
     await page.goto('/markets/polymarket%3A540816');
     await expect(
-      page.getByText(/trading is currently unavailable|connect wallet to trade/i),
+      page.getByText(/trading is currently unavailable/i),
     ).toBeVisible();
+    expect(await page.getByText(/connect wallet to trade/i).count()).toBe(0);
   });
 });
