@@ -133,6 +133,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" data-scroll-behavior="smooth">
       <head>
+        <link rel="dns-prefetch" href="https://relay44-api.onrender.com" />
+        <link rel="preconnect" href="https://relay44-api.onrender.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+        <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="mask-icon" href="/relay44-logo-w.svg" color="#ffffff" />
         <meta name="msapplication-config" content="/browserconfig.xml" />
         <meta name="base:app_id" content="69b6fceed6271e8cedf2ada0" />
