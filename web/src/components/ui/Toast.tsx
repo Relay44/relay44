@@ -73,17 +73,17 @@ interface ToastItemProps {
 }
 
 function ToastItem({ toast, onClose }: ToastItemProps) {
-  const bgColor = {
-    success: 'bg-accent',
-    error: 'bg-bg-tertiary',
-    info: 'bg-accent',
+  const tone = {
+    success: 'bg-accent text-text-inverse',
+    error: 'border border-border bg-bg-tertiary text-text-primary',
+    info: 'bg-accent text-text-inverse',
   }[toast.type];
 
   return (
     <div
       className={cn(
-        'flex items-center gap-3 px-4 py-3  text-white shadow-lg animate-slide-in',
-        bgColor
+        'animate-slide-in flex items-center gap-3 px-4 py-3 shadow-lg',
+        tone
       )}
     >
       <span className="flex-1">{toast.message}</span>

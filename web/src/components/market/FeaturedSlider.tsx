@@ -46,11 +46,10 @@ function FeaturedCard({ market }: { market: Market }) {
               e.stopPropagation();
             }}
             className={cn(
-              'flex-1 py-2 px-3 font-mono text-[0.7rem] font-bold',
+              'flex h-10 flex-1 items-center justify-between px-3 font-mono text-sm font-semibold',
               'border border-border text-text-primary',
               'hover:bg-text-primary hover:text-text-inverse',
-              'transition-colors cursor-pointer',
-              'flex items-center justify-between'
+              'transition-colors cursor-pointer'
             )}
           >
             <span>YES</span>
@@ -63,11 +62,10 @@ function FeaturedCard({ market }: { market: Market }) {
               e.stopPropagation();
             }}
             className={cn(
-              'flex-1 py-2 px-3 font-mono text-[0.7rem] font-bold',
+              'flex h-10 flex-1 items-center justify-between px-3 font-mono text-sm font-semibold',
               'border border-border text-text-primary',
               'hover:bg-text-primary hover:text-text-inverse',
-              'transition-colors cursor-pointer',
-              'flex items-center justify-between'
+              'transition-colors cursor-pointer'
             )}
           >
             <span>NO</span>

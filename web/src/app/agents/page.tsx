@@ -377,7 +377,7 @@ export default function AgentsPage() {
           <div className="mt-4 flex flex-wrap gap-2">
             <Link
               href="/settings/credentials"
-              className="inline-flex h-9 items-center border border-border px-4 text-xs uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              className="inline-flex h-10 items-center border border-border px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
             >
               Manage venue credentials
             </Link>

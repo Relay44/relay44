@@ -319,7 +319,9 @@ export function HeroTicket({
         >
           <span>RELAY44</span>
           <span className="inline-block w-1 h-1 bg-text-primary opacity-50 mx-2 align-[2px]" />
-          <span>SIGNAL → RESOLVED</span>
+          <span>
+            SIGNAL → <span style={{ color: '#22c55e' }}>RESOLVED</span>
+          </span>
         </div>
       </div>
     </div>

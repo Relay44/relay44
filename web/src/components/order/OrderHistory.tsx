@@ -102,7 +102,7 @@ export function OrderHistory({ marketId }: OrderHistoryProps) {
                 className={cn(
                   'px-3 py-1 text-sm  transition-colors duration-fast cursor-pointer capitalize',
                   filter === f
-                    ? 'bg-accent text-white'
+                    ? 'bg-accent text-text-inverse'
                     : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'
                 )}
               >

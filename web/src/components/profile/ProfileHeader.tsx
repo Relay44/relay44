@@ -113,7 +113,7 @@ export function ProfileHeader({ wallet }: ProfileHeaderProps) {
                   priority={false}
                 />
               ) : (
-                <span className="text-2xl font-bold text-white">
+                <span className="text-2xl font-bold text-text-inverse">
                   {(profile.username || wallet).charAt(0).toUpperCase()}
                 </span>
               )}

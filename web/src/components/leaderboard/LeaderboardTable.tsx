@@ -181,7 +181,7 @@ export function LeaderboardTable({
                     className={cn(
                       'shrink-0 whitespace-nowrap px-3 py-1 text-sm transition-colors duration-fast cursor-pointer',
                       period === p.id
-                        ? 'bg-accent text-white'
+                        ? 'bg-accent text-text-inverse'
                         : 'text-text-secondary hover:text-text-primary'
                     )}
                   >
@@ -200,7 +200,7 @@ export function LeaderboardTable({
                     className={cn(
                       'shrink-0 whitespace-nowrap px-3 py-1 text-sm transition-colors duration-fast cursor-pointer',
                       metric === m.id
-                        ? 'bg-accent text-white'
+                        ? 'bg-accent text-text-inverse'
                         : 'text-text-secondary hover:text-text-primary'
                     )}
                   >
