@@ -15,6 +15,8 @@ test.describe('Agents Page', () => {
 
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
+    expect(await page.getByRole('heading', { name: 'Launch Agent' }).count()).toBe(0);
+
     await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
     await expect(
       page.getByRole('heading', { name: /agent control is currently unavailable/i })
@@ -31,5 +33,14 @@ test.describe('Agents Page', () => {
     await expect(
       page.getByRole('link', { name: /manage venue credentials/i })
     ).toBeVisible();
+  });
+
+  test('does not expose launch controls while runtime status is read-only', async ({ page }) => {
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
+
+    await expect(
+      page.getByRole('heading', { name: /agent control is currently unavailable/i })
+    ).toBeVisible();
+    expect(await page.getByRole('button', { name: /launch onchain agent/i }).count()).toBe(0);
   });
 });

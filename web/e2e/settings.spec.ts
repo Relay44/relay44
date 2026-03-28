@@ -31,3 +31,16 @@ test.describe('Settings Page', () => {
     await expect(page.getByRole('heading', { name: 'Wallet' })).not.toBeVisible();
   });
 });
+
+test.describe('Credential Settings', () => {
+  test('credentials route shows the read-only state instead of save controls', async ({
+    page,
+  }) => {
+    await page.goto('/settings/credentials', { waitUntil: 'domcontentloaded' });
+
+    await expect(
+      page.getByRole('heading', { name: /credential management is currently unavailable/i })
+    ).toBeVisible();
+    expect(await page.getByRole('heading', { name: 'Save credential' }).count()).toBe(0);
+  });
+});

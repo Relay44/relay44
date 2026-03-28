@@ -863,6 +863,9 @@ class ApiClient {
     }
 
     const capabilities = await this.loadCapabilities();
+    if (!capabilities) {
+      throw new ApiError(503, 'Runtime status is unavailable, write actions are disabled');
+    }
     if (isReadOnlyMode(capabilities)) {
       throw new ApiError(403, 'This action is unavailable in this environment');
     }
