@@ -4,6 +4,11 @@ import { ArrowUpRight, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types";
 
+const PROVIDER_LOGOS: Record<string, string> = {
+  limitless: "/limitless.svg",
+  polymarket: "/polymarket.svg",
+};
+
 export interface MarketCardProps {
   market: Market;
   compact?: boolean;
@@ -61,7 +66,16 @@ export function MarketCard({ market }: MarketCardProps) {
           </div>
           <div className="flex-1">
             <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.16em] text-text-muted mb-1">
-              <span className="px-2 py-0.5 border border-border bg-bg-secondary/60">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-border bg-bg-secondary/60">
+                {PROVIDER_LOGOS[market.provider?.toLowerCase()] ? (
+                  <Image
+                    src={PROVIDER_LOGOS[market.provider.toLowerCase()]}
+                    alt={market.provider}
+                    width={14}
+                    height={14}
+                    className="inline-block"
+                  />
+                ) : null}
                 {market.provider}
               </span>
               <span className="px-2 py-0.5 border border-border bg-bg-secondary/60">

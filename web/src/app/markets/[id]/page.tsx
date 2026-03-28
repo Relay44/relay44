@@ -100,7 +100,7 @@ export default function MarketDetailPage() {
       <MarketStats market={market} />
 
       {walletConnected && !market.isExternal && claimable > 0 ? (
-        <div className="mb-6 border border-border p-4">
+        <div className="mb-6 border border-border bg-bg-secondary p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="text-sm font-medium text-text-primary">
@@ -123,7 +123,7 @@ export default function MarketDetailPage() {
       ) : null}
 
       {relatedDecisionCells.length > 0 ? (
-        <div className="mb-6 border border-border p-4">
+        <div className="mb-6 border border-border bg-bg-secondary/40 p-4">
           <div className="flex flex-col gap-4">
             <div>
               <div className="text-sm font-medium text-text-primary">
