@@ -23,6 +23,11 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
+const AGENT_RUNTIME_CONFIG_ERRORS = new Set([
+  'AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED',
+  'INVALID_AGENT_RUNTIME_ADDRESS',
+]);
+
 function buildTargetUrl(request: NextRequest, path: string[]) {
   const proxyTarget = resolveApiProxyTarget();
   const target = new URL(`${proxyTarget}/${path.join('/')}`);
@@ -64,6 +69,42 @@ function buildProxyHeaders(request: NextRequest) {
   headers.set('x-forwarded-host', request.headers.get('host') || 'localhost:3000');
   headers.set('x-forwarded-proto', request.nextUrl.protocol.replace(':', ''));
   return headers;
+}
+
+function isAgentRuntimePath(path: string[]) {
+  const normalizedPath = path[0] === 'v1' ? path.slice(1) : path;
+  return normalizedPath[0] === 'evm' && normalizedPath[1] === 'agents';
+}
+
+async function shouldUseLocalFallback(response: Response, path: string[]) {
+  if (response.status >= 500) {
+    return true;
+  }
+
+  if (response.status !== 400 || !isAgentRuntimePath(path)) {
+    return false;
+  }
+
+  const contentType = response.headers.get('content-type')?.toLowerCase() || '';
+  if (!contentType.includes('application/json')) {
+    return false;
+  }
+
+  try {
+    const payload = (await response.clone().json()) as {
+      code?: string;
+      error?: { code?: string } | string;
+    };
+    const errorCode =
+      typeof payload.code === 'string'
+        ? payload.code
+        : typeof payload.error === 'object' && payload.error
+          ? payload.error.code
+          : undefined;
+    return !!errorCode && AGENT_RUNTIME_CONFIG_ERRORS.has(errorCode);
+  } catch {
+    return false;
+  }
 }
 
 async function proxyRequest(
@@ -115,7 +156,7 @@ async function proxyRequest(
     response = await send(localTarget);
   }
 
-  if (proxyTarget && canUseLocalFallback && response.status >= 500) {
+  if (proxyTarget && canUseLocalFallback && (await shouldUseLocalFallback(response, path))) {
     const fallback = await send(localTarget);
     if (fallback.ok || fallback.status < 500) {
       usedLocalTarget = true;
