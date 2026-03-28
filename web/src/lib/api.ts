@@ -834,18 +834,22 @@ class ApiClient {
   }
 
   private async requestBaseRead<T>(path: string): Promise<T> {
+    if (LOCAL_BASE_READ_API_BASE) {
+      try {
+        return await this.requestFromBase<T>(LOCAL_BASE_READ_API_BASE, path);
+      } catch (localError) {
+        try {
+          return await this.request<T>(path);
+        } catch {
+          throw localError;
+        }
+      }
+    }
+
     try {
       return await this.request<T>(path);
     } catch (primaryError) {
-      if (!LOCAL_BASE_READ_API_BASE) {
-        throw primaryError;
-      }
-
-      try {
-        return await this.requestFromBase<T>(LOCAL_BASE_READ_API_BASE, path);
-      } catch {
-        throw primaryError;
-      }
+      throw primaryError;
     }
   }
 
@@ -875,12 +879,7 @@ class ApiClient {
 
     this.capabilitiesPromise = (async () => {
       try {
-        const capabilities = await this.request<Web4Capabilities>(
-          '/web4/capabilities',
-          {},
-          true,
-          true
-        );
+        const capabilities = await this.requestBaseRead<Web4Capabilities>('/web4/capabilities');
         this.setCapabilities(capabilities);
         return capabilities;
       } catch {
@@ -1074,7 +1073,7 @@ class ApiClient {
   }
 
   async getWeb4Capabilities(): Promise<Web4Capabilities> {
-    const capabilities = await this.request<Web4Capabilities>('/web4/capabilities');
+    const capabilities = await this.requestBaseRead<Web4Capabilities>('/web4/capabilities');
     this.setCapabilities(capabilities);
     return capabilities;
   }
@@ -1153,7 +1152,7 @@ class ApiClient {
       market_id: filters?.marketId,
       active: filters?.active,
     });
-    const response = await this.request<BaseAgentsResponse>(`/evm/agents${query}`);
+    const response = await this.requestBaseRead<BaseAgentsResponse>(`/evm/agents${query}`);
     const data = (response.agents ?? []).map(mapBaseAgentToAgent);
     const total = toNumber(response.total, data.length);
     const limit = toNumber(response.limit, filters?.limit ?? data.length);
@@ -1173,7 +1172,7 @@ class ApiClient {
     if (!Number.isInteger(parsedId) || parsedId < 1) {
       throw new ApiError(404, 'Agent not found');
     }
-    const response = await this.request<BaseAgentSnapshot>(`/evm/agents/${parsedId}`);
+    const response = await this.requestBaseRead<BaseAgentSnapshot>(`/evm/agents/${parsedId}`);
     return mapBaseAgentToAgent(response);
   }
 

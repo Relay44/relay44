@@ -1,24 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveApiProxyTarget } from '@/lib/server/apiTarget';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function normalizeTarget(raw: string | undefined) {
-  const trimmed = String(raw || '').trim().replace(/\/$/, '');
-  if (!trimmed) {
-    return '';
-  }
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
-  }
-  return `http://${trimmed}`;
-}
-
-const API_PROXY_TARGET = normalizeTarget(
-  process.env.API_PROXY_TARGET ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    'http://localhost:8080/v1'
-);
 const READ_ONLY_MODE = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.NEXT_PUBLIC_READ_ONLY_MODE || '')
     .trim()
@@ -39,7 +24,8 @@ const HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
-  const target = new URL(`${API_PROXY_TARGET}/${path.join('/')}`);
+  const proxyTarget = resolveApiProxyTarget();
+  const target = new URL(`${proxyTarget}/${path.join('/')}`);
   request.nextUrl.searchParams.forEach((value, key) => {
     target.searchParams.append(key, value);
   });
@@ -70,7 +56,7 @@ async function proxyRequest(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
-  if (!API_PROXY_TARGET) {
+  if (!resolveApiProxyTarget()) {
     return NextResponse.json({ error: 'API proxy target is not configured' }, { status: 500 });
   }
 
