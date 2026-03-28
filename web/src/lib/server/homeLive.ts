@@ -165,7 +165,10 @@ let newsCache: CacheEntry<NewsSlide[]> | null = null;
 let signalCache: CacheEntry<SignalSnapshot> | null = null;
 
 function getApiBases(): string[] {
-  const primary = process.env.NEXT_PUBLIC_API_URL?.trim() || 'http://localhost:8080/v1';
+  const primary =
+    process.env.API_PROXY_TARGET?.trim()
+    || process.env.NEXT_PUBLIC_API_URL?.trim()
+    || 'http://localhost:8080/v1';
   const fallback = process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || '';
   return [...new Set([primary, fallback].filter(Boolean))];
 }

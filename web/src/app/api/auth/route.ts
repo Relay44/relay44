@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/v1';
+const API_BASE =
+  process.env.API_PROXY_TARGET || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/v1';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const MAX_BODY_BYTES = 16 * 1024;
 const RATE_LIMIT_WINDOW_MS = 60_000;

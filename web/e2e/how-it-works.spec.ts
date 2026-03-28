@@ -42,8 +42,15 @@ test.describe("How It Works", () => {
   });
 
   test("create market flow shows launch guidance", async ({ page }) => {
-    await page.goto("/markets/create");
-    await expect(page.getByText(/question checklist/i)).toBeVisible();
-    await expect(page.getByText(/objective yes or no outcome/i)).toBeVisible();
+    await page.goto("/markets/create", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: /market creation is currently unavailable/i }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/market discovery stays live, but market creation is unavailable in this environment/i),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("main").getByRole("link", { name: "Browse markets", exact: true }),
+    ).toBeVisible();
   });
 });
