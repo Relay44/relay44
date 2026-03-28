@@ -126,6 +126,15 @@ function parseExternalMarketId(raw: string): ExternalMarketId | null {
   return { provider, value };
 }
 
+function isInternalConfigError(error: unknown) {
+  return (
+    error instanceof BaseApiError &&
+    (error.code === 'INVALID_MARKET_CORE_ADDRESS' ||
+      error.code === 'INVALID_ORDER_BOOK_ADDRESS' ||
+      error.code === 'INVALID_BASE_CHAIN_ID')
+  );
+}
+
 function includeMarket(
   tradable: TradableFilter,
   market: Pick<BaseMarketSnapshot, 'execution_users' | 'execution_agents'>
@@ -569,10 +578,13 @@ export async function readUnifiedMarkets(searchParams: URLSearchParams) {
       const internalResponse = await readBaseMarkets(internalParams);
       markets.push(...internalResponse.markets);
     } catch (error) {
-      if (source === 'internal') {
+      if (isInternalConfigError(error)) {
+        internalError = error;
+      } else if (source === 'internal') {
         throw error;
+      } else {
+        internalError = error;
       }
-      internalError = error;
     }
   }
 
