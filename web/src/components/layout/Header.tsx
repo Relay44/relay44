@@ -58,13 +58,15 @@ function ConnectWalletButton() {
   const truncateAddress = (address: string) => {
     return `${address.slice(0, 4)}...${address.slice(-4)}`;
   };
+  const walletButtonClass =
+    'inline-flex h-10 items-center border border-border bg-transparent px-4 text-sm font-mono text-text-primary transition-colors hover:bg-bg-hover';
 
   const installSolanaWallet = (
     <a
       href="https://phantom.app/"
       target="_blank"
       rel="noreferrer"
-      className="h-9 px-4 text-[0.75rem] font-mono inline-flex items-center border border-border text-text-primary bg-transparent hover:bg-bg-hover transition-colors"
+      className={walletButtonClass}
     >
       Install Phantom
     </a>
@@ -79,7 +81,7 @@ function ConnectWalletButton() {
     return (
       <button
         onClick={handleBaseClick}
-        className="h-9 max-w-[8.5rem] border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors cursor-pointer sm:max-w-none sm:px-4 hover:bg-bg-hover"
+        className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-sm font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
       >
         <span className="truncate sm:hidden">{compactLabel}</span>
         <span className="hidden sm:inline">
@@ -98,7 +100,7 @@ function ConnectWalletButton() {
     return (
       <button
         onClick={handleSolanaClick}
-        className="h-9 max-w-[8.5rem] border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors cursor-pointer sm:max-w-none sm:px-4 hover:bg-bg-hover"
+        className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-sm font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
       >
         <span className="truncate sm:hidden">
           {solanaWallet.isConnected && solanaWallet.address
@@ -119,7 +121,7 @@ function ConnectWalletButton() {
       {baseEnabled && (
         <button
           onClick={handleBaseClick}
-          className="h-9 border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors hover:bg-bg-hover"
+          className={walletButtonClass}
         >
           {baseWallet.isConnected && baseWallet.address
             ? `Base ${truncateAddress(baseWallet.address)}`
@@ -130,7 +132,7 @@ function ConnectWalletButton() {
         (solanaAvailable ? (
           <button
             onClick={handleSolanaClick}
-            className="h-9 border border-border bg-transparent px-3 text-[0.75rem] font-mono text-text-primary transition-colors hover:bg-bg-hover"
+            className={walletButtonClass}
           >
             {solanaWallet.isConnected && solanaWallet.address
               ? `Sol ${truncateAddress(solanaWallet.address)}`
@@ -141,7 +143,7 @@ function ConnectWalletButton() {
             href="https://phantom.app/"
             target="_blank"
             rel="noreferrer"
-            className="h-9 px-3 text-[0.75rem] font-mono border border-border inline-flex items-center text-text-primary bg-transparent hover:bg-bg-hover transition-colors"
+            className={walletButtonClass}
           >
             Install Solana Wallet
           </a>

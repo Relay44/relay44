@@ -36,11 +36,13 @@
 
   :root {
     --app-header-offset: 74px;
+    --app-page-offset: calc(var(--app-header-offset) + 12px);
   }
 
   @media (min-width: 640px) {
     :root {
       --app-header-offset: 82px;
+      --app-page-offset: calc(var(--app-header-offset) + 16px);
     }
   }
 
@@ -125,15 +127,15 @@
   }
 
   .btn-trade {
-    @apply font-semibold py-3 px-6 transition-colors duration-fast;
+    @apply px-6 py-3 text-sm font-semibold transition-colors duration-fast;
   }
 
   .btn-trade-bid {
-    @apply btn-trade bg-bid text-white hover:bg-bid-hover;
+    @apply btn-trade bg-bid text-text-inverse hover:bg-bid-hover;
   }
 
   .btn-trade-ask {
-    @apply btn-trade bg-ask text-white hover:bg-ask-hover;
+    @apply btn-trade bg-ask text-text-inverse hover:bg-ask-hover;
   }
 
   .industrial-panel {
@@ -255,6 +257,10 @@
 
   .pt-header {
     padding-top: var(--app-header-offset);
+  }
+
+  .pt-page {
+    padding-top: var(--app-page-offset);
   }
 
   .top-header {

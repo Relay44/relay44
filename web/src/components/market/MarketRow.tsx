@@ -54,7 +54,7 @@ export function MarketRow({ market, index }: MarketRowProps) {
         <span
           className={cn(
             "border border-border px-4 py-1.5 text-sm font-bold uppercase",
-            "hover:bg-accent hover:text-white hover:border-accent",
+            "hover:bg-accent hover:text-text-inverse hover:border-accent",
             "transition-all duration-fast flex-shrink-0"
           )}
         >
