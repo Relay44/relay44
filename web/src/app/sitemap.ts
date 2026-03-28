@@ -1,13 +1,10 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
-import { fetchAllSeoMarkets, fetchSeoLeaderboard } from "@/lib/server/seo";
+import { fetchAllSeoMarkets } from "@/lib/server/seo";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
-  const [markets, leaderboardEntries] = await Promise.all([
-    fetchAllSeoMarkets(100, 10),
-    fetchSeoLeaderboard(50),
-  ]);
+  const markets = await fetchAllSeoMarkets(100, 10);
 
   const staticRoutes: MetadataRoute.Sitemap = [
     {
@@ -81,16 +78,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: market.status === "active" ? 0.85 : 0.65,
   }));
 
-  const profileRoutes: MetadataRoute.Sitemap = [
-    ...new Set(leaderboardEntries.map((entry) => entry.wallet)),
-  ]
-    .filter(Boolean)
-    .map((wallet) => ({
-      url: `${SITE_URL}/profile/${wallet}`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.65,
-    }));
-
-  return [...staticRoutes, ...marketRoutes, ...profileRoutes];
+  return [...staticRoutes, ...marketRoutes];
 }
