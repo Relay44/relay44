@@ -10,9 +10,9 @@ test.describe('Wallet Connection UI', () => {
     await expect(connectBtn).toBeVisible();
   });
 
-  test('connect wallet button has gradient styling', async ({ page }) => {
+  test('connect wallet button uses the shared header action style', async ({ page }) => {
     const connectBtn = page.getByRole('button', { name: /connect wallet/i });
-    await expect(connectBtn).toHaveClass(/from-accent/);
+    await expect(connectBtn).toHaveClass(/border-border/);
   });
 
   test('connect wallet button is clickable', async ({ page }) => {
@@ -28,10 +28,9 @@ test.describe('Wallet Required Pages', () => {
   });
 
   test('market detail shows connect prompt when not connected', async ({ page }) => {
-    await page.goto('/markets/test-market');
-    // Either shows "Market not found" (invalid id) or "Connect wallet to trade" (valid id)
-    const hasConnectPrompt = await page.getByText(/connect wallet/i).isVisible();
-    const hasNotFound = await page.getByText(/market not found/i).isVisible();
-    expect(hasConnectPrompt || hasNotFound).toBeTruthy();
+    await page.goto('/markets/polymarket%3A540816');
+    await expect(
+      page.getByText(/trading is currently unavailable|connect wallet to trade/i),
+    ).toBeVisible();
   });
 });

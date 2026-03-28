@@ -14,7 +14,11 @@ test.describe('Leaderboard Page', () => {
   });
 
   test('displays container with proper layout', async ({ page }) => {
-    const container = page.locator('.container');
-    await expect(container).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
+    await expect(
+      page
+        .getByText(/loading leaderboard|leaderboard is not live yet|no data available for this period/i)
+        .first()
+    ).toBeVisible();
   });
 });

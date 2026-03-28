@@ -18,7 +18,7 @@ test.describe('Settings Page', () => {
   test('displays network section', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Network' })).toBeVisible();
     await expect(page.getByText('Base', { exact: true })).toBeVisible();
-    await expect(page.getByText(/RPC:/i)).toBeVisible();
+    await expect(page.getByText('RPC: https://mainnet.base.org')).toBeVisible();
   });
 
   test('displays about section', async ({ page }) => {
