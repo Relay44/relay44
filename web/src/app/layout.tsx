@@ -73,16 +73,16 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
   icons: {
     icon: [
-      { url: '/favicon.ico?v=20260310' },
-      { url: '/favicon-48x48.png?v=20260310', sizes: '48x48', type: 'image/png' },
-      { url: '/favicon-32x32.png?v=20260310', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon-16x16.png?v=20260310', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon.png?v=20260310', sizes: '512x512', type: 'image/png' },
+      { url: '/favicon.ico?v=20260328' },
+      { url: '/favicon-48x48.png?v=20260328', sizes: '48x48', type: 'image/png' },
+      { url: '/favicon-32x32.png?v=20260328', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-16x16.png?v=20260328', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon.png?v=20260328', sizes: '512x512', type: 'image/png' },
     ],
     apple: [
-      { url: '/apple-touch-icon.png?v=20260310', sizes: '180x180' },
-      { url: '/apple-touch-icon-167x167.png?v=20260310', sizes: '167x167' },
-      { url: '/apple-touch-icon-152x152.png?v=20260310', sizes: '152x152' },
+      { url: '/apple-touch-icon.png?v=20260328', sizes: '180x180' },
+      { url: '/apple-touch-icon-167x167.png?v=20260328', sizes: '167x167' },
+      { url: '/apple-touch-icon-152x152.png?v=20260328', sizes: '152x152' },
     ],
   },
   openGraph: {
