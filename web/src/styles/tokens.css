@@ -66,18 +66,18 @@
   --color-accent-border: rgba(0, 0, 0, 0.3);
 
   /* Trading Colors - Yes */
-  --color-yes: #000000;
-  --color-yes-hover: #262626;
-  --color-yes-muted: rgba(0, 0, 0, 0.08);
-  --color-yes-border: rgba(0, 0, 0, 0.2);
-  --color-yes-glow: rgba(0, 0, 0, 0.12);
+  --color-yes: #16a34a;
+  --color-yes-hover: #15803d;
+  --color-yes-muted: rgba(22, 163, 74, 0.1);
+  --color-yes-border: rgba(22, 163, 74, 0.25);
+  --color-yes-glow: rgba(22, 163, 74, 0.15);
 
   /* Trading Colors - No */
-  --color-no: #525252;
-  --color-no-hover: #404040;
-  --color-no-muted: rgba(82, 82, 82, 0.08);
-  --color-no-border: rgba(82, 82, 82, 0.2);
-  --color-no-glow: rgba(82, 82, 82, 0.12);
+  --color-no: #dc2626;
+  --color-no-hover: #b91c1c;
+  --color-no-muted: rgba(220, 38, 38, 0.1);
+  --color-no-border: rgba(220, 38, 38, 0.25);
+  --color-no-glow: rgba(220, 38, 38, 0.15);
 
   /* Legacy bid/ask mapping */
   --color-bid: var(--color-yes);
@@ -239,17 +239,17 @@
   --color-accent-muted: rgba(255, 255, 255, 0.08);
   --color-accent-border: rgba(255, 255, 255, 0.3);
 
-  --color-yes: #ffffff;
-  --color-yes-hover: #e5e5e5;
-  --color-yes-muted: rgba(255, 255, 255, 0.08);
-  --color-yes-border: rgba(255, 255, 255, 0.2);
-  --color-yes-glow: rgba(255, 255, 255, 0.12);
+  --color-yes: #22c55e;
+  --color-yes-hover: #16a34a;
+  --color-yes-muted: rgba(34, 197, 94, 0.1);
+  --color-yes-border: rgba(34, 197, 94, 0.25);
+  --color-yes-glow: rgba(34, 197, 94, 0.15);
 
-  --color-no: #a3a3a3;
-  --color-no-hover: #d4d4d4;
-  --color-no-muted: rgba(163, 163, 163, 0.08);
-  --color-no-border: rgba(163, 163, 163, 0.2);
-  --color-no-glow: rgba(163, 163, 163, 0.12);
+  --color-no: red;
+  --color-no-hover: #dc2626;
+  --color-no-muted: rgba(255, 0, 0, 0.1);
+  --color-no-border: rgba(255, 0, 0, 0.25);
+  --color-no-glow: rgba(255, 0, 0, 0.15);
 
   --color-bid: var(--color-yes);
   --color-bid-hover: var(--color-yes-hover);

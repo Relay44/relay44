@@ -2,6 +2,31 @@ import { Badge } from '@/components/ui';
 import { MARKET_STATUS_LABELS } from '@/lib/constants';
 import type { Market } from '@/types';
 
+function Linkify({ text }: { text: string }) {
+  const urlRegex = /(https?:\/\/[^\s)]+)/g;
+  const parts = text.split(urlRegex);
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        urlRegex.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent hover:text-accent-hover underline underline-offset-2"
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
 export interface MarketHeaderProps {
   market: Market;
 }
@@ -30,7 +55,9 @@ export function MarketHeader({ market }: MarketHeaderProps) {
         </Badge>
       </div>
       <h1 className="mb-2 text-xl font-bold sm:text-2xl">{market.question}</h1>
-      <p className="text-sm leading-6 text-text-secondary">{market.description}</p>
+      <p className="text-sm leading-6 text-text-secondary">
+        <Linkify text={market.description || ''} />
+      </p>
     </div>
   );
 }
