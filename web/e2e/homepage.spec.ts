@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 test.describe("Homepage", () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto("/");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
   });
 
   test("displays header with logo and navigation", async ({ page }) => {
@@ -32,12 +32,9 @@ test.describe("Homepage", () => {
     await expect(page.getByPlaceholder(/search/i)).toBeVisible();
   });
 
-  test("displays sort tabs", async ({ page }) => {
-    // Look for any sort-related buttons
-    const sortButtons = page
-      .locator("button")
-      .filter({ hasText: /trending|new|ending/i });
-    await expect(sortButtons.first()).toBeVisible();
+  test("displays featured market rail controls", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "Signal Relay" })).toBeVisible();
+    await expect(page.locator('section').nth(1).getByRole("button").first()).toBeVisible();
   });
 
   test("displays featured section", async ({ page }) => {

@@ -13,6 +13,7 @@ import {
   MARKET_CORE_ADDRESS,
   ORDER_BOOK_ADDRESS,
 } from '@/lib/contracts';
+import { buildLocalWeb4Capabilities } from '@/lib/server/web4Capabilities';
 
 const ORDER_FILLED_EVENT_ABI = [
   {
@@ -169,6 +170,25 @@ function getBaseConfig(): BaseConfig {
   };
 }
 
+function mapBaseHealthError(error: unknown) {
+  if (
+    error instanceof BaseApiError &&
+    (error.code === 'INVALID_MARKET_CORE_ADDRESS' ||
+      error.code === 'INVALID_ORDER_BOOK_ADDRESS' ||
+      error.code === 'INVALID_BASE_CHAIN_ID')
+  ) {
+    return {
+      status: 'not_configured',
+      error: error.message,
+    };
+  }
+
+  return {
+    status: 'unhealthy',
+    error: error instanceof Error ? error.message : 'Unknown Base RPC error',
+  };
+}
+
 function buildClient(config: BaseConfig) {
   const chain = config.chainId === 8453 ? base : baseSepolia;
   return createPublicClient({
@@ -264,6 +284,21 @@ export async function readHealth() {
 }
 
 export async function readDetailedHealth() {
+  const capabilities = buildLocalWeb4Capabilities();
+  const checks: Record<string, unknown> = {
+    runtime: {
+      status: 'healthy',
+      mode: 'web-only',
+      service: 'relay44-web',
+      chain_mode: capabilities.chain_mode,
+    },
+    external_markets: {
+      status: capabilities.runtime.external_markets_enabled ? 'healthy' : 'disabled',
+      limitless_enabled: capabilities.runtime.limitless_enabled,
+      polymarket_enabled: capabilities.runtime.polymarket_enabled,
+    },
+  };
+
   try {
     const config = getBaseConfig();
     const client = buildClient(config);
@@ -273,38 +308,31 @@ export async function readDetailedHealth() {
       functionName: 'marketCount',
     })) as bigint;
 
-    return {
+    checks.base = {
       status: 'healthy',
-      service: 'relay44-web',
-      timestamp: new Date().toISOString(),
-      checks: {
-        runtime: {
-          status: 'healthy',
-          mode: 'web-only',
-          service: 'relay44-web',
-        },
-        base: {
-          status: 'healthy',
-          chain_id: config.chainId,
-          rpc_url: config.rpcUrl,
-          market_core: config.marketCore,
-          order_book: config.orderBook,
-          market_count: asNumber(marketCount),
-        },
-      },
+      chain_id: config.chainId,
+      rpc_url: config.rpcUrl,
+      market_core: config.marketCore,
+      order_book: config.orderBook,
+      market_count: asNumber(marketCount),
     };
   } catch (error) {
-    return {
-      status: 'degraded',
-      timestamp: new Date().toISOString(),
-      checks: {
-        base: {
-          status: 'unhealthy',
-          error: error instanceof Error ? error.message : 'Unknown Base RPC error',
-        },
-      },
-    };
+    checks.base = mapBaseHealthError(error);
   }
+
+  const baseStatus = (checks.base as { status?: string } | undefined)?.status;
+  const status =
+    baseStatus === 'unhealthy' && !capabilities.runtime.external_markets_enabled
+      ? 'degraded'
+      : 'healthy';
+
+  return {
+    status,
+    service: 'relay44-web',
+    timestamp: new Date().toISOString(),
+    checks,
+    capabilities,
+  };
 }
 
 export async function readBaseMarkets(searchParams: URLSearchParams) {

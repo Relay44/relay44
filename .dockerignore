@@ -8,16 +8,13 @@ target
 node_modules
 web/node_modules
 web/.next
-app
 assets
 config
 docker
 edge
 evm
 infra
-migrations
 monitoring
-programs
 scripts
 sdk
 services

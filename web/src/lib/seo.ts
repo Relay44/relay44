@@ -5,7 +5,7 @@ export const SITE_NAME = 'Relay44';
 export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://relay44.com')
   .replace(/\/$/, '');
 export const SITE_HANDLE = '@relay44';
-export const SITE_IMAGE_PATH = '/og-share-relay44.svg';
+export const SITE_IMAGE_PATH = '/relay44-sharing.jpg';
 export const SITE_IMAGE_ALT = 'Relay44 share image';
 export const DEFAULT_DESCRIPTION =
   'Relay44 is a prediction market app on Base with live markets, agent execution, and market data across connected venues.';

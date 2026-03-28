@@ -15,6 +15,7 @@ import { CHAIN_MODE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 const primaryLinks = [
+  { href: "/how-it-works", label: "How it works" },
   { href: "/markets", label: "Markets" },
   { href: "/decisions", label: "Decisions" },
   { href: "/agents", label: "Swarm" },
@@ -81,13 +82,18 @@ function ConnectWalletButton() {
     return (
       <button
         onClick={handleBaseClick}
+        aria-label={
+          baseWallet.isConnected && baseWallet.address
+            ? `Connected wallet ${truncateAddress(baseWallet.address)}`
+            : "Connect Wallet"
+        }
         className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-sm font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
       >
         <span className="truncate sm:hidden">{compactLabel}</span>
         <span className="hidden sm:inline">
           {baseWallet.isConnected && baseWallet.address
             ? truncateAddress(baseWallet.address)
-            : "Connect Base"}
+            : "Connect Wallet"}
         </span>
       </button>
     );
@@ -100,6 +106,11 @@ function ConnectWalletButton() {
     return (
       <button
         onClick={handleSolanaClick}
+        aria-label={
+          solanaWallet.isConnected && solanaWallet.address
+            ? `Connected wallet ${truncateAddress(solanaWallet.address)}`
+            : "Connect Wallet"
+        }
         className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-sm font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
       >
         <span className="truncate sm:hidden">
@@ -110,7 +121,7 @@ function ConnectWalletButton() {
         <span className="hidden sm:inline">
           {solanaWallet.isConnected && solanaWallet.address
             ? truncateAddress(solanaWallet.address)
-            : "Connect Solana"}
+            : "Connect Wallet"}
         </span>
       </button>
     );
@@ -121,22 +132,32 @@ function ConnectWalletButton() {
       {baseEnabled && (
         <button
           onClick={handleBaseClick}
+          aria-label={
+            baseWallet.isConnected && baseWallet.address
+              ? `Connected Base wallet ${truncateAddress(baseWallet.address)}`
+              : "Connect Base Wallet"
+          }
           className={walletButtonClass}
         >
           {baseWallet.isConnected && baseWallet.address
             ? `Base ${truncateAddress(baseWallet.address)}`
-            : "Connect Base"}
+            : "Connect Base Wallet"}
         </button>
       )}
       {solanaEnabled &&
         (solanaAvailable ? (
           <button
             onClick={handleSolanaClick}
+            aria-label={
+              solanaWallet.isConnected && solanaWallet.address
+                ? `Connected Solana wallet ${truncateAddress(solanaWallet.address)}`
+                : "Connect Solana Wallet"
+            }
             className={walletButtonClass}
           >
             {solanaWallet.isConnected && solanaWallet.address
               ? `Sol ${truncateAddress(solanaWallet.address)}`
-              : "Connect Solana"}
+              : "Connect Solana Wallet"}
           </button>
         ) : (
           <a
@@ -213,9 +234,9 @@ export function Header() {
                 key={href}
                 href={href}
                 className={cn(
-                  "font-mono text-[0.85rem] uppercase leading-none transition-colors",
+                  "rounded-sm px-2 py-1 font-mono text-[0.85rem] uppercase leading-none transition-colors",
                   active
-                    ? "text-text-primary"
+                    ? "bg-bg-secondary text-text-primary"
                     : "text-text-muted hover:text-text-primary",
                 )}
               >
