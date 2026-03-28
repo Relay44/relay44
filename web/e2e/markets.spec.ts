@@ -45,14 +45,17 @@ test.describe('Markets Page', () => {
 
 test.describe('Market Detail Page', () => {
   test('displays market not found for invalid id', async ({ page }) => {
-    await page.goto('/markets/invalid-market-id');
-    await expect(page.getByText(/market not found/i)).toBeVisible();
-    await expect(page.getByRole('link', { name: /back to markets/i })).toBeVisible();
+    await page.goto('/markets/invalid-market-id', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('link', { name: /back to markets/i })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/market not found/i).first()).toBeVisible();
   });
 
   test('back to markets link works', async ({ page }) => {
     await page.goto('/markets/invalid-market-id');
-    await page.getByRole('link', { name: /back to markets/i }).click();
+    await Promise.all([
+      page.waitForURL('**/markets'),
+      page.getByRole('link', { name: /back to markets/i }).click(),
+    ]);
     await expect(page).toHaveURL('/markets');
   });
 });

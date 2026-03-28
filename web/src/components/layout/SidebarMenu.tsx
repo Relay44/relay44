@@ -110,14 +110,8 @@ export function SidebarMenu() {
         <MenuGlyph />
       </button>
 
-      <div
-        className={cn(
-          "fixed inset-0 z-[65] transition-opacity duration-normal",
-          open
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0",
-        )}
-      >
+      {open ? (
+        <div className="fixed inset-0 z-[65] transition-opacity duration-normal pointer-events-auto opacity-100">
         <button
           type="button"
           onClick={() => setOpen(false)}
@@ -248,7 +242,8 @@ export function SidebarMenu() {
             </div>
           </div>
         </aside>
-      </div>
+        </div>
+      ) : null}
     </>
   );
 }

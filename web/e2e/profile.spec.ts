@@ -16,7 +16,7 @@ test.describe('Profile Page', () => {
   });
 
   test('displays container with proper layout', async ({ page }) => {
-    const container = page.locator('.container');
-    await expect(container).toBeVisible();
+    await expect(page.getByRole('heading', { name: /public profiles are not live yet/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Browse markets' })).toBeVisible();
   });
 });
