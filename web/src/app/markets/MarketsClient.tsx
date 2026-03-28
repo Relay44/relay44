@@ -94,7 +94,7 @@ export default function MarketsClient({
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5  text-sm font-medium transition-colors cursor-pointer',
                   sortTab === 'trending'
-                    ? 'bg-accent text-white'
+                    ? 'bg-accent text-text-inverse'
                     : 'text-text-secondary hover:bg-bg-hover'
                 )}
               >
@@ -106,7 +106,7 @@ export default function MarketsClient({
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5  text-sm font-medium transition-colors cursor-pointer',
                   sortTab === 'new'
-                    ? 'bg-accent text-white'
+                    ? 'bg-accent text-text-inverse'
                     : 'text-text-secondary hover:bg-bg-hover'
                 )}
               >
@@ -118,7 +118,7 @@ export default function MarketsClient({
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5  text-sm font-medium transition-colors cursor-pointer',
                   sortTab === 'ending'
-                    ? 'bg-accent text-white'
+                    ? 'bg-accent text-text-inverse'
                     : 'text-text-secondary hover:bg-bg-hover'
                 )}
               >

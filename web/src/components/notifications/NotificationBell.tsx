@@ -79,7 +79,7 @@ export function NotificationBell() {
 
         {unreadCount > 0 && (
           <span
-            className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-xs font-medium bg-accent text-white "
+            className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center px-1 text-xs font-medium bg-accent text-text-inverse"
             aria-hidden="true"
           >
             {displayCount > 99 ? '99+' : displayCount}

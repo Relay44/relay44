@@ -35,7 +35,7 @@ export default function DecisionsPageClient() {
             </div>
             <Link
               href="/decisions/create"
-              className="inline-flex h-10 items-center border border-accent bg-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-accent-hover"
+              className="inline-flex h-10 items-center border border-accent bg-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-inverse transition-colors hover:bg-accent-hover"
             >
               Create decision cell
             </Link>
@@ -71,7 +71,7 @@ export default function DecisionsPageClient() {
               </p>
               <Link
                 href="/decisions/create"
-                className="inline-flex h-10 items-center border border-accent bg-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-white transition-colors hover:bg-accent-hover"
+                className="inline-flex h-10 items-center border border-accent bg-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-inverse transition-colors hover:bg-accent-hover"
               >
                 Create your first cell
               </Link>
