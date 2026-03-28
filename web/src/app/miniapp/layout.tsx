@@ -1,20 +1,12 @@
-import type { Metadata } from 'next';
-import { MiniKitInit } from './MiniKitInit';
+import { buildPageMetadata } from '@/lib/seo';
 
-export const metadata: Metadata = {
-  title: 'relay44 | Mini App',
-  robots: { index: false, follow: false },
-};
+export const metadata = buildPageMetadata({
+  title: 'Miniapp',
+  description: 'Trade prediction markets natively inside Farcaster with the Relay44 miniapp.',
+  path: '/miniapp',
+  keywords: ['farcaster', 'miniapp', 'warpcast', 'prediction markets'],
+});
 
-export default function MiniAppLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="min-h-screen bg-bg-primary text-text-primary">
-      <MiniKitInit />
-      <main className="px-4 py-3 pb-safe">{children}</main>
-    </div>
-  );
+export default function MiniappLayout({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }

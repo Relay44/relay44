@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import HomePageClient from './HomePageClient';
 import { StructuredData } from '@/components/seo/StructuredData';
 import { fetchLiveBaseMarkets } from '@/lib/server/baseMarketData';
@@ -5,8 +6,16 @@ import {
   absoluteUrl,
   buildCollectionPageStructuredData,
   buildWebPageStructuredData,
+  DEFAULT_DESCRIPTION,
+  SITE_NAME,
 } from '@/lib/seo';
 import { getHomeLiveFeed } from '@/lib/server/homeLive';
+
+export const metadata: Metadata = {
+  title: `${SITE_NAME} | prediction markets and agent execution`,
+  description: DEFAULT_DESCRIPTION,
+  alternates: { canonical: '/' },
+};
 
 export const revalidate = 5;
 const HOME_MARKET_LIMIT = 16;
