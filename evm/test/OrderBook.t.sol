@@ -75,7 +75,7 @@ contract OrderBookTest is Test {
     function test_matchAndClaimResolvedMarket() external {
         uint64 closeTime = uint64(block.timestamp + 4 hours);
 
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("Will BTC close above 120k?"), closeTime, resolver);
 
         vm.prank(yesTrader);
@@ -119,7 +119,7 @@ contract OrderBookTest is Test {
     }
 
     function test_matchFailsForInvalidPriceCross() external {
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId =
             marketCore.createMarket(keccak256("price-cross"), uint64(block.timestamp + 2 hours), resolver);
 
@@ -135,7 +135,7 @@ contract OrderBookTest is Test {
     }
 
     function test_permissionlessMatcherCanMatch() external {
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("auth"), uint64(block.timestamp + 2 hours), resolver);
 
         vm.prank(yesTrader);
@@ -151,7 +151,7 @@ contract OrderBookTest is Test {
     }
 
     function test_claimFailsBeforeResolve() external {
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId =
             marketCore.createMarket(keccak256("resolve-gate"), uint64(block.timestamp + 2 hours), resolver);
 
@@ -172,7 +172,7 @@ contract OrderBookTest is Test {
     function test_claimForSettlesToOwner() external {
         uint64 closeTime = uint64(block.timestamp + 2 hours);
 
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("agent-claim"), closeTime, resolver);
 
         vm.prank(yesTrader);
@@ -196,7 +196,7 @@ contract OrderBookTest is Test {
     }
 
     function test_pauseBlocksMatchingAndClaim() external {
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("pause"), uint64(block.timestamp + 1 hours), resolver);
 
         vm.prank(yesTrader);

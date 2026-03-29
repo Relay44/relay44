@@ -167,11 +167,8 @@ function marketCreateErrorMessage(error: unknown): string {
   const message =
     error instanceof Error ? error.message : "Failed to create market";
 
-  if (
-    message.includes("AccessControlUnauthorizedAccount") ||
-    message.includes("MARKET_CREATOR_ROLE")
-  ) {
-    return "This wallet is not allowed to publish internal relay44 markets.";
+  if (message.includes("UnauthorizedResolver")) {
+    return "Use your own wallet as the resolver unless you are an admin.";
   }
 
   return message;
@@ -486,12 +483,12 @@ export function CreateMarketForm({
       <CardContent className="space-y-6">
         <div className="border border-border bg-bg-secondary p-4">
           <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
-            Live contract policy
+            Resolver policy
           </p>
           <p className="mt-2 text-sm text-text-secondary">
-            Publishing internal relay44 markets is limited to operator wallets
-            on the live MarketCore contract. Unauthorized wallets can review
-            drafts here, but publish will fail onchain.
+            Publishing creates a live Base market immediately. By default, your
+            connected wallet is the resolver, which means you are responsible
+            for settling the final YES or NO outcome after trading closes.
           </p>
         </div>
 

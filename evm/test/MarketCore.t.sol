@@ -25,7 +25,7 @@ contract MarketCoreTest is Test {
         uint64 closeTime = uint64(block.timestamp + 1 days);
         bytes32 questionHash = keccak256("Will ETH close above 5k in 2026?");
 
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(questionHash, closeTime, resolver);
 
         (bytes32 storedHash, uint64 storedCloseTime,, address storedResolver, bool resolved,) =
@@ -36,6 +36,7 @@ contract MarketCoreTest is Test {
         assertEq(storedCloseTime, closeTime);
         assertEq(storedResolver, resolver);
         assertEq(resolved, false);
+        assertEq(marketCore.marketCreators(marketId), resolver);
     }
 
     function test_createMarketRichStoresMetadata() external {
@@ -45,7 +46,7 @@ contract MarketCoreTest is Test {
         string memory category = "base";
         string memory resolutionSource = "https://base.org";
 
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId =
             marketCore.createMarketRich(question, description, category, resolutionSource, closeTime, resolver);
 
@@ -55,6 +56,7 @@ contract MarketCoreTest is Test {
         assertEq(storedCloseTime, closeTime);
         assertEq(storedResolver, resolver);
         assertEq(resolved, false);
+        assertEq(marketCore.marketCreators(marketId), resolver);
 
         (
             string memory storedQuestion,
@@ -74,14 +76,44 @@ contract MarketCoreTest is Test {
         marketCore.setMarketMetadata(999, "q?", "d", "c", "s");
     }
 
-    function test_onlyCreatorCanCreate() external {
+    function test_anyoneCanCreateWhenResolverIsSelf() external {
         vm.prank(outsider);
-        vm.expectRevert();
+        uint256 marketId = marketCore.createMarket(
+            keccak256("question"), uint64(block.timestamp + 1 days), outsider
+        );
+        assertEq(marketId, 1);
+        assertEq(marketCore.marketCreators(marketId), outsider);
+    }
+
+    function test_nonAdminCannotCreateForDifferentResolver() external {
+        vm.prank(outsider);
+        vm.expectRevert(MarketCore.UnauthorizedResolver.selector);
         marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 1 days), resolver);
     }
 
+    function test_creatorCanUpdateMetadata() external {
+        vm.prank(outsider);
+        uint256 marketId = marketCore.createMarketRich(
+            "Will relay44 go live?", "seed", "tech", "docs", uint64(block.timestamp + 1 days), outsider
+        );
+
+        vm.prank(outsider);
+        marketCore.setMarketMetadata(marketId, "Will relay44 stay live?", "updated", "ops", "runbook");
+
+        (
+            string memory question,
+            string memory description,
+            string memory category,
+            string memory resolutionSource
+        ) = marketCore.getMarketMetadata(marketId);
+        assertEq(question, "Will relay44 stay live?");
+        assertEq(description, "updated");
+        assertEq(category, "ops");
+        assertEq(resolutionSource, "runbook");
+    }
+
     function test_resolveMarket() external {
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 4 hours), resolver);
 
         vm.warp(block.timestamp + 4 hours + 1);
@@ -95,22 +127,18 @@ contract MarketCoreTest is Test {
     }
 
     function test_onlyDesignatedResolverCanResolve() external {
-        vm.prank(creator);
-        uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 1 hours), resolver);
-
-        vm.startPrank(admin);
-        marketCore.grantRole(marketCore.RESOLVER_ROLE(), outsider);
-        vm.stopPrank();
+        vm.prank(outsider);
+        uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 1 hours), outsider);
 
         vm.warp(block.timestamp + 1 hours + 1);
 
-        vm.prank(outsider);
+        vm.prank(creator);
         vm.expectRevert(MarketCore.NotDesignatedResolver.selector);
         marketCore.resolveMarket(marketId, true);
     }
 
     function test_cannotResolveBeforeCloseTime() external {
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 1 days), resolver);
 
         vm.prank(resolver);
@@ -122,14 +150,14 @@ contract MarketCoreTest is Test {
         vm.prank(admin);
         marketCore.pause();
 
-        vm.prank(creator);
+        vm.prank(resolver);
         vm.expectRevert();
         marketCore.createMarket(keccak256("paused"), uint64(block.timestamp + 1 days), resolver);
 
         vm.prank(admin);
         marketCore.unpause();
 
-        vm.prank(creator);
+        vm.prank(resolver);
         uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 2 hours), resolver);
 
         vm.warp(block.timestamp + 2 hours + 1);

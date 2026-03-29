@@ -47,7 +47,7 @@ contract AgentRuntimeTest is Test {
         vm.prank(alice);
         collateralVault.deposit(500e6);
 
-        vm.prank(creator);
+        vm.prank(resolver);
         marketId = marketCore.createMarket(keccak256("agent-runtime"), uint64(block.timestamp + 2 days), resolver);
     }
 

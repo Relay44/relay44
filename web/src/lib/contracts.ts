@@ -64,6 +64,16 @@ export const MARKET_CORE_ABI = [
       { name: 'resolutionSource', type: 'string' },
     ],
   },
+  {
+    type: 'function',
+    name: 'resolveMarket',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'marketId', type: 'uint256' },
+      { name: 'outcome', type: 'bool' },
+    ],
+    outputs: [],
+  },
 ] as const;
 
 export const ORDER_BOOK_ABI = [

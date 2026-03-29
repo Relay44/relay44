@@ -19,6 +19,7 @@ import {
   useDecisionCells,
   useMarket,
   usePositions,
+  useResolveMarket,
   useRuntimeMode,
   useSessionState,
 } from "@/hooks";
@@ -33,6 +34,7 @@ export default function MarketDetailPage() {
   const { readOnly } = useRuntimeMode();
   const { hasSession, sessionRestored } = useSessionState();
   const claimWinnings = useClaimWinnings();
+  const resolveMarket = useResolveMarket();
 
   const { data: market, isLoading, error } = useMarket(marketId);
   const { data: positionsData } = usePositions();
@@ -44,6 +46,12 @@ export default function MarketDetailPage() {
   const claimable =
     positionsData?.data.find((entry) => entry.marketId === marketId)
       ?.claimable || 0;
+  const canResolveInternalMarket =
+    walletConnected &&
+    !market?.isExternal &&
+    market?.status === "closed" &&
+    !!baseWallet.address &&
+    market.oracle.toLowerCase() === baseWallet.address.toLowerCase();
   const relatedDecisionCells = (decisionCellsData?.data || []).filter((cell) =>
     cell.linkedMarketRefs.includes(marketId)
   );
@@ -55,6 +63,20 @@ export default function MarketDetailPage() {
     } catch (claimError) {
       const message =
         claimError instanceof Error ? claimError.message : "Claim failed";
+      addToast(message, "error");
+    }
+  };
+
+  const handleResolve = async (outcome: "yes" | "no") => {
+    try {
+      const result = await resolveMarket.mutateAsync({ marketId, outcome });
+      addToast(
+        `Market resolved ${outcome.toUpperCase()} onchain: ${result.txSignature}`,
+        "success",
+      );
+    } catch (resolveError) {
+      const message =
+        resolveError instanceof Error ? resolveError.message : "Resolve failed";
       addToast(message, "error");
     }
   };
@@ -98,6 +120,41 @@ export default function MarketDetailPage() {
         />
       </div>
       <MarketStats market={market} />
+
+      {canResolveInternalMarket ? (
+        <div className="mb-6 border border-border bg-bg-secondary p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium text-text-primary">
+                Resolve this market
+              </div>
+              <div className="mt-1 text-sm text-text-secondary">
+                Trading is closed. As the designated resolver, you can now
+                settle the outcome on Base.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleResolve("no")}
+                loading={resolveMarket.isPending}
+                disabled={readOnly || resolveMarket.isPending}
+              >
+                Resolve NO
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleResolve("yes")}
+                loading={resolveMarket.isPending}
+                disabled={readOnly || resolveMarket.isPending}
+              >
+                Resolve YES
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {walletConnected && !market.isExternal && claimable > 0 ? (
         <div className="mb-6 border border-border bg-bg-secondary p-4">

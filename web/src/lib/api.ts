@@ -1643,6 +1643,17 @@ class ApiClient {
     });
   }
 
+  async prepareBaseResolveMarket(data: {
+    from?: string;
+    marketId: number;
+    outcome: boolean;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request('/evm/write/markets/resolve', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async prepareBasePlaceOrder(data: {
     from?: string;
     marketId: number;
