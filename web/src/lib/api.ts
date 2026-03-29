@@ -664,6 +664,30 @@ function normalizeTrade(raw: Record<string, unknown>): Trade {
   };
 }
 
+function normalizeExternalOrderRecord(raw: Record<string, unknown>): ExternalOrderRecord {
+  const responsePayload = raw.responsePayload ?? raw.response_payload;
+
+  return {
+    id: String(raw.id ?? ''),
+    provider: String(raw.provider ?? 'limitless') as ExternalOrderRecord['provider'],
+    market_id: String(raw.marketId ?? raw.market_id ?? ''),
+    provider_order_id: String(raw.providerOrderId ?? raw.provider_order_id ?? ''),
+    status: String(raw.status ?? 'pending'),
+    created_at: toIsoString(raw.createdAt ?? raw.created_at),
+    updated_at: toIsoString(raw.updatedAt ?? raw.updated_at),
+    response_payload:
+      responsePayload && typeof responsePayload === 'object' && !Array.isArray(responsePayload)
+        ? (responsePayload as Record<string, unknown>)
+        : {},
+    error_message:
+      raw.errorMessage === null || raw.error_message === null
+        ? null
+        : raw.errorMessage ?? raw.error_message
+          ? String(raw.errorMessage ?? raw.error_message)
+          : undefined,
+  };
+}
+
 function mapBaseTradeToTrade(snapshot: BaseTradeSnapshot): Trade {
   return {
     id: snapshot.id,
@@ -1311,7 +1335,7 @@ class ApiClient {
     providerResponse?: Record<string, unknown>;
     providerStatus?: number;
   }): Promise<ExternalOrderRecord> {
-    return this.request('/external/orders/submit', {
+    const response = await this.request<Record<string, unknown>>('/external/orders/submit', {
       method: 'POST',
       body: JSON.stringify({
         intentId: data.intentId,
@@ -1321,6 +1345,7 @@ class ApiClient {
         providerStatus: data.providerStatus,
       }),
     });
+    return normalizeExternalOrderRecord(response);
   }
 
   async prepareExternalOrderSubmit(data: {
@@ -1382,7 +1407,19 @@ class ApiClient {
     offset?: number;
   }): Promise<ExternalOrdersListResponse> {
     const query = this.buildQuery(params || {});
-    return this.request(`/external/orders${query}`);
+    const response = await this.request<Record<string, unknown>>(`/external/orders${query}`);
+    const orders = Array.isArray(response.orders)
+      ? response.orders
+          .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object')
+          .map((entry) => normalizeExternalOrderRecord(entry))
+      : [];
+
+    return {
+      orders,
+      total: toNumber(response.total),
+      limit: toNumber(response.limit),
+      offset: toNumber(response.offset),
+    };
   }
 
   async listExternalAgents(params?: {
