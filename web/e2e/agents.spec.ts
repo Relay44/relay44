@@ -15,12 +15,8 @@ test.describe('Agents Page', () => {
 
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
-    expect(await page.getByRole('heading', { name: 'Launch Agent' }).count()).toBe(0);
-
     await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
-    await expect(
-      page.getByRole('heading', { name: /agent control is currently unavailable/i })
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Launch Agent' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Agent Directory' })).toBeVisible();
     await expect(page.getByText(/No agents found for current filter\./i)).toBeVisible();
 
@@ -35,12 +31,13 @@ test.describe('Agents Page', () => {
     ).toBeVisible();
   });
 
-  test('does not expose launch controls while runtime status is read-only', async ({ page }) => {
+  test('exposes launch controls when runtime is live', async ({ page }) => {
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
-    await expect(
-      page.getByRole('heading', { name: /agent control is currently unavailable/i })
-    ).toBeVisible();
-    expect(await page.getByRole('button', { name: /launch onchain agent/i }).count()).toBe(0);
+    await expect(page.getByRole('heading', { name: 'Launch Agent' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /launch onchain agent/i })).toBeVisible();
+    expect(
+      await page.getByRole('heading', { name: /agent control is currently unavailable/i }).count(),
+    ).toBe(0);
   });
 });

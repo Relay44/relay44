@@ -142,7 +142,7 @@ export default function ExternalCredentialsPage() {
   }, [selectedCredentialId, visibleCredentials]);
 
   useEffect(() => {
-    if (!canManage || readOnly) {
+    if (!canManage || readOnly || visibleCredentials.length === 0) {
       setCredentialStatus(null);
       return;
     }
@@ -172,7 +172,7 @@ export default function ExternalCredentialsPage() {
     return () => {
       cancelled = true;
     };
-  }, [addToast, canManage, draft.provider, readOnly, selectedCredentialId]);
+  }, [addToast, canManage, draft.provider, readOnly, selectedCredentialId, visibleCredentials.length]);
 
   async function handleSave(event: React.FormEvent) {
     event.preventDefault();
