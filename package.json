@@ -66,6 +66,7 @@
     "farcaster-bot:tick": "node scripts/farcaster-bot-tick.mjs",
     "external-runner:tick": "node scripts/external-runner-tick.mjs",
     "external-runner:run": "node scripts/external-runner-run.mjs",
+    "external-state:migrate": "node scripts/migrate-external-state.mjs",
     "decision-runner:tick": "node scripts/decision-runner-tick.mjs",
     "agents:operator": "node scripts/base-agent-operator.mjs",
     "x402:facilitator": "node services/x402-facilitator/server.mjs",
@@ -115,6 +116,7 @@
     "@xmtp/agent-sdk": "^2.2.0",
     "express": "^5.2.1",
     "http-proxy-middleware": "^3.0.5",
+    "pg": "^8.16.3",
     "viem": "^2.47.1",
     "zod": "^4.3.6"
   }
