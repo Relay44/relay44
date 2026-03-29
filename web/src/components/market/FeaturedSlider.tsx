@@ -3,6 +3,7 @@
 import { useRef } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { MarketArtwork } from '@/components/market/MarketArtwork';
 import { cn } from '@/lib/utils';
 import type { Market } from '@/types';
 
@@ -29,6 +30,7 @@ function FeaturedCard({ market }: { market: Market }) {
         )}
       >
         <div className="flex items-center gap-2 mb-4">
+          <MarketArtwork market={market} className="h-10 w-10 shrink-0" sizes="40px" />
           <span className="px-2 py-0.5 text-[0.65rem] font-mono uppercase tracking-wider border border-border text-text-muted">
             {market.category}
           </span>
