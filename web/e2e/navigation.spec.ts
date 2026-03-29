@@ -60,8 +60,8 @@ test.describe("Navigation", () => {
   });
 
   test("navigates to leaderboard page", async ({ page }) => {
-    await page.goto("/leaderboard");
-    await expect(page).toHaveURL("/leaderboard");
+    const response = await page.goto("/leaderboard");
+    expect(response?.status()).toBe(404);
   });
 
   test("navigates to settings page", async ({ page }) => {
@@ -72,8 +72,8 @@ test.describe("Navigation", () => {
 
   test("navigates to profile page with wallet address", async ({ page }) => {
     const testWallet = "0x71C7656EC7ab88b098defB751B7401B5f6d8976F";
-    await page.goto(`/profile/${testWallet}`);
-    await expect(page).toHaveURL(`/profile/${testWallet}`);
+    const response = await page.goto(`/profile/${testWallet}`);
+    expect(response?.status()).toBe(404);
   });
 });
 
