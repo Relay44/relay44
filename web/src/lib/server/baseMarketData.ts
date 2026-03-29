@@ -14,8 +14,36 @@ interface FetchBaseMarketsOptions {
   limit?: number;
   offset?: number;
   source?: MarketSource;
+  sort?: 'volume' | 'newest' | 'ending';
+  order?: 'asc' | 'desc';
   tradable?: TradableFilter;
   revalidateSeconds?: number;
+}
+
+function sortMarkets(
+  markets: Market[],
+  sort: FetchBaseMarketsOptions['sort'],
+  order: FetchBaseMarketsOptions['order']
+) {
+  const direction = order === 'asc' ? 1 : -1;
+
+  markets.sort((left, right) => {
+    if (sort === 'newest') {
+      return (
+        (new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime()) *
+        direction
+      );
+    }
+
+    if (sort === 'ending') {
+      return (
+        (new Date(left.tradingEnd).getTime() - new Date(right.tradingEnd).getTime()) *
+        direction
+      );
+    }
+
+    return (left.volume24h - right.volume24h) * direction;
+  });
 }
 
 function getApiBases(): string[] {
@@ -63,6 +91,12 @@ export async function fetchLiveBaseMarkets(
     source: options.source ?? 'all',
     tradable: options.tradable ?? 'all',
   });
+  if (options.sort) {
+    query.set('sort', options.sort);
+  }
+  if (options.order) {
+    query.set('order', options.order);
+  }
   const path = `/evm/markets?${query.toString()}`;
   const revalidateSeconds = options.revalidateSeconds ?? 5;
 
@@ -74,12 +108,30 @@ export async function fetchLiveBaseMarkets(
     );
 
     if (payload && Array.isArray(payload.markets)) {
-      return normalizeBaseMarketsResponse(payload);
+      const response = normalizeBaseMarketsResponse(payload);
+      if (options.sort) {
+        const data = [...response.data];
+        sortMarkets(data, options.sort, options.order);
+        return {
+          ...response,
+          data,
+        };
+      }
+      return response;
     }
   }
 
   try {
-    return normalizeBaseMarketsResponse(await readUnifiedMarkets(query));
+    const response = normalizeBaseMarketsResponse(await readUnifiedMarkets(query));
+    if (options.sort) {
+      const data = [...response.data];
+      sortMarkets(data, options.sort, options.order);
+      return {
+        ...response,
+        data,
+      };
+    }
+    return response;
   } catch {
     return null;
   }

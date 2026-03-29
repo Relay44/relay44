@@ -105,11 +105,12 @@ const nextConfig = {
   async headers() {
     const csp = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://*.tradingview.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data: https:",
       "connect-src 'self' https: wss:",
+      "frame-src 'self' https://*.tradingview.com https://*.tradingview-widget.com",
       "frame-ancestors 'self' https://*.farcaster.xyz https://warpcast.com https://*.coinbase.com https://*.base.org https://base.dev https://www.base.dev",
       "base-uri 'self'",
       "form-action 'self'",
