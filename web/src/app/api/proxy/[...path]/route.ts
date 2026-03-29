@@ -30,7 +30,12 @@ const AGENT_RUNTIME_CONFIG_ERRORS = new Set([
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
   const proxyTarget = resolveApiProxyTarget();
-  const target = new URL(`${proxyTarget}/${path.join('/')}`);
+  const normalizedPath = path.join('/');
+  const targetBase =
+    path[0] === 'health'
+      ? proxyTarget.replace(/\/v1\/?$/, '')
+      : proxyTarget;
+  const target = new URL(`${targetBase}/${normalizedPath}`);
   request.nextUrl.searchParams.forEach((value, key) => {
     target.searchParams.append(key, value);
   });
@@ -38,7 +43,12 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
 }
 
 function buildLocalTargetUrl(request: NextRequest, path: string[]) {
-  const normalizedPath = path[0] === 'v1' ? path.join('/') : `v1/${path.join('/')}`;
+  const normalizedPath =
+    path[0] === 'health'
+      ? path.join('/')
+      : path[0] === 'v1'
+        ? path.join('/')
+        : `v1/${path.join('/')}`;
   const port = process.env.PORT || '3000';
   const localOrigin =
     process.env.NODE_ENV === 'production'

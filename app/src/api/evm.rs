@@ -23,6 +23,7 @@ const MARKET_CORE_COUNT_SELECTOR: &str = "0xec979082";
 const MARKET_CORE_MARKETS_SELECTOR: &str = "0xb1283e77";
 const MARKET_CORE_METADATA_SELECTOR: &str = "0x6b6445b6";
 const MARKET_CORE_CREATE_RICH_SELECTOR: &str = "0xddabefe7";
+const MARKET_CORE_RESOLVE_SELECTOR: &str = "0x57bde446";
 const ORDER_BOOK_COUNT_SELECTOR: &str = "0x2453ffa8";
 const ORDER_BOOK_ORDERS_SELECTOR: &str = "0xa85c38ef";
 const ORDER_BOOK_PLACE_SELECTOR: &str = "0xa8dd6515";
@@ -445,6 +446,14 @@ pub struct PrepareCancelOrderWriteRequest {
 pub struct PrepareClaimWriteRequest {
     pub from: Option<String>,
     pub market_id: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareResolveMarketWriteRequest {
+    pub from: Option<String>,
+    pub market_id: u64,
+    pub outcome: bool,
 }
 
 #[derive(Deserialize)]
@@ -2384,6 +2393,35 @@ pub async fn prepare_claim_write(
         order_book,
         data,
         "claim",
+    )))
+}
+
+pub async fn prepare_resolve_market_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareResolveMarketWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let market_core = configured_address(
+        &state.config.market_core_address,
+        "MARKET_CORE_ADDRESS_NOT_CONFIGURED",
+        "MARKET_CORE_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    let data = format!(
+        "{}{}{}",
+        MARKET_CORE_RESOLVE_SELECTOR,
+        encode_u256_hex(body.market_id),
+        encode_bool_word(body.outcome)
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        market_core,
+        data,
+        "resolveMarket",
     )))
 }
 

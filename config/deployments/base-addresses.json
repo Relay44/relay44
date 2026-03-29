@@ -1,14 +1,14 @@
 {
-  "generatedAt": "2026-02-28T00:00:00Z",
+  "generatedAt": "2026-03-29T17:06:00Z",
   "environments": {
     "production": {
       "name": "base-mainnet",
       "chainId": 8453,
       "contracts": {
-        "marketCore": "0x4d66ab11e147f6d8c395b36d6b0da867eb1f7a13",
-        "orderBook": "0x391050b6a7e3be5b699772880fe6d3d249d49b7b",
-        "collateralVault": "0x139290d00aebe1df9f5d40b796c0d30dea1e93a0",
-        "agentRuntime": "0xbf5d884648bd799092f5b1663c950a85dee1e825",
+        "marketCore": "0x5A829E9c863ae0700ecA12429012fa7295EA5e2d",
+        "orderBook": "0x1555b194A545f5D6D106BebBd569b9fEfF924BFc",
+        "collateralVault": "0x913183891c10A049490c1b31b793b5bFB2CB4333",
+        "agentRuntime": "0xA5f90c329F541E175c12f79559961ccF15db1bBE",
         "collateralToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
       }
     },
