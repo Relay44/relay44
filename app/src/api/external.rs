@@ -4987,8 +4987,29 @@ pub async fn cancel_external_order(
 
     sqlx::query(
         "UPDATE external_orders
-         SET status = 'cancelled', response_payload = $1, updated_at = NOW()
-         WHERE owner = $2 AND provider = $3 AND provider_order_id = $4",
+         SET status = 'cancelled',
+             provider_order_id = CASE
+                 WHEN COALESCE(provider_order_id, '') = '' THEN $4
+                 ELSE provider_order_id
+             END,
+             response_payload = $1,
+             updated_at = NOW()
+         WHERE owner = $2 AND provider = $3
+           AND (
+               provider_order_id = $4
+               OR (
+                   COALESCE(provider_order_id, '') = ''
+                   AND (
+                       COALESCE(response_payload ->> 'orderID', '') = $4
+                       OR COALESCE(response_payload ->> 'orderId', '') = $4
+                       OR COALESCE(response_payload ->> 'order_id', '') = $4
+                       OR COALESCE(response_payload -> 'order' ->> 'orderID', '') = $4
+                       OR COALESCE(response_payload -> 'order' ->> 'orderId', '') = $4
+                       OR COALESCE(response_payload -> 'order' ->> 'order_id', '') = $4
+                       OR COALESCE(response_payload -> 'order' ->> 'id', '') = $4
+                   )
+               )
+           )",
     )
     .bind(&response_payload)
     .bind(user.wallet_address.as_str())
