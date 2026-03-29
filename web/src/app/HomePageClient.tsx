@@ -178,13 +178,13 @@ function AgentPanel({
             <div className="mt-4 flex gap-2">
               <Link
                 href="/agents"
-                className="inline-flex h-10 items-center border border-accent px-4 text-sm font-medium uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
+                className="inline-flex h-10 items-center border border-accent px-4 text-[0.7rem] font-medium uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
               >
                 Open agents
               </Link>
               <Link
                 href="/markets"
-                className="inline-flex h-10 items-center border border-border px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-hover hover:text-text-primary"
+                className="inline-flex h-10 items-center border border-border px-4 text-[0.7rem] font-medium uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-hover hover:text-text-primary"
               >
                 View markets
               </Link>
@@ -266,14 +266,14 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
                   <div className="flex gap-2">
                     <Link
                       href={`/markets/${market.id}`}
-                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-sm font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-[0.7rem] font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
                     >
                       <span>YES</span>
                       <span>{yesPrice}</span>
                     </Link>
                     <Link
                       href={`/markets/${market.id}`}
-                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-sm font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-[0.7rem] font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
                     >
                       <span>NO</span>
                       <span>{noPrice}</span>
@@ -388,19 +388,19 @@ export default function HomePageClient({
             <div className="flex flex-wrap gap-3">
               <Link
                 href="/markets"
-                className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+                className="inline-flex h-10 items-center border border-border px-4 text-[0.7rem] uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
               >
                 Browse markets
               </Link>
               <Link
                 href="/how-it-works"
-                className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+                className="inline-flex h-10 items-center border border-border px-4 text-[0.7rem] uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
               >
                 How it works
               </Link>
               <Link
                 href="/legal/disclaimer"
-                className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+                className="inline-flex h-10 items-center border border-border px-4 text-[0.7rem] uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
               >
                 Risk disclosure
               </Link>

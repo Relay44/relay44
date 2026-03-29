@@ -107,7 +107,7 @@ export function PriceChart({
               type="button"
               onClick={() => setTimeRange(range.id)}
               className={cn(
-                'px-3 py-1 text-sm  transition-colors duration-fast cursor-pointer',
+                'px-3 py-1 text-[0.7rem] transition-colors duration-fast cursor-pointer',
                 timeRange === range.id
                   ? 'bg-accent text-text-inverse'
                   : 'text-text-secondary hover:text-text-primary hover:bg-bg-secondary'

@@ -49,6 +49,7 @@ export default async function MarketsPage({ searchParams }: MarketsPageProps) {
   const initialMarkets = await fetchLiveBaseMarkets({
     limit: 50,
     revalidateSeconds: 5,
+    sort: 'newest',
   });
   const category = normalizeCategory(params.category);
   const searchQuery = normalizeQuery(params.q);
