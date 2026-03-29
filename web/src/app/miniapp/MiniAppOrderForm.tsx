@@ -2,7 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { Button, Input, Card, Tabs, Spinner, useToast } from '@/components/ui';
-import { api, type ExternalCredential, type ExternalOrderIntent } from '@/lib/api';
+import { api, type ExternalCredential } from '@/lib/api';
+import { submitExternalMarketOrder } from '@/lib/externalExecution';
 import { usePlaceOrder } from '@/hooks';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { formatPrice, cn } from '@/lib/utils';
@@ -98,39 +99,15 @@ export function MiniAppOrderForm({ market, onSuccess }: MiniAppOrderFormProps) {
 
     setIsSubmitting(true);
     try {
-      const intent = await api.post<ExternalOrderIntent>('/external/orders/intent', {
+      await submitExternalMarketOrder({
         provider,
         marketId: market.id,
         outcome,
         side,
         price: numericPrice,
         quantity: amountValue,
-        credentialId: credential?.id,
-      });
-
-      // API may return camelCase or snake_case
-      const raw = intent as unknown as Record<string, unknown>;
-      const typedData = (raw.typedData ?? raw.typed_data) as Record<string, unknown>;
-
-      const ethereum = (
-        window as unknown as {
-          ethereum?: { request: (args: Record<string, unknown>) => Promise<unknown> };
-        }
-      ).ethereum;
-
-      if (!ethereum || !baseWallet.address) {
-        throw new Error('Connect wallet to place order');
-      }
-
-      const signature = await ethereum.request({
-        method: 'eth_signTypedData_v4',
-        params: [baseWallet.address, JSON.stringify(typedData)],
-      });
-
-      await api.post('/external/orders/submit', {
-        intentId: intent.id,
-        signedOrder: { typedData, signature: String(signature || '') },
-        credentialId: credential?.id,
+        credentialId: credential.id,
+        walletAddress: baseWallet.address || '',
       });
 
       addToast('Order placed!', 'success');

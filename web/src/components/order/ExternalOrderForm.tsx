@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Input, Select, useToast } from '@/components/ui';
 import { ReadOnlyNotice } from '@/components/runtime/ReadOnlyNotice';
 import {
@@ -10,6 +10,10 @@ import {
   type ExternalCredentialStatus,
   type ExternalOrderRecord,
 } from '@/lib/api';
+import {
+  cancelExternalMarketOrder,
+  submitExternalMarketOrder,
+} from '@/lib/externalExecution';
 import { useRuntimeMode, useSessionState } from '@/hooks';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import type { Market, Outcome, OrderSide } from '@/types';
@@ -22,13 +26,6 @@ export interface ExternalOrderFormProps {
 
 function providerFromMarket(market: Market): 'limitless' | 'polymarket' {
   return market.provider === 'polymarket' ? 'polymarket' : 'limitless';
-}
-
-function signedOrderFallback(input: string): Record<string, unknown> {
-  if (!input.trim()) {
-    return {};
-  }
-  return JSON.parse(input);
 }
 
 export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps) {
@@ -49,6 +46,9 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [preflight, setPreflight] = useState<Record<string, unknown> | null>(null);
   const [lastOrder, setLastOrder] = useState<ExternalOrderRecord | null>(null);
+  const [recentOrders, setRecentOrders] = useState<ExternalOrderRecord[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
 
   const provider = providerFromMarket(market);
   const currentPrice = outcome === 'yes' ? market.yesPrice : market.noPrice;
@@ -132,6 +132,27 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
       })),
     [credentials]
   );
+  const loadRecentOrders = useCallback(async () => {
+    if (readOnly || !canManageCredentials) {
+      setRecentOrders([]);
+      return;
+    }
+
+    setIsLoadingOrders(true);
+    try {
+      const response = await api.listExternalOrders({ provider, limit: 20 });
+      setRecentOrders(response.orders.filter((entry) => entry.market_id === market.id).slice(0, 6));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load external orders';
+      addToast(message, 'error');
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  }, [addToast, canManageCredentials, market.id, provider, readOnly]);
+
+  useEffect(() => {
+    void loadRecentOrders();
+  }, [loadRecentOrders]);
 
   if (readOnly) {
     return (
@@ -141,20 +162,6 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
       />
     );
   }
-
-  const signTypedData = async (typedData: Record<string, unknown>) => {
-    const ethereum = (window as unknown as { ethereum?: { request: (args: Record<string, unknown>) => Promise<unknown> } }).ethereum;
-    if (!ethereum || !baseWallet.address) {
-      throw new Error('Connect wallet to sign typed data');
-    }
-
-    const signature = await ethereum.request({
-      method: 'eth_signTypedData_v4',
-      params: [baseWallet.address, JSON.stringify(typedData)],
-    });
-
-    return String(signature || '');
-  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -184,7 +191,7 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
 
     setIsSubmitting(true);
     try {
-      const intent = await api.createExternalOrderIntent({
+      const { intent, order } = await submitExternalMarketOrder({
         provider,
         marketId: market.id,
         outcome,
@@ -192,35 +199,12 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
         price: numericPrice,
         quantity: numericQuantity,
         credentialId,
+        walletAddress: baseWallet.address || '',
+        signedOrderJson,
       });
       setPreflight(intent.preflight || null);
-
-      const rawIntent = intent as unknown as Record<string, unknown>;
-      const typedData = (rawIntent.typedData ?? rawIntent.typed_data) as
-        | Record<string, unknown>
-        | undefined;
-      if (!typedData) {
-        throw new Error('External order intent did not include typed data');
-      }
-
-      let signedOrder: Record<string, unknown>;
-      if (signedOrderJson.trim()) {
-        signedOrder = signedOrderFallback(signedOrderJson);
-      } else {
-        const signature = await signTypedData(typedData);
-        signedOrder = {
-          typedData,
-          signature,
-        };
-      }
-
-      const order = await api.submitExternalOrder({
-        intentId: intent.id,
-        signedOrder: signedOrder,
-        credentialId,
-      });
-
       setLastOrder(order);
+      await loadRecentOrders();
       addToast('External order submitted', 'success');
       onSuccess?.();
     } catch (error) {
@@ -228,6 +212,32 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
       addToast(message, 'error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCancel = async (order: ExternalOrderRecord) => {
+    if (!credentialId) {
+      addToast('Select a credential first', 'error');
+      return;
+    }
+
+    setCancellingOrderId(order.id);
+    try {
+      await cancelExternalMarketOrder({
+        provider,
+        providerOrderId: order.provider_order_id,
+        credentialId,
+      });
+      setLastOrder((current) =>
+        current?.id === order.id ? { ...current, status: 'cancelled' } : current
+      );
+      await loadRecentOrders();
+      addToast('External order cancelled', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'External order cancel failed';
+      addToast(message, 'error');
+    } finally {
+      setCancellingOrderId(null);
     }
   };
 
@@ -402,6 +412,43 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
           <div>Status: {lastOrder.status}</div>
           <div>Provider Order: {lastOrder.provider_order_id || 'n/a'}</div>
         </div>
+      ) : null}
+
+      {recentOrders.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          <p className="text-xs text-text-muted">Recent external orders</p>
+          {recentOrders.map((order) => {
+            const canCancel = order.status === 'submitted' && !!order.provider_order_id;
+            return (
+              <div
+                key={order.id}
+                className="flex items-center justify-between gap-3 border border-border p-2 text-xs"
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-text-primary">
+                    {order.status} · {order.provider_order_id || 'pending id'}
+                  </div>
+                  <div className="text-text-muted">
+                    {new Date(order.created_at).toLocaleString()}
+                  </div>
+                </div>
+                {canCancel ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    loading={cancellingOrderId === order.id}
+                    onClick={() => void handleCancel(order)}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : isLoadingOrders ? (
+        <div className="mt-4 text-xs text-text-muted">Loading recent orders...</div>
       ) : null}
     </Card>
   );
