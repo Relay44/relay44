@@ -1,4 +1,4 @@
-export { useMarkets, useMarket, useOrderBook, useTrades } from './useMarkets';
+export { useMarkets, useMarket, useOrderBook, useTrades, useResolveMarket } from './useMarkets';
 export { useOrders, useOrder, usePlaceOrder, useCancelOrder } from './useOrders';
 export { usePositions, usePosition, useClaimWinnings } from './usePositions';
 export {

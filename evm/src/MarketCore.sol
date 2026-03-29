@@ -29,6 +29,7 @@ contract MarketCore is AccessControl, Pausable {
 
     uint256 public marketCount;
     mapping(uint256 => Market) public markets;
+    mapping(uint256 => address) public marketCreators;
     mapping(uint256 => MarketMetadata) private marketMetadata;
 
     error ZeroAddress();
@@ -37,6 +38,8 @@ contract MarketCore is AccessControl, Pausable {
     error MarketNotClosed();
     error MarketAlreadyResolved();
     error NotDesignatedResolver();
+    error NotMarketCreator();
+    error UnauthorizedResolver();
     error EmptyQuestion();
     error TextTooLong();
 
@@ -57,11 +60,10 @@ contract MarketCore is AccessControl, Pausable {
 
     function createMarket(bytes32 questionHash, uint64 closeTime, address resolver)
         external
-        onlyRole(MARKET_CREATOR_ROLE)
         whenNotPaused
         returns (uint256 marketId)
     {
-        marketId = _createMarket(questionHash, closeTime, resolver);
+        marketId = _createMarket(msg.sender, questionHash, closeTime, resolver);
     }
 
     function createMarketRich(
@@ -71,11 +73,11 @@ contract MarketCore is AccessControl, Pausable {
         string calldata resolutionSource,
         uint64 closeTime,
         address resolver
-    ) external onlyRole(MARKET_CREATOR_ROLE) whenNotPaused returns (uint256 marketId) {
+    ) external whenNotPaused returns (uint256 marketId) {
         if (bytes(question).length == 0) revert EmptyQuestion();
 
         bytes32 questionHash = keccak256(bytes(question));
-        marketId = _createMarket(questionHash, closeTime, resolver);
+        marketId = _createMarket(msg.sender, questionHash, closeTime, resolver);
         _setMarketMetadata(marketId, question, description, category, resolutionSource);
     }
 
@@ -85,8 +87,11 @@ contract MarketCore is AccessControl, Pausable {
         string calldata description,
         string calldata category,
         string calldata resolutionSource
-    ) external onlyRole(MARKET_CREATOR_ROLE) whenNotPaused {
+    ) external whenNotPaused {
         if (markets[marketId].resolver == address(0)) revert MarketNotFound();
+        if (msg.sender != marketCreators[marketId] && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
+            revert NotMarketCreator();
+        }
         _setMarketMetadata(marketId, question, description, category, resolutionSource);
     }
 
@@ -105,7 +110,7 @@ contract MarketCore is AccessControl, Pausable {
         return (metadata.question, metadata.description, metadata.category, metadata.resolutionSource);
     }
 
-    function resolveMarket(uint256 marketId, bool outcome) external onlyRole(RESOLVER_ROLE) whenNotPaused {
+    function resolveMarket(uint256 marketId, bool outcome) external whenNotPaused {
         Market storage market = markets[marketId];
         if (market.resolver == address(0)) revert MarketNotFound();
         if (block.timestamp < market.closeTime) revert MarketNotClosed();
@@ -129,14 +134,16 @@ contract MarketCore is AccessControl, Pausable {
         _unpause();
     }
 
-    function _createMarket(bytes32 questionHash, uint64 closeTime, address resolver)
+    function _createMarket(address creator, bytes32 questionHash, uint64 closeTime, address resolver)
         internal
         returns (uint256 marketId)
     {
         if (resolver == address(0)) revert ZeroAddress();
         if (closeTime <= block.timestamp) revert InvalidCloseTime();
+        if (!hasRole(DEFAULT_ADMIN_ROLE, creator) && resolver != creator) revert UnauthorizedResolver();
 
         marketId = ++marketCount;
+        marketCreators[marketId] = creator;
         markets[marketId] = Market({
             questionHash: questionHash,
             closeTime: closeTime,
