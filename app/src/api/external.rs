@@ -2540,6 +2540,7 @@ async fn build_limitless_submit_payload(
     credential: &StoredCredential,
     market_id: &str,
     provider_market_ref: &str,
+    price: f64,
     typed_data: &Value,
     signed_order: &Value,
 ) -> Result<Value, ApiError> {
@@ -2572,6 +2573,9 @@ async fn build_limitless_submit_payload(
                 let profile =
                     fetch_limitless_profile(state, base_wallet.as_str(), api_key.as_str()).await?;
                 object.insert("ownerId".to_string(), json!(profile.id));
+            }
+            if let Some(order) = object.get_mut("order").and_then(|value| value.as_object_mut()) {
+                ensure_limitless_order_price(order, price);
             }
         }
         return Ok(payload);
@@ -2638,6 +2642,7 @@ async fn build_limitless_submit_payload(
         order.insert(key.clone(), normalized);
     }
     order.insert("signature".to_string(), json!(signature));
+    ensure_limitless_order_price(&mut order, price);
 
     Ok(json!({
         "order": order,
@@ -2645,6 +2650,12 @@ async fn build_limitless_submit_payload(
         "marketSlug": market_slug,
         "ownerId": profile.id,
     }))
+}
+
+fn ensure_limitless_order_price(order: &mut serde_json::Map<String, Value>, price: f64) {
+    order
+        .entry("price".to_string())
+        .or_insert_with(|| json!(price));
 }
 
 async fn submit_polymarket_order(
@@ -4361,7 +4372,7 @@ pub async fn submit_external_order(
     let user = extract_authenticated_user(&req, &state).await?;
 
     let row = sqlx::query(
-        "SELECT id, provider, market_id, provider_market_ref, credential_id, typed_data, status
+        "SELECT id, provider, market_id, provider_market_ref, credential_id, price, typed_data, status
          FROM external_order_intents
          WHERE id = $1 AND owner = $2",
     )
@@ -4399,6 +4410,9 @@ pub async fn submit_external_order(
     let provider_market_ref: String = row
         .try_get("provider_market_ref")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let price: f64 = row
+        .try_get("price")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
     let typed_data: Value = row
         .try_get("typed_data")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
@@ -4410,6 +4424,7 @@ pub async fn submit_external_order(
                 &credential,
                 market_id.as_str(),
                 provider_market_ref.as_str(),
+                price,
                 &typed_data,
                 &body.signed_order,
             )
@@ -5859,6 +5874,30 @@ mod tests {
                 .and_then(|value| value.as_str())
                 .unwrap(),
             "0xdCE731717296De1f68F88c6819a41fDbA9c8E8aB"
+        );
+    }
+
+    #[test]
+    fn ensure_limitless_order_price_inserts_missing_value() {
+        let mut order = serde_json::Map::new();
+        ensure_limitless_order_price(&mut order, 0.42);
+
+        assert_eq!(
+            order.get("price").and_then(|value| value.as_f64()),
+            Some(0.42)
+        );
+    }
+
+    #[test]
+    fn ensure_limitless_order_price_preserves_existing_value() {
+        let mut order = serde_json::Map::new();
+        order.insert("price".to_string(), json!(0.73));
+
+        ensure_limitless_order_price(&mut order, 0.42);
+
+        assert_eq!(
+            order.get("price").and_then(|value| value.as_f64()),
+            Some(0.73)
         );
     }
 
