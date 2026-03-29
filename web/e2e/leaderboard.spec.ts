@@ -1,24 +1,16 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-test.describe('Leaderboard Page', () => {
+test.describe("Leaderboard Page", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/leaderboard');
+    const response = await page.goto("/leaderboard");
+    expect(response?.status()).toBe(404);
   });
 
-  test('page loads successfully', async ({ page }) => {
-    await expect(page).toHaveURL('/leaderboard');
+  test("returns 404", async ({ page }) => {
+    await expect(page).toHaveURL("/leaderboard");
   });
 
-  test('has correct page title in metadata', async ({ page }) => {
-    await expect(page).toHaveTitle(/leaderboard.*relay44/i);
-  });
-
-  test('displays container with proper layout', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Leaderboard' })).toBeVisible();
-    await expect(
-      page
-        .getByText(/loading leaderboard|leaderboard is not live yet|no data available for this period/i)
-        .first()
-    ).toBeVisible();
+  test("shows the not found page", async ({ page }) => {
+    await expect(page.getByText(/this page could not be found/i)).toBeVisible();
   });
 });

@@ -215,29 +215,6 @@ export function NotificationSettings() {
           </div>
         </div>
 
-        {/* External notifications */}
-        <div>
-          <h4 className="text-sm font-medium text-text-secondary uppercase tracking-wider mb-2">
-            External Notifications
-          </h4>
-          <div className="divide-y divide-border">
-            <Toggle
-              label="Email notifications"
-              description="Email delivery is not live yet"
-              checked={preferences.emailNotifications}
-              onChange={(v) => handleChange('emailNotifications', v)}
-              disabled
-            />
-            <Toggle
-              label="Push notifications"
-              description="Browser push delivery is not live yet"
-              checked={preferences.pushNotifications}
-              onChange={(v) => handleChange('pushNotifications', v)}
-              disabled
-            />
-          </div>
-        </div>
-
         <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-end">
           {status === 'saved' && (
             <span className="text-sm text-bid">Settings saved</span>
