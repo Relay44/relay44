@@ -218,7 +218,7 @@ export default function AgentsPage() {
   }, [canManageExternal, externalProvider, readOnly]);
 
   useEffect(() => {
-    if (readOnly || !canManageExternal) {
+    if (readOnly || !canManageExternal || externalCredentials.length === 0) {
       setExternalCredentialStatus(null);
       return;
     }
@@ -245,7 +245,7 @@ export default function AgentsPage() {
     return () => {
       canceled = true;
     };
-  }, [canManageExternal, externalCredentialId, externalProvider, readOnly]);
+  }, [canManageExternal, externalCredentialId, externalCredentials.length, externalProvider, readOnly]);
 
   const onCreateAgent = async (event: React.FormEvent) => {
     event.preventDefault();

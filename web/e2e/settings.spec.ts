@@ -33,14 +33,23 @@ test.describe('Settings Page', () => {
 });
 
 test.describe('Credential Settings', () => {
-  test('credentials route shows the read-only state instead of save controls', async ({
+  test('credentials route shows live credential setup guidance and form controls', async ({
     page,
   }) => {
     await page.goto('/settings/credentials', { waitUntil: 'domcontentloaded' });
 
+    await expect(page.getByRole('heading', { name: 'External Credentials' })).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: /credential management is currently unavailable/i })
+      page.getByRole('heading', { name: /connect and authenticate/i }),
     ).toBeVisible();
-    expect(await page.getByRole('heading', { name: 'Save credential' }).count()).toBe(0);
+    await expect(
+      page.getByText(/connect your wallet, then authenticate with siwe before saving keys/i),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save credential' })).toBeVisible();
+    expect(
+      await page
+        .getByRole('heading', { name: /credential management is currently unavailable/i })
+        .count(),
+    ).toBe(0);
   });
 });
