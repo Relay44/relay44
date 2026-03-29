@@ -1,7 +1,9 @@
+import { encodeFunctionData } from 'viem';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { waitForTransactionReceipt } from '@wagmi/core';
 import { useConfig, useWalletClient } from 'wagmi';
 import { api, ApiError } from '@/lib/api';
+import { assertContractAddress, MARKET_CORE_ABI, MARKET_CORE_ADDRESS } from '@/lib/contracts';
 import { assertWritesEnabled } from '@/lib/runtimeMode';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import type { MarketFilters, Outcome, PaginatedResponse, Market } from '@/types';
@@ -140,6 +142,28 @@ export function useResolveMarket() {
         from: baseWallet.address,
         marketId: parsedMarketId,
         outcome: outcome === 'yes',
+      }).catch((error) => {
+        if (!(error instanceof ApiError) || error.status !== 404) {
+          throw error;
+        }
+
+        const marketCore = assertContractAddress(
+          MARKET_CORE_ADDRESS,
+          'NEXT_PUBLIC_MARKET_CORE_ADDRESS'
+        );
+
+        return {
+          chain_id: 8453,
+          from: baseWallet.address,
+          to: marketCore,
+          data: encodeFunctionData({
+            abi: MARKET_CORE_ABI,
+            functionName: 'resolveMarket',
+            args: [BigInt(parsedMarketId), outcome === 'yes'],
+          }),
+          value: '0x0' as const,
+          method: 'resolveMarket',
+        };
       });
       const hash = await walletClient.sendTransaction({
         account: baseWallet.address as `0x${string}`,

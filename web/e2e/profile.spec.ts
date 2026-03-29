@@ -1,22 +1,19 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
 
-const TEST_WALLET = '0x71C7656EC7ab88b098defB751B7401B5f6d8976F';
+const TEST_WALLET = "0x71C7656EC7ab88b098defB751B7401B5f6d8976F";
 
-test.describe('Profile Page', () => {
+test.describe("Profile Page", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto(`/profile/${TEST_WALLET}`);
+    const response = await page.goto(`/profile/${TEST_WALLET}`);
+    expect(response?.status()).toBe(404);
   });
 
-  test('page loads successfully', async ({ page }) => {
+  test("returns 404", async ({ page }) => {
+    await page.goto(`/profile/${TEST_WALLET}`);
     await expect(page).toHaveURL(`/profile/${TEST_WALLET}`);
   });
 
-  test('has correct page title with truncated address', async ({ page }) => {
-    await expect(page).toHaveTitle(/0x71C7.*976F.*relay44/i);
-  });
-
-  test('displays container with proper layout', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: /public profiles are not live yet/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Browse markets' })).toBeVisible();
+  test("shows the not found page", async ({ page }) => {
+    await expect(page.getByText(/this page could not be found/i)).toBeVisible();
   });
 });
