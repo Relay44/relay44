@@ -54,10 +54,12 @@ function TicketCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const canvasEl = canvas;
     const container = canvas.parentElement;
     if (!container) return;
+    const host = container;
 
-    const context = canvas.getContext('2d');
+    const context = canvasEl.getContext('2d');
     if (!context) return;
     const ctx: CanvasRenderingContext2D = context;
 
@@ -180,13 +182,13 @@ function TicketCanvas({
     }
 
     function resizeCanvas() {
-      const rect = container.getBoundingClientRect();
+      const rect = host.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) {
         return;
       }
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
+      canvasEl.width = rect.width * dpr;
+      canvasEl.height = rect.height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const cellSize = Math.max(5, Math.round(Math.min(rect.width, rect.height) / 56));
@@ -252,7 +254,7 @@ function TicketCanvas({
     const resizeObserver = new ResizeObserver(() => {
       resizeCanvas();
     });
-    resizeObserver.observe(container);
+    resizeObserver.observe(host);
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
@@ -282,7 +284,7 @@ function TicketCanvas({
     };
 
     function render(time: number) {
-      const rect = container.getBoundingClientRect();
+      const rect = host.getBoundingClientRect();
       const now = time * 0.001;
       const breath = Math.sin(now * 0.2) * 0.5 + 0.5;
       ctx.clearRect(0, 0, rect.width, rect.height);
