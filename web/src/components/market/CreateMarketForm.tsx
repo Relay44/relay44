@@ -163,6 +163,20 @@ function formatTradingEndLabel(date: string, time: string): string {
   );
 }
 
+function marketCreateErrorMessage(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : "Failed to create market";
+
+  if (
+    message.includes("AccessControlUnauthorizedAccount") ||
+    message.includes("MARKET_CREATOR_ROLE")
+  ) {
+    return "This wallet is not allowed to publish internal relay44 markets.";
+  }
+
+  return message;
+}
+
 export function CreateMarketForm({
   onSuccess,
   draftSlide,
@@ -426,7 +440,7 @@ export function CreateMarketForm({
       setConfirmedDeadline(false);
       setStep(1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create market");
+      setError(marketCreateErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -470,6 +484,17 @@ export function CreateMarketForm({
       </CardHeader>
 
       <CardContent className="space-y-6">
+        <div className="border border-border bg-bg-secondary p-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
+            Live contract policy
+          </p>
+          <p className="mt-2 text-sm text-text-secondary">
+            Publishing internal relay44 markets is limited to operator wallets
+            on the live MarketCore contract. Unauthorized wallets can review
+            drafts here, but publish will fail onchain.
+          </p>
+        </div>
+
         {draftSlide && draftOptions.length > 0 ? (
           <div className="space-y-4 border border-accent/20 bg-accent/5 p-4">
             <div className="flex flex-wrap items-center gap-3">
