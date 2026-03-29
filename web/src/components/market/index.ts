@@ -1,4 +1,5 @@
 export { MarketCard } from './MarketCard';
+export { MarketArtwork } from './MarketArtwork';
 export { MarketHeader } from './MarketHeader';
 export { MarketStats, MarketInfo } from './MarketStats';
 export { PriceBar } from './PriceBar';
@@ -7,4 +8,5 @@ export { FeaturedSlider } from './FeaturedSlider';
 export { FeaturedBanner } from './FeaturedBanner';
 export { CreateMarketForm } from './CreateMarketForm';
 export { PriceChart } from './PriceChart';
+export { TradingViewChart } from './TradingViewChart';
 export { MarketRow } from './MarketRow';

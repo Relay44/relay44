@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Flame, Clock } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import { Header, BottomNav } from '@/components/layout';
 import { MarketList } from '@/components/market';
 import { useMarkets } from '@/hooks';
@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { CATEGORIES } from '@/lib/constants';
 import type { Market, MarketFilters, PaginatedResponse } from '@/types';
 
-type SortTab = 'trending' | 'new' | 'ending';
+type SortTab = 'new' | 'ending';
 type SourceTab = 'all' | 'internal' | 'limitless' | 'polymarket';
 
 interface MarketsClientProps {
@@ -33,7 +33,7 @@ export default function MarketsClient({
   initialSearchQuery,
 }: MarketsClientProps) {
   const [category, setCategory] = useState(normalizeCategory(initialCategory));
-  const [sortTab, setSortTab] = useState<SortTab>('trending');
+  const [sortTab, setSortTab] = useState<SortTab>('new');
   const [sourceTab, setSourceTab] = useState<SourceTab>('all');
   const [includeLowLiquidity, setIncludeLowLiquidity] = useState(false);
   const searchQuery = initialSearchQuery?.trim() || '';
@@ -42,14 +42,14 @@ export default function MarketsClient({
   const filters: MarketFilters = {
     source: sourceTab,
     category: category === 'All' ? undefined : category.toLowerCase(),
-    sort: sortTab === 'trending' ? 'volume' : sortTab === 'new' ? 'newest' : 'ending',
+    sort: sortTab === 'new' ? 'newest' : 'ending',
     includeLowLiquidity,
     limit: 50,
   };
 
   const defaultInitialData = useMemo(() => {
     if (!initialMarkets) return undefined;
-    if (category !== 'All' || sortTab !== 'trending' || sourceTab !== 'all') {
+    if (category !== 'All' || sortTab !== 'new' || sourceTab !== 'all') {
       return undefined;
     }
     return initialMarkets;
@@ -90,21 +90,9 @@ export default function MarketsClient({
           <div className="flex items-center gap-4 py-3 overflow-x-auto scrollbar-hide">
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
-                onClick={() => setSortTab('trending')}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5  text-sm font-medium transition-colors cursor-pointer',
-                  sortTab === 'trending'
-                    ? 'bg-accent text-text-inverse'
-                    : 'text-text-secondary hover:bg-bg-hover'
-                )}
-              >
-                <Flame className="w-3.5 h-3.5" />
-                Trending
-              </button>
-              <button
                 onClick={() => setSortTab('new')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5  text-sm font-medium transition-colors cursor-pointer',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-[0.7rem] font-medium transition-colors cursor-pointer',
                   sortTab === 'new'
                     ? 'bg-accent text-text-inverse'
                     : 'text-text-secondary hover:bg-bg-hover'
@@ -116,7 +104,7 @@ export default function MarketsClient({
               <button
                 onClick={() => setSortTab('ending')}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5  text-sm font-medium transition-colors cursor-pointer',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-[0.7rem] font-medium transition-colors cursor-pointer',
                   sortTab === 'ending'
                     ? 'bg-accent text-text-inverse'
                     : 'text-text-secondary hover:bg-bg-hover'
@@ -135,7 +123,7 @@ export default function MarketsClient({
                   key={source}
                   onClick={() => setSourceTab(source)}
                   className={cn(
-                    'px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer border',
+                    'px-3 py-1.5 text-[0.7rem] font-medium whitespace-nowrap transition-colors cursor-pointer border',
                     sourceTab === source
                       ? 'border-accent text-accent'
                       : 'border-border text-text-secondary hover:border-border-hover'
@@ -151,7 +139,7 @@ export default function MarketsClient({
             <button
               onClick={() => setIncludeLowLiquidity((current) => !current)}
               className={cn(
-                'px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors cursor-pointer border',
+                'px-3 py-1.5 text-[0.7rem] font-medium whitespace-nowrap transition-colors cursor-pointer border',
                 includeLowLiquidity
                   ? 'border-accent text-accent'
                   : 'border-border text-text-secondary hover:border-border-hover'
@@ -168,7 +156,7 @@ export default function MarketsClient({
                   key={cat}
                   onClick={() => setCategory(cat)}
                   className={cn(
-                    'px-3 py-1.5  text-sm font-medium whitespace-nowrap transition-colors cursor-pointer',
+                    'px-3 py-1.5 text-[0.7rem] font-medium whitespace-nowrap transition-colors cursor-pointer',
                     category === cat
                       ? 'bg-bg-tertiary text-text-primary'
                       : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'

@@ -3,7 +3,49 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 
-function TicketCanvas({ isDark }: { isDark: boolean }) {
+const ZERO_BITMAP = [
+  [0, 1, 1, 0],
+  [1, 0, 0, 1],
+  [1, 0, 0, 1],
+  [1, 0, 0, 1],
+  [0, 1, 1, 0],
+] as const;
+
+const ONE_BITMAP = [
+  [0, 1, 0],
+  [1, 1, 0],
+  [0, 1, 0],
+  [0, 1, 0],
+  [1, 1, 1],
+] as const;
+
+const O_BITMAP = [
+  [0, 1, 1, 0],
+  [1, 0, 0, 1],
+  [1, 0, 0, 1],
+  [0, 1, 1, 0],
+] as const;
+
+const HERO_BACKGROUND_IMAGE_SRCS = [
+  '/home-hero-slides/643927642.jpg',
+  '/home-hero-slides/65465146546.jpg',
+  '/home-hero-slides/68880184-283f-4bad-9f22-62194696309f.jpg',
+  '/home-hero-slides/b79d5c4f-4a29-4f88-87ab-8ad587370502.jpg',
+] as const;
+
+function getGlyphBitmap(char: '0' | '1' | 'o') {
+  if (char === '0') return ZERO_BITMAP;
+  if (char === '1') return ONE_BITMAP;
+  return O_BITMAP;
+}
+
+function TicketCanvas({
+  backgroundImageSrc,
+  isDark,
+}: {
+  backgroundImageSrc: string;
+  isDark: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const isDarkRef = useRef(isDark);
@@ -12,139 +54,367 @@ function TicketCanvas({ isDark }: { isDark: boolean }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const container = canvas.parentElement;
+    if (!container) return;
 
-    const gl = canvas.getContext('webgl', { antialias: false });
-    if (!gl) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const ctx: CanvasRenderingContext2D = context;
 
-    function resizeCanvas() {
-      const rect = canvas!.parentElement!.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas!.width = rect.width * dpr;
-      canvas!.height = rect.height * dpr;
-      gl!.viewport(0, 0, canvas!.width, canvas!.height);
+    let glyphs: Array<{
+      char: '0' | '1' | 'o';
+      contourX: number;
+      contourY: number;
+      darkness: number;
+      detail: number;
+      flowScale: number;
+      opacityBase: number;
+      phase: number;
+      pixelSize: number;
+      sprite: HTMLCanvasElement;
+      threshold: number;
+      x: number;
+      y: number;
+    }> = [];
+    let imageSample: { data: Uint8ClampedArray; height: number; width: number } | null = null;
+    const spriteCache = new Map<string, HTMLCanvasElement>();
+    const sampleCanvas = document.createElement('canvas');
+    const sampleContext = sampleCanvas.getContext('2d');
+
+    function getSprite(char: '0' | '1' | 'o', pixelSize: number) {
+      const key = `${char}:${pixelSize}`;
+      const cached = spriteCache.get(key);
+      if (cached) {
+        return cached;
+      }
+
+      const bitmap = getGlyphBitmap(char);
+      const sprite = document.createElement('canvas');
+      sprite.width = bitmap[0].length * pixelSize;
+      sprite.height = bitmap.length * pixelSize;
+
+      const spriteContext = sprite.getContext('2d');
+      if (!spriteContext) {
+        return sprite;
+      }
+
+      spriteContext.fillStyle = '#ffffff';
+      for (let row = 0; row < bitmap.length; row += 1) {
+        for (let column = 0; column < bitmap[row].length; column += 1) {
+          if (!bitmap[row][column]) {
+            continue;
+          }
+          spriteContext.fillRect(
+            column * pixelSize,
+            row * pixelSize,
+            pixelSize,
+            pixelSize
+          );
+        }
+      }
+
+      spriteCache.set(key, sprite);
+      return sprite;
     }
 
+    function sampleLuminance(x: number, y: number) {
+      if (!imageSample) {
+        return 0.5;
+      }
+
+      const clampedX = Math.max(0, Math.min(imageSample.width - 1, Math.round(x)));
+      const clampedY = Math.max(0, Math.min(imageSample.height - 1, Math.round(y)));
+      const index = (clampedY * imageSample.width + clampedX) * 4;
+      const red = imageSample.data[index] / 255;
+      const green = imageSample.data[index + 1] / 255;
+      const blue = imageSample.data[index + 2] / 255;
+      return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+    }
+
+    function sampleImageInfo(containerX: number, containerY: number, rect: DOMRect) {
+      if (!imageSample) {
+        return {
+          contourX: 1,
+          contourY: 0,
+          detail: 0.3,
+          luminance: 0.5,
+        };
+      }
+
+      const scale = Math.max(
+        rect.width / imageSample.width,
+        rect.height / imageSample.height
+      );
+      const drawWidth = imageSample.width * scale;
+      const drawHeight = imageSample.height * scale;
+      const offsetX = (rect.width - drawWidth) / 2;
+      const offsetY = (rect.height - drawHeight) / 2;
+      const imageX = (containerX - offsetX) / scale;
+      const imageY = (containerY - offsetY) / scale;
+
+      const luminance = sampleLuminance(imageX, imageY);
+      const left = sampleLuminance(imageX - 1.2, imageY);
+      const right = sampleLuminance(imageX + 1.2, imageY);
+      const top = sampleLuminance(imageX, imageY - 1.2);
+      const bottom = sampleLuminance(imageX, imageY + 1.2);
+      const signedGradientX = right - left;
+      const signedGradientY = bottom - top;
+      const gradientX = Math.abs(signedGradientX);
+      const gradientY = Math.abs(signedGradientY);
+      const diagonal = Math.abs(
+        sampleLuminance(imageX + 1, imageY + 1)
+        - sampleLuminance(imageX - 1, imageY - 1)
+      );
+      const edge = Math.min(1, (gradientX + gradientY + diagonal * 0.7) * 1.8);
+      const contrast = Math.abs(luminance - 0.5) * 2;
+      const contourLength = Math.hypot(signedGradientX, signedGradientY);
+      const contourX = contourLength > 0.0001 ? -signedGradientY / contourLength : 1;
+      const contourY = contourLength > 0.0001 ? signedGradientX / contourLength : 0;
+
+      return {
+        contourX,
+        contourY,
+        detail: Math.max(0.08, Math.min(1, edge * 0.78 + contrast * 0.34)),
+        luminance,
+      };
+    }
+
+    function resizeCanvas() {
+      const rect = container.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        return;
+      }
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const cellSize = Math.max(5, Math.round(Math.min(rect.width, rect.height) / 56));
+      const columns = Math.ceil(rect.width / cellSize) + 3;
+      const rows = Math.ceil(rect.height / cellSize) + 3;
+
+      glyphs = [];
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const seed = (column * 17 + row * 31) % 11;
+          const x = column * cellSize + cellSize * 0.16;
+          const y = row * cellSize + cellSize * 0.14;
+          const info = sampleImageInfo(x, y, rect);
+          const detail = info.detail;
+          const luminance = info.luminance;
+          const darkness = 1 - luminance;
+          const shadowPenalty = Math.max(0, darkness - 0.54) / 0.46;
+          const char =
+            detail > 0.6
+              ? seed % 5 === 0
+                ? 'o'
+                : luminance > 0.46
+                  ? '1'
+                  : seed % 4 === 0
+                    ? '0'
+                    : '1'
+              : luminance > 0.58
+                ? '1'
+              : luminance < 0.34
+                ? seed % 3 === 0
+                  ? '0'
+                  : '1'
+                : seed % 6 === 0
+                  ? 'o'
+                  : '1';
+          const pixelSize = 1;
+          glyphs.push({
+            char,
+            contourX: info.contourX,
+            contourY: info.contourY,
+            darkness,
+            detail,
+            flowScale: 0.35 + detail * 1.45,
+            opacityBase:
+              0.038
+              + detail * (0.18 + (1 - shadowPenalty * 0.85) * 0.1)
+              + (seed % 4) * 0.01,
+            phase: column * 0.37 + row * 0.21 + seed * 0.16,
+            pixelSize,
+            sprite: getSprite(char, pixelSize),
+            threshold:
+              0.032
+              + (1 - detail) * 0.05
+              + luminance * 0.02
+              + shadowPenalty * 0.11,
+            x,
+            y,
+          });
+        }
+      }
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      resizeCanvas();
+    });
+    resizeObserver.observe(container);
     window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    const vsSource = `
-      attribute vec4 aVertexPosition;
-      void main() {
-        gl_Position = aVertexPosition;
-      }
-    `;
-
-    const fsSource = `
-      precision highp float;
-      uniform vec2 u_resolution;
-      uniform float u_time;
-      uniform vec3 u_dotColor;
-
-      vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-      float snoise(vec2 v){
-        const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
-        vec2 i  = floor(v + dot(v, C.yy));
-        vec2 x0 = v - i + dot(i, C.xx);
-        vec2 i1;
-        i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-        vec4 x12 = x0.xyxy + C.xxzz;
-        x12.xy -= i1;
-        i = mod(i, 289.0);
-        vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
-        vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-        m = m*m; m = m*m;
-        vec3 x = 2.0 * fract(p * C.www) - 1.0;
-        vec3 h = abs(x) - 0.5;
-        vec3 ox = floor(x + 0.5);
-        vec3 a0 = x - ox;
-        m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
-        vec3 g;
-        g.x  = a0.x  * x0.x  + h.x  * x0.y;
-        g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-        return 130.0 * dot(m, g);
+    const posterImage = new Image();
+    posterImage.src = backgroundImageSrc;
+    posterImage.decoding = 'async';
+    posterImage.onload = () => {
+      if (!sampleContext) {
+        return;
       }
 
-      void main() {
-        vec2 st = gl_FragCoord.xy/u_resolution.xy;
-        st.x *= u_resolution.x/u_resolution.y;
-
-        float scale = 60.0;
-        vec2 gridUv = st * scale;
-        vec2 id = floor(gridUv);
-        vec2 fractUv = fract(gridUv) - 0.5;
-
-        float t = u_time * 0.15;
-        float n1 = snoise(id * 0.08 + vec2(t, t*0.3));
-        float finalNoise = n1 * 0.5 + 0.5;
-
-        float targetRadius = smoothstep(0.3, 0.7, finalNoise) * 0.42;
-        float dist = length(fractUv);
-        float edge = 0.06;
-        float dotAlpha = 1.0 - smoothstep(targetRadius - edge, targetRadius + edge, dist);
-
-        gl_FragColor = vec4(u_dotColor, dotAlpha * 0.9);
-      }
-    `;
-
-    function createShader(glCtx: WebGLRenderingContext, type: number, source: string) {
-      const shader = glCtx.createShader(type)!;
-      glCtx.shaderSource(shader, source);
-      glCtx.compileShader(shader);
-      return shader;
-    }
-
-    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
-    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-    const program = gl.createProgram()!;
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-
-    const positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, 1, 1, 1, -1, -1, 1, -1]), gl.STATIC_DRAW);
-
-    const positionLocation = gl.getAttribLocation(program, 'aVertexPosition');
-    const resolutionLocation = gl.getUniformLocation(program, 'u_resolution');
-    const timeLocation = gl.getUniformLocation(program, 'u_time');
-    const dotColorLocation = gl.getUniformLocation(program, 'u_dotColor');
+      sampleCanvas.width = posterImage.naturalWidth;
+      sampleCanvas.height = posterImage.naturalHeight;
+      sampleContext.drawImage(posterImage, 0, 0);
+      const pixels = sampleContext.getImageData(
+        0,
+        0,
+        posterImage.naturalWidth,
+        posterImage.naturalHeight
+      );
+      imageSample = {
+        data: pixels.data,
+        height: pixels.height,
+        width: pixels.width,
+      };
+      resizeCanvas();
+    };
 
     function render(time: number) {
-      time *= 0.001;
-      gl!.viewport(0, 0, canvas!.width, canvas!.height);
-      gl!.clearColor(0, 0, 0, 0);
-      gl!.clear(gl!.COLOR_BUFFER_BIT);
-      gl!.useProgram(program);
-      gl!.enableVertexAttribArray(positionLocation);
-      gl!.bindBuffer(gl!.ARRAY_BUFFER, positionBuffer);
-      gl!.vertexAttribPointer(positionLocation, 2, gl!.FLOAT, false, 0, 0);
-      gl!.uniform2f(resolutionLocation, canvas!.width, canvas!.height);
-      gl!.uniform1f(timeLocation, time);
-      if (isDarkRef.current) {
-        gl!.uniform3f(dotColorLocation, 0.91, 0.89, 0.86);
-      } else {
-        gl!.uniform3f(dotColorLocation, 0.15, 0.15, 0.15);
+      const rect = container.getBoundingClientRect();
+      const now = time * 0.001;
+      const breath = Math.sin(now * 0.2) * 0.5 + 0.5;
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.fillStyle = isDarkRef.current
+        ? 'rgba(3, 3, 3, 0.18)'
+        : 'rgba(255, 255, 255, 0.1)';
+      ctx.fillRect(0, 0, rect.width, rect.height);
+
+      for (const glyph of glyphs) {
+        const shimmer =
+          Math.sin(glyph.x * 0.028 + now * 0.62 + glyph.phase) * 0.36
+          + Math.cos(glyph.y * 0.024 - now * 0.36 + glyph.phase) * 0.3
+          + Math.sin((glyph.x + glyph.y) * 0.016 - now * 0.24 + glyph.phase) * 0.26;
+        const cluster =
+          Math.sin(now * 0.36 + glyph.y * 0.012 + glyph.phase) * 0.075
+          + Math.cos(now * 0.28 - glyph.x * 0.01 + glyph.phase * 0.7) * 0.065;
+        const pulse =
+          Math.sin(now * 0.5 + glyph.phase * 1.3 + glyph.y * 0.01) * 0.04
+          + breath * 0.024;
+        const contourGlow =
+          Math.sin(
+            now * 0.34
+            + glyph.phase
+            + glyph.x * glyph.contourX * 0.02
+            + glyph.y * glyph.contourY * 0.02
+          ) * 0.05
+          + glyph.detail * 0.035;
+        const intensity = Math.max(
+          0,
+          Math.min(1, glyph.opacityBase + shimmer * 0.09 + cluster + pulse + contourGlow)
+        );
+        if (intensity < glyph.threshold) {
+          continue;
+        }
+
+        const shadowSuppression = Math.max(0, glyph.darkness - 0.54) / 0.46;
+        const opacity = isDarkRef.current
+          ? 0.038
+            + intensity
+              * (0.18 + glyph.detail * 0.12 + (1 - shadowSuppression * 0.7) * 0.1)
+          : 0.022
+            + intensity
+              * (0.12 + glyph.detail * 0.08 + (1 - shadowSuppression * 0.72) * 0.06);
+        const streamX =
+          Math.sin(now * 0.26 + glyph.y * 0.018 + glyph.phase) * 1.12
+          + Math.cos(now * 0.2 - glyph.x * 0.013 + glyph.phase) * 0.9;
+        const streamY =
+          Math.cos(now * 0.24 + glyph.x * 0.015 + glyph.phase) * 0.94
+          + Math.sin(now * 0.18 - glyph.y * 0.011 + glyph.phase * 1.2) * 0.78;
+        const swirlX =
+          Math.sin(now * 0.14 + glyph.x * 0.009 - glyph.y * 0.007 + glyph.phase) * 1.24
+          + Math.cos(now * 0.1 + glyph.y * 0.012 + glyph.phase * 0.8) * 0.82;
+        const swirlY =
+          Math.cos(now * 0.13 + glyph.y * 0.01 - glyph.x * 0.008 + glyph.phase) * 1.14
+          - Math.sin(now * 0.1 + glyph.x * 0.011 + glyph.phase * 0.9) * 0.76;
+        const curl =
+          Math.sin(now * 0.31 + (glyph.x - glyph.y) * 0.01 + glyph.phase) * 0.52
+          + Math.cos(now * 0.23 + (glyph.x + glyph.y) * 0.008 + glyph.phase) * 0.4;
+        const contourWave =
+          Math.sin(
+            now * 0.4
+            + glyph.phase * 1.1
+            + glyph.x * glyph.contourX * 0.018
+            + glyph.y * glyph.contourY * 0.018
+          ) * 1.62
+          + Math.cos(
+            now * 0.25
+            - glyph.phase * 0.8
+            + glyph.x * glyph.contourY * 0.012
+            - glyph.y * glyph.contourX * 0.012
+          ) * 1.04;
+        const contourPulse =
+          Math.cos(
+            now * 0.21
+            + glyph.phase
+            + glyph.x * glyph.contourY * 0.01
+            - glyph.y * glyph.contourX * 0.01
+          ) * 0.58;
+        const contourWeight = 0.3 + glyph.detail * 1.15;
+        const contourDriftX =
+          glyph.contourX * contourWave * glyph.flowScale * contourWeight
+          - glyph.contourY * contourPulse * glyph.flowScale * 0.32;
+        const contourDriftY =
+          glyph.contourY * contourWave * glyph.flowScale * contourWeight
+          + glyph.contourX * contourPulse * glyph.flowScale * 0.32;
+        const ambientWeight = 0.9 - glyph.detail * 0.45;
+        const driftX =
+          (
+            (streamX * 0.6 + swirlX * 0.4 + curl * 0.7) * ambientWeight
+            + contourDriftX
+          ) * (0.85 + breath * 0.35);
+        const driftY =
+          (
+            (streamY * 0.58 + swirlY * 0.42 - curl * 0.55) * ambientWeight
+            + contourDriftY
+          ) * (0.85 + breath * 0.35);
+
+        ctx.globalAlpha = opacity;
+        ctx.drawImage(glyph.sprite, glyph.x + driftX, glyph.y + driftY);
+        ctx.globalAlpha = opacity * (0.3 + glyph.detail * 0.13);
+        ctx.drawImage(glyph.sprite, glyph.x + driftX * 1.52, glyph.y + driftY * 1.52);
+        ctx.globalAlpha = opacity * 0.22;
+        ctx.drawImage(glyph.sprite, glyph.x - driftX * 0.82, glyph.y - driftY * 0.82);
       }
-      gl!.enable(gl!.BLEND);
-      gl!.blendFunc(gl!.SRC_ALPHA, gl!.ONE_MINUS_SRC_ALPHA);
-      gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
+      ctx.globalAlpha = 1;
+
       animFrameRef.current = requestAnimationFrame(render);
     }
 
     animFrameRef.current = requestAnimationFrame(render);
 
     return () => {
+      resizeObserver.disconnect();
       window.removeEventListener('resize', resizeCanvas);
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, []);
+  }, [backgroundImageSrc]);
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: '100%', height: '100%', display: 'block' }}
+      style={{
+        position: 'absolute',
+        inset: 0,
+        width: '100%',
+        height: '100%',
+        display: 'block',
+        zIndex: 1,
+        pointerEvents: 'none',
+      }}
     />
   );
 }
@@ -191,6 +461,9 @@ export function HeroTicket({
   detailRows = DEFAULT_DETAIL_ROWS,
 }: HeroTicketProps) {
   const [isDesktop, setIsDesktop] = useState(false);
+  const [backgroundImageSrc, setBackgroundImageSrc] = useState<string>(
+    HERO_BACKGROUND_IMAGE_SRCS[0]
+  );
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
@@ -199,6 +472,11 @@ export function HeroTicket({
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
+  }, []);
+
+  useEffect(() => {
+    const nextIndex = Math.floor(Math.random() * HERO_BACKGROUND_IMAGE_SRCS.length);
+    setBackgroundImageSrc(HERO_BACKGROUND_IMAGE_SRCS[nextIndex]);
   }, []);
 
   const borderColor = isDark ? 'rgba(232, 228, 220, 0.1)' : 'rgba(0, 0, 0, 0.1)';
@@ -229,41 +507,15 @@ export function HeroTicket({
           width: '100%',
           position: 'relative',
           overflow: 'hidden',
+          backgroundImage: `url('${backgroundImageSrc}')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
           borderRight: isDesktop ? `1px solid ${borderColor}` : 'none',
           borderBottom: isDesktop ? 'none' : `1px solid ${borderColor}`,
           minHeight: isDesktop ? 'auto' : '200px',
         }}
       >
-        <div
-          className="text-text-primary"
-          style={{
-            position: 'absolute',
-            top: '1.5rem',
-            right: '1.5rem',
-            textAlign: 'right',
-            fontSize: '0.7rem',
-            lineHeight: 1.4,
-            letterSpacing: '2px',
-            opacity: 0.8,
-            pointerEvents: 'none',
-            zIndex: 10,
-          }}
-        >
-          <span style={{ display: 'block' }}>R E L A Y</span>
-          <span style={{ display: 'block', paddingLeft: '1.5rem' }}>4 4</span>
-          <span
-            style={{
-              display: 'block',
-              paddingLeft: '0.5rem',
-              marginTop: '8px',
-              fontSize: '0.6rem',
-              opacity: 0.5,
-            }}
-          >
-            S I G N A L &nbsp; N E T W O R K
-          </span>
-        </div>
-        <TicketCanvas isDark={isDark} />
+        <TicketCanvas backgroundImageSrc={backgroundImageSrc} isDark={isDark} />
       </div>
 
       {/* Data — right half */}
