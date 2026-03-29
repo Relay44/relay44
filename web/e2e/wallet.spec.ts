@@ -27,11 +27,14 @@ test.describe('Wallet Required Pages', () => {
     await expect(page).toHaveURL('/portfolio');
   });
 
-  test('market detail shows connect prompt when not connected', async ({ page }) => {
+  test('market detail shows the live connect-to-trade prompt when not connected', async ({
+    page,
+  }) => {
     await page.goto('/markets/polymarket%3A540816');
+    await expect(page.getByText(/connect wallet to trade/i)).toBeVisible();
     await expect(
-      page.getByText(/trading is currently unavailable/i),
+      page.getByText(/approve the sign-in prompt, and return here to place orders against the live book/i),
     ).toBeVisible();
-    expect(await page.getByText(/connect wallet to trade/i).count()).toBe(0);
+    expect(await page.getByText(/trading is currently unavailable/i).count()).toBe(0);
   });
 });
