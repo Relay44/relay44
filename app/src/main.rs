@@ -315,7 +315,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(actix_middleware::Compress::default())
             .wrap(crate::middleware::AccessLog)
             .wrap(crate::middleware::RequestIdMiddleware)
-            .app_data(web::JsonConfig::default().limit(4096))
+            .app_data(web::JsonConfig::default().limit(4 * 1024 * 1024))
             .route("/health", web::get().to(api::health::health_check))
             .route(
                 "/health/detailed",
