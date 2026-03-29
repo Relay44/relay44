@@ -125,6 +125,8 @@ pub struct AppConfig {
     pub polymarket_builder_api_key: String,
     pub polymarket_builder_api_secret: String,
     pub polymarket_builder_api_passphrase: String,
+    pub polymarket_forwarder_url: String,
+    pub polymarket_forwarder_shared_secret: String,
     pub external_credentials_master_key: String,
     pub external_credentials_key_id: String,
     pub limitless_api_base: String,
@@ -333,6 +335,12 @@ impl AppConfig {
             .unwrap_or_default()
             .trim()
             .to_string();
+        let polymarket_forwarder_url =
+            normalize_http_endpoint(env::var("POLYMARKET_FORWARDER_URL").unwrap_or_default());
+        let polymarket_forwarder_shared_secret = env::var("POLYMARKET_FORWARDER_SHARED_SECRET")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
         let external_credentials_master_key =
             env::var("EXTERNAL_CREDENTIALS_MASTER_KEY").unwrap_or_else(|_| String::new());
@@ -489,6 +497,8 @@ impl AppConfig {
             polymarket_builder_api_key,
             polymarket_builder_api_secret,
             polymarket_builder_api_passphrase,
+            polymarket_forwarder_url,
+            polymarket_forwarder_shared_secret,
             external_credentials_master_key,
             external_credentials_key_id,
             limitless_api_base: env::var("LIMITLESS_API_BASE")
@@ -622,6 +632,8 @@ mod tests {
             "POLYMARKET_BUILDER_API_KEY",
             "POLYMARKET_BUILDER_API_SECRET",
             "POLYMARKET_BUILDER_API_PASSPHRASE",
+            "POLYMARKET_FORWARDER_URL",
+            "POLYMARKET_FORWARDER_SHARED_SECRET",
             "EXTERNAL_CREDENTIALS_MASTER_KEY",
             "EXTERNAL_CREDENTIALS_KEY_ID",
             "LIMITLESS_API_BASE",
@@ -822,6 +834,26 @@ mod tests {
             assert_eq!(
                 config.polymarket_builder_api_passphrase,
                 "builder-passphrase"
+            );
+        });
+    }
+
+    #[test]
+    fn test_polymarket_forwarder_config_parsing() {
+        with_clean_env(|| {
+            std::env::set_var("ENVIRONMENT", "development");
+            std::env::set_var("POLYMARKET_FORWARDER_URL", "forwarder.internal:8099");
+            std::env::set_var("POLYMARKET_FORWARDER_SHARED_SECRET", "shared-secret");
+
+            let config = AppConfig::from_env();
+
+            assert_eq!(
+                config.polymarket_forwarder_url,
+                "http://forwarder.internal:8099"
+            );
+            assert_eq!(
+                config.polymarket_forwarder_shared_secret,
+                "shared-secret"
             );
         });
     }
