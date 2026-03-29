@@ -122,6 +122,9 @@ pub struct AppConfig {
     pub polymarket_api_key: String,
     pub polymarket_api_secret: String,
     pub polymarket_api_passphrase: String,
+    pub polymarket_builder_api_key: String,
+    pub polymarket_builder_api_secret: String,
+    pub polymarket_builder_api_passphrase: String,
     pub external_credentials_master_key: String,
     pub external_credentials_key_id: String,
     pub limitless_api_base: String,
@@ -318,6 +321,18 @@ impl AppConfig {
             .unwrap_or_default()
             .trim()
             .to_string();
+        let polymarket_builder_api_key = env::var("POLYMARKET_BUILDER_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let polymarket_builder_api_secret = env::var("POLYMARKET_BUILDER_API_SECRET")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let polymarket_builder_api_passphrase = env::var("POLYMARKET_BUILDER_API_PASSPHRASE")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
         let external_credentials_master_key =
             env::var("EXTERNAL_CREDENTIALS_MASTER_KEY").unwrap_or_else(|_| String::new());
@@ -471,6 +486,9 @@ impl AppConfig {
             polymarket_api_key,
             polymarket_api_secret,
             polymarket_api_passphrase,
+            polymarket_builder_api_key,
+            polymarket_builder_api_secret,
+            polymarket_builder_api_passphrase,
             external_credentials_master_key,
             external_credentials_key_id,
             limitless_api_base: env::var("LIMITLESS_API_BASE")
@@ -601,6 +619,9 @@ mod tests {
             "POLYMARKET_API_KEY",
             "POLYMARKET_API_SECRET",
             "POLYMARKET_API_PASSPHRASE",
+            "POLYMARKET_BUILDER_API_KEY",
+            "POLYMARKET_BUILDER_API_SECRET",
+            "POLYMARKET_BUILDER_API_PASSPHRASE",
             "EXTERNAL_CREDENTIALS_MASTER_KEY",
             "EXTERNAL_CREDENTIALS_KEY_ID",
             "LIMITLESS_API_BASE",
@@ -786,6 +807,9 @@ mod tests {
             std::env::set_var("POLYMARKET_API_KEY", "poly-key");
             std::env::set_var("POLYMARKET_API_SECRET", "poly-secret");
             std::env::set_var("POLYMARKET_API_PASSPHRASE", "poly-passphrase");
+            std::env::set_var("POLYMARKET_BUILDER_API_KEY", "builder-key");
+            std::env::set_var("POLYMARKET_BUILDER_API_SECRET", "builder-secret");
+            std::env::set_var("POLYMARKET_BUILDER_API_PASSPHRASE", "builder-passphrase");
 
             let config = AppConfig::from_env();
 
@@ -793,6 +817,12 @@ mod tests {
             assert_eq!(config.polymarket_api_key, "poly-key");
             assert_eq!(config.polymarket_api_secret, "poly-secret");
             assert_eq!(config.polymarket_api_passphrase, "poly-passphrase");
+            assert_eq!(config.polymarket_builder_api_key, "builder-key");
+            assert_eq!(config.polymarket_builder_api_secret, "builder-secret");
+            assert_eq!(
+                config.polymarket_builder_api_passphrase,
+                "builder-passphrase"
+            );
         });
     }
 }

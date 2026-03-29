@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::api::auth::{extract_authenticated_user, extract_jwt_user, AuthenticatedUserWithRole};
 use crate::api::jwt::{check_role, UserRole};
 use crate::api::ApiError;
-use crate::config::ExternalExecutionMode;
+use crate::config::{AppConfig, ExternalExecutionMode};
 use crate::services::external;
 use crate::services::external::credentials::{decrypt_json, encrypt_json, mask_secret};
 use crate::services::external::paper::{realized_pnl, simulate_fill, unrealized_pnl};
@@ -45,6 +45,20 @@ struct PolymarketCredentials {
     api_passphrase: String,
     funder: String,
     signature_type: u8,
+}
+
+struct PolymarketBuilderCredentials<'a> {
+    api_key: &'a str,
+    api_secret: &'a str,
+    api_passphrase: &'a str,
+}
+
+#[derive(Debug)]
+struct PolymarketBuilderHeaders {
+    api_key: String,
+    api_passphrase: String,
+    signature: String,
+    timestamp: String,
 }
 
 struct PolymarketOrderContext {
@@ -1807,6 +1821,25 @@ fn polymarket_request_body(payload: &Value) -> Result<String, ApiError> {
     serde_json::to_string(payload).map_err(|err| ApiError::internal(&err.to_string()))
 }
 
+fn polymarket_hmac_signature(
+    secret: &str,
+    method: &str,
+    path: &str,
+    body: &str,
+    timestamp: &str,
+    invalid_code: &str,
+    invalid_field: &str,
+) -> Result<String, ApiError> {
+    let invalid_message = format!("{invalid_field} is invalid");
+    let decoded_secret = URL_SAFE
+        .decode(secret.trim())
+        .map_err(|_| ApiError::bad_request(invalid_code, invalid_message.as_str()))?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(&decoded_secret)
+        .map_err(|_| ApiError::bad_request(invalid_code, invalid_message.as_str()))?;
+    mac.update(format!("{}{}{}{}", timestamp, method, path, body).as_bytes());
+    Ok(URL_SAFE.encode(mac.finalize().into_bytes()))
+}
+
 fn polymarket_l2_signature(
     api_secret: &str,
     method: &str,
@@ -1814,14 +1847,66 @@ fn polymarket_l2_signature(
     body: &str,
     timestamp: &str,
 ) -> Result<String, ApiError> {
-    let decoded_secret = URL_SAFE.decode(api_secret.trim()).map_err(|_| {
-        ApiError::bad_request("INVALID_CREDENTIALS", "polymarket apiSecret is invalid")
-    })?;
-    let mut mac = Hmac::<Sha256>::new_from_slice(&decoded_secret).map_err(|_| {
-        ApiError::bad_request("INVALID_CREDENTIALS", "polymarket apiSecret is invalid")
-    })?;
-    mac.update(format!("{}{}{}{}", timestamp, method, path, body).as_bytes());
-    Ok(URL_SAFE.encode(mac.finalize().into_bytes()))
+    polymarket_hmac_signature(
+        api_secret,
+        method,
+        path,
+        body,
+        timestamp,
+        "INVALID_CREDENTIALS",
+        "polymarket apiSecret",
+    )
+}
+
+fn polymarket_builder_credentials(config: &AppConfig) -> Option<PolymarketBuilderCredentials<'_>> {
+    let api_key = config.polymarket_builder_api_key.trim();
+    let api_secret = config.polymarket_builder_api_secret.trim();
+    let api_passphrase = config.polymarket_builder_api_passphrase.trim();
+    if api_key.is_empty() || api_secret.is_empty() || api_passphrase.is_empty() {
+        return None;
+    }
+
+    Some(PolymarketBuilderCredentials {
+        api_key,
+        api_secret,
+        api_passphrase,
+    })
+}
+
+fn polymarket_builder_headers(
+    credentials: PolymarketBuilderCredentials<'_>,
+    method: &str,
+    path: &str,
+    body: &str,
+    timestamp: &str,
+) -> Result<PolymarketBuilderHeaders, ApiError> {
+    let signature = polymarket_hmac_signature(
+        credentials.api_secret,
+        method,
+        path,
+        body,
+        timestamp,
+        "INVALID_BUILDER_CREDENTIALS",
+        "polymarket builder apiSecret",
+    )?;
+
+    Ok(PolymarketBuilderHeaders {
+        api_key: credentials.api_key.to_string(),
+        api_passphrase: credentials.api_passphrase.to_string(),
+        signature,
+        timestamp: timestamp.to_string(),
+    })
+}
+
+fn apply_polymarket_builder_headers(
+    request: reqwest::RequestBuilder,
+    headers: &PolymarketBuilderHeaders,
+) -> reqwest::RequestBuilder {
+    request
+        .header("POLY_BUILDER_API_KEY", headers.api_key.as_str())
+        .header("POLY_BUILDER_PASSPHRASE", headers.api_passphrase.as_str())
+        .header("POLY_BUILDER_SIGNATURE", headers.signature.as_str())
+        .header("POLY_BUILDER_TIMESTAMP", headers.timestamp.as_str())
 }
 
 async fn check_polymarket_auth_status(
@@ -2690,9 +2775,21 @@ async fn submit_polymarket_order(
         .header("POLY_API_KEY", credentials.api_key)
         .header("POLY_PASSPHRASE", credentials.api_passphrase)
         .header("POLY_SIGNATURE", signature)
-        .header("POLY_TIMESTAMP", timestamp)
-        .header("Content-Type", "application/json")
-        .body(body)
+        .header("POLY_TIMESTAMP", timestamp.as_str())
+        .header("Content-Type", "application/json");
+    let response = if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
+        let builder_headers = polymarket_builder_headers(
+            builder_credentials,
+            "POST",
+            path,
+            body.as_str(),
+            timestamp.as_str(),
+        )?;
+        apply_polymarket_builder_headers(response, &builder_headers)
+    } else {
+        response
+    }
+    .body(body)
         .send()
         .await
         .map_err(|err| ApiError::internal(&format!("polymarket submit failed: {}", err)))?;
@@ -2873,8 +2970,21 @@ async fn cancel_on_provider(
                 .header("POLY_API_KEY", credentials.api_key)
                 .header("POLY_PASSPHRASE", credentials.api_passphrase)
                 .header("POLY_SIGNATURE", signature)
-                .header("POLY_TIMESTAMP", timestamp)
-                .header("Content-Type", "application/json")
+                .header("POLY_TIMESTAMP", timestamp.as_str())
+                .header("Content-Type", "application/json");
+            let response =
+                if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
+                    let builder_headers = polymarket_builder_headers(
+                        builder_credentials,
+                        "DELETE",
+                        path,
+                        body_string.as_str(),
+                        timestamp.as_str(),
+                    )?;
+                    apply_polymarket_builder_headers(response, &builder_headers)
+                } else {
+                    response
+                }
                 .body(body_string)
                 .send()
                 .await
@@ -6008,6 +6118,46 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("0xabc")
         );
+    }
+
+    #[test]
+    fn polymarket_builder_headers_match_sdk_contract() {
+        let headers = polymarket_builder_headers(
+            PolymarketBuilderCredentials {
+                api_key: "builder-key",
+                api_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                api_passphrase: "builder-passphrase",
+            },
+            "POST",
+            "/order",
+            r#"{"foo":"bar"}"#,
+            "1",
+        )
+        .unwrap();
+
+        assert_eq!(headers.api_key, "builder-key");
+        assert_eq!(headers.api_passphrase, "builder-passphrase");
+        assert_eq!(headers.timestamp, "1");
+        assert_eq!(headers.signature, "lrkaEs3ANc-KEbkGfYeyM-7_fqL3fatsQnztOq-_wXw=");
+    }
+
+    #[test]
+    fn polymarket_builder_headers_reject_invalid_secret() {
+        let err = polymarket_builder_headers(
+            PolymarketBuilderCredentials {
+                api_key: "builder-key",
+                api_secret: "not-base64",
+                api_passphrase: "builder-passphrase",
+            },
+            "DELETE",
+            "/order",
+            r#"{"orderId":"123"}"#,
+            "1",
+        )
+        .unwrap_err();
+
+        assert_eq!(err.code, "INVALID_BUILDER_CREDENTIALS");
+        assert_eq!(err.message, "polymarket builder apiSecret is invalid");
     }
 
     #[test]
