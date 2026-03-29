@@ -16,6 +16,7 @@ export function MarketArtwork({
   sizes,
   priority = false,
 }: MarketArtworkProps) {
+  const isGenerated = !market.imageUrl;
   const src =
     market.imageUrl ||
     buildMarketArtworkDataUrl(
@@ -36,7 +37,10 @@ export function MarketArtwork({
         sizes={sizes}
         priority={priority}
         unoptimized={src.startsWith("data:")}
-        className="object-cover [image-rendering:pixelated]"
+        className={cn(
+          "[image-rendering:pixelated]",
+          isGenerated ? "object-contain p-1.5" : "object-cover"
+        )}
       />
     </div>
   );
