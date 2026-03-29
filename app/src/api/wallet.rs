@@ -359,9 +359,6 @@ pub async fn deposit(
                 "deposit confirmation failed: vault available balance did not increase as expected",
             )
             .await?;
-            intent.status = "confirmed".to_string();
-            store_wallet_intent(&state, &intent).await?;
-
             record_transaction(
                 &state,
                 &transaction_id,
@@ -374,6 +371,9 @@ pub async fn deposit(
                 "confirmed",
             )
             .await?;
+
+            intent.status = "confirmed".to_string();
+            store_wallet_intent(&state, &intent).await?;
 
             Ok(HttpResponse::Ok().json(DepositResponse {
                 transaction_id,
@@ -548,21 +548,21 @@ pub async fn withdraw(
                 "withdraw confirmation failed: vault available balance did not decrease as expected",
             )
             .await?;
-            intent.status = "confirmed".to_string();
-            store_wallet_intent(&state, &intent).await?;
-
             record_transaction(
                 &state,
                 &transaction_id,
                 &wallet,
                 TransactionType::Withdraw,
                 body.amount,
-                Some(wallet.as_str()),
+                None,
                 fee,
                 Some(tx_sig.to_ascii_lowercase()),
                 "confirmed",
             )
             .await?;
+
+            intent.status = "confirmed".to_string();
+            store_wallet_intent(&state, &intent).await?;
 
             Ok(HttpResponse::Ok().json(WithdrawResponse {
                 transaction_id,
