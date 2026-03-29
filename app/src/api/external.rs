@@ -1857,6 +1857,21 @@ fn verify_submitted_typed_data(
     Ok(())
 }
 
+fn submitted_typed_data<'a>(signed_order: &'a Value) -> Option<&'a Value> {
+    signed_order
+        .get("typedData")
+        .or_else(|| signed_order.get("typed_data"))
+}
+
+fn required_signed_order_typed_data<'a>(signed_order: &'a Value) -> Result<&'a Value, ApiError> {
+    submitted_typed_data(signed_order).ok_or_else(|| {
+        ApiError::bad_request(
+            "INVALID_SIGNED_ORDER",
+            "signed order must include typedData unless it is already provider-formatted",
+        )
+    })
+}
+
 fn build_polymarket_submit_payload(
     credential: &StoredCredential,
     typed_data: &Value,
@@ -1901,6 +1916,55 @@ fn build_polymarket_submit_payload(
         "owner": credentials.api_key,
         "orderType": "GTC",
     }))
+}
+
+async fn build_provider_submit_payload(
+    state: &AppState,
+    provider: ExternalProvider,
+    credential: &StoredCredential,
+    market_id: &str,
+    provider_market_ref: &str,
+    price: f64,
+    intent_typed_data: Option<&Value>,
+    signed_order: &Value,
+) -> Result<Value, ApiError> {
+    match provider {
+        ExternalProvider::Limitless => {
+            let empty_typed_data = Value::Null;
+            let typed_data = if signed_order.get("order").is_some() {
+                &empty_typed_data
+            } else if let Some(value) = intent_typed_data.or_else(|| submitted_typed_data(signed_order)) {
+                value
+            } else {
+                return Err(ApiError::bad_request(
+                    "INVALID_SIGNED_ORDER",
+                    "signed order must include typedData unless it is already provider-formatted",
+                ));
+            };
+
+            build_limitless_submit_payload(
+                state,
+                credential,
+                market_id,
+                provider_market_ref,
+                price,
+                typed_data,
+                signed_order,
+            )
+            .await
+        }
+        ExternalProvider::Polymarket => {
+            if signed_order.get("order").is_some() && signed_order.get("owner").is_some() {
+                return Ok(signed_order.clone());
+            }
+
+            let typed_data = match intent_typed_data {
+                Some(value) => value,
+                None => required_signed_order_typed_data(signed_order)?,
+            };
+            build_polymarket_submit_payload(credential, typed_data, signed_order)
+        }
+    }
 }
 
 fn polymarket_request_body(payload: &Value) -> Result<String, ApiError> {
@@ -4056,8 +4120,19 @@ async fn execute_live_agent(
         ));
     };
 
+    let provider_payload = build_provider_submit_payload(
+        state,
+        agent.provider,
+        &credential,
+        agent.market_id.as_str(),
+        "",
+        agent.price,
+        None,
+        &signed_order,
+    )
+    .await?;
     let submit_payload =
-        submit_to_provider(state, agent.provider, &credential, &signed_order).await?;
+        submit_to_provider(state, agent.provider, &credential, &provider_payload).await?;
     let provider_order_id = provider_order_id_from_payload(&submit_payload);
     let now = Utc::now();
     let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
@@ -4075,7 +4150,7 @@ async fn execute_live_agent(
     .bind(agent.provider.as_str())
     .bind(agent.market_id.as_str())
     .bind(provider_order_id.as_str())
-    .bind(&signed_order)
+    .bind(&provider_payload)
     .bind(&submit_payload)
     .bind(now)
     .execute(state.db.pool())
@@ -4733,23 +4808,17 @@ pub async fn submit_external_order(
     .await?;
     ensure_provider_credential_ready(&state, provider, &credential).await?;
 
-    let provider_payload = match provider {
-        ExternalProvider::Limitless => {
-            build_limitless_submit_payload(
-                &state,
-                &credential,
-                intent.market_id.as_str(),
-                intent.provider_market_ref.as_str(),
-                intent.price,
-                &intent.typed_data,
-                &body.signed_order,
-            )
-            .await?
-        }
-        ExternalProvider::Polymarket => {
-            build_polymarket_submit_payload(&credential, &intent.typed_data, &body.signed_order)?
-        }
-    };
+    let provider_payload = build_provider_submit_payload(
+        &state,
+        provider,
+        &credential,
+        intent.market_id.as_str(),
+        intent.provider_market_ref.as_str(),
+        intent.price,
+        Some(&intent.typed_data),
+        &body.signed_order,
+    )
+    .await?;
 
     let now = Utc::now();
     let order_id = Uuid::new_v4().to_string();
@@ -6460,6 +6529,38 @@ mod tests {
                 .and_then(|value| value.get("signature"))
                 .and_then(|value| value.as_str()),
             Some("0xabc")
+        );
+    }
+
+    #[test]
+    fn submitted_typed_data_supports_camel_and_snake_case() {
+        let camel = json!({ "typedData": { "message": { "nonce": "1" } } });
+        let snake = json!({ "typed_data": { "message": { "nonce": "2" } } });
+
+        assert_eq!(
+            submitted_typed_data(&camel)
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.get("nonce"))
+                .and_then(|value| value.as_str()),
+            Some("1")
+        );
+        assert_eq!(
+            submitted_typed_data(&snake)
+                .and_then(|value| value.get("message"))
+                .and_then(|value| value.get("nonce"))
+                .and_then(|value| value.as_str()),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn required_signed_order_typed_data_rejects_missing_payload() {
+        let err = required_signed_order_typed_data(&json!({ "signature": "0xabc" })).unwrap_err();
+
+        assert_eq!(err.code, "INVALID_SIGNED_ORDER");
+        assert_eq!(
+            err.message,
+            "signed order must include typedData unless it is already provider-formatted"
         );
     }
 
