@@ -25,6 +25,7 @@ use crate::AppState;
 use sqlx::{Postgres, QueryBuilder};
 
 const MAX_PAGE_SIZE: i64 = 200;
+const MAX_EXTERNAL_STATE_IMPORT_BATCH_SIZE: usize = 2_000;
 const LIMITLESS_SIGNING_NAME: &str = "Limitless CTF Exchange";
 const LIMITLESS_SIGNING_VERSION: &str = "1";
 const LIMITLESS_ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
@@ -81,6 +82,12 @@ pub struct BindLimitlessWalletRequest {
     pub base_wallet: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalStateBatchRequest {
+    pub rows: Vec<Value>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalCredentialResponse {
@@ -98,6 +105,14 @@ pub struct ExternalCredentialResponse {
 pub struct ExternalCredentialsListResponse {
     pub credentials: Vec<ExternalCredentialResponse>,
     pub total: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportExternalStateResponse {
+    pub ok: bool,
+    pub table: String,
+    pub imported: usize,
 }
 
 #[derive(Serialize)]
@@ -569,6 +584,407 @@ fn ensure_live_write_mode(state: &AppState) -> Result<(), ApiError> {
             "live external venue writes are disabled while EXTERNAL_EXECUTION_MODE=paper",
         ));
     }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum ExternalStateImportTable {
+    Credentials,
+    OrderIntents,
+    Orders,
+    Agents,
+    AgentRuns,
+}
+
+impl ExternalStateImportTable {
+    fn parse(raw: &str) -> Result<Self, ApiError> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "external_credentials" => Ok(Self::Credentials),
+            "external_order_intents" => Ok(Self::OrderIntents),
+            "external_orders" => Ok(Self::Orders),
+            "external_agents" => Ok(Self::Agents),
+            "external_agent_runs" => Ok(Self::AgentRuns),
+            _ => Err(ApiError::bad_request(
+                "INVALID_EXTERNAL_STATE_TABLE",
+                "unsupported external state table",
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Credentials => "external_credentials",
+            Self::OrderIntents => "external_order_intents",
+            Self::Orders => "external_orders",
+            Self::Agents => "external_agents",
+            Self::AgentRuns => "external_agent_runs",
+        }
+    }
+}
+
+async fn ensure_external_state_import_admin(
+    req: &HttpRequest,
+    state: &web::Data<Arc<AppState>>,
+) -> Result<(), ApiError> {
+    let user = extract_jwt_user(req, state)?;
+    check_role(user.role, UserRole::Admin)?;
+    Ok(())
+}
+
+async fn import_external_state_rows(
+    state: &web::Data<Arc<AppState>>,
+    table: ExternalStateImportTable,
+    rows: Vec<Value>,
+) -> Result<usize, ApiError> {
+    if rows.is_empty() {
+        return Ok(0);
+    }
+
+    if rows.len() > MAX_EXTERNAL_STATE_IMPORT_BATCH_SIZE {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_STATE_BATCH_TOO_LARGE",
+            "external state import batch exceeds maximum size",
+        ));
+    }
+
+    let imported = rows.len();
+    let payload = Value::Array(rows);
+
+    let query = match table {
+        ExternalStateImportTable::Credentials => {
+            r#"
+            INSERT INTO external_credentials (
+                id,
+                owner,
+                provider,
+                label,
+                encrypted_payload,
+                key_id,
+                created_at,
+                updated_at,
+                revoked_at
+            )
+            SELECT
+                entry.id,
+                LOWER(entry.owner),
+                entry.provider,
+                entry.label,
+                entry.encrypted_payload,
+                entry.key_id,
+                entry.created_at,
+                entry.updated_at,
+                entry.revoked_at
+            FROM jsonb_to_recordset($1::jsonb) AS entry(
+                id TEXT,
+                owner TEXT,
+                provider TEXT,
+                label TEXT,
+                encrypted_payload TEXT,
+                key_id TEXT,
+                created_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ,
+                revoked_at TIMESTAMPTZ
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET owner = EXCLUDED.owner,
+                provider = EXCLUDED.provider,
+                label = EXCLUDED.label,
+                encrypted_payload = EXCLUDED.encrypted_payload,
+                key_id = EXCLUDED.key_id,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at,
+                revoked_at = EXCLUDED.revoked_at
+            "#
+        }
+        ExternalStateImportTable::OrderIntents => {
+            r#"
+            INSERT INTO external_order_intents (
+                id,
+                owner,
+                provider,
+                market_id,
+                provider_market_ref,
+                outcome,
+                side,
+                price,
+                quantity,
+                preflight,
+                typed_data,
+                status,
+                credential_id,
+                created_at,
+                updated_at
+            )
+            SELECT
+                entry.id,
+                LOWER(entry.owner),
+                entry.provider,
+                entry.market_id,
+                entry.provider_market_ref,
+                entry.outcome,
+                entry.side,
+                entry.price,
+                entry.quantity,
+                COALESCE(entry.preflight, '{}'::jsonb),
+                COALESCE(entry.typed_data, '{}'::jsonb),
+                entry.status,
+                entry.credential_id,
+                entry.created_at,
+                entry.updated_at
+            FROM jsonb_to_recordset($1::jsonb) AS entry(
+                id TEXT,
+                owner TEXT,
+                provider TEXT,
+                market_id TEXT,
+                provider_market_ref TEXT,
+                outcome TEXT,
+                side TEXT,
+                price DOUBLE PRECISION,
+                quantity DOUBLE PRECISION,
+                preflight JSONB,
+                typed_data JSONB,
+                status TEXT,
+                credential_id TEXT,
+                created_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET owner = EXCLUDED.owner,
+                provider = EXCLUDED.provider,
+                market_id = EXCLUDED.market_id,
+                provider_market_ref = EXCLUDED.provider_market_ref,
+                outcome = EXCLUDED.outcome,
+                side = EXCLUDED.side,
+                price = EXCLUDED.price,
+                quantity = EXCLUDED.quantity,
+                preflight = EXCLUDED.preflight,
+                typed_data = EXCLUDED.typed_data,
+                status = EXCLUDED.status,
+                credential_id = EXCLUDED.credential_id,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
+            "#
+        }
+        ExternalStateImportTable::Orders => {
+            r#"
+            INSERT INTO external_orders (
+                id,
+                owner,
+                provider,
+                intent_id,
+                market_id,
+                provider_order_id,
+                status,
+                request_payload,
+                response_payload,
+                error_message,
+                created_at,
+                updated_at
+            )
+            SELECT
+                entry.id,
+                LOWER(entry.owner),
+                entry.provider,
+                entry.intent_id,
+                entry.market_id,
+                entry.provider_order_id,
+                entry.status,
+                COALESCE(entry.request_payload, '{}'::jsonb),
+                COALESCE(entry.response_payload, '{}'::jsonb),
+                entry.error_message,
+                entry.created_at,
+                entry.updated_at
+            FROM jsonb_to_recordset($1::jsonb) AS entry(
+                id TEXT,
+                owner TEXT,
+                provider TEXT,
+                intent_id TEXT,
+                market_id TEXT,
+                provider_order_id TEXT,
+                status TEXT,
+                request_payload JSONB,
+                response_payload JSONB,
+                error_message TEXT,
+                created_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET owner = EXCLUDED.owner,
+                provider = EXCLUDED.provider,
+                intent_id = EXCLUDED.intent_id,
+                market_id = EXCLUDED.market_id,
+                provider_order_id = EXCLUDED.provider_order_id,
+                status = EXCLUDED.status,
+                request_payload = EXCLUDED.request_payload,
+                response_payload = EXCLUDED.response_payload,
+                error_message = EXCLUDED.error_message,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
+            "#
+        }
+        ExternalStateImportTable::Agents => {
+            r#"
+            INSERT INTO external_agents (
+                id,
+                owner,
+                name,
+                provider,
+                market_id,
+                provider_market_ref,
+                outcome,
+                side,
+                price,
+                quantity,
+                cadence_seconds,
+                strategy,
+                credential_id,
+                active,
+                last_executed_at,
+                next_execution_at,
+                created_at,
+                updated_at
+            )
+            SELECT
+                entry.id,
+                LOWER(entry.owner),
+                entry.name,
+                entry.provider,
+                entry.market_id,
+                entry.provider_market_ref,
+                entry.outcome,
+                entry.side,
+                entry.price,
+                entry.quantity,
+                entry.cadence_seconds,
+                entry.strategy,
+                entry.credential_id,
+                entry.active,
+                entry.last_executed_at,
+                entry.next_execution_at,
+                entry.created_at,
+                entry.updated_at
+            FROM jsonb_to_recordset($1::jsonb) AS entry(
+                id TEXT,
+                owner TEXT,
+                name TEXT,
+                provider TEXT,
+                market_id TEXT,
+                provider_market_ref TEXT,
+                outcome TEXT,
+                side TEXT,
+                price DOUBLE PRECISION,
+                quantity DOUBLE PRECISION,
+                cadence_seconds BIGINT,
+                strategy TEXT,
+                credential_id TEXT,
+                active BOOLEAN,
+                last_executed_at TIMESTAMPTZ,
+                next_execution_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET owner = EXCLUDED.owner,
+                name = EXCLUDED.name,
+                provider = EXCLUDED.provider,
+                market_id = EXCLUDED.market_id,
+                provider_market_ref = EXCLUDED.provider_market_ref,
+                outcome = EXCLUDED.outcome,
+                side = EXCLUDED.side,
+                price = EXCLUDED.price,
+                quantity = EXCLUDED.quantity,
+                cadence_seconds = EXCLUDED.cadence_seconds,
+                strategy = EXCLUDED.strategy,
+                credential_id = EXCLUDED.credential_id,
+                active = EXCLUDED.active,
+                last_executed_at = EXCLUDED.last_executed_at,
+                next_execution_at = EXCLUDED.next_execution_at,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
+            "#
+        }
+        ExternalStateImportTable::AgentRuns => {
+            r#"
+            INSERT INTO external_agent_runs (
+                id,
+                agent_id,
+                owner,
+                status,
+                intent_id,
+                external_order_id,
+                error_message,
+                metadata,
+                created_at
+            )
+            SELECT
+                entry.id,
+                entry.agent_id,
+                LOWER(entry.owner),
+                entry.status,
+                entry.intent_id,
+                entry.external_order_id,
+                entry.error_message,
+                COALESCE(entry.metadata, '{}'::jsonb),
+                entry.created_at
+            FROM jsonb_to_recordset($1::jsonb) AS entry(
+                id TEXT,
+                agent_id TEXT,
+                owner TEXT,
+                status TEXT,
+                intent_id TEXT,
+                external_order_id TEXT,
+                error_message TEXT,
+                metadata JSONB,
+                created_at TIMESTAMPTZ
+            )
+            ON CONFLICT (id) DO UPDATE
+            SET agent_id = EXCLUDED.agent_id,
+                owner = EXCLUDED.owner,
+                status = EXCLUDED.status,
+                intent_id = EXCLUDED.intent_id,
+                external_order_id = EXCLUDED.external_order_id,
+                error_message = EXCLUDED.error_message,
+                metadata = EXCLUDED.metadata,
+                created_at = EXCLUDED.created_at
+            "#
+        }
+    };
+
+    sqlx::query(query)
+        .bind(payload)
+        .execute(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(imported)
+}
+
+async fn reset_external_state(state: &web::Data<Arc<AppState>>) -> Result<(), ApiError> {
+    let mut tx = state
+        .db
+        .pool()
+        .begin()
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    for statement in [
+        "DELETE FROM external_agent_runs",
+        "DELETE FROM external_orders",
+        "DELETE FROM external_order_intents",
+        "DELETE FROM external_agents",
+        "DELETE FROM external_credentials",
+        "DELETE FROM external_market_cache",
+    ] {
+        sqlx::query(statement)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
     Ok(())
 }
 
@@ -4693,6 +5109,33 @@ pub async fn run_external_agents_tick(
         agents_scanned: agents.len() as u64,
         agents_executed,
         skips_by_reason,
+    }))
+}
+
+pub async fn reset_imported_external_state(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_state_import_admin(&req, &state).await?;
+    reset_external_state(&state).await?;
+
+    Ok(HttpResponse::Ok().json(json!({ "ok": true })))
+}
+
+pub async fn import_external_state_batch(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    table: web::Path<String>,
+    body: web::Json<ImportExternalStateBatchRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_state_import_admin(&req, &state).await?;
+    let table = ExternalStateImportTable::parse(table.as_str())?;
+    let imported = import_external_state_rows(&state, table, body.into_inner().rows).await?;
+
+    Ok(HttpResponse::Ok().json(ImportExternalStateResponse {
+        ok: true,
+        table: table.as_str().to_string(),
+        imported,
     }))
 }
 
