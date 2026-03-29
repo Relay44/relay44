@@ -69,6 +69,7 @@
     "external-state:migrate": "node scripts/migrate-external-state.mjs",
     "decision-runner:tick": "node scripts/decision-runner-tick.mjs",
     "agents:operator": "node scripts/base-agent-operator.mjs",
+    "polymarket:forwarder": "node services/polymarket-forwarder/server.mjs",
     "x402:facilitator": "node services/x402-facilitator/server.mjs",
     "launch:onchain:verify": "node scripts/verify-base-mainnet-deployment.mjs",
     "matcher:worker": "bash scripts/base-matcher-worker.sh --network mainnet",

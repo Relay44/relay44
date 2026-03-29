@@ -50,6 +50,16 @@ services:
         sync: false
       - key: POLYMARKET_API_PASSPHRASE
         sync: false
+      - key: POLYMARKET_FORWARDER_URL
+        fromService:
+          name: relay44-polymarket-forwarder
+          type: web
+          property: url
+      - key: POLYMARKET_FORWARDER_SHARED_SECRET
+        fromService:
+          name: relay44-polymarket-forwarder
+          type: web
+          envVarKey: POLYMARKET_FORWARDER_SHARED_SECRET
       - key: EXTERNAL_CREDENTIALS_MASTER_KEY
         sync: false
       - key: EXTERNAL_CREDENTIALS_KEY_ID
@@ -226,6 +236,26 @@ services:
         sync: false
       - key: BASE_CHAIN_ID
         value: "8453"
+
+  - type: web
+    name: relay44-polymarket-forwarder
+    runtime: node
+    region: singapore
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm run polymarket:forwarder
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: POLYMARKET_FORWARDER_HOST
+        value: 0.0.0.0
+      - key: POLYMARKET_FORWARDER_PORT
+        value: "8099"
+      - key: POLYMARKET_FORWARDER_SHARED_SECRET
+        generateValue: true
+      - key: POLYMARKET_FORWARDER_TARGET
+        value: https://clob.polymarket.com
 
   - type: pserv
     name: relay44-xmtp-bridge
