@@ -623,6 +623,14 @@ async fn main() -> std::io::Result<()> {
                                 web::post().to(api::external::run_external_agents_tick),
                             )
                             .route(
+                                "/admin/state/reset",
+                                web::post().to(api::external::reset_imported_external_state),
+                            )
+                            .route(
+                                "/admin/state/{table}",
+                                web::post().to(api::external::import_external_state_batch),
+                            )
+                            .route(
                                 "/agents/{agent_id}",
                                 web::patch().to(api::external::update_external_agent),
                             )
