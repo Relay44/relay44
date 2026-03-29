@@ -60,7 +60,7 @@ function ConnectWalletButton() {
     return `${address.slice(0, 4)}...${address.slice(-4)}`;
   };
   const walletButtonClass =
-    'inline-flex h-10 items-center border border-border bg-transparent px-4 text-sm font-mono text-text-primary transition-colors hover:bg-bg-hover';
+    'inline-flex h-10 items-center border border-border bg-transparent px-4 text-[0.7rem] font-mono text-text-primary transition-colors hover:bg-bg-hover';
 
   const installSolanaWallet = (
     <a
@@ -87,7 +87,7 @@ function ConnectWalletButton() {
             ? `Connected wallet ${truncateAddress(baseWallet.address)}`
             : "Connect Wallet"
         }
-        className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-sm font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
+        className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-[0.7rem] font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
       >
         <span className="truncate sm:hidden">{compactLabel}</span>
         <span className="hidden sm:inline">
@@ -111,7 +111,7 @@ function ConnectWalletButton() {
             ? `Connected wallet ${truncateAddress(solanaWallet.address)}`
             : "Connect Wallet"
         }
-        className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-sm font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
+        className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-[0.7rem] font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
       >
         <span className="truncate sm:hidden">
           {solanaWallet.isConnected && solanaWallet.address

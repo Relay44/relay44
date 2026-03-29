@@ -6,7 +6,12 @@ import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { PageShell } from "@/components/layout";
 import { ReadOnlyNotice } from "@/components/runtime/ReadOnlyNotice";
 import { Button, LoadingScreen, useToast } from "@/components/ui";
-import { MarketHeader, MarketStats, MarketInfo } from "@/components/market";
+import {
+  MarketHeader,
+  MarketStats,
+  MarketInfo,
+  TradingViewChart,
+} from "@/components/market";
 import {
   ExternalOrderForm,
   OrderForm,
@@ -24,6 +29,7 @@ import {
   useSessionState,
 } from "@/hooks";
 import { SITE_URL } from "@/lib/seo";
+import { extractTradingViewReference } from "@/lib/tradingView";
 
 export default function MarketDetailPage() {
   const params = useParams();
@@ -102,6 +108,8 @@ export default function MarketDetailPage() {
     );
   }
 
+  const tradingViewReference = extractTradingViewReference(market.description);
+
   return (
     <PageShell>
       <Link
@@ -113,13 +121,24 @@ export default function MarketDetailPage() {
       </Link>
 
       <div className="flex items-center justify-between mb-2">
-        <MarketHeader market={market} />
+        <MarketHeader
+          market={market}
+          suppressTradingViewLinks={Boolean(tradingViewReference)}
+        />
         <ShareCastButton
           text={`${market.question}\n\nYES ${Math.round(market.yesPrice * 100)}% | NO ${Math.round(market.noPrice * 100)}%`}
           embedUrl={`${SITE_URL}/markets/${encodeURIComponent(market.id)}`}
         />
       </div>
       <MarketStats market={market} />
+
+      {tradingViewReference ? (
+        <TradingViewChart
+          className="mb-6"
+          symbol={tradingViewReference.symbol}
+          sourceUrl={tradingViewReference.url}
+        />
+      ) : null}
 
       {canResolveInternalMarket ? (
         <div className="mb-6 border border-border bg-bg-secondary p-4">
@@ -256,13 +275,13 @@ export default function MarketDetailPage() {
               <div className="flex flex-wrap justify-center gap-3">
                 <Link
                   href="/how-it-works"
-                  className="inline-flex h-10 items-center border border-accent px-4 text-sm uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
+                  className="inline-flex h-10 items-center border border-accent px-4 text-[0.7rem] uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
                 >
                   How it works
                 </Link>
                 <Link
                   href="/wallet"
-                  className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+                  className="inline-flex h-10 items-center border border-border px-4 text-[0.7rem] uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
                 >
                   Wallet setup
                 </Link>
