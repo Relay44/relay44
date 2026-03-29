@@ -231,6 +231,14 @@ export interface ExternalOrderRecord {
   error_message?: string | null;
 }
 
+export interface PreparedExternalProviderRequest {
+  provider: 'limitless' | 'polymarket';
+  url: string;
+  method: 'POST' | 'DELETE';
+  headers: Record<string, string>;
+  body: string;
+}
+
 interface ExternalOrdersListResponse {
   orders: ExternalOrderRecord[];
   total: number;
@@ -1300,8 +1308,27 @@ class ApiClient {
     intentId: string;
     signedOrder: Record<string, unknown>;
     credentialId?: string;
+    providerResponse?: Record<string, unknown>;
+    providerStatus?: number;
   }): Promise<ExternalOrderRecord> {
     return this.request('/external/orders/submit', {
+      method: 'POST',
+      body: JSON.stringify({
+        intentId: data.intentId,
+        signedOrder: data.signedOrder,
+        credentialId: data.credentialId,
+        providerResponse: data.providerResponse,
+        providerStatus: data.providerStatus,
+      }),
+    });
+  }
+
+  async prepareExternalOrderSubmit(data: {
+    intentId: string;
+    signedOrder: Record<string, unknown>;
+    credentialId?: string;
+  }): Promise<PreparedExternalProviderRequest> {
+    return this.request('/external/orders/prepare-submit', {
       method: 'POST',
       body: JSON.stringify({
         intentId: data.intentId,
@@ -1316,8 +1343,29 @@ class ApiClient {
     providerOrderId: string;
     credentialId?: string;
     payload?: Record<string, unknown>;
+    providerResponse?: Record<string, unknown>;
+    providerStatus?: number;
   }): Promise<{ ok: boolean }> {
     return this.request('/external/orders/cancel', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: data.provider,
+        providerOrderId: data.providerOrderId,
+        credentialId: data.credentialId,
+        payload: data.payload,
+        providerResponse: data.providerResponse,
+        providerStatus: data.providerStatus,
+      }),
+    });
+  }
+
+  async prepareExternalOrderCancel(data: {
+    provider: 'limitless' | 'polymarket';
+    providerOrderId: string;
+    credentialId?: string;
+    payload?: Record<string, unknown>;
+  }): Promise<PreparedExternalProviderRequest> {
+    return this.request('/external/orders/prepare-cancel', {
       method: 'POST',
       body: JSON.stringify({
         provider: data.provider,

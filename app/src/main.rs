@@ -599,8 +599,16 @@ async fn main() -> std::io::Result<()> {
                                 web::post().to(api::external::submit_external_order),
                             )
                             .route(
+                                "/orders/prepare-submit",
+                                web::post().to(api::external::prepare_external_order_submit),
+                            )
+                            .route(
                                 "/orders/cancel",
                                 web::post().to(api::external::cancel_external_order),
+                            )
+                            .route(
+                                "/orders/prepare-cancel",
+                                web::post().to(api::external::prepare_external_order_cancel),
                             )
                             .route(
                                 "/orders",

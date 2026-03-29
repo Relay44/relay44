@@ -188,10 +188,30 @@ pub struct ExternalOrderIntentResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PrepareExternalOrderSubmitRequest {
+    pub intent_id: String,
+    pub signed_order: Value,
+    pub credential_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedExternalProviderRequestResponse {
+    pub provider: String,
+    pub url: String,
+    pub method: String,
+    pub headers: BTreeMap<String, String>,
+    pub body: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubmitExternalOrderRequest {
     pub intent_id: String,
     pub signed_order: Value,
     pub credential_id: Option<String>,
+    pub provider_response: Option<Value>,
+    pub provider_status: Option<u16>,
 }
 
 #[derive(Deserialize)]
@@ -201,6 +221,8 @@ pub struct CancelExternalOrderRequest {
     pub provider_order_id: String,
     pub credential_id: Option<String>,
     pub payload: Option<Value>,
+    pub provider_response: Option<Value>,
+    pub provider_status: Option<u16>,
 }
 
 #[derive(Serialize)]
@@ -410,6 +432,16 @@ struct StoredCredential {
     id: String,
     owner: String,
     payload: Value,
+}
+
+#[derive(Debug)]
+struct ExternalOrderIntentRecord {
+    provider: ExternalProvider,
+    market_id: String,
+    provider_market_ref: String,
+    credential_id: Option<String>,
+    price: f64,
+    typed_data: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -1312,6 +1344,45 @@ async fn load_credential(
     })
 }
 
+async fn load_external_order_intent_record(
+    state: &AppState,
+    owner: &str,
+    intent_id: &str,
+) -> Result<ExternalOrderIntentRecord, ApiError> {
+    let row = sqlx::query(
+        "SELECT provider, market_id, provider_market_ref, credential_id, price, typed_data
+         FROM external_order_intents
+         WHERE id = $1 AND owner = $2",
+    )
+    .bind(intent_id)
+    .bind(owner)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?
+    .ok_or_else(|| ApiError::not_found("External order intent"))?;
+
+    let provider_raw: String = row
+        .try_get("provider")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(ExternalOrderIntentRecord {
+        provider: normalize_provider(provider_raw.as_str())?,
+        market_id: row
+            .try_get("market_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        provider_market_ref: row
+            .try_get("provider_market_ref")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        credential_id: row.try_get("credential_id").ok(),
+        price: row
+            .try_get("price")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        typed_data: row
+            .try_get("typed_data")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+    })
+}
+
 fn api_key_from_payload(payload: &Value, keys: &[&str]) -> Option<String> {
     for key in keys {
         if let Some(value) = payload.get(*key).and_then(|entry| entry.as_str()) {
@@ -1912,6 +1983,60 @@ fn polymarket_builder_headers(
     })
 }
 
+fn polymarket_clob_url(config: &AppConfig, path: &str) -> String {
+    format!(
+        "{}{}",
+        config.polymarket_clob_api_base.trim_end_matches('/'),
+        path
+    )
+}
+
+fn build_polymarket_request_headers(
+    state: &AppState,
+    credential: &StoredCredential,
+    method: &str,
+    path: &str,
+    body: &str,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    let credentials = polymarket_credentials(credential)?;
+    let owner = normalize_evm_wallet(credential.owner.as_str())?.to_ascii_lowercase();
+    let timestamp = Utc::now().timestamp().to_string();
+    let signature = polymarket_l2_signature(
+        credentials.api_secret.as_str(),
+        method,
+        path,
+        body,
+        timestamp.as_str(),
+    )?;
+    let mut headers = BTreeMap::from([
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("POLY_ADDRESS".to_string(), owner),
+        ("POLY_API_KEY".to_string(), credentials.api_key),
+        (
+            "POLY_PASSPHRASE".to_string(),
+            credentials.api_passphrase,
+        ),
+        ("POLY_SIGNATURE".to_string(), signature),
+        ("POLY_TIMESTAMP".to_string(), timestamp),
+    ]);
+
+    if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
+        let builder_headers = polymarket_builder_headers(
+            builder_credentials,
+            method,
+            path,
+            body,
+            headers
+                .get("POLY_TIMESTAMP")
+                .map(String::as_str)
+                .unwrap_or_default(),
+        )?;
+        insert_polymarket_builder_headers(&mut headers, &builder_headers);
+    }
+
+    Ok(headers)
+}
+
 fn polymarket_forwarder(config: &AppConfig) -> Option<PolymarketForwarder<'_>> {
     let url = config.polymarket_forwarder_url.trim();
     let shared_secret = config.polymarket_forwarder_shared_secret.trim();
@@ -1944,13 +2069,47 @@ fn insert_polymarket_builder_headers(
     );
 }
 
+fn prepare_polymarket_provider_request(
+    state: &AppState,
+    credential: &StoredCredential,
+    method: &str,
+    path: &str,
+    payload: &Value,
+) -> Result<PreparedExternalProviderRequestResponse, ApiError> {
+    let body = polymarket_request_body(payload)?;
+    let headers = build_polymarket_request_headers(state, credential, method, path, body.as_str())?;
+
+    Ok(PreparedExternalProviderRequestResponse {
+        provider: ExternalProvider::Polymarket.as_str().to_string(),
+        url: polymarket_clob_url(&state.config, path),
+        method: method.to_string(),
+        headers,
+        body,
+    })
+}
+
 fn polymarket_provider_error_message<'a>(payload: &'a Value, fallback: &'a str) -> &'a str {
+    if let Some(raw) = payload.as_str() {
+        return raw;
+    }
+
     payload
         .get("errorMsg")
         .or_else(|| payload.get("message"))
         .or_else(|| payload.get("error"))
         .and_then(|value| value.as_str())
         .unwrap_or(fallback)
+}
+
+fn provider_order_id(payload: &Value) -> String {
+    payload
+        .get("orderId")
+        .or_else(|| payload.get("id"))
+        .or_else(|| payload.get("order_id"))
+        .or_else(|| payload.get("order").and_then(|value| value.get("id")))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 async fn execute_polymarket_request(
@@ -2865,42 +3024,9 @@ async fn submit_polymarket_order(
     credential: &StoredCredential,
     signed_order: &Value,
 ) -> Result<Value, ApiError> {
-    let credentials = polymarket_credentials(credential)?;
-    let owner = normalize_evm_wallet(credential.owner.as_str())?.to_ascii_lowercase();
     let body = polymarket_request_body(signed_order)?;
     let path = "/order";
-    let timestamp = Utc::now().timestamp().to_string();
-    let signature = polymarket_l2_signature(
-        credentials.api_secret.as_str(),
-        "POST",
-        path,
-        body.as_str(),
-        timestamp.as_str(),
-    )?;
-    let mut headers = BTreeMap::from([
-        ("Content-Type".to_string(), "application/json".to_string()),
-        ("POLY_ADDRESS".to_string(), owner),
-        ("POLY_API_KEY".to_string(), credentials.api_key),
-        (
-            "POLY_PASSPHRASE".to_string(),
-            credentials.api_passphrase,
-        ),
-        ("POLY_SIGNATURE".to_string(), signature),
-        ("POLY_TIMESTAMP".to_string(), timestamp),
-    ]);
-    if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
-        let builder_headers = polymarket_builder_headers(
-            builder_credentials,
-            "POST",
-            path,
-            body.as_str(),
-            headers
-                .get("POLY_TIMESTAMP")
-                .map(String::as_str)
-                .unwrap_or_default(),
-        )?;
-        insert_polymarket_builder_headers(&mut headers, &builder_headers);
-    }
+    let headers = build_polymarket_request_headers(state, credential, "POST", path, body.as_str())?;
 
     execute_polymarket_request(
         state,
@@ -3048,45 +3174,11 @@ async fn cancel_on_provider(
             Ok(body)
         }
         ExternalProvider::Polymarket => {
-            let credentials = polymarket_credentials(credential)?;
-            let owner = normalize_evm_wallet(credential.owner.as_str())?.to_ascii_lowercase();
             let body = payload.unwrap_or_else(|| json!({ "orderId": provider_order_id }));
             let body_string = polymarket_request_body(&body)?;
             let path = "/order";
-            let timestamp = Utc::now().timestamp().to_string();
-            let signature = polymarket_l2_signature(
-                credentials.api_secret.as_str(),
-                "DELETE",
-                path,
-                body_string.as_str(),
-                timestamp.as_str(),
-            )?;
-            let mut headers = BTreeMap::from([
-                ("Content-Type".to_string(), "application/json".to_string()),
-                ("POLY_ADDRESS".to_string(), owner),
-                ("POLY_API_KEY".to_string(), credentials.api_key),
-                (
-                    "POLY_PASSPHRASE".to_string(),
-                    credentials.api_passphrase,
-                ),
-                ("POLY_SIGNATURE".to_string(), signature),
-                ("POLY_TIMESTAMP".to_string(), timestamp),
-            ]);
-            if let Some(builder_credentials) =
-                polymarket_builder_credentials(&state.config)
-            {
-                let builder_headers = polymarket_builder_headers(
-                    builder_credentials,
-                    "DELETE",
-                    path,
-                    body_string.as_str(),
-                    headers
-                        .get("POLY_TIMESTAMP")
-                        .map(String::as_str)
-                        .unwrap_or_default(),
-                )?;
-                insert_polymarket_builder_headers(&mut headers, &builder_headers);
-            }
+            let headers =
+                build_polymarket_request_headers(state, credential, "DELETE", path, body_string.as_str())?;
 
             execute_polymarket_request(
                 state,
@@ -4555,6 +4647,53 @@ pub async fn create_external_order_intent(
     }))
 }
 
+pub async fn prepare_external_order_submit(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareExternalOrderSubmitRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_TRADING_DISABLED",
+            "external trading is disabled",
+        ));
+    }
+    ensure_live_write_mode(&state)?;
+
+    let user = extract_authenticated_user(&req, &state).await?;
+    let intent = load_external_order_intent_record(&state, user.wallet_address.as_str(), body.intent_id.as_str()).await?;
+    ensure_provider_action_allowed(&req, intent.provider, ProviderRailAction::TradeOpen)?;
+
+    if intent.provider != ExternalProvider::Polymarket {
+        return Err(ApiError::bad_request(
+            "CLIENT_EXECUTION_UNSUPPORTED",
+            "prepared client execution is only available for polymarket",
+        ));
+    }
+
+    let credential_id = body
+        .credential_id
+        .as_deref()
+        .map(ToOwned::to_owned)
+        .or(intent.credential_id.clone());
+    let credential = load_credential(
+        &state,
+        user.wallet_address.as_str(),
+        intent.provider,
+        credential_id.as_deref(),
+    )
+    .await?;
+    ensure_provider_credential_ready(&state, intent.provider, &credential).await?;
+
+    let provider_payload =
+        build_polymarket_submit_payload(&credential, &intent.typed_data, &body.signed_order)?;
+    let prepared =
+        prepare_polymarket_provider_request(&state, &credential, "POST", "/order", &provider_payload)?;
+
+    Ok(HttpResponse::Ok().json(prepared))
+}
+
 pub async fn submit_external_order(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
@@ -4570,30 +4709,16 @@ pub async fn submit_external_order(
     ensure_live_write_mode(&state)?;
 
     let user = extract_authenticated_user(&req, &state).await?;
-
-    let row = sqlx::query(
-        "SELECT id, provider, market_id, provider_market_ref, credential_id, price, typed_data, status
-         FROM external_order_intents
-         WHERE id = $1 AND owner = $2",
-    )
-    .bind(body.intent_id.as_str())
-    .bind(user.wallet_address.as_str())
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|err| ApiError::internal(&err.to_string()))?
-    .ok_or_else(|| ApiError::not_found("External order intent"))?;
-
-    let provider_raw: String = row
-        .try_get("provider")
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
-    let provider = normalize_provider(provider_raw.as_str())?;
+    let intent =
+        load_external_order_intent_record(&state, user.wallet_address.as_str(), body.intent_id.as_str()).await?;
+    let provider = intent.provider;
     ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
 
     let credential_id = body
         .credential_id
         .as_deref()
         .map(ToOwned::to_owned)
-        .or_else(|| row.try_get::<String, _>("credential_id").ok());
+        .or(intent.credential_id.clone());
 
     let credential = load_credential(
         &state,
@@ -4604,61 +4729,90 @@ pub async fn submit_external_order(
     .await?;
     ensure_provider_credential_ready(&state, provider, &credential).await?;
 
-    let market_id: String = row
-        .try_get("market_id")
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
-    let provider_market_ref: String = row
-        .try_get("provider_market_ref")
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
-    let price: f64 = row
-        .try_get("price")
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
-    let typed_data: Value = row
-        .try_get("typed_data")
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
-
     let provider_payload = match provider {
         ExternalProvider::Limitless => {
             build_limitless_submit_payload(
                 &state,
                 &credential,
-                market_id.as_str(),
-                provider_market_ref.as_str(),
-                price,
-                &typed_data,
+                intent.market_id.as_str(),
+                intent.provider_market_ref.as_str(),
+                intent.price,
+                &intent.typed_data,
                 &body.signed_order,
             )
             .await?
         }
         ExternalProvider::Polymarket => {
-            build_polymarket_submit_payload(&credential, &typed_data, &body.signed_order)?
+            build_polymarket_submit_payload(&credential, &intent.typed_data, &body.signed_order)?
         }
     };
 
-    let provider_response =
-        submit_to_provider(&state, provider, &credential, &provider_payload).await;
     let now = Utc::now();
     let order_id = Uuid::new_v4().to_string();
+    let (status, payload, error_message, provider_order_id) =
+        if provider == ExternalProvider::Polymarket {
+            if let Some(client_payload) = body.provider_response.clone() {
+                let provider_status = body.provider_status.unwrap_or(200);
+                if (200..300).contains(&provider_status) {
+                    (
+                        "submitted".to_string(),
+                        client_payload.clone(),
+                        None,
+                        provider_order_id(&client_payload),
+                    )
+                } else {
+                    (
+                        "failed".to_string(),
+                        client_payload.clone(),
+                        Some(
+                            polymarket_provider_error_message(
+                                &client_payload,
+                                "polymarket order submission failed",
+                            )
+                            .to_string(),
+                        ),
+                        String::new(),
+                    )
+                }
+            } else {
+                match submit_to_provider(&state, provider, &credential, &provider_payload).await {
+                    Ok(payload) => (
+                        "submitted".to_string(),
+                        payload.clone(),
+                        None,
+                        provider_order_id(&payload),
+                    ),
+                    Err(err) => (
+                        "failed".to_string(),
+                        json!({ "error": err.message }),
+                        Some(err.message),
+                        String::new(),
+                    ),
+                }
+            }
+        } else {
+            if body.provider_response.is_some() || body.provider_status.is_some() {
+                return Err(ApiError::bad_request(
+                    "CLIENT_EXECUTION_UNSUPPORTED",
+                    "prepared client execution is only available for polymarket",
+                ));
+            }
 
-    let (status, payload, error_message, provider_order_id) = match provider_response {
-        Ok(payload) => {
-            let provider_order_id = payload
-                .get("orderId")
-                .or_else(|| payload.get("id"))
-                .or_else(|| payload.get("order_id"))
-                .or_else(|| payload.get("order").and_then(|value| value.get("id")))
-                .and_then(|value| value.as_str())
-                .unwrap_or_default()
-                .to_string();
-            ("submitted".to_string(), payload, None, provider_order_id)
-        }
-        Err(err) => (
-            "failed".to_string(),
-            json!({ "error": err.message }),
-            Some(err.message),
-            String::new(),
-        ),
-    };
+            match submit_to_provider(&state, provider, &credential, &provider_payload).await {
+                Ok(payload) => (
+                    "submitted".to_string(),
+                    payload.clone(),
+                    None,
+                    provider_order_id(&payload),
+                ),
+                Err(err) => (
+                    "failed".to_string(),
+                    json!({ "error": err.message }),
+                    Some(err.message),
+                    String::new(),
+                ),
+            }
+        };
 
     sqlx::query(
         "INSERT INTO external_orders (
@@ -4670,7 +4824,7 @@ pub async fn submit_external_order(
     .bind(user.wallet_address.as_str())
     .bind(provider.as_str())
     .bind(body.intent_id.as_str())
-    .bind(market_id.as_str())
+    .bind(intent.market_id.as_str())
     .bind(provider_order_id.as_str())
     .bind(status.as_str())
     .bind(&provider_payload)
@@ -4706,9 +4860,7 @@ pub async fn submit_external_order(
     Ok(HttpResponse::Ok().json(ExternalOrderResponse {
         id: order_id,
         provider: provider.as_str().to_string(),
-        market_id: row
-            .try_get("market_id")
-            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        market_id: intent.market_id,
         provider_order_id,
         status,
         created_at: now.to_rfc3339(),
@@ -4716,6 +4868,50 @@ pub async fn submit_external_order(
         response_payload: payload,
         error_message: None,
     }))
+}
+
+pub async fn prepare_external_order_cancel(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CancelExternalOrderRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    if !state.config.external_trading_enabled {
+        return Err(ApiError::bad_request(
+            "EXTERNAL_TRADING_DISABLED",
+            "external trading is disabled",
+        ));
+    }
+    ensure_live_write_mode(&state)?;
+
+    let user = extract_authenticated_user(&req, &state).await?;
+    let provider = normalize_provider(body.provider.as_str())?;
+    ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeClose)?;
+
+    if provider != ExternalProvider::Polymarket {
+        return Err(ApiError::bad_request(
+            "CLIENT_EXECUTION_UNSUPPORTED",
+            "prepared client execution is only available for polymarket",
+        ));
+    }
+
+    let credential = load_credential(
+        &state,
+        user.wallet_address.as_str(),
+        provider,
+        body.credential_id.as_deref(),
+    )
+    .await?;
+    ensure_provider_credential_ready(&state, provider, &credential).await?;
+
+    let payload = body
+        .payload
+        .clone()
+        .unwrap_or_else(|| json!({ "orderId": body.provider_order_id }));
+    let prepared =
+        prepare_polymarket_provider_request(&state, &credential, "DELETE", "/order", &payload)?;
+
+    Ok(HttpResponse::Ok().json(prepared))
 }
 
 pub async fn cancel_external_order(
@@ -4744,14 +4940,46 @@ pub async fn cancel_external_order(
     .await?;
     ensure_provider_credential_ready(&state, provider, &credential).await?;
 
-    let response_payload = cancel_on_provider(
-        &state,
-        provider,
-        &credential,
-        body.provider_order_id.as_str(),
-        body.payload.clone(),
-    )
-    .await?;
+    let response_payload = if provider == ExternalProvider::Polymarket {
+        if let Some(client_payload) = body.provider_response.clone() {
+            let provider_status = body.provider_status.unwrap_or(200);
+            if !(200..300).contains(&provider_status) {
+                return Err(ApiError::bad_request(
+                    "POLYMARKET_CANCEL_FAILED",
+                    polymarket_provider_error_message(
+                        &client_payload,
+                        "polymarket cancel failed",
+                    ),
+                ));
+            }
+            client_payload
+        } else {
+            cancel_on_provider(
+                &state,
+                provider,
+                &credential,
+                body.provider_order_id.as_str(),
+                body.payload.clone(),
+            )
+            .await?
+        }
+    } else {
+        if body.provider_response.is_some() || body.provider_status.is_some() {
+            return Err(ApiError::bad_request(
+                "CLIENT_EXECUTION_UNSUPPORTED",
+                "prepared client execution is only available for polymarket",
+            ));
+        }
+
+        cancel_on_provider(
+            &state,
+            provider,
+            &credential,
+            body.provider_order_id.as_str(),
+            body.payload.clone(),
+        )
+        .await?
+    };
 
     sqlx::query(
         "UPDATE external_orders
@@ -6248,6 +6476,26 @@ mod tests {
 
         assert_eq!(err.code, "INVALID_BUILDER_CREDENTIALS");
         assert_eq!(err.message, "polymarket builder apiSecret is invalid");
+    }
+
+    #[test]
+    fn polymarket_provider_error_message_accepts_string_payloads() {
+        assert_eq!(
+            polymarket_provider_error_message(&json!("plain error"), "fallback"),
+            "plain error"
+        );
+    }
+
+    #[test]
+    fn provider_order_id_prefers_top_level_order_id() {
+        assert_eq!(
+            provider_order_id(&json!({ "orderId": "order-1", "id": "order-2" })),
+            "order-1"
+        );
+        assert_eq!(
+            provider_order_id(&json!({ "order": { "id": "order-3" } })),
+            "order-3"
+        );
     }
 
     #[test]
