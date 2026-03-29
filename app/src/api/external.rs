@@ -61,6 +61,20 @@ struct PolymarketBuilderHeaders {
     timestamp: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PolymarketForwardRequest {
+    method: String,
+    path: String,
+    headers: BTreeMap<String, String>,
+    body: String,
+}
+
+struct PolymarketForwarder<'a> {
+    url: &'a str,
+    shared_secret: &'a str,
+}
+
 struct PolymarketOrderContext {
     token_id: String,
     fee_rate_bps: u64,
@@ -1898,15 +1912,118 @@ fn polymarket_builder_headers(
     })
 }
 
-fn apply_polymarket_builder_headers(
-    request: reqwest::RequestBuilder,
-    headers: &PolymarketBuilderHeaders,
-) -> reqwest::RequestBuilder {
-    request
-        .header("POLY_BUILDER_API_KEY", headers.api_key.as_str())
-        .header("POLY_BUILDER_PASSPHRASE", headers.api_passphrase.as_str())
-        .header("POLY_BUILDER_SIGNATURE", headers.signature.as_str())
-        .header("POLY_BUILDER_TIMESTAMP", headers.timestamp.as_str())
+fn polymarket_forwarder(config: &AppConfig) -> Option<PolymarketForwarder<'_>> {
+    let url = config.polymarket_forwarder_url.trim();
+    let shared_secret = config.polymarket_forwarder_shared_secret.trim();
+    if url.is_empty() || shared_secret.is_empty() {
+        return None;
+    }
+
+    Some(PolymarketForwarder { url, shared_secret })
+}
+
+fn insert_polymarket_builder_headers(
+    headers: &mut BTreeMap<String, String>,
+    builder_headers: &PolymarketBuilderHeaders,
+) {
+    headers.insert(
+        "POLY_BUILDER_API_KEY".to_string(),
+        builder_headers.api_key.clone(),
+    );
+    headers.insert(
+        "POLY_BUILDER_PASSPHRASE".to_string(),
+        builder_headers.api_passphrase.clone(),
+    );
+    headers.insert(
+        "POLY_BUILDER_SIGNATURE".to_string(),
+        builder_headers.signature.clone(),
+    );
+    headers.insert(
+        "POLY_BUILDER_TIMESTAMP".to_string(),
+        builder_headers.timestamp.clone(),
+    );
+}
+
+fn polymarket_provider_error_message<'a>(payload: &'a Value, fallback: &'a str) -> &'a str {
+    payload
+        .get("errorMsg")
+        .or_else(|| payload.get("message"))
+        .or_else(|| payload.get("error"))
+        .and_then(|value| value.as_str())
+        .unwrap_or(fallback)
+}
+
+async fn execute_polymarket_request(
+    state: &AppState,
+    method: &str,
+    path: &str,
+    headers: BTreeMap<String, String>,
+    body: String,
+    transport_error: &str,
+    provider_error_code: &str,
+    provider_error_fallback: &str,
+) -> Result<Value, ApiError> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let response = if let Some(forwarder) = polymarket_forwarder(&state.config) {
+        client
+            .post(format!("{}/forward", forwarder.url.trim_end_matches('/')))
+            .header(
+                "Authorization",
+                format!("Bearer {}", forwarder.shared_secret),
+            )
+            .json(&PolymarketForwardRequest {
+                method: method.to_string(),
+                path: path.to_string(),
+                headers,
+                body,
+            })
+            .send()
+            .await
+            .map_err(|err| ApiError::internal(&format!("{transport_error}: {err}")))?
+    } else {
+        let mut request = match method {
+            "POST" => client.post(format!(
+                "{}{}",
+                state.config.polymarket_clob_api_base.trim_end_matches('/'),
+                path
+            )),
+            "DELETE" => client.delete(format!(
+                "{}{}",
+                state.config.polymarket_clob_api_base.trim_end_matches('/'),
+                path
+            )),
+            _ => {
+                return Err(ApiError::internal("unsupported polymarket request method"));
+            }
+        };
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        request
+            .body(body)
+            .send()
+            .await
+            .map_err(|err| ApiError::internal(&format!("{transport_error}: {err}")))?
+    };
+
+    let status = response.status();
+    let payload = response
+        .json::<Value>()
+        .await
+        .unwrap_or_else(|_| json!({ "ok": status.is_success() }));
+
+    if !status.is_success() {
+        return Err(ApiError::bad_request(
+            provider_error_code,
+            polymarket_provider_error_message(&payload, provider_error_fallback),
+        ));
+    }
+
+    Ok(payload)
 }
 
 async fn check_polymarket_auth_status(
@@ -2760,57 +2877,42 @@ async fn submit_polymarket_order(
         body.as_str(),
         timestamp.as_str(),
     )?;
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
-    let response = client
-        .post(format!(
-            "{}{}",
-            state.config.polymarket_clob_api_base.trim_end_matches('/'),
-            path
-        ))
-        .header("POLY_ADDRESS", owner)
-        .header("POLY_API_KEY", credentials.api_key)
-        .header("POLY_PASSPHRASE", credentials.api_passphrase)
-        .header("POLY_SIGNATURE", signature)
-        .header("POLY_TIMESTAMP", timestamp.as_str())
-        .header("Content-Type", "application/json");
-    let response = if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
+    let mut headers = BTreeMap::from([
+        ("Content-Type".to_string(), "application/json".to_string()),
+        ("POLY_ADDRESS".to_string(), owner),
+        ("POLY_API_KEY".to_string(), credentials.api_key),
+        (
+            "POLY_PASSPHRASE".to_string(),
+            credentials.api_passphrase,
+        ),
+        ("POLY_SIGNATURE".to_string(), signature),
+        ("POLY_TIMESTAMP".to_string(), timestamp),
+    ]);
+    if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
         let builder_headers = polymarket_builder_headers(
             builder_credentials,
             "POST",
             path,
             body.as_str(),
-            timestamp.as_str(),
+            headers
+                .get("POLY_TIMESTAMP")
+                .map(String::as_str)
+                .unwrap_or_default(),
         )?;
-        apply_polymarket_builder_headers(response, &builder_headers)
-    } else {
-        response
-    }
-    .body(body)
-        .send()
-        .await
-        .map_err(|err| ApiError::internal(&format!("polymarket submit failed: {}", err)))?;
-
-    let status = response.status();
-    let payload = response
-        .json::<Value>()
-        .await
-        .unwrap_or_else(|_| json!({ "ok": status.is_success() }));
-
-    if !status.is_success() {
-        let message = payload
-            .get("errorMsg")
-            .or_else(|| payload.get("message"))
-            .or_else(|| payload.get("error"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("polymarket order submission failed");
-        return Err(ApiError::bad_request("POLYMARKET_SUBMIT_FAILED", message));
+        insert_polymarket_builder_headers(&mut headers, &builder_headers);
     }
 
-    Ok(payload)
+    execute_polymarket_request(
+        state,
+        "POST",
+        path,
+        headers,
+        body,
+        "polymarket submit failed",
+        "POLYMARKET_SUBMIT_FAILED",
+        "polymarket order submission failed",
+    )
+    .await
 }
 
 async fn submit_to_provider(
@@ -2959,56 +3061,44 @@ async fn cancel_on_provider(
                 body_string.as_str(),
                 timestamp.as_str(),
             )?;
-
-            let response = client
-                .delete(format!(
-                    "{}{}",
-                    state.config.polymarket_clob_api_base.trim_end_matches('/'),
-                    path
-                ))
-                .header("POLY_ADDRESS", owner)
-                .header("POLY_API_KEY", credentials.api_key)
-                .header("POLY_PASSPHRASE", credentials.api_passphrase)
-                .header("POLY_SIGNATURE", signature)
-                .header("POLY_TIMESTAMP", timestamp.as_str())
-                .header("Content-Type", "application/json");
-            let response =
-                if let Some(builder_credentials) = polymarket_builder_credentials(&state.config) {
-                    let builder_headers = polymarket_builder_headers(
-                        builder_credentials,
-                        "DELETE",
-                        path,
-                        body_string.as_str(),
-                        timestamp.as_str(),
-                    )?;
-                    apply_polymarket_builder_headers(response, &builder_headers)
-                } else {
-                    response
-                }
-                .body(body_string)
-                .send()
-                .await
-                .map_err(|err| ApiError::internal(&format!("polymarket cancel failed: {}", err)))?;
-
-            let status = response.status();
-            let payload = response
-                .json::<Value>()
-                .await
-                .unwrap_or_else(|_| json!({ "ok": status.is_success() }));
-
-            if !status.is_success() {
-                return Err(ApiError::bad_request(
-                    "POLYMARKET_CANCEL_FAILED",
-                    payload
-                        .get("errorMsg")
-                        .or_else(|| payload.get("message"))
-                        .or_else(|| payload.get("error"))
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("polymarket cancel failed"),
-                ));
+            let mut headers = BTreeMap::from([
+                ("Content-Type".to_string(), "application/json".to_string()),
+                ("POLY_ADDRESS".to_string(), owner),
+                ("POLY_API_KEY".to_string(), credentials.api_key),
+                (
+                    "POLY_PASSPHRASE".to_string(),
+                    credentials.api_passphrase,
+                ),
+                ("POLY_SIGNATURE".to_string(), signature),
+                ("POLY_TIMESTAMP".to_string(), timestamp),
+            ]);
+            if let Some(builder_credentials) =
+                polymarket_builder_credentials(&state.config)
+            {
+                let builder_headers = polymarket_builder_headers(
+                    builder_credentials,
+                    "DELETE",
+                    path,
+                    body_string.as_str(),
+                    headers
+                        .get("POLY_TIMESTAMP")
+                        .map(String::as_str)
+                        .unwrap_or_default(),
+                )?;
+                insert_polymarket_builder_headers(&mut headers, &builder_headers);
             }
 
-            Ok(payload)
+            execute_polymarket_request(
+                state,
+                "DELETE",
+                path,
+                headers,
+                body_string,
+                "polymarket cancel failed",
+                "POLYMARKET_CANCEL_FAILED",
+                "polymarket cancel failed",
+            )
+            .await
         }
     }
 }
