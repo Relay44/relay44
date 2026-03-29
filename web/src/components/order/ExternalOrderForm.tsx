@@ -28,6 +28,14 @@ function providerFromMarket(market: Market): 'limitless' | 'polymarket' {
   return market.provider === 'polymarket' ? 'polymarket' : 'limitless';
 }
 
+function isPolymarketOrderBelowMinimumNotional(
+  provider: 'limitless' | 'polymarket',
+  price: number,
+  quantity: number
+): boolean {
+  return provider === 'polymarket' && price * quantity < 1;
+}
+
 export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps) {
   const { addToast } = useToast();
   const baseWallet = useBaseWallet();
@@ -174,6 +182,10 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
     }
     if (!Number.isFinite(numericQuantity) || numericQuantity <= 0) {
       addToast('Quantity must be greater than zero', 'error');
+      return;
+    }
+    if (isPolymarketOrderBelowMinimumNotional(provider, numericPrice, numericQuantity)) {
+      addToast('Polymarket minimum order size is $1 notional', 'error');
       return;
     }
     if (!credentialId) {
