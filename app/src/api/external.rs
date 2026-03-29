@@ -1056,6 +1056,7 @@ fn increment_skip_reason(skips: &mut BTreeMap<String, u64>, reason: &str) {
 fn provider_order_id_from_payload(payload: &Value) -> String {
     payload
         .get("orderId")
+        .or_else(|| payload.get("orderID"))
         .or_else(|| payload.get("id"))
         .or_else(|| payload.get("order_id"))
         .and_then(|value| value.as_str())
@@ -2104,8 +2105,11 @@ fn polymarket_provider_error_message<'a>(payload: &'a Value, fallback: &'a str) 
 fn provider_order_id(payload: &Value) -> String {
     payload
         .get("orderId")
+        .or_else(|| payload.get("orderID"))
         .or_else(|| payload.get("id"))
         .or_else(|| payload.get("order_id"))
+        .or_else(|| payload.get("order").and_then(|value| value.get("orderId")))
+        .or_else(|| payload.get("order").and_then(|value| value.get("orderID")))
         .or_else(|| payload.get("order").and_then(|value| value.get("id")))
         .and_then(|value| value.as_str())
         .unwrap_or_default()
@@ -6493,8 +6497,20 @@ mod tests {
             "order-1"
         );
         assert_eq!(
+            provider_order_id(&json!({ "orderID": "order-4", "id": "order-2" })),
+            "order-4"
+        );
+        assert_eq!(
             provider_order_id(&json!({ "order": { "id": "order-3" } })),
             "order-3"
+        );
+        assert_eq!(
+            provider_order_id(&json!({ "order": { "orderID": "order-5" } })),
+            "order-5"
+        );
+        assert_eq!(
+            provider_order_id_from_payload(&json!({ "orderID": "order-6" })),
+            "order-6"
         );
     }
 
