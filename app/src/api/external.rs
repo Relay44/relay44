@@ -1054,14 +1054,7 @@ fn increment_skip_reason(skips: &mut BTreeMap<String, u64>, reason: &str) {
 }
 
 fn provider_order_id_from_payload(payload: &Value) -> String {
-    payload
-        .get("orderId")
-        .or_else(|| payload.get("orderID"))
-        .or_else(|| payload.get("id"))
-        .or_else(|| payload.get("order_id"))
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string()
+    provider_order_id(payload)
 }
 
 pub(crate) fn skip_reason_from_error(err: &ApiError) -> String {
@@ -6633,6 +6626,10 @@ mod tests {
         assert_eq!(
             provider_order_id_from_payload(&json!({ "orderID": "order-6" })),
             "order-6"
+        );
+        assert_eq!(
+            provider_order_id_from_payload(&json!({ "order": { "id": "order-7" } })),
+            "order-7"
         );
     }
 
