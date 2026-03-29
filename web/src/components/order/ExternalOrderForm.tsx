@@ -91,7 +91,7 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
   }, [addToast, canManageCredentials, credentialId, provider, readOnly]);
 
   useEffect(() => {
-    if (readOnly || !canManageCredentials) {
+    if (readOnly || !canManageCredentials || credentials.length === 0) {
       setCredentialStatus(null);
       return;
     }
@@ -118,7 +118,7 @@ export function ExternalOrderForm({ market, onSuccess }: ExternalOrderFormProps)
     return () => {
       canceled = true;
     };
-  }, [addToast, canManageCredentials, credentialId, provider, readOnly]);
+  }, [addToast, canManageCredentials, credentialId, credentials.length, provider, readOnly]);
 
   const preflightChecks = useMemo(() => {
     const checks = preflight?.checks;

@@ -381,6 +381,48 @@ export class ApiError extends Error {
   }
 }
 
+function extractApiErrorMessage(raw: string, fallback: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as
+      | { message?: unknown; error?: unknown }
+      | string
+      | null;
+
+    if (typeof parsed === 'string' && parsed.trim()) {
+      return parsed;
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        return parsed.message;
+      }
+
+      if (typeof parsed.error === 'string' && parsed.error.trim()) {
+        return parsed.error;
+      }
+
+      if (
+        parsed.error &&
+        typeof parsed.error === 'object' &&
+        'message' in parsed.error &&
+        typeof parsed.error.message === 'string' &&
+        parsed.error.message.trim()
+      ) {
+        return parsed.error.message;
+      }
+    }
+  } catch {
+    // Keep the raw response text below.
+  }
+
+  return trimmed || fallback;
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -789,7 +831,7 @@ class ApiClient {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new ApiError(res.status, text || res.statusText);
+      throw new ApiError(res.status, extractApiErrorMessage(text, res.statusText));
     }
 
     if (res.status === 204) {
@@ -823,7 +865,7 @@ class ApiClient {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new ApiError(response.status, text || response.statusText);
+      throw new ApiError(response.status, extractApiErrorMessage(text, response.statusText));
     }
 
     if (response.status === 204) {
