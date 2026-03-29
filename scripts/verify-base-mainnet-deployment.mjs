@@ -7,26 +7,32 @@ import { base } from 'viem/chains';
 
 const MANIFEST_PATH = path.join(process.cwd(), 'config', 'deployments', 'base-addresses.json');
 const DEFAULT_ADMIN_ROLE = '0x0000000000000000000000000000000000000000000000000000000000000000';
-const MARKET_CREATOR_ROLE = '0x5b5d65471830e0f9f4cbf96f03835b4a60446d0709f5fc433d9198f4f11f23ef';
-const RESOLVER_ROLE = '0x5cdddf6bb8d3e1ee87b3512ad57d8ccfb67f52c16e491061b85d34ed2a5b3eea';
-const PAUSER_ROLE = '0x65d7a28e3265b15968f4675b51ffa45736daf1049ef3152847f456701f9f13df';
-const OPERATOR_ROLE = '0x97667070ce983f4d92ad742d2ee05b00c63289ae72e7e13e3611a39cc66ad7c9';
-const AGENT_RUNTIME_ROLE = '0x9f2df0fed2c77648de5860a4cc508cd0818c85b8b8a1ab4f90c6b0f4db0f17f0';
 
 const accessControlAbi = [
   { type: 'function', name: 'hasRole', stateMutability: 'view', inputs: [{ type: 'bytes32', name: 'role' }, { type: 'address', name: 'account' }], outputs: [{ type: 'bool' }] },
 ];
+const marketCoreRoleAbi = [
+  ...accessControlAbi,
+  { type: 'function', name: 'MARKET_CREATOR_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'RESOLVER_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'PAUSER_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+];
 const orderBookAbi = [
   ...accessControlAbi,
+  { type: 'function', name: 'PAUSER_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'AGENT_RUNTIME_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'marketCore', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'collateralVault', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
 ];
 const collateralVaultAbi = [
   ...accessControlAbi,
+  { type: 'function', name: 'PAUSER_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'OPERATOR_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'collateral', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
 ];
 const agentRuntimeAbi = [
   ...accessControlAbi,
+  { type: 'function', name: 'PAUSER_ROLE', stateMutability: 'view', inputs: [], outputs: [{ type: 'bytes32' }] },
   { type: 'function', name: 'orderBook', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'identityRegistry', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { type: 'function', name: 'agentCount', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
@@ -84,6 +90,17 @@ async function main() {
     expectCode('collateralToken', contracts.collateralToken),
   ]);
 
+  const [marketCreatorRole, resolverRole, marketCorePauserRole, orderBookPauserRole, orderBookRuntimeRoleId, vaultPauserRole, vaultOperatorRoleId, runtimePauserRole] = await Promise.all([
+    publicClient.readContract({ address: contracts.marketCore, abi: marketCoreRoleAbi, functionName: 'MARKET_CREATOR_ROLE' }),
+    publicClient.readContract({ address: contracts.marketCore, abi: marketCoreRoleAbi, functionName: 'RESOLVER_ROLE' }),
+    publicClient.readContract({ address: contracts.marketCore, abi: marketCoreRoleAbi, functionName: 'PAUSER_ROLE' }),
+    publicClient.readContract({ address: contracts.orderBook, abi: orderBookAbi, functionName: 'PAUSER_ROLE' }),
+    publicClient.readContract({ address: contracts.orderBook, abi: orderBookAbi, functionName: 'AGENT_RUNTIME_ROLE' }),
+    publicClient.readContract({ address: contracts.collateralVault, abi: collateralVaultAbi, functionName: 'PAUSER_ROLE' }),
+    publicClient.readContract({ address: contracts.collateralVault, abi: collateralVaultAbi, functionName: 'OPERATOR_ROLE' }),
+    publicClient.readContract({ address: contracts.agentRuntime, abi: agentRuntimeAbi, functionName: 'PAUSER_ROLE' }),
+  ]);
+
   const [wiredMarketCore, wiredVault, wiredCollateral, wiredOrderBook, wiredIdentityRegistry, agentCount, tokenDecimals, tokenSymbol, orderBookRuntimeRole, vaultOperatorRole] = await Promise.all([
     publicClient.readContract({ address: contracts.orderBook, abi: orderBookAbi, functionName: 'marketCore' }),
     publicClient.readContract({ address: contracts.orderBook, abi: orderBookAbi, functionName: 'collateralVault' }),
@@ -93,8 +110,8 @@ async function main() {
     publicClient.readContract({ address: contracts.agentRuntime, abi: agentRuntimeAbi, functionName: 'agentCount' }),
     publicClient.readContract({ address: contracts.collateralToken, abi: erc20Abi, functionName: 'decimals' }),
     publicClient.readContract({ address: contracts.collateralToken, abi: erc20Abi, functionName: 'symbol' }),
-    publicClient.readContract({ address: contracts.orderBook, abi: accessControlAbi, functionName: 'hasRole', args: [AGENT_RUNTIME_ROLE, contracts.agentRuntime] }),
-    publicClient.readContract({ address: contracts.collateralVault, abi: accessControlAbi, functionName: 'hasRole', args: [OPERATOR_ROLE, contracts.orderBook] }),
+    publicClient.readContract({ address: contracts.orderBook, abi: accessControlAbi, functionName: 'hasRole', args: [orderBookRuntimeRoleId, contracts.agentRuntime] }),
+    publicClient.readContract({ address: contracts.collateralVault, abi: accessControlAbi, functionName: 'hasRole', args: [vaultOperatorRoleId, contracts.orderBook] }),
   ]);
 
   if (wiredMarketCore.toLowerCase() !== contracts.marketCore.toLowerCase()) {
@@ -135,10 +152,10 @@ async function main() {
 
   for (const address of expectedPausers) {
     const checks = await Promise.all([
-      publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [PAUSER_ROLE, address] }),
-      publicClient.readContract({ address: contracts.orderBook, abi: accessControlAbi, functionName: 'hasRole', args: [PAUSER_ROLE, address] }),
-      publicClient.readContract({ address: contracts.collateralVault, abi: accessControlAbi, functionName: 'hasRole', args: [PAUSER_ROLE, address] }),
-      publicClient.readContract({ address: contracts.agentRuntime, abi: accessControlAbi, functionName: 'hasRole', args: [PAUSER_ROLE, address] }),
+      publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [marketCorePauserRole, address] }),
+      publicClient.readContract({ address: contracts.orderBook, abi: accessControlAbi, functionName: 'hasRole', args: [orderBookPauserRole, address] }),
+      publicClient.readContract({ address: contracts.collateralVault, abi: accessControlAbi, functionName: 'hasRole', args: [vaultPauserRole, address] }),
+      publicClient.readContract({ address: contracts.agentRuntime, abi: accessControlAbi, functionName: 'hasRole', args: [runtimePauserRole, address] }),
     ]);
     if (checks.some((entry) => !entry)) {
       failures.push(`pauser wallet missing PAUSER_ROLE on one or more contracts: ${address}`);
@@ -146,14 +163,14 @@ async function main() {
   }
 
   for (const address of expectedCreators) {
-    const allowed = await publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [MARKET_CREATOR_ROLE, address] });
+    const allowed = await publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [marketCreatorRole, address] });
     if (!allowed) {
       failures.push(`market creator wallet missing MARKET_CREATOR_ROLE: ${address}`);
     }
   }
 
   for (const address of expectedResolvers) {
-    const allowed = await publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [RESOLVER_ROLE, address] });
+    const allowed = await publicClient.readContract({ address: contracts.marketCore, abi: accessControlAbi, functionName: 'hasRole', args: [resolverRole, address] });
     if (!allowed) {
       failures.push(`resolver wallet missing RESOLVER_ROLE: ${address}`);
     }

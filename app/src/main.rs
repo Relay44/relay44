@@ -506,6 +506,10 @@ async fn main() -> std::io::Result<()> {
                                         web::post().to(api::evm::prepare_create_market_write),
                                     )
                                     .route(
+                                        "/markets/resolve",
+                                        web::post().to(api::evm::prepare_resolve_market_write),
+                                    )
+                                    .route(
                                         "/orders/place",
                                         web::post().to(api::evm::prepare_place_order_write),
                                     )
