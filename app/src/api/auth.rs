@@ -292,10 +292,21 @@ pub async fn siwe_login(
         timestamp: Some(OffsetDateTime::now_utc()),
     };
 
-    message
-        .verify(&signature, &opts)
+    let eoa_result = message.verify(&signature, &opts).await;
+
+    if eoa_result.is_err() && is_erc6492_signature(&signature) {
+        verify_erc6492_signature(
+            &state.config.base_rpc_url,
+            &wallet,
+            &req.message,
+            &signature,
+        )
         .await
-        .map_err(|e| ApiError::unauthorized(&format!("SIWE verification failed: {}", e)))?;
+        .map_err(|e| ApiError::unauthorized(&format!("ERC-6492 verification failed: {}", e)))?;
+    } else {
+        eoa_result
+            .map_err(|e| ApiError::unauthorized(&format!("SIWE verification failed: {}", e)))?;
+    }
 
     let role = determine_user_role(&wallet, &state).await;
     let access_token = state.jwt.generate_access_token(&wallet, role)?;
@@ -742,6 +753,102 @@ fn decode_hex_signature(signature: &str) -> Result<Vec<u8>, ApiError> {
 
     hex::decode(sig)
         .map_err(|_| ApiError::bad_request("INVALID_SIGNATURE", "Signature must be valid hex"))
+}
+
+const ERC6492_MAGIC_SUFFIX: [u8; 32] = [
+    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
+    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
+    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
+];
+
+fn is_erc6492_signature(signature: &[u8]) -> bool {
+    signature.len() > 32 && signature[signature.len() - 32..] == ERC6492_MAGIC_SUFFIX
+}
+
+/// Verify an ERC-6492 wrapped signature via eth_call to the UniversalSigValidator.
+/// Reference: https://eips.ethereum.org/EIPS/eip-6492
+async fn verify_erc6492_signature(
+    rpc_url: &str,
+    signer: &str,
+    message: &str,
+    signature: &[u8],
+) -> Result<(), String> {
+    // UniversalSigValidator deployed on Base
+    let validator = "0x82b554b0eEb9BC7A4dE1a9C01890015e14cB398e";
+
+    let message_hash = {
+        let mut hasher = Keccak256::new();
+        let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
+        hasher.update(prefix.as_bytes());
+        hasher.update(message.as_bytes());
+        hasher.finalize()
+    };
+
+    // ABI encode: isValidSig(address,bytes32,bytes)
+    // selector: 0x6ccea652
+    let selector = hex::decode("6ccea652").unwrap();
+    let signer_addr = hex::decode(signer.strip_prefix("0x").unwrap_or(signer))
+        .map_err(|_| "invalid signer address")?;
+
+    let mut calldata = selector;
+    // address param (padded to 32 bytes)
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(&signer_addr);
+    // bytes32 hash
+    calldata.extend_from_slice(&message_hash);
+    // offset to bytes (dynamic) = 96
+    calldata.extend_from_slice(&[0u8; 31]);
+    calldata.push(96);
+    // length of signature bytes
+    let sig_len = signature.len();
+    let mut len_bytes = [0u8; 32];
+    len_bytes[28..32].copy_from_slice(&(sig_len as u32).to_be_bytes());
+    calldata.extend_from_slice(&len_bytes);
+    // signature data (padded to 32-byte boundary)
+    calldata.extend_from_slice(signature);
+    let padding = (32 - (sig_len % 32)) % 32;
+    calldata.extend_from_slice(&vec![0u8; padding]);
+
+    let calldata_hex = format!("0x{}", hex::encode(&calldata));
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [{
+                "to": validator,
+                "data": calldata_hex
+            }, "latest"],
+            "id": 1
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("RPC request failed: {}", e))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("RPC response parse failed: {}", e))?;
+
+    if let Some(error) = body.get("error") {
+        return Err(format!("RPC error: {}", error));
+    }
+
+    let result = body["result"]
+        .as_str()
+        .ok_or("missing result in RPC response")?;
+
+    // isValidSig returns true (non-zero) on success
+    let result_bytes =
+        hex::decode(result.strip_prefix("0x").unwrap_or(result)).map_err(|_| "invalid result hex")?;
+
+    if result_bytes.iter().all(|&b| b == 0) {
+        return Err("smart wallet signature verification failed".to_string());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

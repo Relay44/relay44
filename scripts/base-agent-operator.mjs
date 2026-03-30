@@ -10,6 +10,8 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 
+const useCdp = isEnabled(process.env.CDP_WALLET_ENABLED, false);
+
 const enabled = isEnabled(process.env.BASE_AGENT_OPERATOR_ENABLED, false);
 const apiBase = normalizeApiBase(
   process.env.BASE_AGENT_OPERATOR_API_URL || "http://localhost:8080/v1",
@@ -154,14 +156,41 @@ async function apiPost(pathname, token, body = {}) {
   });
 }
 
+const GAS_PRICE_ORACLE = "0x420000000000000000000000000000000000000F";
+const L1_FEE_ABI = [
+  {
+    name: "getL1FeeUpperBound",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "_unsignedTxSize", type: "uint256" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+];
+const TYPICAL_EXECUTE_TX_SIZE = 300;
+
+async function estimateL1Fee(publicClient) {
+  try {
+    return await publicClient.readContract({
+      address: GAS_PRICE_ORACLE,
+      abi: L1_FEE_ABI,
+      functionName: "getL1FeeUpperBound",
+      args: [BigInt(TYPICAL_EXECUTE_TX_SIZE)],
+    });
+  } catch {
+    return 0n;
+  }
+}
+
 async function ensureOperatorBalance(runtime) {
-  const balance = await runtime.publicClient.getBalance({
-    address: runtime.account.address,
-  });
+  const [balance, l1Fee] = await Promise.all([
+    runtime.publicClient.getBalance({ address: runtime.account.address }),
+    estimateL1Fee(runtime.publicClient),
+  ]);
   const balanceEth = formatEther(balance);
   const minBalanceWei = BigInt(Math.ceil(minBalanceEth * 1e18));
+  const requiredWei = minBalanceWei > l1Fee ? minBalanceWei : l1Fee * 2n;
 
-  if (balance < minBalanceWei) {
+  if (balance < requiredWei) {
     return {
       ok: false,
       skipped: true,
@@ -169,6 +198,7 @@ async function ensureOperatorBalance(runtime) {
       operator: runtime.account.address,
       balanceEth,
       minBalanceEth,
+      estimatedL1FeeEth: formatEther(l1Fee),
     };
   }
 
@@ -284,16 +314,30 @@ async function main() {
     return;
   }
 
-  const privateKey = envOrThrow("BASE_AGENT_OPERATOR_PRIVATE_KEY");
-  const account = privateKeyToAccount(privateKey);
+  let runtime;
   const transport = createTransport();
   const chain = { ...base, id: chainId };
-  const runtime = {
-    account,
-    chain,
-    publicClient: createPublicClient({ chain, transport }),
-    walletClient: createWalletClient({ account, chain, transport }),
-  };
+
+  if (useCdp) {
+    const { initCdpWallet } = await import("../services/agent-wallet/cdp.mjs");
+    const cdp = await initCdpWallet({ chainId });
+    runtime = {
+      account: cdp.account,
+      chain,
+      publicClient: createPublicClient({ chain, transport }),
+      walletClient: cdp.walletClient,
+    };
+    console.log(`Using CDP wallet: ${cdp.address}`);
+  } else {
+    const privateKey = envOrThrow("BASE_AGENT_OPERATOR_PRIVATE_KEY");
+    const account = privateKeyToAccount(privateKey);
+    runtime = {
+      account,
+      chain,
+      publicClient: createPublicClient({ chain, transport }),
+      walletClient: createWalletClient({ account, chain, transport }),
+    };
+  }
 
   const balanceCheck = await ensureOperatorBalance(runtime);
   if (!balanceCheck.ok) {
@@ -301,7 +345,7 @@ async function main() {
     return;
   }
 
-  const accessToken = await loginAdmin(account);
+  const accessToken = await loginAdmin(runtime.account);
   const startedAt = new Date().toISOString();
   const plan = await fetchTickPlan(accessToken);
   const actions = Array.isArray(plan?.actions) ? plan.actions : [];
