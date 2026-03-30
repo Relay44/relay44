@@ -1,0 +1,53 @@
+name: Documentation issue
+description: Report missing, unclear, or incorrect public repository documentation.
+title: "[docs] "
+labels: ["documentation", "triage"]
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I checked existing issues and pull requests for duplicates.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is wrong or missing?
+    validations:
+      required: true
+  - type: dropdown
+    id: doc_type
+    attributes:
+      label: Documentation area
+      options:
+        - README
+        - Contributing
+        - Security
+        - Support
+        - Governance / maintainers
+        - Release process
+        - API docs
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: location
+    attributes:
+      label: Current location
+      description: Link the file, section, route, or page that should change.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed improvement
+      description: What should the docs say instead?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include screenshots, links, or user pain if relevant.

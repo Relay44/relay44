@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security report
-    url: mailto:security@relay44.com
+    url: https://github.com/Relay44/relay44/security/advisories/new
     about: Report vulnerabilities privately.
-  - name: General support
-    url: mailto:support@relay44.com
-    about: Ask questions or request help directly.
+  - name: Support guide
+    url: https://github.com/Relay44/relay44/blob/main/SUPPORT.md
+    about: Use the right path for usage questions, bug reports, or operational help.
+  - name: Contribution guide
+    url: https://github.com/Relay44/relay44/blob/main/CONTRIBUTING.md
+    about: Review contribution, review, and validation expectations before opening a PR.

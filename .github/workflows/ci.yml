@@ -36,6 +36,9 @@ jobs:
       - name: Verify project silo
         run: SILO_CHECK_INCLUDE_DOCS=1 ./scripts/verify-project-silo.sh
 
+      - name: Verify public repo standards
+        run: bash ./scripts/verify-public-repo-standards.sh
+
       - name: Verify open core boundary
         run: node ./scripts/verify-open-core-boundary.mjs
 
