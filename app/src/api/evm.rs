@@ -1,5 +1,5 @@
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha3::{Digest, Keccak256};
@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::api::ApiError;
-use crate::services::database::PayoutJobRecord;
+use crate::services::database::{
+    BaseMarketBootstrapConfigRecord, BaseMarketBootstrapUpsert, PayoutJobRecord,
+};
 use crate::services::external::types::ExternalMarketId;
 use crate::services::external::{
     self, ExternalMarketSource, ExternalMarketsRequest, TradableFilter,
@@ -24,6 +26,8 @@ const MARKET_CORE_MARKETS_SELECTOR: &str = "0xb1283e77";
 const MARKET_CORE_METADATA_SELECTOR: &str = "0x6b6445b6";
 const MARKET_CORE_CREATE_RICH_SELECTOR: &str = "0xddabefe7";
 const MARKET_CORE_RESOLVE_SELECTOR: &str = "0x57bde446";
+const MARKET_CREATED_TOPIC: &str =
+    "0x550857481380e1875f94e5eac6470eff69ecd368405067d9d5dfdf645d3d1f8e";
 const ORDER_BOOK_COUNT_SELECTOR: &str = "0x2453ffa8";
 const ORDER_BOOK_ORDERS_SELECTOR: &str = "0xa85c38ef";
 const ORDER_BOOK_PLACE_SELECTOR: &str = "0xa8dd6515";
@@ -58,6 +62,27 @@ const ERC8004_MAX_TIER: u8 = 100;
 const MATCHER_STATE_REDIS_KEY: &str = "ops:matcher:state";
 const MATCHER_STATS_REDIS_KEY: &str = "ops:matcher:stats";
 const INDEXER_CURSOR_KEY: &str = "evm_indexer_main";
+const PAR_PRICE_BPS: u64 = 10_000;
+const BOOTSTRAP_MIN_SEED_USDC: f64 = 50.0;
+const BOOTSTRAP_MAX_SEED_USDC: f64 = 1_000_000.0;
+const BOOTSTRAP_DEFAULT_LEVELS: u64 = 5;
+const BOOTSTRAP_DEFAULT_BASE_SPREAD_BPS: u64 = 150;
+const BOOTSTRAP_DEFAULT_STEP_BPS: u64 = 100;
+const BOOTSTRAP_DEFAULT_CADENCE_SECONDS: u64 = 300;
+const BOOTSTRAP_DEFAULT_EXPIRY_SECONDS: u64 = 900;
+const BOOTSTRAP_DEFAULT_DEPTH_WINDOW_BPS: u64 = 500;
+const BOOTSTRAP_DEFAULT_TARGET_DEPTH_MULTIPLIER: f64 = 2.0;
+const BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER: f64 = 10.0;
+const BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS: u64 = 7 * 24 * 60 * 60;
+const BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS: u64 = 6_500;
+const BOOTSTRAP_QUALIFY_DURATION_HOURS: i64 = 24;
+const BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY: &str = "clob_only";
+const BOOTSTRAP_LIQUIDITY_MODE_HYBRID: &str = "bootstrap_hybrid";
+const BOOTSTRAP_STATUS_ACTIVE: &str = "active";
+const BOOTSTRAP_STATUS_DISABLED: &str = "disabled";
+const BOOTSTRAP_STRATEGY_LADDER_V1: &str = "ladder_v1";
+const BOOTSTRAP_STRATEGY_LMSR_EXPERIMENTAL: &str = "ls_lmsr_v1";
+const BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL: &str = "pmm_experimental";
 
 #[derive(Serialize)]
 pub struct BaseTokenStateResponse {
@@ -130,6 +155,27 @@ pub struct MatcherPauseRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RegisterBaseMarketBootstrapRequest {
+    pub tx_hash: String,
+    pub liquidity_mode: String,
+    pub seed_usdc: f64,
+    pub initial_yes_bps: u64,
+    pub strategy: String,
+    pub levels: u64,
+    pub base_spread_bps: u64,
+    pub step_bps: u64,
+    pub cadence_seconds: u64,
+    pub expiry_seconds: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBaseMarketBootstrapRuntimeRequest {
+    pub inventory_skew_bps: Option<i32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PayoutReportRequest {
     pub market_id: u64,
     pub wallet: String,
@@ -191,6 +237,36 @@ pub struct BaseMarketSnapshot {
     pub execution_users: bool,
     pub execution_agents: bool,
     pub outcomes: Vec<BaseMarketOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub yes_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub liquidity_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_active: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_seed_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_strategy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_levels: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_initial_yes_bps: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_base_spread_bps: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_step_bps: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_cadence_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_expiry_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_graduated_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -554,10 +630,35 @@ pub struct RelayRawTransactionRequest {
     pub raw_tx: String,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct LevelAggregate {
     quantity: u64,
     orders: u64,
+}
+
+#[derive(Clone)]
+struct BootstrapSyntheticBook {
+    yes_bids: BTreeMap<u64, LevelAggregate>,
+    no_bids: BTreeMap<u64, LevelAggregate>,
+}
+
+#[derive(Clone, Debug)]
+struct ValidatedBootstrapRegistration {
+    liquidity_mode: String,
+    status: String,
+    seed_usdc: f64,
+    initial_yes_bps: u64,
+    strategy: String,
+    levels: u64,
+    base_spread_bps: u64,
+    step_bps: u64,
+    cadence_seconds: u64,
+    expiry_seconds: u64,
+    organic_depth_window_bps: u64,
+    target_depth_multiplier: f64,
+    target_volume_multiplier: f64,
+    max_age_seconds: u64,
+    exposure_cap_bps: u64,
 }
 
 struct BaseRawOrder {
@@ -772,6 +873,21 @@ fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> Ba
                 probability: entry.probability,
             })
             .collect(),
+        yes_price: Some(snapshot.yes_price),
+        no_price: Some(snapshot.no_price),
+        volume: Some(snapshot.volume),
+        liquidity_mode: None,
+        bootstrap_status: None,
+        bootstrap_active: None,
+        bootstrap_seed_usdc: None,
+        bootstrap_strategy: None,
+        bootstrap_levels: None,
+        bootstrap_initial_yes_bps: None,
+        bootstrap_base_spread_bps: None,
+        bootstrap_step_bps: None,
+        bootstrap_cadence_seconds: None,
+        bootstrap_expiry_seconds: None,
+        bootstrap_graduated_at: None,
     }
 }
 
@@ -786,6 +902,538 @@ fn internal_feed_warning(err: &ApiError) -> BaseFeedWarning {
         source: "internal".to_string(),
         message,
     }
+}
+
+fn now_seconds() -> Result<u64, ApiError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ApiError::internal("System time error"))
+        .map(|duration| duration.as_secs())
+}
+
+fn price_from_bps(price_bps: u64) -> f64 {
+    (price_bps as f64) / 10_000.0
+}
+
+fn clamp_u64(value: u64, min: u64, max: u64) -> u64 {
+    value.max(min).min(max)
+}
+
+fn insert_level(levels: &mut BTreeMap<u64, LevelAggregate>, price_bps: u64, quantity: u64) {
+    if quantity == 0 || !(1..PAR_PRICE_BPS).contains(&price_bps) {
+        return;
+    }
+
+    let level = levels.entry(price_bps).or_default();
+    level.quantity = level.quantity.saturating_add(quantity);
+    level.orders = level.orders.saturating_add(1);
+}
+
+fn merge_level_maps(
+    destination: &mut BTreeMap<u64, LevelAggregate>,
+    source: &BTreeMap<u64, LevelAggregate>,
+) {
+    for (price_bps, level) in source {
+        let entry = destination.entry(*price_bps).or_default();
+        entry.quantity = entry.quantity.saturating_add(level.quantity);
+        entry.orders = entry.orders.saturating_add(level.orders);
+    }
+}
+
+fn book_side_from_levels(levels: &BTreeMap<u64, LevelAggregate>, depth: u64) -> Vec<BaseOrderBookLevel> {
+    levels
+        .iter()
+        .rev()
+        .take(depth as usize)
+        .map(|(price_bps, level)| BaseOrderBookLevel {
+            price: price_from_bps(*price_bps),
+            quantity: level.quantity as f64,
+            orders: level.orders,
+        })
+        .collect()
+}
+
+fn complementary_asks_from_levels(
+    opposing_levels: &BTreeMap<u64, LevelAggregate>,
+    depth: u64,
+) -> Vec<BaseOrderBookLevel> {
+    opposing_levels
+        .iter()
+        .rev()
+        .filter_map(|(price_bps, level)| {
+            let ask_price_bps = PAR_PRICE_BPS.saturating_sub(*price_bps);
+            if !(1..PAR_PRICE_BPS).contains(&ask_price_bps) {
+                return None;
+            }
+
+            Some(BaseOrderBookLevel {
+                price: price_from_bps(ask_price_bps),
+                quantity: level.quantity as f64,
+                orders: level.orders,
+            })
+        })
+        .take(depth as usize)
+        .collect()
+}
+
+fn bootstrap_reference_yes_bps(config: &BaseMarketBootstrapConfigRecord) -> u64 {
+    let exposure_cap = config.exposure_cap_bps.max(1) as i64;
+    let skew = (config.inventory_skew_bps as i64).clamp(-exposure_cap, exposure_cap);
+    let max_shift = (config.step_bps.saturating_mul(config.levels.max(1)) as i64)
+        .max(config.base_spread_bps as i64);
+    let adjusted = config.initial_yes_bps as i64 - (skew * max_shift / exposure_cap);
+    adjusted.clamp(1, (PAR_PRICE_BPS - 1) as i64) as u64
+}
+
+fn bootstrap_side_budget_bps(config: &BaseMarketBootstrapConfigRecord) -> (u64, u64) {
+    let exposure_cap = config.exposure_cap_bps.max(1) as i64;
+    let skew = (config.inventory_skew_bps as i64).clamp(-exposure_cap, exposure_cap);
+    let transfer = 5_000_i64 * skew.abs() / exposure_cap;
+
+    if skew >= 0 {
+        ((5_000 - transfer) as u64, (5_000 + transfer) as u64)
+    } else {
+        ((5_000 + transfer) as u64, (5_000 - transfer) as u64)
+    }
+}
+
+fn bootstrap_budget_levels(total: u64, levels: u64) -> Vec<u64> {
+    if levels == 0 {
+        return Vec::new();
+    }
+
+    let base = total / levels;
+    let remainder = total % levels;
+
+    (0..levels)
+        .map(|index| base + u64::from(index < remainder))
+        .collect()
+}
+
+fn bootstrap_seed_microusdc(seed_usdc: f64) -> u64 {
+    (seed_usdc.max(0.0) * 1_000_000.0).round() as u64
+}
+
+fn generate_bootstrap_synthetic_book(config: &BaseMarketBootstrapConfigRecord) -> BootstrapSyntheticBook {
+    let reference_yes_bps = bootstrap_reference_yes_bps(config);
+    let reference_no_bps = PAR_PRICE_BPS.saturating_sub(reference_yes_bps);
+    let (yes_budget_bps, no_budget_bps) = bootstrap_side_budget_bps(config);
+    let seed_microusdc = bootstrap_seed_microusdc(config.seed_usdc);
+    let yes_budget = seed_microusdc.saturating_mul(yes_budget_bps) / PAR_PRICE_BPS;
+    let no_budget = seed_microusdc.saturating_mul(no_budget_bps) / PAR_PRICE_BPS;
+    let yes_quantities = bootstrap_budget_levels(yes_budget, config.levels.max(1));
+    let no_quantities = bootstrap_budget_levels(no_budget, config.levels.max(1));
+
+    let exposure_cap = config.exposure_cap_bps.max(1) as i64;
+    let skew = (config.inventory_skew_bps as i64).clamp(-exposure_cap, exposure_cap);
+    let spread_extra =
+        (config.step_bps.saturating_mul(config.levels.max(1)) as i64 * skew.abs()) / exposure_cap;
+    let tighten = (spread_extra / 2) as u64;
+
+    let mut yes_bids = BTreeMap::new();
+    let mut no_bids = BTreeMap::new();
+
+    for level_index in 0..config.levels.max(1) {
+        let base_spread =
+            config.base_spread_bps + level_index.saturating_mul(config.step_bps);
+        let yes_spread = if skew > 0 {
+            base_spread.saturating_add(spread_extra as u64)
+        } else {
+            base_spread.saturating_sub(tighten)
+        };
+        let no_spread = if skew < 0 {
+            base_spread.saturating_add(spread_extra as u64)
+        } else {
+            base_spread.saturating_sub(tighten)
+        };
+
+        let yes_price_bps = reference_yes_bps.saturating_sub(yes_spread).clamp(1, PAR_PRICE_BPS - 1);
+        let no_price_bps = reference_no_bps.saturating_sub(no_spread).clamp(1, PAR_PRICE_BPS - 1);
+
+        let yes_quantity = yes_quantities
+            .get(level_index as usize)
+            .copied()
+            .unwrap_or_default();
+        let no_quantity = no_quantities
+            .get(level_index as usize)
+            .copied()
+            .unwrap_or_default();
+
+        insert_level(&mut yes_bids, yes_price_bps, yes_quantity);
+        insert_level(&mut no_bids, no_price_bps, no_quantity);
+    }
+
+    BootstrapSyntheticBook { yes_bids, no_bids }
+}
+
+fn sum_depth_near_mid(
+    levels: &BTreeMap<u64, LevelAggregate>,
+    midpoint_bps: u64,
+    window_bps: u64,
+) -> u64 {
+    levels
+        .iter()
+        .filter(|(price_bps, _)| price_bps.abs_diff(midpoint_bps) <= window_bps)
+        .map(|(_, level)| level.quantity)
+        .sum()
+}
+
+fn parse_rfc3339_utc(value: Option<&DateTime<Utc>>) -> Option<String> {
+    value.map(DateTime::<Utc>::to_rfc3339)
+}
+
+fn bootstrap_active_for_market(
+    config: &BaseMarketBootstrapConfigRecord,
+    market: &BaseMarketSnapshot,
+    now: u64,
+) -> bool {
+    config.liquidity_mode == BOOTSTRAP_LIQUIDITY_MODE_HYBRID
+        && config.status == BOOTSTRAP_STATUS_ACTIVE
+        && !market.resolved
+        && market.close_time > now
+}
+
+fn apply_bootstrap_snapshot(
+    snapshot: &mut BaseMarketSnapshot,
+    config: Option<&BaseMarketBootstrapConfigRecord>,
+) -> Result<(), ApiError> {
+    snapshot.liquidity_mode = Some(BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY.to_string());
+
+    let Some(config) = config else {
+        return Ok(());
+    };
+
+    snapshot.liquidity_mode = Some(config.liquidity_mode.clone());
+    snapshot.bootstrap_status = Some(config.status.clone());
+    snapshot.bootstrap_seed_usdc = Some(config.seed_usdc);
+    snapshot.bootstrap_strategy = Some(config.strategy.clone());
+    snapshot.bootstrap_levels = Some(config.levels);
+    snapshot.bootstrap_initial_yes_bps = Some(config.initial_yes_bps);
+    snapshot.bootstrap_base_spread_bps = Some(config.base_spread_bps);
+    snapshot.bootstrap_step_bps = Some(config.step_bps);
+    snapshot.bootstrap_cadence_seconds = Some(config.cadence_seconds);
+    snapshot.bootstrap_expiry_seconds = Some(config.expiry_seconds);
+    snapshot.bootstrap_graduated_at = parse_rfc3339_utc(config.graduated_at.as_ref());
+
+    if config.liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID {
+        snapshot.bootstrap_active = Some(false);
+        return Ok(());
+    }
+
+    let active = bootstrap_active_for_market(config, snapshot, now_seconds()?);
+    snapshot.bootstrap_active = Some(active);
+
+    if active {
+        let yes_bps = bootstrap_reference_yes_bps(config);
+        snapshot.yes_price = Some(price_from_bps(yes_bps));
+        snapshot.no_price = Some(price_from_bps(PAR_PRICE_BPS - yes_bps));
+    }
+
+    Ok(())
+}
+
+fn validate_bootstrap_registration(
+    body: &RegisterBaseMarketBootstrapRequest,
+) -> Result<ValidatedBootstrapRegistration, ApiError> {
+    let liquidity_mode = body.liquidity_mode.trim().to_ascii_lowercase();
+    if liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY
+        && liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID
+    {
+        return Err(ApiError::bad_request(
+            "INVALID_LIQUIDITY_MODE",
+            "liquidityMode must be either 'clob_only' or 'bootstrap_hybrid'",
+        ));
+    }
+
+    let strategy = body.strategy.trim().to_ascii_lowercase();
+    if strategy == BOOTSTRAP_STRATEGY_LMSR_EXPERIMENTAL
+        || strategy == BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL
+    {
+        return Err(ApiError::bad_request(
+            "BOOTSTRAP_STRATEGY_DISABLED",
+            "only ladder_v1 is enabled in this build",
+        ));
+    }
+    if strategy != BOOTSTRAP_STRATEGY_LADDER_V1 {
+        return Err(ApiError::bad_request(
+            "INVALID_BOOTSTRAP_STRATEGY",
+            "strategy must be ladder_v1",
+        ));
+    }
+
+    let initial_yes_bps = clamp_u64(body.initial_yes_bps, 1, PAR_PRICE_BPS - 1);
+    let levels = clamp_u64(body.levels, 1, 12);
+    let base_spread_bps = clamp_u64(body.base_spread_bps, 25, 1_000);
+    let step_bps = clamp_u64(body.step_bps, 10, 1_000);
+    let cadence_seconds = clamp_u64(body.cadence_seconds, 30, 3_600);
+    let expiry_seconds = clamp_u64(body.expiry_seconds, cadence_seconds, 7_200);
+
+    if liquidity_mode == BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY {
+        return Ok(ValidatedBootstrapRegistration {
+            liquidity_mode,
+            status: BOOTSTRAP_STATUS_DISABLED.to_string(),
+            seed_usdc: 0.0,
+            initial_yes_bps,
+            strategy,
+            levels,
+            base_spread_bps,
+            step_bps,
+            cadence_seconds,
+            expiry_seconds,
+            organic_depth_window_bps: BOOTSTRAP_DEFAULT_DEPTH_WINDOW_BPS,
+            target_depth_multiplier: BOOTSTRAP_DEFAULT_TARGET_DEPTH_MULTIPLIER,
+            target_volume_multiplier: BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER,
+            max_age_seconds: BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS,
+            exposure_cap_bps: BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS,
+        });
+    }
+
+    if !body.seed_usdc.is_finite()
+        || body.seed_usdc < BOOTSTRAP_MIN_SEED_USDC
+        || body.seed_usdc > BOOTSTRAP_MAX_SEED_USDC
+    {
+        return Err(ApiError::bad_request(
+            "INVALID_BOOTSTRAP_SEED",
+            "seedUsdc must be between 50 and 1000000",
+        ));
+    }
+
+    Ok(ValidatedBootstrapRegistration {
+        liquidity_mode,
+        status: BOOTSTRAP_STATUS_ACTIVE.to_string(),
+        seed_usdc: (body.seed_usdc * 100.0).round() / 100.0,
+        initial_yes_bps,
+        strategy,
+        levels,
+        base_spread_bps,
+        step_bps,
+        cadence_seconds,
+        expiry_seconds,
+        organic_depth_window_bps: BOOTSTRAP_DEFAULT_DEPTH_WINDOW_BPS,
+        target_depth_multiplier: BOOTSTRAP_DEFAULT_TARGET_DEPTH_MULTIPLIER,
+        target_volume_multiplier: BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER,
+        max_age_seconds: BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS,
+        exposure_cap_bps: BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS,
+    })
+}
+
+async fn verify_market_bootstrap_registration_tx(
+    state: &AppState,
+    market_id: u64,
+    tx_hash: &str,
+) -> Result<String, ApiError> {
+    let tx_hash = normalize_required_bytes32(
+        tx_hash,
+        "INVALID_TX_HASH",
+        "txHash must be a valid 0x-prefixed transaction hash",
+    )?;
+    let market_core = configured_address(
+        &state.config.market_core_address,
+        "MARKET_CORE_ADDRESS_NOT_CONFIGURED",
+        "MARKET_CORE_ADDRESS must be configured for Base markets",
+    )?;
+
+    let receipt = state
+        .evm_rpc
+        .eth_get_transaction_receipt(tx_hash.as_str())
+        .await
+        .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "unable to fetch transaction receipt"))?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction receipt not found"))?;
+    let status = receipt
+        .status
+        .as_deref()
+        .and_then(|value| parse_u64_hex(value).ok())
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction status unavailable"))?;
+    if status != 1 {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_HASH",
+            "transaction reverted onchain",
+        ));
+    }
+
+    let tx = state
+        .evm_rpc
+        .eth_get_transaction_by_hash(tx_hash.as_str())
+        .await
+        .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "unable to fetch transaction"))?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction not found"))?;
+
+    let sender = tx
+        .from
+        .as_deref()
+        .map(|value| {
+            normalize_required_address(
+                value,
+                "INVALID_TX_HASH",
+                "transaction sender unavailable",
+            )
+        })
+        .transpose()?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction sender unavailable"))?;
+    let target = tx
+        .to
+        .as_deref()
+        .map(|value| {
+            normalize_required_address(
+                value,
+                "INVALID_TX_HASH",
+                "transaction target unavailable",
+            )
+        })
+        .transpose()?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction target unavailable"))?;
+    if target != market_core {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_HASH",
+            "transaction target does not match configured market core",
+        ));
+    }
+    if !tx
+        .input
+        .to_ascii_lowercase()
+        .starts_with(MARKET_CORE_CREATE_RICH_SELECTOR.trim_start_matches("0x"))
+        && !tx
+            .input
+            .to_ascii_lowercase()
+            .starts_with(MARKET_CORE_CREATE_RICH_SELECTOR)
+    {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_HASH",
+            "transaction is not a createMarketRich call",
+        ));
+    }
+
+    if let (Some(tx_block), Some(receipt_block)) =
+        (tx.block_number.as_deref(), receipt.block_number.as_deref())
+    {
+        let tx_block = parse_u64_hex(tx_block)
+            .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "transaction block is invalid"))?;
+        let receipt_block = parse_u64_hex(receipt_block)
+            .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "receipt block is invalid"))?;
+        if tx_block != receipt_block {
+            return Err(ApiError::bad_request(
+                "INVALID_TX_HASH",
+                "transaction block mismatch",
+            ));
+        }
+    }
+
+    let event_found = receipt.logs.iter().any(|log| {
+        let Some(address) = log.address.as_deref() else {
+            return false;
+        };
+        let Ok(log_address) = normalize_required_address(
+            address,
+            "INVALID_TX_HASH",
+            "invalid receipt log address",
+        ) else {
+            return false;
+        };
+
+        log_address == market_core
+            && log.topics.len() >= 2
+            && log.topics[0].eq_ignore_ascii_case(MARKET_CREATED_TOPIC)
+            && parse_u64_hex(log.topics[1].as_str()).ok() == Some(market_id)
+    });
+    if !event_found {
+        return Err(ApiError::bad_request(
+            "INVALID_TX_HASH",
+            "transaction did not emit the expected MarketCreated event",
+        ));
+    }
+
+    Ok(sender)
+}
+
+async fn maybe_refresh_bootstrap_state(
+    state: &AppState,
+    market: &BaseMarketSnapshot,
+    config: BaseMarketBootstrapConfigRecord,
+    organic_yes_bids: &BTreeMap<u64, LevelAggregate>,
+    organic_no_bids: &BTreeMap<u64, LevelAggregate>,
+) -> Result<BaseMarketBootstrapConfigRecord, ApiError> {
+    if config.liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID
+        || config.status != BOOTSTRAP_STATUS_ACTIVE
+    {
+        return Ok(config);
+    }
+
+    let now = Utc::now();
+    if market.resolved || market.close_time <= now.timestamp().max(0) as u64 {
+        return Ok(state
+            .db
+            .graduate_base_market_bootstrap(config.market_id, "market_closed")
+            .await?
+            .unwrap_or(config));
+    }
+
+    if config.activated_at
+        + ChronoDuration::seconds(config.max_age_seconds.min(i64::MAX as u64) as i64)
+        <= now
+    {
+        return Ok(state
+            .db
+            .graduate_base_market_bootstrap(config.market_id, "max_age")
+            .await?
+            .unwrap_or(config));
+    }
+
+    if market
+        .volume
+        .is_some_and(|volume| volume >= config.seed_usdc * config.target_volume_multiplier)
+    {
+        return Ok(state
+            .db
+            .graduate_base_market_bootstrap(config.market_id, "volume")
+            .await?
+            .unwrap_or(config));
+    }
+
+    let synthetic = generate_bootstrap_synthetic_book(&config);
+    let yes_mid = bootstrap_reference_yes_bps(&config);
+    let no_mid = PAR_PRICE_BPS - yes_mid;
+    let window_bps = config.organic_depth_window_bps;
+    let organic_depth = sum_depth_near_mid(organic_yes_bids, yes_mid, window_bps)
+        .saturating_add(sum_depth_near_mid(organic_no_bids, no_mid, window_bps));
+    let bootstrap_depth = sum_depth_near_mid(&synthetic.yes_bids, yes_mid, window_bps)
+        .saturating_add(sum_depth_near_mid(&synthetic.no_bids, no_mid, window_bps));
+
+    if bootstrap_depth == 0 {
+        return Ok(config);
+    }
+
+    let qualifies =
+        (organic_depth as f64) >= (bootstrap_depth as f64 * config.target_depth_multiplier);
+    if qualifies {
+        if let Some(since) = config.depth_qualified_since {
+            if now.signed_duration_since(since) >= ChronoDuration::hours(BOOTSTRAP_QUALIFY_DURATION_HOURS)
+            {
+                return Ok(state
+                    .db
+                    .graduate_base_market_bootstrap(config.market_id, "organic_depth")
+                    .await?
+                    .unwrap_or(config));
+            }
+        } else {
+            state
+                .db
+                .set_base_market_bootstrap_depth_qualified_since(config.market_id, Some(now))
+                .await?;
+            let mut updated = config;
+            updated.depth_qualified_since = Some(now);
+            return Ok(updated);
+        }
+    } else if config.depth_qualified_since.is_some() {
+        state
+            .db
+            .set_base_market_bootstrap_depth_qualified_since(config.market_id, None)
+            .await?;
+        let mut updated = config;
+        updated.depth_qualified_since = None;
+        return Ok(updated);
+    }
+
+    Ok(config)
 }
 
 async fn fetch_internal_market_snapshots(
@@ -814,6 +1462,13 @@ async fn fetch_internal_market_snapshots(
     if total == 0 {
         return Ok(Vec::new());
     }
+    let bootstrap_configs = state
+        .db
+        .list_base_market_bootstrap_configs()
+        .await?
+        .into_iter()
+        .map(|entry| (entry.market_id, entry))
+        .collect::<HashMap<_, _>>();
 
     let mut markets = Vec::with_capacity(total as usize);
     for index in 1..=total {
@@ -852,6 +1507,7 @@ async fn fetch_internal_market_snapshots(
         snapshot.requires_credentials = false;
         snapshot.execution_users = true;
         snapshot.execution_agents = true;
+        apply_bootstrap_snapshot(&mut snapshot, bootstrap_configs.get(&index))?;
         markets.push(snapshot);
     }
 
@@ -932,6 +1588,8 @@ async fn fetch_internal_market_snapshot_by_id(
     snapshot.requires_credentials = false;
     snapshot.execution_users = true;
     snapshot.execution_agents = true;
+    let bootstrap_config = state.db.get_base_market_bootstrap(market_id).await?;
+    apply_bootstrap_snapshot(&mut snapshot, bootstrap_config.as_ref())?;
 
     Ok(snapshot)
 }
@@ -1133,6 +1791,98 @@ pub async fn get_base_market(
     })?;
     let market = fetch_internal_market_snapshot_by_id(&state, market_id).await?;
     Ok(HttpResponse::Ok().json(market))
+}
+
+pub async fn register_base_market_bootstrap(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+    body: web::Json<RegisterBaseMarketBootstrapRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let market_id = path.into_inner();
+    if market_id == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_MARKET_ID",
+            "market_id must be a positive integer",
+        ));
+    }
+
+    let validated = validate_bootstrap_registration(&body)?;
+    let market = fetch_internal_market_snapshot_by_id(&state, market_id).await?;
+    if market.resolved {
+        return Err(ApiError::conflict(
+            "MARKET_ALREADY_RESOLVED",
+            "resolved markets cannot be registered for bootstrap liquidity",
+        ));
+    }
+
+    let creator = verify_market_bootstrap_registration_tx(&state, market_id, body.tx_hash.as_str()).await?;
+    let record = state
+        .db
+        .upsert_base_market_bootstrap(&BaseMarketBootstrapUpsert {
+            market_id,
+            creator: creator.as_str(),
+            liquidity_mode: validated.liquidity_mode.as_str(),
+            status: validated.status.as_str(),
+            seed_usdc: validated.seed_usdc,
+            initial_yes_bps: validated.initial_yes_bps,
+            strategy: validated.strategy.as_str(),
+            levels: validated.levels,
+            base_spread_bps: validated.base_spread_bps,
+            step_bps: validated.step_bps,
+            cadence_seconds: validated.cadence_seconds,
+            expiry_seconds: validated.expiry_seconds,
+            organic_depth_window_bps: validated.organic_depth_window_bps,
+            target_depth_multiplier: validated.target_depth_multiplier,
+            target_volume_multiplier: validated.target_volume_multiplier,
+            max_age_seconds: validated.max_age_seconds,
+            inventory_skew_bps: 0,
+            exposure_cap_bps: validated.exposure_cap_bps,
+            activated_at: Some(Utc::now()),
+            graduated_at: None,
+            graduation_reason: None,
+            create_tx_hash: Some(body.tx_hash.as_str()),
+        })
+        .await?;
+
+    Ok(HttpResponse::Ok().json(record))
+}
+
+pub async fn update_base_market_bootstrap_runtime(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+    body: web::Json<UpdateBaseMarketBootstrapRuntimeRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let market_id = path.into_inner();
+    let current = state
+        .db
+        .get_base_market_bootstrap(market_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+    if current.liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID {
+        return Err(ApiError::bad_request(
+            "BOOTSTRAP_NOT_ACTIVE",
+            "runtime updates require bootstrap_hybrid liquidity mode",
+        ));
+    }
+
+    let next_skew = body.inventory_skew_bps.map(|value| {
+        value.clamp(
+            -(current.exposure_cap_bps.min(i32::MAX as u64) as i32),
+            current.exposure_cap_bps.min(i32::MAX as u64) as i32,
+        )
+    });
+    let updated = state
+        .db
+        .update_base_market_bootstrap_runtime(market_id, next_skew)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+
+    Ok(HttpResponse::Ok().json(updated))
 }
 
 pub async fn get_base_agents(
@@ -1790,95 +2540,85 @@ pub async fn get_base_orderbook(
         .await
         .map_err(map_evm_rpc_error)?;
     let total = parse_u64_hex(&total_hex)?;
-    if total == 0 {
-        return Ok(HttpResponse::Ok().json(BaseOrderBookResponse {
-            market_id: market_id_raw,
-            outcome: outcome.to_string(),
-            bids: vec![],
-            asks: vec![],
-            last_updated: Utc::now().to_rfc3339(),
-            source: "order_book_contract".to_string(),
-            provider: "internal".to_string(),
-            chain_id: state.config.base_chain_id,
-            provider_market_ref: market_id.to_string(),
-            is_synthetic: false,
-        }));
-    }
-
     let start = if total > ORDERBOOK_SCAN_WINDOW {
         total - ORDERBOOK_SCAN_WINDOW + 1
     } else {
         1
     };
+    let now = now_seconds()?;
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| ApiError::internal("System time error"))?
-        .as_secs();
+    let mut yes_bid_levels: BTreeMap<u64, LevelAggregate> = BTreeMap::new();
+    let mut no_bid_levels: BTreeMap<u64, LevelAggregate> = BTreeMap::new();
 
-    let mut bid_levels: BTreeMap<u64, LevelAggregate> = BTreeMap::new();
-    let mut ask_levels: BTreeMap<u64, LevelAggregate> = BTreeMap::new();
+    if total > 0 {
+        for order_id in (start..=total).rev() {
+            let calldata = format!(
+                "{}{}",
+                ORDER_BOOK_ORDERS_SELECTOR,
+                encode_u256_hex(order_id)
+            );
+            let payload = state
+                .evm_rpc
+                .eth_call(order_book, &calldata)
+                .await
+                .map_err(map_evm_rpc_error)?;
+            let Some(order) = decode_order_snapshot(&payload)? else {
+                continue;
+            };
 
-    for order_id in (start..=total).rev() {
-        let calldata = format!(
-            "{}{}",
-            ORDER_BOOK_ORDERS_SELECTOR,
-            encode_u256_hex(order_id)
-        );
-        let payload = state
-            .evm_rpc
-            .eth_call(order_book, &calldata)
-            .await
-            .map_err(map_evm_rpc_error)?;
-        let Some(order) = decode_order_snapshot(&payload)? else {
-            continue;
-        };
-
-        if order.market_id != market_id
-            || order.canceled
-            || order.remaining == 0
-            || order.expiry < now
-            || order.price_bps == 0
-            || order.price_bps >= 10_000
-        {
-            continue;
-        }
-
-        if order.is_yes == outcome_is_yes {
-            let level = bid_levels.entry(order.price_bps).or_default();
-            level.quantity += order.remaining;
-            level.orders += 1;
-        } else {
-            let ask_price_bps = 10_000 - order.price_bps;
-            if ask_price_bps == 0 || ask_price_bps >= 10_000 {
+            if order.market_id != market_id
+                || order.canceled
+                || order.remaining == 0
+                || order.expiry < now
+                || !(1..PAR_PRICE_BPS).contains(&order.price_bps)
+            {
                 continue;
             }
-            let level = ask_levels.entry(ask_price_bps).or_default();
-            level.quantity += order.remaining;
-            level.orders += 1;
+
+            if order.is_yes {
+                insert_level(&mut yes_bid_levels, order.price_bps, order.remaining);
+            } else {
+                insert_level(&mut no_bid_levels, order.price_bps, order.remaining);
+            }
         }
     }
 
-    let bids = bid_levels
-        .into_iter()
-        .rev()
-        .take(depth as usize)
-        .map(|(price_bps, level)| BaseOrderBookLevel {
-            price: (price_bps as f64) / 10_000.0,
-            quantity: level.quantity as f64,
-            orders: level.orders,
-        })
-        .collect::<Vec<_>>();
+    let market_snapshot = fetch_internal_market_snapshot_by_id(&state, market_id).await?;
+    let mut bootstrap_config = state.db.get_base_market_bootstrap(market_id).await?;
+    if let Some(config) = bootstrap_config.take() {
+        let refreshed = maybe_refresh_bootstrap_state(
+            &state,
+            &market_snapshot,
+            config,
+            &yes_bid_levels,
+            &no_bid_levels,
+        )
+        .await?;
 
-    let asks = ask_levels
-        .into_iter()
-        .take(depth as usize)
-        .map(|(price_bps, level)| BaseOrderBookLevel {
-            price: (price_bps as f64) / 10_000.0,
-            quantity: level.quantity as f64,
-            orders: level.orders,
-        })
-        .collect::<Vec<_>>();
+        if bootstrap_active_for_market(&refreshed, &market_snapshot, now) {
+            let synthetic = generate_bootstrap_synthetic_book(&refreshed);
+            merge_level_maps(&mut yes_bid_levels, &synthetic.yes_bids);
+            merge_level_maps(&mut no_bid_levels, &synthetic.no_bids);
+            bootstrap_config = Some(refreshed);
+        } else {
+            bootstrap_config = Some(refreshed);
+        }
+    }
+
+    let (bids, asks) = if outcome_is_yes {
+        (
+            book_side_from_levels(&yes_bid_levels, depth),
+            complementary_asks_from_levels(&no_bid_levels, depth),
+        )
+    } else {
+        (
+            book_side_from_levels(&no_bid_levels, depth),
+            complementary_asks_from_levels(&yes_bid_levels, depth),
+        )
+    };
+    let is_synthetic = bootstrap_config.as_ref().is_some_and(|config| {
+        bootstrap_active_for_market(config, &market_snapshot, now)
+    });
 
     Ok(HttpResponse::Ok().json(BaseOrderBookResponse {
         market_id: market_id_raw,
@@ -1890,7 +2630,7 @@ pub async fn get_base_orderbook(
         provider: "internal".to_string(),
         chain_id: state.config.base_chain_id,
         provider_market_ref: market_id.to_string(),
-        is_synthetic: false,
+        is_synthetic,
     }))
 }
 
@@ -3323,6 +4063,21 @@ fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, 
         execution_users: true,
         execution_agents: true,
         outcomes: Vec::new(),
+        yes_price: None,
+        no_price: None,
+        volume: None,
+        liquidity_mode: Some(BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY.to_string()),
+        bootstrap_status: None,
+        bootstrap_active: None,
+        bootstrap_seed_usdc: None,
+        bootstrap_strategy: None,
+        bootstrap_levels: None,
+        bootstrap_initial_yes_bps: None,
+        bootstrap_base_spread_bps: None,
+        bootstrap_step_bps: None,
+        bootstrap_cadence_seconds: None,
+        bootstrap_expiry_seconds: None,
+        bootstrap_graduated_at: None,
     })
 }
 
@@ -3574,6 +4329,146 @@ fn unix_to_rfc3339(timestamp: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_bootstrap_config() -> BaseMarketBootstrapConfigRecord {
+        let now = Utc::now();
+        BaseMarketBootstrapConfigRecord {
+            market_id: 42,
+            creator: "0x71c7656ec7ab88b098defb751b7401b5f6d8976f".to_string(),
+            liquidity_mode: BOOTSTRAP_LIQUIDITY_MODE_HYBRID.to_string(),
+            status: BOOTSTRAP_STATUS_ACTIVE.to_string(),
+            seed_usdc: 100.0,
+            initial_yes_bps: 5_000,
+            strategy: BOOTSTRAP_STRATEGY_LADDER_V1.to_string(),
+            levels: BOOTSTRAP_DEFAULT_LEVELS,
+            base_spread_bps: BOOTSTRAP_DEFAULT_BASE_SPREAD_BPS,
+            step_bps: BOOTSTRAP_DEFAULT_STEP_BPS,
+            cadence_seconds: BOOTSTRAP_DEFAULT_CADENCE_SECONDS,
+            expiry_seconds: BOOTSTRAP_DEFAULT_EXPIRY_SECONDS,
+            organic_depth_window_bps: BOOTSTRAP_DEFAULT_DEPTH_WINDOW_BPS,
+            target_depth_multiplier: BOOTSTRAP_DEFAULT_TARGET_DEPTH_MULTIPLIER,
+            target_volume_multiplier: BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER,
+            max_age_seconds: BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS,
+            inventory_skew_bps: 0,
+            exposure_cap_bps: BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS,
+            depth_qualified_since: None,
+            activated_at: now,
+            graduated_at: None,
+            graduation_reason: None,
+            create_tx_hash: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn test_validate_bootstrap_registration_rejects_disabled_strategies() {
+        let request = RegisterBaseMarketBootstrapRequest {
+            tx_hash: "0x1111111111111111111111111111111111111111111111111111111111111111"
+                .to_string(),
+            liquidity_mode: BOOTSTRAP_LIQUIDITY_MODE_HYBRID.to_string(),
+            seed_usdc: 100.0,
+            initial_yes_bps: 5_000,
+            strategy: BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL.to_string(),
+            levels: 5,
+            base_spread_bps: 150,
+            step_bps: 100,
+            cadence_seconds: 300,
+            expiry_seconds: 900,
+        };
+
+        let error = validate_bootstrap_registration(&request).unwrap_err();
+        assert_eq!(error.code, "BOOTSTRAP_STRATEGY_DISABLED");
+    }
+
+    #[test]
+    fn test_generate_bootstrap_synthetic_book_is_symmetric_without_skew() {
+        let config = sample_bootstrap_config();
+        let synthetic = generate_bootstrap_synthetic_book(&config);
+        let yes_prices = synthetic.yes_bids.keys().copied().collect::<Vec<_>>();
+        let no_prices = synthetic.no_bids.keys().copied().collect::<Vec<_>>();
+
+        assert_eq!(yes_prices, vec![4_450, 4_550, 4_650, 4_750, 4_850]);
+        assert_eq!(no_prices, vec![4_450, 4_550, 4_650, 4_750, 4_850]);
+        assert_eq!(
+            synthetic
+                .yes_bids
+                .values()
+                .map(|level| level.quantity)
+                .sum::<u64>(),
+            50_000_000
+        );
+        assert_eq!(
+            synthetic
+                .no_bids
+                .values()
+                .map(|level| level.quantity)
+                .sum::<u64>(),
+            50_000_000
+        );
+    }
+
+    #[test]
+    fn test_generate_bootstrap_synthetic_book_suppresses_crowded_side_at_cap() {
+        let mut config = sample_bootstrap_config();
+        config.inventory_skew_bps = config.exposure_cap_bps as i32;
+
+        let synthetic = generate_bootstrap_synthetic_book(&config);
+
+        assert!(synthetic.yes_bids.is_empty());
+        assert_eq!(
+            synthetic
+                .no_bids
+                .values()
+                .map(|level| level.quantity)
+                .sum::<u64>(),
+            100_000_000
+        );
+    }
+
+    #[test]
+    fn test_merge_level_maps_aggregates_quantities() {
+        let mut organic = BTreeMap::from([(
+            4_900,
+            LevelAggregate {
+                quantity: 10,
+                orders: 1,
+            },
+        )]);
+        let synthetic = BTreeMap::from([
+            (
+                4_900,
+                LevelAggregate {
+                    quantity: 25,
+                    orders: 1,
+                },
+            ),
+            (
+                4_800,
+                LevelAggregate {
+                    quantity: 40,
+                    orders: 1,
+                },
+            ),
+        ]);
+
+        merge_level_maps(&mut organic, &synthetic);
+
+        assert_eq!(organic.get(&4_900).unwrap().quantity, 35);
+        assert_eq!(organic.get(&4_900).unwrap().orders, 2);
+        assert_eq!(organic.get(&4_800).unwrap().quantity, 40);
+    }
+
+    #[test]
+    fn test_bootstrap_side_budget_bps_respects_exposure_cap() {
+        let mut config = sample_bootstrap_config();
+        config.inventory_skew_bps = -((config.exposure_cap_bps / 2) as i32);
+
+        let (yes_budget_bps, no_budget_bps) = bootstrap_side_budget_bps(&config);
+
+        assert_eq!(yes_budget_bps, 7_500);
+        assert_eq!(no_budget_bps, 2_500);
+    }
 
     #[test]
     fn test_is_valid_evm_address() {

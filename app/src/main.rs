@@ -496,6 +496,14 @@ async fn main() -> std::io::Result<()> {
                                 web::get().to(api::evm::get_base_trades),
                             )
                             .route(
+                                "/internal/markets/{market_id}/bootstrap",
+                                web::post().to(api::evm::register_base_market_bootstrap),
+                            )
+                            .route(
+                                "/internal/markets/{market_id}/bootstrap/runtime",
+                                web::patch().to(api::evm::update_base_market_bootstrap_runtime),
+                            )
+                            .route(
                                 "/token/state",
                                 web::get().to(api::evm::get_r44_token_state),
                             )

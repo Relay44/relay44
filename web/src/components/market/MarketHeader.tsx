@@ -88,6 +88,11 @@ export function MarketHeader({
           <Badge variant={statusVariant}>
             {MARKET_STATUS_LABELS[market.status]}
           </Badge>
+          {market.liquidityMode === 'bootstrap_hybrid' ? (
+            <Badge variant={market.bootstrapActive ? 'accent' : 'muted'}>
+              {market.bootstrapActive ? 'bootstrap active' : 'bootstrap graduated'}
+            </Badge>
+          ) : null}
         </div>
         <h1 className="mb-2 text-xl font-bold sm:text-2xl">{market.question}</h1>
         <p className="text-sm leading-6 text-text-secondary">

@@ -1,9 +1,12 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Row};
+use sqlx::{
+    postgres::{PgPoolOptions, PgRow},
+    PgPool, Postgres, Row,
+};
 use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -107,6 +110,61 @@ pub struct ChainSyncCursor {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseMarketBootstrapConfigRecord {
+    pub market_id: u64,
+    pub creator: String,
+    pub liquidity_mode: String,
+    pub status: String,
+    pub seed_usdc: f64,
+    pub initial_yes_bps: u64,
+    pub strategy: String,
+    pub levels: u64,
+    pub base_spread_bps: u64,
+    pub step_bps: u64,
+    pub cadence_seconds: u64,
+    pub expiry_seconds: u64,
+    pub organic_depth_window_bps: u64,
+    pub target_depth_multiplier: f64,
+    pub target_volume_multiplier: f64,
+    pub max_age_seconds: u64,
+    pub inventory_skew_bps: i32,
+    pub exposure_cap_bps: u64,
+    pub depth_qualified_since: Option<DateTime<Utc>>,
+    pub activated_at: DateTime<Utc>,
+    pub graduated_at: Option<DateTime<Utc>>,
+    pub graduation_reason: Option<String>,
+    pub create_tx_hash: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseMarketBootstrapUpsert<'a> {
+    pub market_id: u64,
+    pub creator: &'a str,
+    pub liquidity_mode: &'a str,
+    pub status: &'a str,
+    pub seed_usdc: f64,
+    pub initial_yes_bps: u64,
+    pub strategy: &'a str,
+    pub levels: u64,
+    pub base_spread_bps: u64,
+    pub step_bps: u64,
+    pub cadence_seconds: u64,
+    pub expiry_seconds: u64,
+    pub organic_depth_window_bps: u64,
+    pub target_depth_multiplier: f64,
+    pub target_volume_multiplier: f64,
+    pub max_age_seconds: u64,
+    pub inventory_skew_bps: i32,
+    pub exposure_cap_bps: u64,
+    pub activated_at: Option<DateTime<Utc>>,
+    pub graduated_at: Option<DateTime<Utc>>,
+    pub graduation_reason: Option<&'a str>,
+    pub create_tx_hash: Option<&'a str>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ComplianceDecisionEntry<'a> {
     pub request_id: Option<&'a str>,
@@ -121,6 +179,36 @@ pub struct ComplianceDecisionEntry<'a> {
 }
 
 impl DatabaseService {
+    fn map_base_market_bootstrap_row(row: &PgRow) -> BaseMarketBootstrapConfigRecord {
+        BaseMarketBootstrapConfigRecord {
+            market_id: row.get::<i64, _>("market_id") as u64,
+            creator: row.get("creator"),
+            liquidity_mode: row.get("liquidity_mode"),
+            status: row.get("status"),
+            seed_usdc: row.get("seed_usdc"),
+            initial_yes_bps: row.get::<i32, _>("initial_yes_bps") as u64,
+            strategy: row.get("strategy"),
+            levels: row.get::<i32, _>("levels") as u64,
+            base_spread_bps: row.get::<i32, _>("base_spread_bps") as u64,
+            step_bps: row.get::<i32, _>("step_bps") as u64,
+            cadence_seconds: row.get::<i32, _>("cadence_seconds") as u64,
+            expiry_seconds: row.get::<i32, _>("expiry_seconds") as u64,
+            organic_depth_window_bps: row.get::<i32, _>("organic_depth_window_bps") as u64,
+            target_depth_multiplier: row.get("target_depth_multiplier"),
+            target_volume_multiplier: row.get("target_volume_multiplier"),
+            max_age_seconds: row.get::<i64, _>("max_age_seconds") as u64,
+            inventory_skew_bps: row.get("inventory_skew_bps"),
+            exposure_cap_bps: row.get::<i32, _>("exposure_cap_bps") as u64,
+            depth_qualified_since: row.try_get("depth_qualified_since").ok(),
+            activated_at: row.get("activated_at"),
+            graduated_at: row.try_get("graduated_at").ok(),
+            graduation_reason: row.try_get("graduation_reason").ok(),
+            create_tx_hash: row.try_get("create_tx_hash").ok(),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+
     fn migrations_path() -> PathBuf {
         if let Ok(path) = env::var("MIGRATIONS_DIR") {
             return PathBuf::from(path);
@@ -1195,6 +1283,184 @@ impl DatabaseService {
             .collect();
 
         Ok(entries)
+    }
+
+    pub async fn upsert_base_market_bootstrap(
+        &self,
+        input: &BaseMarketBootstrapUpsert<'_>,
+    ) -> Result<BaseMarketBootstrapConfigRecord> {
+        let activated_at = input.activated_at.unwrap_or_else(Utc::now);
+        let row = sqlx::query(
+            r#"
+            INSERT INTO base_market_bootstrap_configs (
+                market_id,
+                creator,
+                liquidity_mode,
+                status,
+                seed_usdc,
+                initial_yes_bps,
+                strategy,
+                levels,
+                base_spread_bps,
+                step_bps,
+                cadence_seconds,
+                expiry_seconds,
+                organic_depth_window_bps,
+                target_depth_multiplier,
+                target_volume_multiplier,
+                max_age_seconds,
+                inventory_skew_bps,
+                exposure_cap_bps,
+                activated_at,
+                graduated_at,
+                graduation_reason,
+                create_tx_hash
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+            )
+            ON CONFLICT (market_id) DO UPDATE
+            SET creator = EXCLUDED.creator,
+                liquidity_mode = EXCLUDED.liquidity_mode,
+                status = EXCLUDED.status,
+                seed_usdc = EXCLUDED.seed_usdc,
+                initial_yes_bps = EXCLUDED.initial_yes_bps,
+                strategy = EXCLUDED.strategy,
+                levels = EXCLUDED.levels,
+                base_spread_bps = EXCLUDED.base_spread_bps,
+                step_bps = EXCLUDED.step_bps,
+                cadence_seconds = EXCLUDED.cadence_seconds,
+                expiry_seconds = EXCLUDED.expiry_seconds,
+                organic_depth_window_bps = EXCLUDED.organic_depth_window_bps,
+                target_depth_multiplier = EXCLUDED.target_depth_multiplier,
+                target_volume_multiplier = EXCLUDED.target_volume_multiplier,
+                max_age_seconds = EXCLUDED.max_age_seconds,
+                inventory_skew_bps = EXCLUDED.inventory_skew_bps,
+                exposure_cap_bps = EXCLUDED.exposure_cap_bps,
+                activated_at = COALESCE(base_market_bootstrap_configs.activated_at, EXCLUDED.activated_at),
+                graduated_at = EXCLUDED.graduated_at,
+                graduation_reason = EXCLUDED.graduation_reason,
+                create_tx_hash = COALESCE(EXCLUDED.create_tx_hash, base_market_bootstrap_configs.create_tx_hash)
+            RETURNING *
+            "#,
+        )
+        .bind(input.market_id as i64)
+        .bind(input.creator)
+        .bind(input.liquidity_mode)
+        .bind(input.status)
+        .bind(input.seed_usdc)
+        .bind(input.initial_yes_bps as i32)
+        .bind(input.strategy)
+        .bind(input.levels as i32)
+        .bind(input.base_spread_bps as i32)
+        .bind(input.step_bps as i32)
+        .bind(input.cadence_seconds as i32)
+        .bind(input.expiry_seconds as i32)
+        .bind(input.organic_depth_window_bps as i32)
+        .bind(input.target_depth_multiplier)
+        .bind(input.target_volume_multiplier)
+        .bind(input.max_age_seconds as i64)
+        .bind(input.inventory_skew_bps)
+        .bind(input.exposure_cap_bps as i32)
+        .bind(activated_at)
+        .bind(input.graduated_at)
+        .bind(input.graduation_reason)
+        .bind(input.create_tx_hash)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Self::map_base_market_bootstrap_row(&row))
+    }
+
+    pub async fn get_base_market_bootstrap(
+        &self,
+        market_id: u64,
+    ) -> Result<Option<BaseMarketBootstrapConfigRecord>> {
+        let row = sqlx::query("SELECT * FROM base_market_bootstrap_configs WHERE market_id = $1")
+            .bind(market_id as i64)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.as_ref().map(Self::map_base_market_bootstrap_row))
+    }
+
+    pub async fn list_base_market_bootstrap_configs(
+        &self,
+    ) -> Result<Vec<BaseMarketBootstrapConfigRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM base_market_bootstrap_configs ORDER BY market_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(Self::map_base_market_bootstrap_row)
+            .collect())
+    }
+
+    pub async fn update_base_market_bootstrap_runtime(
+        &self,
+        market_id: u64,
+        inventory_skew_bps: Option<i32>,
+    ) -> Result<Option<BaseMarketBootstrapConfigRecord>> {
+        let row = sqlx::query(
+            r#"
+            UPDATE base_market_bootstrap_configs
+            SET inventory_skew_bps = COALESCE($2, inventory_skew_bps)
+            WHERE market_id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(market_id as i64)
+        .bind(inventory_skew_bps)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(Self::map_base_market_bootstrap_row))
+    }
+
+    pub async fn set_base_market_bootstrap_depth_qualified_since(
+        &self,
+        market_id: u64,
+        value: Option<DateTime<Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE base_market_bootstrap_configs
+            SET depth_qualified_since = $2
+            WHERE market_id = $1
+            "#,
+        )
+        .bind(market_id as i64)
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn graduate_base_market_bootstrap(
+        &self,
+        market_id: u64,
+        reason: &str,
+    ) -> Result<Option<BaseMarketBootstrapConfigRecord>> {
+        let row = sqlx::query(
+            r#"
+            UPDATE base_market_bootstrap_configs
+            SET status = 'graduated',
+                graduated_at = COALESCE(graduated_at, NOW()),
+                graduation_reason = $2
+            WHERE market_id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(market_id as i64)
+        .bind(reason)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(Self::map_base_market_bootstrap_row))
     }
 }
 
