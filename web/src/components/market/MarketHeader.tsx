@@ -1,8 +1,12 @@
-import { MarketArtwork } from '@/components/market/MarketArtwork';
-import { Badge } from '@/components/ui';
-import { MARKET_STATUS_LABELS } from '@/lib/constants';
-import { isTradingViewUrl } from '@/lib/tradingView';
-import type { Market } from '@/types';
+import { MarketArtwork } from "@/components/market/MarketArtwork";
+import { Badge } from "@/components/ui";
+import {
+  getBootstrapStatusLabel,
+  getBootstrapStatusTone,
+} from "@/lib/bootstrap";
+import { MARKET_STATUS_LABELS } from "@/lib/constants";
+import { isTradingViewUrl } from "@/lib/tradingView";
+import type { Market } from "@/types";
 
 function Linkify({
   text,
@@ -60,13 +64,14 @@ export function MarketHeader({
   market,
   suppressTradingViewLinks = false,
 }: MarketHeaderProps) {
-  // Use accent for active, muted for others - no harsh green/red
   const statusVariant =
-    market.status === 'active'
-      ? 'accent'
-      : market.status === 'resolved'
-        ? 'default'
-        : 'muted';
+    market.status === "active"
+      ? "accent"
+      : market.status === "resolved"
+        ? "default"
+        : "muted";
+  const bootstrapLabel = getBootstrapStatusLabel(market);
+  const bootstrapTone = getBootstrapStatusTone(market);
 
   return (
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -79,25 +84,31 @@ export function MarketHeader({
       <div className="min-w-0 flex-1">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Badge variant="muted">{market.category}</Badge>
-          <Badge variant={market.isExternal ? 'accent' : 'muted'}>
+          <Badge variant={market.isExternal ? "accent" : "muted"}>
             {market.provider}
           </Badge>
           <Badge variant="muted">
-            {market.chainId === 137 ? 'polygon' : market.chainId === 8453 ? 'base' : `chain-${market.chainId}`}
+            {market.chainId === 137
+              ? "polygon"
+              : market.chainId === 8453
+                ? "base"
+                : `chain-${market.chainId}`}
           </Badge>
           <Badge variant={statusVariant}>
             {MARKET_STATUS_LABELS[market.status]}
           </Badge>
-          {market.liquidityMode === 'bootstrap_hybrid' ? (
-            <Badge variant={market.bootstrapActive ? 'accent' : 'muted'}>
-              {market.bootstrapActive ? 'bootstrap active' : 'bootstrap graduated'}
+          {market.liquidityMode === "bootstrap_hybrid" ? (
+            <Badge variant={bootstrapTone}>
+              {`bootstrap ${bootstrapLabel}`}
             </Badge>
           ) : null}
         </div>
-        <h1 className="mb-2 text-xl font-bold sm:text-2xl">{market.question}</h1>
+        <h1 className="mb-2 text-xl font-bold sm:text-2xl">
+          {market.question}
+        </h1>
         <p className="text-sm leading-6 text-text-secondary">
           <Linkify
-            text={market.description || ''}
+            text={market.description || ""}
             suppressTradingViewLinks={suppressTradingViewLinks}
           />
         </p>
