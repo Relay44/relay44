@@ -65,6 +65,15 @@ const RESOLUTION_SOURCES = [
   { id: "custom", label: "Custom", description: "Specify your own source" },
 ] as const;
 
+const BOOTSTRAP_DEFAULTS = {
+  strategy: "ladder_v1",
+  levels: 5,
+  baseSpreadBps: 150,
+  stepBps: 100,
+  cadenceSeconds: 300,
+  expirySeconds: 900,
+} as const;
+
 function splitTradingEnd(value?: string): { date: string; time: string } {
   if (!value) {
     return { date: "", time: "23:59" };
@@ -212,7 +221,11 @@ export function CreateMarketForm({
   const [customSource, setCustomSource] = useState(initialCustomSource || "");
   const [tradingEndDate, setTradingEndDate] = useState(initialTradingEndDate);
   const [tradingEndTime, setTradingEndTime] = useState(initialTradingEndTime);
+  const [liquidityMode, setLiquidityMode] = useState<
+    "clob_only" | "bootstrap_hybrid"
+  >("bootstrap_hybrid");
   const [initialLiquidity, setInitialLiquidity] = useState("100");
+  const [initialYesPrice, setInitialYesPrice] = useState("50");
   const [confirmedQuestion, setConfirmedQuestion] = useState(false);
   const [confirmedSource, setConfirmedSource] = useState(false);
   const [confirmedDeadline, setConfirmedDeadline] = useState(false);
@@ -338,6 +351,23 @@ export function CreateMarketForm({
       );
       return false;
     }
+    if (liquidityMode === "bootstrap_hybrid") {
+      const liquidityValue = Number(initialLiquidity);
+      if (!Number.isFinite(liquidityValue) || liquidityValue < 50) {
+        setError("Bootstrap liquidity requires at least 50 USDC.");
+        return false;
+      }
+
+      const openingYesPrice = Number(initialYesPrice);
+      if (
+        !Number.isFinite(openingYesPrice) ||
+        openingYesPrice < 1 ||
+        openingYesPrice > 99
+      ) {
+        setError("Opening YES price must be between 1 and 99.");
+        return false;
+      }
+    }
     setError(null);
     return true;
   };
@@ -422,6 +452,34 @@ export function CreateMarketForm({
       if (!marketId) {
         throw new Error("Market created but market id was not emitted");
       }
+      let bootstrapWarning: string | null = null;
+      try {
+        await api.registerBaseMarketBootstrap(marketId, {
+          txHash,
+          liquidityMode,
+          seedUsdc:
+            liquidityMode === "bootstrap_hybrid"
+              ? Number(initialLiquidity)
+              : 0,
+          initialYesBps: Math.round(Number(initialYesPrice) * 100),
+          strategy: BOOTSTRAP_DEFAULTS.strategy,
+          levels: BOOTSTRAP_DEFAULTS.levels,
+          baseSpreadBps: BOOTSTRAP_DEFAULTS.baseSpreadBps,
+          stepBps: BOOTSTRAP_DEFAULTS.stepBps,
+          cadenceSeconds: BOOTSTRAP_DEFAULTS.cadenceSeconds,
+          expirySeconds: BOOTSTRAP_DEFAULTS.expirySeconds,
+        });
+      } catch (bootstrapError) {
+        bootstrapWarning =
+          liquidityMode === "bootstrap_hybrid"
+            ? `Market created, but bootstrap registration failed: ${marketCreateErrorMessage(
+                bootstrapError,
+              )}`
+            : `Market created, but liquidity mode registration failed: ${marketCreateErrorMessage(
+                bootstrapError,
+              )}`;
+      }
+
       onSuccess?.(marketId);
 
       setQuestion("");
@@ -431,11 +489,14 @@ export function CreateMarketForm({
       setCustomSource("");
       setTradingEndDate("");
       setTradingEndTime("23:59");
+      setLiquidityMode("bootstrap_hybrid");
       setInitialLiquidity("100");
+      setInitialYesPrice("50");
       setConfirmedQuestion(false);
       setConfirmedSource(false);
       setConfirmedDeadline(false);
       setStep(1);
+      setError(bootstrapWarning);
     } catch (err) {
       setError(marketCreateErrorMessage(err));
     } finally {
@@ -828,6 +889,108 @@ export function CreateMarketForm({
                   {formatTradingEndLabel(tradingEndDate, tradingEndTime)}
                 </p>
               </div>
+
+              <div>
+                <p className="text-sm text-text-secondary">Liquidity Mode</p>
+                <p className="text-text-primary">
+                  {liquidityMode === "bootstrap_hybrid"
+                    ? "Bootstrap hybrid"
+                    : "CLOB only"}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 border border-border bg-bg-secondary p-4">
+              <div>
+                <p className="text-sm font-medium text-text-primary">
+                  Bootstrap setup
+                </p>
+                <p className="mt-1 text-sm text-text-secondary">
+                  Use bootstrap mode to seed thin markets with synthetic ladder
+                  depth on the existing YES and NO book. CLOB only publishes the
+                  market without bootstrap depth.
+                </p>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setLiquidityMode("bootstrap_hybrid")}
+                  className={cn(
+                    "border p-4 text-left transition-colors",
+                    liquidityMode === "bootstrap_hybrid"
+                      ? "border-accent bg-accent/10"
+                      : "border-border hover:border-border-hover hover:bg-bg-primary",
+                  )}
+                >
+                  <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
+                    Bootstrap hybrid
+                  </p>
+                  <p className="mt-2 text-sm text-text-primary">
+                    Seed ladder depth, then let the book take over when organic
+                    liquidity is real.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLiquidityMode("clob_only")}
+                  className={cn(
+                    "border p-4 text-left transition-colors",
+                    liquidityMode === "clob_only"
+                      ? "border-accent bg-accent/10"
+                      : "border-border hover:border-border-hover hover:bg-bg-primary",
+                  )}
+                >
+                  <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
+                    CLOB only
+                  </p>
+                  <p className="mt-2 text-sm text-text-primary">
+                    Publish the market with no bootstrap depth and rely on
+                    organic orders from the start.
+                  </p>
+                </button>
+              </div>
+
+              {liquidityMode === "bootstrap_hybrid" ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-text-secondary">
+                      Initial Liquidity (USDC)
+                    </label>
+                    <Input
+                      type="number"
+                      value={initialLiquidity}
+                      onChange={(e) => setInitialLiquidity(e.target.value)}
+                      min="50"
+                      step="10"
+                    />
+                    <p className="mt-1 text-xs text-text-secondary">
+                      Minimum: 50 USDC. Default ladder config uses five levels.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-text-secondary">
+                      Opening YES Price (%)
+                    </label>
+                    <Input
+                      type="number"
+                      value={initialYesPrice}
+                      onChange={(e) => setInitialYesPrice(e.target.value)}
+                      min="1"
+                      max="99"
+                      step="1"
+                    />
+                    <p className="mt-1 text-xs text-text-secondary">
+                      Sets the starting midpoint for the bootstrap ladder.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-text-secondary">
+                  Bootstrap seed capital is disabled for this market.
+                </p>
+              )}
             </div>
 
             <div className="space-y-3 border border-border bg-bg-primary p-4">
@@ -870,22 +1033,6 @@ export function CreateMarketForm({
                   question.
                 </span>
               </label>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-text-secondary">
-                Initial Liquidity (USDC)
-              </label>
-              <Input
-                type="number"
-                value={initialLiquidity}
-                onChange={(e) => setInitialLiquidity(e.target.value)}
-                min="10"
-                step="10"
-              />
-              <p className="mt-1 text-xs text-text-secondary">
-                Minimum: 10 USDC. Higher liquidity attracts more traders.
-              </p>
             </div>
 
             <div className="bg-bg-tertiary p-4">

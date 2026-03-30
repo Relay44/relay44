@@ -95,6 +95,18 @@ export interface BaseMarketSnapshot {
   no_price?: number;
   volume?: number;
   provider_market_ref?: string;
+  liquidity_mode?: 'clob_only' | 'bootstrap_hybrid';
+  bootstrap_status?: string;
+  bootstrap_active?: boolean;
+  bootstrap_seed_usdc?: number;
+  bootstrap_strategy?: string;
+  bootstrap_levels?: number;
+  bootstrap_initial_yes_bps?: number;
+  bootstrap_base_spread_bps?: number;
+  bootstrap_step_bps?: number;
+  bootstrap_cadence_seconds?: number;
+  bootstrap_expiry_seconds?: number;
+  bootstrap_graduated_at?: string;
 }
 
 export interface BaseMarketsResponse {
@@ -440,6 +452,15 @@ function toNumber(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+function toOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 function toIsoString(value: unknown): string {
   if (typeof value === 'string' && value.length > 0) return value;
   return new Date().toISOString();
@@ -594,6 +615,20 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
     resolvedAt: snapshot.resolved ? fromUnixSeconds(snapshot.resolve_time) : undefined,
     outcomes: snapshot.outcomes && snapshot.outcomes.length > 0
       ? snapshot.outcomes
+      : undefined,
+    liquidityMode: snapshot.liquidity_mode,
+    bootstrapStatus: snapshot.bootstrap_status,
+    bootstrapActive: snapshot.bootstrap_active,
+    bootstrapSeedUsdc: toOptionalNumber(snapshot.bootstrap_seed_usdc),
+    bootstrapStrategy: snapshot.bootstrap_strategy,
+    bootstrapLevels: toOptionalNumber(snapshot.bootstrap_levels),
+    bootstrapInitialYesBps: toOptionalNumber(snapshot.bootstrap_initial_yes_bps),
+    bootstrapBaseSpreadBps: toOptionalNumber(snapshot.bootstrap_base_spread_bps),
+    bootstrapStepBps: toOptionalNumber(snapshot.bootstrap_step_bps),
+    bootstrapCadenceSeconds: toOptionalNumber(snapshot.bootstrap_cadence_seconds),
+    bootstrapExpirySeconds: toOptionalNumber(snapshot.bootstrap_expiry_seconds),
+    bootstrapGraduatedAt: snapshot.bootstrap_graduated_at
+      ? toIsoString(snapshot.bootstrap_graduated_at)
       : undefined,
   };
 }
@@ -1219,6 +1254,27 @@ class ApiClient {
       `/evm/markets/${encodeURIComponent(id)}`
     );
     return mapBaseSnapshotToMarket(response);
+  }
+
+  async registerBaseMarketBootstrap(
+    marketId: string,
+    data: {
+      txHash: string;
+      liquidityMode: 'clob_only' | 'bootstrap_hybrid';
+      seedUsdc: number;
+      initialYesBps: number;
+      strategy: string;
+      levels: number;
+      baseSpreadBps: number;
+      stepBps: number;
+      cadenceSeconds: number;
+      expirySeconds: number;
+    }
+  ) {
+    return this.request(`/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 
   async getBaseAgents(filters?: AgentFilters): Promise<PaginatedResponse<Agent>> {

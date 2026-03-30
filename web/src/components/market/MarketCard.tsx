@@ -73,6 +73,11 @@ export function MarketCard({ market }: MarketCardProps) {
                     ? "base"
                     : `chain-${market.chainId}`}
               </span>
+              {market.liquidityMode === "bootstrap_hybrid" ? (
+                <span className="px-2 py-0.5 border border-accent/30 bg-accent/10 text-accent">
+                  bootstrap
+                </span>
+              ) : null}
             </div>
             <h3 className="font-semibold text-text-primary text-sm leading-snug line-clamp-2 group-hover:text-accent transition-colors">
               {market.question}
@@ -115,6 +120,11 @@ export function MarketCard({ market }: MarketCardProps) {
             <span className="font-semibold text-text-primary">
               {formatVolume(market.totalVolume)}
             </span>
+            {market.liquidityMode === "bootstrap_hybrid" && market.bootstrapSeedUsdc ? (
+              <span className="text-text-secondary">
+                bootstrap ${Math.round(market.bootstrapSeedUsdc)}
+              </span>
+            ) : null}
             {market.frequency && (
               <>
                 <RefreshCw className="w-3 h-3" />
