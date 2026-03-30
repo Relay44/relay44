@@ -52,7 +52,7 @@ Relay44 is a full-stack prediction market system with Base-native contracts, a R
 
 ## Architecture
 
-![Relay44 architecture](assets/architecture/diagram-white.png)
+![Relay44 architecture](assets/architecture/diagram-white.svg)
 
 | Layer         | Purpose                                           | Main path                       |
 | ------------- | ------------------------------------------------- | ------------------------------- |
