@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider, createConfig, http } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
 import { injected } from '@wagmi/core';
+import { coinbaseWallet } from 'wagmi/connectors';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -19,7 +20,13 @@ import {
 
 const wagmiConfig = createConfig({
   chains: [base, baseSepolia],
-  connectors: [injected()],
+  connectors: [
+    coinbaseWallet({
+      appName: 'Relay44',
+      preference: { options: 'all' },
+    }),
+    injected(),
+  ],
   transports: {
     [base.id]: http(BASE_CHAIN_ID === base.id ? BASE_RPC_ENDPOINT : undefined),
     [baseSepolia.id]: http(BASE_CHAIN_ID === baseSepolia.id ? BASE_RPC_ENDPOINT : undefined),
