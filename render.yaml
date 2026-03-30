@@ -108,6 +108,8 @@ services:
         sync: false
       - key: AGENT_RUNTIME_ADDRESS
         sync: false
+      - key: BOOTSTRAP_OPERATOR_ADDRESS
+        sync: false
       - key: COLLATERAL_VAULT_ADDRESS
         sync: false
       - key: PROGRAM_VAULT_ADDRESS
@@ -438,8 +440,12 @@ services:
           property: hostport
       - key: BASE_AGENT_OPERATOR_PRIVATE_KEY
         sync: false
+      - key: BASE_AGENT_OPERATOR_SIWE_DOMAIN
+        value: relay44.com
       - key: BASE_AGENT_OPERATOR_LIMIT
         value: "100"
+      - key: BASE_AGENT_OPERATOR_MIN_BALANCE_ETH
+        value: "0.0002"
       - key: BASE_CHAIN_ID
         value: "8453"
       - key: BASE_RPC_URL

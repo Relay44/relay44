@@ -43,7 +43,9 @@ impl ExternalExecutionMode {
     }
 
     fn from_env(raw: Option<String>) -> Self {
-        raw.as_deref().and_then(Self::from_str).unwrap_or(Self::Live)
+        raw.as_deref()
+            .and_then(Self::from_str)
+            .unwrap_or(Self::Live)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -873,10 +875,7 @@ mod tests {
                 config.polymarket_forwarder_url,
                 "http://forwarder.internal:8099"
             );
-            assert_eq!(
-                config.polymarket_forwarder_shared_secret,
-                "shared-secret"
-            );
+            assert_eq!(config.polymarket_forwarder_shared_secret, "shared-secret");
         });
     }
 }

@@ -12,6 +12,7 @@ Open infrastructure for agentic prediction markets on Base.
 Relay44 is a full-stack prediction market system with Base-native contracts, a Rust API, a Next.js web client, PostgreSQL migrations, and public verification tooling. This repository is the open-source mirror of the platform. Production secrets, funded wallets, private runtime services, and internal deployment state are intentionally excluded from the public snapshot.
 
 **Links**
+
 - Product: [relay44.com](https://relay44.com)
 - Support: [SUPPORT.md](SUPPORT.md)
 - Security: [SECURITY.md](SECURITY.md)
@@ -53,23 +54,25 @@ Relay44 is a full-stack prediction market system with Base-native contracts, a R
 
 ![Relay44 architecture](assets/architecture/diagram-white.png)
 
-| Layer | Purpose | Main path |
-| --- | --- | --- |
-| Web | User-facing application and wallet flows | `web/` |
-| API | Market data, compliance, writes, and integrations | `app/` |
-| Contracts | Base-native protocol contracts | `evm/` |
-| Data | PostgreSQL schema and migrations | `migrations/` |
-| SDK / Tooling | Client tooling, operator scripts, MCP surfaces | `sdk/`, `scripts/`, `services/` |
+| Layer         | Purpose                                           | Main path                       |
+| ------------- | ------------------------------------------------- | ------------------------------- |
+| Web           | User-facing application and wallet flows          | `web/`                          |
+| API           | Market data, compliance, writes, and integrations | `app/`                          |
+| Contracts     | Base-native protocol contracts                    | `evm/`                          |
+| Data          | PostgreSQL schema and migrations                  | `migrations/`                   |
+| SDK / Tooling | Client tooling, operator scripts, MCP surfaces    | `sdk/`, `scripts/`, `services/` |
 
 ## Public Snapshot Boundary
 
 Included here:
+
 - core product code required to build, run, test, and audit the public stack
 - public automation, validation, and release tooling
 - community health files, ownership metadata, and contribution policy
 - public x402 facilitator code and MCP surfaces
 
 Excluded from here:
+
 - production secrets and funded wallets
 - internal deployment state and operational access
 - private runtime services and operator-only execution paths
@@ -94,6 +97,7 @@ Excluded from here:
 
 - Node.js 22+
 - Rust stable toolchain
+- `rustup component add rustfmt`
 - Docker
 - PostgreSQL and Redis via Docker Compose
 - Foundry if you want to build or test the Base contracts
@@ -125,6 +129,7 @@ Write-enabled Base features require real production-style configuration:
 - deployed contract addresses
 - Base RPC access
 - wallet and SIWE configuration
+- `BOOTSTRAP_OPERATOR_ADDRESS` plus an operator wallet included in `ADMIN_WALLETS` if you want creator-funded bootstrap liquidity automation
 - external venue credentials if you want live external trading
 - x402 keys if you are enabling paid resource flows
 - additional runtime keys for optional subsystems you turn on
@@ -150,6 +155,20 @@ npm --prefix web run dev
 
 ```bash
 npm run launch:onchain:verify
+```
+
+### Run the bootstrap operator locally
+
+The bootstrap ladder runner is a signer-backed cron. It logs in to the API with SIWE, fetches planned bootstrap actions, signs the onchain transactions, and reports receipts back to the API.
+
+```bash
+BASE_AGENT_OPERATOR_ENABLED=true \
+BASE_AGENT_OPERATOR_API_URL=http://127.0.0.1:8080/v1 \
+BASE_AGENT_OPERATOR_PRIVATE_KEY=0x... \
+BASE_AGENT_OPERATOR_SIWE_DOMAIN=localhost:3000 \
+BOOTSTRAP_OPERATOR_ADDRESS=0x... \
+ADMIN_WALLETS=0x... \
+npm run agents:operator
 ```
 
 ### Publish a sanitized public snapshot

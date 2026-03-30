@@ -1,18 +1,19 @@
-import { Card } from '@/components/ui';
-import { formatCurrency, formatDate, formatPercent, truncateAddress } from '@/lib/utils';
-import type { Market } from '@/types';
+import { Card } from "@/components/ui";
+import { getBootstrapStatusLabel } from "@/lib/bootstrap";
+import {
+  formatCurrency,
+  formatDate,
+  formatPercent,
+  truncateAddress,
+} from "@/lib/utils";
+import type { Market } from "@/types";
 
 export interface MarketStatsProps {
   market: Market;
 }
 
 export function MarketStats({ market }: MarketStatsProps) {
-  const bootstrapLabel =
-    market.bootstrapActive === undefined
-      ? 'inactive'
-      : market.bootstrapActive
-        ? 'active'
-        : market.bootstrapStatus || 'graduated';
+  const bootstrapLabel = getBootstrapStatusLabel(market);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -40,20 +41,34 @@ export function MarketStats({ market }: MarketStatsProps) {
           {formatCurrency(market.totalVolume)}
         </div>
       </Card>
-      {market.liquidityMode === 'bootstrap_hybrid' ? (
+      {market.liquidityMode === "bootstrap_hybrid" ? (
         <>
           <Card>
-            <div className="text-text-secondary text-xs mb-1">Bootstrap Seed</div>
+            <div className="text-text-secondary text-xs mb-1">
+              Bootstrap Seed
+            </div>
             <div className="text-lg font-semibold">
               {formatCurrency(market.bootstrapSeedUsdc || 0)}
             </div>
           </Card>
           <Card>
-            <div className="text-text-secondary text-xs mb-1">Bootstrap Status</div>
+            <div className="text-text-secondary text-xs mb-1">
+              Bootstrap Status
+            </div>
             <div className="text-lg font-semibold capitalize">
               {bootstrapLabel}
             </div>
           </Card>
+          {market.bootstrapLastError ? (
+            <Card>
+              <div className="text-text-secondary text-xs mb-1">
+                Bootstrap Note
+              </div>
+              <div className="text-sm font-medium text-text-primary">
+                {market.bootstrapLastError}
+              </div>
+            </Card>
+          ) : null}
         </>
       ) : null}
     </div>
@@ -61,6 +76,8 @@ export function MarketStats({ market }: MarketStatsProps) {
 }
 
 export function MarketInfo({ market }: MarketStatsProps) {
+  const bootstrapLabel = getBootstrapStatusLabel(market);
+
   return (
     <Card>
       <h3 className="font-semibold mb-4">Market Info</h3>
@@ -87,7 +104,7 @@ export function MarketInfo({ market }: MarketStatsProps) {
           <span className="text-text-secondary">Fee</span>
           <span>{(market.feeBps / 100).toFixed(2)}%</span>
         </div>
-        {market.liquidityMode === 'bootstrap_hybrid' ? (
+        {market.liquidityMode === "bootstrap_hybrid" ? (
           <>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-text-secondary">Liquidity Mode</span>
@@ -99,8 +116,16 @@ export function MarketInfo({ market }: MarketStatsProps) {
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-text-secondary">Bootstrap Status</span>
-              <span className="capitalize">{market.bootstrapStatus || 'active'}</span>
+              <span className="capitalize">{bootstrapLabel}</span>
             </div>
+            {market.bootstrapLastError ? (
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <span className="text-text-secondary">Bootstrap Note</span>
+                <span className="max-w-[24rem] text-text-primary sm:text-right">
+                  {market.bootstrapLastError}
+                </span>
+              </div>
+            ) : null}
           </>
         ) : null}
       </div>
