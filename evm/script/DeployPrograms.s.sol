@@ -67,12 +67,7 @@ contract DeployProgramsScript is Script {
         _configureErc8004IdentityRegistry(erc8004IdentityRegistry, bootstrapAdmin, admin, pauser, erc8004Issuer);
         _configureErc8004ReputationRegistry(erc8004ReputationRegistry, bootstrapAdmin, admin, pauser, erc8004Attester);
         _configureErc8004ValidationRegistry(
-            erc8004ValidationRegistry,
-            bootstrapAdmin,
-            admin,
-            pauser,
-            erc8004ValidationManager,
-            erc8004Validator
+            erc8004ValidationRegistry, bootstrapAdmin, admin, pauser, erc8004ValidationManager, erc8004Validator
         );
         _configureAgentRuntime(agentRuntime, bootstrapAdmin, admin, pauser, address(identityRegistry));
 

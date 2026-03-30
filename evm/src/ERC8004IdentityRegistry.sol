@@ -59,14 +59,13 @@ contract ERC8004IdentityRegistry is ERC721URIStorage, AccessControl, Pausable, E
 
     event Registered(uint256 indexed agentId, string agentURI, address indexed owner);
     event URIUpdated(uint256 indexed agentId, string newURI, address indexed updatedBy);
-    event MetadataSet(uint256 indexed agentId, string indexed indexedMetadataKey, string metadataKey, bytes metadataValue);
+    event MetadataSet(
+        uint256 indexed agentId, string indexed indexedMetadataKey, string metadataKey, bytes metadataValue
+    );
     event AgentWalletSet(uint256 indexed agentId, address indexed wallet);
     event AgentWalletUnset(uint256 indexed agentId);
 
-    constructor(address admin)
-        ERC721("Relay44 Agent Identity", "NRMD-AI")
-        EIP712("Relay44 Agent Identity", "1")
-    {
+    constructor(address admin) ERC721("Relay44 Agent Identity", "NRMD-AI") EIP712("Relay44 Agent Identity", "1") {
         if (admin == address(0)) revert ZeroAddress();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
@@ -297,13 +296,8 @@ contract ERC8004IdentityRegistry is ERC721URIStorage, AccessControl, Pausable, E
 
         identityId = ++identityCount;
         uint64 nowTs = uint64(block.timestamp);
-        _profiles[wallet] = IdentityProfile({
-            identityId: identityId,
-            tier: tier,
-            active: true,
-            createdAt: nowTs,
-            updatedAt: nowTs
-        });
+        _profiles[wallet] =
+            IdentityProfile({identityId: identityId, tier: tier, active: true, createdAt: nowTs, updatedAt: nowTs});
         _ownersByIdentity[identityId] = wallet;
         registeredAt[identityId] = nowTs;
 
@@ -327,7 +321,12 @@ contract ERC8004IdentityRegistry is ERC721URIStorage, AccessControl, Pausable, E
         return super._update(to, tokenId, auth);
     }
 
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721URIStorage, AccessControl) returns (bool) {
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721URIStorage, AccessControl)
+        returns (bool)
+    {
         return super.supportsInterface(interfaceId);
     }
 

@@ -82,11 +82,7 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
 
     event OutcomeSubmitted(address indexed wallet, bool success, uint128 notionalMicrousdc, uint16 confidenceWeightBps);
     event ReputationUpdated(
-        address indexed wallet,
-        uint32 scoreBps,
-        uint32 confidenceBps,
-        uint64 eventCount,
-        uint128 notionalMicrousdc
+        address indexed wallet, uint32 scoreBps, uint32 confidenceBps, uint64 eventCount, uint128 notionalMicrousdc
     );
     event FeedbackSubmitted(address indexed wallet, uint64 indexed feedbackId, address reviewer, int32 ratingBps);
     event FeedbackRevoked(address indexed wallet, uint64 indexed feedbackId);
@@ -326,12 +322,11 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
         emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseURI, responseHash);
     }
 
-    function getSummary(
-        uint256 agentId,
-        address[] calldata clientAddresses,
-        bytes32 tag1,
-        bytes32 tag2
-    ) external view returns (uint64 count, int128 summaryValue, uint8 decimals) {
+    function getSummary(uint256 agentId, address[] calldata clientAddresses, bytes32 tag1, bytes32 tag2)
+        external
+        view
+        returns (uint64 count, int128 summaryValue, uint8 decimals)
+    {
         if (clientAddresses.length == 0) revert EmptyClientList();
 
         int256 sum = 0;
@@ -389,9 +384,8 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
         if (clientAddresses.length == 0) revert EmptyClientList();
         FeedbackBatch memory batch = _buildFeedbackBatch(agentId, clientAddresses, tag1, tag2, includeRevoked);
 
-        return (
-            batch.clients, batch.indices, batch.values, batch.valueDecimals, batch.tag1s, batch.tag2s, batch.revoked
-        );
+        return
+            (batch.clients, batch.indices, batch.values, batch.valueDecimals, batch.tag1s, batch.tag2s, batch.revoked);
     }
 
     function getLastIndex(uint256 agentId, address clientAddress) external view returns (uint64) {
@@ -451,12 +445,11 @@ contract ERC8004ReputationRegistry is AccessControl, Pausable {
         }
     }
 
-    function _matchesFeedbackFilter(
-        Feedback storage row,
-        bytes32 tag1,
-        bytes32 tag2,
-        bool includeRevoked
-    ) internal view returns (bool) {
+    function _matchesFeedbackFilter(Feedback storage row, bytes32 tag1, bytes32 tag2, bool includeRevoked)
+        internal
+        view
+        returns (bool)
+    {
         if (!includeRevoked && row.isRevoked) return false;
         if (tag1 != bytes32(0) && row.tag1 != tag1) return false;
         if (tag2 != bytes32(0) && row.tag2 != tag2) return false;

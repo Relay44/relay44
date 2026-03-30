@@ -2000,7 +2000,9 @@ async fn build_provider_submit_payload(
             let empty_typed_data = Value::Null;
             let typed_data = if signed_order.get("order").is_some() {
                 &empty_typed_data
-            } else if let Some(value) = intent_typed_data.or_else(|| submitted_typed_data(signed_order)) {
+            } else if let Some(value) =
+                intent_typed_data.or_else(|| submitted_typed_data(signed_order))
+            {
                 value
             } else {
                 return Err(ApiError::bad_request(
@@ -2144,10 +2146,7 @@ fn build_polymarket_request_headers(
         ("Content-Type".to_string(), "application/json".to_string()),
         ("POLY_ADDRESS".to_string(), owner),
         ("POLY_API_KEY".to_string(), credentials.api_key),
-        (
-            "POLY_PASSPHRASE".to_string(),
-            credentials.api_passphrase,
-        ),
+        ("POLY_PASSPHRASE".to_string(), credentials.api_passphrase),
         ("POLY_SIGNATURE".to_string(), signature),
         ("POLY_TIMESTAMP".to_string(), timestamp),
     ]);
@@ -3070,7 +3069,10 @@ async fn build_limitless_submit_payload(
                     fetch_limitless_profile(state, base_wallet.as_str(), api_key.as_str()).await?;
                 object.insert("ownerId".to_string(), json!(profile.id));
             }
-            if let Some(order) = object.get_mut("order").and_then(|value| value.as_object_mut()) {
+            if let Some(order) = object
+                .get_mut("order")
+                .and_then(|value| value.as_object_mut())
+            {
                 ensure_limitless_order_price(order, price);
             }
         }
@@ -3312,8 +3314,13 @@ async fn cancel_on_provider(
             let body = payload.unwrap_or_else(|| json!({ "orderId": provider_order_id }));
             let body_string = polymarket_request_body(&body)?;
             let path = "/order";
-            let headers =
-                build_polymarket_request_headers(state, credential, "DELETE", path, body_string.as_str())?;
+            let headers = build_polymarket_request_headers(
+                state,
+                credential,
+                "DELETE",
+                path,
+                body_string.as_str(),
+            )?;
 
             execute_polymarket_request(
                 state,
@@ -4821,7 +4828,12 @@ pub async fn prepare_external_order_submit(
     ensure_live_write_mode(&state)?;
 
     let user = extract_authenticated_user(&req, &state).await?;
-    let intent = load_external_order_intent_record(&state, user.wallet_address.as_str(), body.intent_id.as_str()).await?;
+    let intent = load_external_order_intent_record(
+        &state,
+        user.wallet_address.as_str(),
+        body.intent_id.as_str(),
+    )
+    .await?;
     ensure_provider_action_allowed(&req, intent.provider, ProviderRailAction::TradeOpen)?;
 
     if intent.provider != ExternalProvider::Polymarket {
@@ -4847,8 +4859,13 @@ pub async fn prepare_external_order_submit(
 
     let provider_payload =
         build_polymarket_submit_payload(&credential, &intent.typed_data, &body.signed_order)?;
-    let prepared =
-        prepare_polymarket_provider_request(&state, &credential, "POST", "/order", &provider_payload)?;
+    let prepared = prepare_polymarket_provider_request(
+        &state,
+        &credential,
+        "POST",
+        "/order",
+        &provider_payload,
+    )?;
 
     Ok(HttpResponse::Ok().json(prepared))
 }
@@ -4868,8 +4885,12 @@ pub async fn submit_external_order(
     ensure_live_write_mode(&state)?;
 
     let user = extract_authenticated_user(&req, &state).await?;
-    let intent =
-        load_external_order_intent_record(&state, user.wallet_address.as_str(), body.intent_id.as_str()).await?;
+    let intent = load_external_order_intent_record(
+        &state,
+        user.wallet_address.as_str(),
+        body.intent_id.as_str(),
+    )
+    .await?;
     let provider = intent.provider;
     ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
 
@@ -5099,10 +5120,7 @@ pub async fn cancel_external_order(
             if !(200..300).contains(&provider_status) {
                 return Err(ApiError::bad_request(
                     "POLYMARKET_CANCEL_FAILED",
-                    polymarket_provider_error_message(
-                        &client_payload,
-                        "polymarket cancel failed",
-                    ),
+                    polymarket_provider_error_message(&client_payload, "polymarket cancel failed"),
                 ));
             }
             client_payload
@@ -5441,8 +5459,11 @@ pub async fn create_external_agent(
     ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
     let outcome = normalize_outcome(body.outcome.as_str())?;
     let side = normalize_side(body.side.as_str())?;
-    let execution_mode =
-        requested_execution_mode(execution_mode(&state), user_role, body.execution_mode.as_deref())?;
+    let execution_mode = requested_execution_mode(
+        execution_mode(&state),
+        user_role,
+        body.execution_mode.as_deref(),
+    )?;
 
     if body.name.trim().is_empty() {
         return Err(ApiError::bad_request("INVALID_NAME", "name is required"));
@@ -5476,19 +5497,20 @@ pub async fn create_external_agent(
         ));
     }
 
-    let credential_id = if execution_mode == ExternalExecutionMode::Live || body.credential_id.is_some() {
-        let credential = load_credential(
-            &state,
-            user.wallet_address.as_str(),
-            provider,
-            body.credential_id.as_deref(),
-        )
-        .await?;
-        ensure_provider_credential_ready(&state, provider, &credential).await?;
-        Some(credential.id)
-    } else {
-        None
-    };
+    let credential_id =
+        if execution_mode == ExternalExecutionMode::Live || body.credential_id.is_some() {
+            let credential = load_credential(
+                &state,
+                user.wallet_address.as_str(),
+                provider,
+                body.credential_id.as_deref(),
+            )
+            .await?;
+            ensure_provider_credential_ready(&state, provider, &credential).await?;
+            Some(credential.id)
+        } else {
+            None
+        };
 
     let id = Uuid::new_v4().to_string();
     let row = sqlx::query(
@@ -6602,10 +6624,7 @@ pub async fn get_public_external_agents_performance(
             ExternalAgentStrategyPerformance {
                 strategy: strategy_label(strategy.as_str()),
                 agents: row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64,
-                active_agents: row
-                    .try_get::<i64, _>("active_agents")
-                    .unwrap_or(0)
-                    .max(0) as u64,
+                active_agents: row.try_get::<i64, _>("active_agents").unwrap_or(0).max(0) as u64,
                 open_positions: 0,
                 closed_positions: 0,
                 fills: 0,
@@ -6623,26 +6642,24 @@ pub async fn get_public_external_agents_performance(
         let strategy: String = row
             .try_get("strategy")
             .map_err(|err| ApiError::internal(&err.to_string()))?;
-        let entry = strategy_map
-            .entry(strategy.clone())
-            .or_insert(ExternalAgentStrategyPerformance {
-                strategy: strategy_label(strategy.as_str()),
-                agents: 0,
-                active_agents: 0,
-                open_positions: 0,
-                closed_positions: 0,
-                fills: 0,
-                volume_usdc: 0.0,
-                fees_usdc: 0.0,
-                realized_pnl_usdc: 0.0,
-                unrealized_pnl_usdc: 0.0,
-                net_pnl_usdc: 0.0,
-                win_rate: 0.0,
-            });
-        entry.open_positions = row
-            .try_get::<i64, _>("open_positions")
-            .unwrap_or(0)
-            .max(0) as u64;
+        let entry =
+            strategy_map
+                .entry(strategy.clone())
+                .or_insert(ExternalAgentStrategyPerformance {
+                    strategy: strategy_label(strategy.as_str()),
+                    agents: 0,
+                    active_agents: 0,
+                    open_positions: 0,
+                    closed_positions: 0,
+                    fills: 0,
+                    volume_usdc: 0.0,
+                    fees_usdc: 0.0,
+                    realized_pnl_usdc: 0.0,
+                    unrealized_pnl_usdc: 0.0,
+                    net_pnl_usdc: 0.0,
+                    win_rate: 0.0,
+                });
+        entry.open_positions = row.try_get::<i64, _>("open_positions").unwrap_or(0).max(0) as u64;
         entry.closed_positions = row
             .try_get::<i64, _>("closed_positions")
             .unwrap_or(0)
@@ -6655,22 +6672,23 @@ pub async fn get_public_external_agents_performance(
         let strategy: String = row
             .try_get("strategy")
             .map_err(|err| ApiError::internal(&err.to_string()))?;
-        let entry = strategy_map
-            .entry(strategy.clone())
-            .or_insert(ExternalAgentStrategyPerformance {
-                strategy: strategy_label(strategy.as_str()),
-                agents: 0,
-                active_agents: 0,
-                open_positions: 0,
-                closed_positions: 0,
-                fills: 0,
-                volume_usdc: 0.0,
-                fees_usdc: 0.0,
-                realized_pnl_usdc: 0.0,
-                unrealized_pnl_usdc: 0.0,
-                net_pnl_usdc: 0.0,
-                win_rate: 0.0,
-            });
+        let entry =
+            strategy_map
+                .entry(strategy.clone())
+                .or_insert(ExternalAgentStrategyPerformance {
+                    strategy: strategy_label(strategy.as_str()),
+                    agents: 0,
+                    active_agents: 0,
+                    open_positions: 0,
+                    closed_positions: 0,
+                    fills: 0,
+                    volume_usdc: 0.0,
+                    fees_usdc: 0.0,
+                    realized_pnl_usdc: 0.0,
+                    unrealized_pnl_usdc: 0.0,
+                    net_pnl_usdc: 0.0,
+                    win_rate: 0.0,
+                });
         entry.fills = row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
         entry.volume_usdc = row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
         entry.fees_usdc = row.try_get::<f64, _>("fees_usdc").unwrap_or(0.0);
@@ -6680,22 +6698,23 @@ pub async fn get_public_external_agents_performance(
         let strategy: String = row
             .try_get("strategy")
             .map_err(|err| ApiError::internal(&err.to_string()))?;
-        let entry = strategy_map
-            .entry(strategy.clone())
-            .or_insert(ExternalAgentStrategyPerformance {
-                strategy: strategy_label(strategy.as_str()),
-                agents: 0,
-                active_agents: 0,
-                open_positions: 0,
-                closed_positions: 0,
-                fills: 0,
-                volume_usdc: 0.0,
-                fees_usdc: 0.0,
-                realized_pnl_usdc: 0.0,
-                unrealized_pnl_usdc: 0.0,
-                net_pnl_usdc: 0.0,
-                win_rate: 0.0,
-            });
+        let entry =
+            strategy_map
+                .entry(strategy.clone())
+                .or_insert(ExternalAgentStrategyPerformance {
+                    strategy: strategy_label(strategy.as_str()),
+                    agents: 0,
+                    active_agents: 0,
+                    open_positions: 0,
+                    closed_positions: 0,
+                    fills: 0,
+                    volume_usdc: 0.0,
+                    fees_usdc: 0.0,
+                    realized_pnl_usdc: 0.0,
+                    unrealized_pnl_usdc: 0.0,
+                    net_pnl_usdc: 0.0,
+                    win_rate: 0.0,
+                });
         entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
         entry.win_rate = row.try_get::<f64, _>("win_rate").unwrap_or(0.0);
         entry.net_pnl_usdc = entry.realized_pnl_usdc + entry.unrealized_pnl_usdc;
@@ -7200,7 +7219,10 @@ mod tests {
         assert_eq!(headers.api_key, "builder-key");
         assert_eq!(headers.api_passphrase, "builder-passphrase");
         assert_eq!(headers.timestamp, "1");
-        assert_eq!(headers.signature, "lrkaEs3ANc-KEbkGfYeyM-7_fqL3fatsQnztOq-_wXw=");
+        assert_eq!(
+            headers.signature,
+            "lrkaEs3ANc-KEbkGfYeyM-7_fqL3fatsQnztOq-_wXw="
+        );
     }
 
     #[test]
@@ -7322,6 +7344,9 @@ mod tests {
             requested_execution_mode(ExternalExecutionMode::Live, UserRole::User, Some("paper"))
                 .unwrap_err();
 
-        assert_eq!(err.message, "Only admins can override external agent execution mode");
+        assert_eq!(
+            err.message,
+            "Only admins can override external agent execution mode"
+        );
     }
 }
