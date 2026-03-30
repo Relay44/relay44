@@ -1,5 +1,8 @@
 import { Card } from "@/components/ui";
-import { getBootstrapStatusLabel } from "@/lib/bootstrap";
+import {
+  getBootstrapReasonLabel,
+  getBootstrapStatusLabel,
+} from "@/lib/bootstrap";
 import {
   formatCurrency,
   formatDate,
@@ -14,6 +17,13 @@ export interface MarketStatsProps {
 
 export function MarketStats({ market }: MarketStatsProps) {
   const bootstrapLabel = getBootstrapStatusLabel(market);
+  const bootstrapReason =
+    getBootstrapReasonLabel(market.bootstrapPauseReason) ||
+    market.bootstrapLastError ||
+    null;
+  const lastReconciled = market.bootstrapLastReconciledAt
+    ? formatDate(market.bootstrapLastReconciledAt)
+    : "Not yet";
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -45,6 +55,12 @@ export function MarketStats({ market }: MarketStatsProps) {
         <>
           <Card>
             <div className="text-text-secondary text-xs mb-1">
+              Bootstrap Status
+            </div>
+            <div className="text-lg font-semibold capitalize">{bootstrapLabel}</div>
+          </Card>
+          <Card>
+            <div className="text-text-secondary text-xs mb-1">
               Bootstrap Seed
             </div>
             <div className="text-lg font-semibold">
@@ -52,20 +68,22 @@ export function MarketStats({ market }: MarketStatsProps) {
             </div>
           </Card>
           <Card>
-            <div className="text-text-secondary text-xs mb-1">
-              Bootstrap Status
-            </div>
-            <div className="text-lg font-semibold capitalize">
-              {bootstrapLabel}
+            <div className="text-text-secondary text-xs mb-1">Active Depth</div>
+            <div className="text-lg font-semibold">
+              {formatCurrency(market.bootstrapReservedUsdc || 0)}
             </div>
           </Card>
-          {market.bootstrapLastError ? (
+          <Card>
+            <div className="text-text-secondary text-xs mb-1">Last Reconcile</div>
+            <div className="text-sm font-medium text-text-primary">
+              {lastReconciled}
+            </div>
+          </Card>
+          {bootstrapReason ? (
             <Card>
-              <div className="text-text-secondary text-xs mb-1">
-                Bootstrap Note
-              </div>
+              <div className="text-text-secondary text-xs mb-1">Health</div>
               <div className="text-sm font-medium text-text-primary">
-                {market.bootstrapLastError}
+                {bootstrapReason}
               </div>
             </Card>
           ) : null}
@@ -77,6 +95,10 @@ export function MarketStats({ market }: MarketStatsProps) {
 
 export function MarketInfo({ market }: MarketStatsProps) {
   const bootstrapLabel = getBootstrapStatusLabel(market);
+  const bootstrapReason =
+    getBootstrapReasonLabel(market.bootstrapPauseReason) ||
+    market.bootstrapLastError ||
+    null;
 
   return (
     <Card>
@@ -118,11 +140,43 @@ export function MarketInfo({ market }: MarketStatsProps) {
               <span className="text-text-secondary">Bootstrap Status</span>
               <span className="capitalize">{bootstrapLabel}</span>
             </div>
-            {market.bootstrapLastError ? (
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-text-secondary">Bootstrap Preset</span>
+              <span>{market.bootstrapPreset || "balanced"}</span>
+            </div>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-text-secondary">Active Depth</span>
+              <span>{formatCurrency(market.bootstrapReservedUsdc || 0)}</span>
+            </div>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-text-secondary">Vault Available</span>
+              <span>{formatCurrency(market.bootstrapAvailableUsdc || 0)}</span>
+            </div>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-text-secondary">Active Slots</span>
+              <span>{market.bootstrapActiveSlots || 0}</span>
+            </div>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-text-secondary">Organic Depth Ratio</span>
+              <span>
+                {market.bootstrapOrganicDepthRatio != null
+                  ? `${market.bootstrapOrganicDepthRatio.toFixed(2)}x`
+                  : "0.00x"}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-text-secondary">Last Reconcile</span>
+              <span>
+                {market.bootstrapLastReconciledAt
+                  ? formatDate(market.bootstrapLastReconciledAt)
+                  : "Not yet"}
+              </span>
+            </div>
+            {bootstrapReason ? (
               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-text-secondary">Bootstrap Note</span>
                 <span className="max-w-[24rem] text-text-primary sm:text-right">
-                  {market.bootstrapLastError}
+                  {bootstrapReason}
                 </span>
               </div>
             ) : null}

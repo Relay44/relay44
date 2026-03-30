@@ -88,6 +88,7 @@ const BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER: f64 = 10.0;
 const BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS: u64 = 7 * 24 * 60 * 60;
 const BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS: u64 = 6_500;
 const BOOTSTRAP_QUALIFY_DURATION_HOURS: i64 = 24;
+const BOOTSTRAP_FLOW_WINDOW_SECONDS: u64 = 60 * 60;
 const BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY: &str = "clob_only";
 const BOOTSTRAP_LIQUIDITY_MODE_HYBRID: &str = "bootstrap_hybrid";
 const BOOTSTRAP_STATUS_ACTIVE: &str = "active";
@@ -97,9 +98,28 @@ const BOOTSTRAP_STATUS_PENDING_FUNDING: &str = "pending_funding";
 const BOOTSTRAP_STATUS_PENDING_LAUNCH: &str = "pending_launch";
 const BOOTSTRAP_STATUS_PAUSED: &str = "paused";
 const BOOTSTRAP_STATUS_ERROR: &str = "error";
+const BOOTSTRAP_STATUS_GRADUATED: &str = "graduated";
 const BOOTSTRAP_STRATEGY_LADDER_V1: &str = "ladder_v1";
+const BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1: &str = "ladder_adaptive_v1";
 const BOOTSTRAP_STRATEGY_LMSR_EXPERIMENTAL: &str = "ls_lmsr_v1";
 const BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL: &str = "pmm_experimental";
+const BOOTSTRAP_PRESET_TIGHT: &str = "tight";
+const BOOTSTRAP_PRESET_BALANCED: &str = "balanced";
+const BOOTSTRAP_PRESET_WIDE: &str = "wide";
+const BOOTSTRAP_PAUSE_REASON_APPROVAL_MISSING: &str = "approval_missing";
+const BOOTSTRAP_PAUSE_REASON_INSUFFICIENT_FUNDS: &str = "insufficient_funds";
+const BOOTSTRAP_PAUSE_REASON_INVENTORY_CAP: &str = "inventory_cap";
+const BOOTSTRAP_PAUSE_REASON_OPERATOR_ERROR: &str = "operator_error";
+const BOOTSTRAP_PAUSE_REASON_GRADUATION_PENDING: &str = "graduation_pending";
+const BOOTSTRAP_PAUSE_REASON_ADMIN_PAUSED: &str = "admin_paused";
+const BOOTSTRAP_FLOW_ONE_SIDED_THRESHOLD_BPS: u64 = 7_000;
+const BOOTSTRAP_INVENTORY_ONE_SIDED_THRESHOLD_BPS: u64 = 3_500;
+const BOOTSTRAP_INVENTORY_TIGHTEN_THRESHOLD_BPS: u64 = 1_500;
+const BOOTSTRAP_SPREAD_WIDEN_STEP_BPS: u64 = 15_000;
+const BOOTSTRAP_SPREAD_TIGHTEN_BPS: u64 = 8_500;
+const BOOTSTRAP_SPREAD_CAP_BPS: u64 = 30_000;
+const BOOTSTRAP_SIZE_REDUCED_BPS: u64 = 7_500;
+const BOOTSTRAP_SIZE_MIN_BPS: u64 = 5_000;
 const COLLATERAL_AVAILABLE_SELECTOR: &str = "0xa0821be3";
 const BOOTSTRAP_RUNNER_ACTION_LAUNCH: &str = "launch";
 const BOOTSTRAP_RUNNER_ACTION_UPDATE: &str = "update";
@@ -183,18 +203,35 @@ pub struct RegisterBaseMarketBootstrapRequest {
     pub seed_usdc: f64,
     pub initial_yes_bps: u64,
     pub manager: Option<String>,
-    pub strategy: String,
-    pub levels: u64,
-    pub base_spread_bps: u64,
-    pub step_bps: u64,
-    pub cadence_seconds: u64,
-    pub expiry_seconds: u64,
+    pub preset: Option<String>,
+    pub strategy: Option<String>,
+    pub levels: Option<u64>,
+    pub base_spread_bps: Option<u64>,
+    pub step_bps: Option<u64>,
+    pub cadence_seconds: Option<u64>,
+    pub expiry_seconds: Option<u64>,
+    pub exposure_cap_bps: Option<u64>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateBaseMarketBootstrapRuntimeRequest {
     pub inventory_skew_bps: Option<i32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapAdminControlRequest {
+    pub reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapBackfillRequest {
+    pub market_ids: Option<Vec<u64>>,
+    pub preset: Option<String>,
+    pub strategy: Option<String>,
+    pub dry_run: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -283,6 +320,8 @@ pub struct BaseMarketSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_manager: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_preset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_strategy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_levels: Option<u64>,
@@ -296,6 +335,18 @@ pub struct BaseMarketSnapshot {
     pub bootstrap_cadence_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_expiry_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_pause_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_reserved_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_available_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_active_slots: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_organic_depth_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_consecutive_failures: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_graduated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -325,6 +376,9 @@ pub struct BaseOrderBookResponse {
     pub chain_id: u64,
     pub provider_market_ref: String,
     pub is_synthetic: bool,
+    pub includes_bootstrap: bool,
+    pub bootstrap_depth: f64,
+    pub organic_depth: f64,
 }
 
 #[derive(Serialize)]
@@ -580,6 +634,37 @@ pub struct BootstrapRunnerReportRequest {
     pub error: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapRunnerReportResponse {
+    pub market_id: u64,
+    pub kind: String,
+    pub status: String,
+    pub pause_reason: Option<String>,
+    pub consecutive_failures: u64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapBackfillEntry {
+    pub market_id: u64,
+    pub status: String,
+    pub pause_reason: Option<String>,
+    pub strategy: String,
+    pub preset: String,
+    pub changed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapBackfillResponse {
+    pub dry_run: bool,
+    pub total: u64,
+    pub updated: u64,
+    pub entries: Vec<BootstrapBackfillEntry>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrepareCreateMarketWriteRequest {
@@ -802,6 +887,7 @@ struct BootstrapSyntheticBook {
 struct ValidatedBootstrapRegistration {
     liquidity_mode: String,
     status: String,
+    preset: String,
     seed_usdc: f64,
     initial_yes_bps: u64,
     strategy: String,
@@ -814,6 +900,18 @@ struct ValidatedBootstrapRegistration {
     target_depth_multiplier: f64,
     target_volume_multiplier: f64,
     max_age_seconds: u64,
+    exposure_cap_bps: u64,
+}
+
+#[derive(Clone, Copy)]
+struct BootstrapPresetConfig {
+    preset: &'static str,
+    strategy: &'static str,
+    levels: u64,
+    base_spread_bps: u64,
+    step_bps: u64,
+    cadence_seconds: u64,
+    expiry_seconds: u64,
     exposure_cap_bps: u64,
 }
 
@@ -856,6 +954,37 @@ struct BootstrapDesiredAgent {
     size: u64,
     cadence: u64,
     expiry_window: u64,
+}
+
+#[derive(Clone, Default)]
+struct BootstrapDepthSnapshot {
+    organic_depth: u64,
+    bootstrap_depth: u64,
+    organic_depth_ratio: f64,
+}
+
+#[derive(Clone, Default)]
+struct BootstrapRecentFlow {
+    yes_quantity: u64,
+    no_quantity: u64,
+}
+
+#[derive(Clone, Default)]
+struct BootstrapPlannerSignals {
+    organic_depth_ratio: f64,
+    one_sided_flow_ratio: f64,
+    one_sided_inventory_ratio: f64,
+    inventory_cap_hit: bool,
+}
+
+#[derive(Clone)]
+struct BootstrapRuntimeAssessment {
+    status: String,
+    pause_reason: Option<String>,
+    reserved_microusdc: u64,
+    available_microusdc: u64,
+    active_slots: u64,
+    organic_depth_ratio: f64,
 }
 
 #[derive(Clone)]
@@ -1056,6 +1185,7 @@ fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> Ba
         bootstrap_active: None,
         bootstrap_seed_usdc: None,
         bootstrap_manager: None,
+        bootstrap_preset: None,
         bootstrap_strategy: None,
         bootstrap_levels: None,
         bootstrap_initial_yes_bps: None,
@@ -1063,6 +1193,12 @@ fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> Ba
         bootstrap_step_bps: None,
         bootstrap_cadence_seconds: None,
         bootstrap_expiry_seconds: None,
+        bootstrap_pause_reason: None,
+        bootstrap_reserved_usdc: None,
+        bootstrap_available_usdc: None,
+        bootstrap_active_slots: None,
+        bootstrap_organic_depth_ratio: None,
+        bootstrap_consecutive_failures: None,
         bootstrap_graduated_at: None,
         bootstrap_launch_tx_hash: None,
         bootstrap_last_reconciled_at: None,
@@ -1196,8 +1332,56 @@ fn bootstrap_seed_microusdc(seed_usdc: f64) -> u64 {
     (seed_usdc.max(0.0) * 1_000_000.0).round() as u64
 }
 
-fn bootstrap_desired_agents(
+fn bootstrap_preset_config(preset: &str) -> Option<BootstrapPresetConfig> {
+    match preset.trim().to_ascii_lowercase().as_str() {
+        BOOTSTRAP_PRESET_TIGHT => Some(BootstrapPresetConfig {
+            preset: BOOTSTRAP_PRESET_TIGHT,
+            strategy: BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1,
+            levels: 4,
+            base_spread_bps: 200,
+            step_bps: 100,
+            cadence_seconds: 45,
+            expiry_seconds: 120,
+            exposure_cap_bps: 3_000,
+        }),
+        BOOTSTRAP_PRESET_WIDE => Some(BootstrapPresetConfig {
+            preset: BOOTSTRAP_PRESET_WIDE,
+            strategy: BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1,
+            levels: 6,
+            base_spread_bps: 600,
+            step_bps: 300,
+            cadence_seconds: 90,
+            expiry_seconds: 240,
+            exposure_cap_bps: 4_000,
+        }),
+        BOOTSTRAP_PRESET_BALANCED => Some(BootstrapPresetConfig {
+            preset: BOOTSTRAP_PRESET_BALANCED,
+            strategy: BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1,
+            levels: 5,
+            base_spread_bps: 400,
+            step_bps: 200,
+            cadence_seconds: 60,
+            expiry_seconds: 180,
+            exposure_cap_bps: 3_500,
+        }),
+        _ => None,
+    }
+}
+
+fn bootstrap_scale_bps(value: u64, multiplier_bps: u64) -> u64 {
+    (((value as u128) * (multiplier_bps as u128) + 5_000) / 10_000)
+        .max(1)
+        .min(u64::MAX as u128) as u64
+}
+
+fn bootstrap_scale_quantity(value: u64, multiplier_bps: u64) -> u64 {
+    (((value as u128) * (multiplier_bps as u128)) / 10_000).min(u64::MAX as u128) as u64
+}
+
+fn bootstrap_ladder_agents(
     config: &BaseMarketBootstrapConfigRecord,
+    spread_multiplier_bps: u64,
+    size_multiplier_bps: u64,
 ) -> Vec<BootstrapDesiredAgent> {
     let levels = config.levels.max(1);
     let reference_yes_bps = bootstrap_reference_yes_bps(config);
@@ -1233,12 +1417,15 @@ fn bootstrap_desired_agents(
             level_index,
             is_yes: true,
             price_bps: reference_yes_bps
-                .saturating_sub(yes_spread)
+                .saturating_sub(bootstrap_scale_bps(yes_spread, spread_multiplier_bps))
                 .clamp(1, PAR_PRICE_BPS - 1),
-            size: yes_quantities
-                .get(level_index as usize)
-                .copied()
-                .unwrap_or_default(),
+            size: bootstrap_scale_quantity(
+                yes_quantities
+                    .get(level_index as usize)
+                    .copied()
+                    .unwrap_or_default(),
+                size_multiplier_bps,
+            ),
             cadence: config.cadence_seconds,
             expiry_window: config.expiry_seconds,
         });
@@ -1247,12 +1434,15 @@ fn bootstrap_desired_agents(
             level_index,
             is_yes: false,
             price_bps: reference_no_bps
-                .saturating_sub(no_spread)
+                .saturating_sub(bootstrap_scale_bps(no_spread, spread_multiplier_bps))
                 .clamp(1, PAR_PRICE_BPS - 1),
-            size: no_quantities
-                .get(level_index as usize)
-                .copied()
-                .unwrap_or_default(),
+            size: bootstrap_scale_quantity(
+                no_quantities
+                    .get(level_index as usize)
+                    .copied()
+                    .unwrap_or_default(),
+                size_multiplier_bps,
+            ),
             cadence: config.cadence_seconds,
             expiry_window: config.expiry_seconds,
         });
@@ -1261,13 +1451,116 @@ fn bootstrap_desired_agents(
     desired
 }
 
-fn generate_bootstrap_synthetic_book(
+fn bootstrap_base_desired_agents(
     config: &BaseMarketBootstrapConfigRecord,
-) -> BootstrapSyntheticBook {
+) -> Vec<BootstrapDesiredAgent> {
+    bootstrap_ladder_agents(config, 10_000, 10_000)
+}
+
+fn bootstrap_flow_ratio(flow: &BootstrapRecentFlow) -> f64 {
+    let total = flow.yes_quantity.saturating_add(flow.no_quantity);
+    if total == 0 {
+        return 0.5;
+    }
+
+    (flow.yes_quantity.max(flow.no_quantity) as f64) / (total as f64)
+}
+
+fn bootstrap_inventory_ratio(
+    config: &BaseMarketBootstrapConfigRecord,
+    position: &BasePositionSnapshot,
+) -> f64 {
+    let seed = bootstrap_seed_microusdc(config.seed_usdc);
+    if seed == 0 {
+        return 0.0;
+    }
+
+    let crowded = position.yes_shares.max(position.no_shares);
+    crowded as f64 / seed as f64
+}
+
+fn bootstrap_planner_signals(
+    config: &BaseMarketBootstrapConfigRecord,
+    position: &BasePositionSnapshot,
+    depth: &BootstrapDepthSnapshot,
+    flow: &BootstrapRecentFlow,
+) -> BootstrapPlannerSignals {
+    let inventory_ratio = bootstrap_inventory_ratio(config, position);
+    let exposure_cap_ratio = (config.exposure_cap_bps as f64) / (PAR_PRICE_BPS as f64);
+
+    BootstrapPlannerSignals {
+        organic_depth_ratio: depth.organic_depth_ratio,
+        one_sided_flow_ratio: bootstrap_flow_ratio(flow),
+        one_sided_inventory_ratio: inventory_ratio,
+        inventory_cap_hit: inventory_ratio >= exposure_cap_ratio,
+    }
+}
+
+fn bootstrap_adaptive_spread_multiplier_bps(signals: &BootstrapPlannerSignals) -> u64 {
+    let organic_short = signals.organic_depth_ratio < 1.0;
+    let flow_hit =
+        signals.one_sided_flow_ratio > (BOOTSTRAP_FLOW_ONE_SIDED_THRESHOLD_BPS as f64 / 10_000.0);
+    let inventory_hit = signals.one_sided_inventory_ratio
+        > (BOOTSTRAP_INVENTORY_ONE_SIDED_THRESHOLD_BPS as f64 / 10_000.0);
+
+    if !organic_short
+        && !flow_hit
+        && signals.organic_depth_ratio >= 1.0
+        && signals.one_sided_inventory_ratio
+            < (BOOTSTRAP_INVENTORY_TIGHTEN_THRESHOLD_BPS as f64 / 10_000.0)
+    {
+        return BOOTSTRAP_SPREAD_TIGHTEN_BPS;
+    }
+
+    let mut multiplier = 10_000_u64;
+    if organic_short {
+        multiplier = bootstrap_scale_bps(multiplier, BOOTSTRAP_SPREAD_WIDEN_STEP_BPS);
+    }
+    if flow_hit {
+        multiplier = bootstrap_scale_bps(multiplier, BOOTSTRAP_SPREAD_WIDEN_STEP_BPS);
+    }
+    if inventory_hit {
+        multiplier = bootstrap_scale_bps(multiplier, BOOTSTRAP_SPREAD_WIDEN_STEP_BPS);
+    }
+
+    multiplier.min(BOOTSTRAP_SPREAD_CAP_BPS)
+}
+
+fn bootstrap_adaptive_size_multiplier_bps(signals: &BootstrapPlannerSignals) -> u64 {
+    let flow_hit =
+        signals.one_sided_flow_ratio > (BOOTSTRAP_FLOW_ONE_SIDED_THRESHOLD_BPS as f64 / 10_000.0);
+    let inventory_hit = signals.one_sided_inventory_ratio
+        > (BOOTSTRAP_INVENTORY_ONE_SIDED_THRESHOLD_BPS as f64 / 10_000.0);
+
+    if flow_hit && inventory_hit {
+        BOOTSTRAP_SIZE_MIN_BPS
+    } else if flow_hit || inventory_hit {
+        BOOTSTRAP_SIZE_REDUCED_BPS
+    } else {
+        10_000
+    }
+}
+
+fn bootstrap_desired_agents(
+    config: &BaseMarketBootstrapConfigRecord,
+    signals: &BootstrapPlannerSignals,
+) -> Vec<BootstrapDesiredAgent> {
+    if config.strategy == BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1 {
+        return bootstrap_ladder_agents(
+            config,
+            bootstrap_adaptive_spread_multiplier_bps(signals),
+            bootstrap_adaptive_size_multiplier_bps(signals),
+        );
+    }
+
+    bootstrap_base_desired_agents(config)
+}
+
+fn synthetic_book_from_agents(desired: &[BootstrapDesiredAgent]) -> BootstrapSyntheticBook {
     let mut yes_bids = BTreeMap::new();
     let mut no_bids = BTreeMap::new();
 
-    for agent in bootstrap_desired_agents(config) {
+    for agent in desired {
         if agent.is_yes {
             insert_level(&mut yes_bids, agent.price_bps, agent.size);
         } else {
@@ -1276,6 +1569,13 @@ fn generate_bootstrap_synthetic_book(
     }
 
     BootstrapSyntheticBook { yes_bids, no_bids }
+}
+
+fn generate_bootstrap_synthetic_book(
+    config: &BaseMarketBootstrapConfigRecord,
+    signals: &BootstrapPlannerSignals,
+) -> BootstrapSyntheticBook {
+    synthetic_book_from_agents(&bootstrap_desired_agents(config, signals))
 }
 
 fn sum_depth_near_mid(
@@ -1288,6 +1588,34 @@ fn sum_depth_near_mid(
         .filter(|(price_bps, _)| price_bps.abs_diff(midpoint_bps) <= window_bps)
         .map(|(_, level)| level.quantity)
         .sum()
+}
+
+fn bootstrap_depth_snapshot(
+    config: &BaseMarketBootstrapConfigRecord,
+    organic_yes_bids: &BTreeMap<u64, LevelAggregate>,
+    organic_no_bids: &BTreeMap<u64, LevelAggregate>,
+) -> BootstrapDepthSnapshot {
+    let base_synthetic = synthetic_book_from_agents(&bootstrap_base_desired_agents(config));
+    let yes_mid = bootstrap_reference_yes_bps(config);
+    let no_mid = PAR_PRICE_BPS - yes_mid;
+    let window_bps = config.organic_depth_window_bps;
+    let organic_depth = sum_depth_near_mid(organic_yes_bids, yes_mid, window_bps)
+        .saturating_add(sum_depth_near_mid(organic_no_bids, no_mid, window_bps));
+    let bootstrap_depth =
+        sum_depth_near_mid(&base_synthetic.yes_bids, yes_mid, window_bps).saturating_add(
+            sum_depth_near_mid(&base_synthetic.no_bids, no_mid, window_bps),
+        );
+    let organic_depth_ratio = if bootstrap_depth == 0 {
+        0.0
+    } else {
+        organic_depth as f64 / bootstrap_depth as f64
+    };
+
+    BootstrapDepthSnapshot {
+        organic_depth,
+        bootstrap_depth,
+        organic_depth_ratio,
+    }
 }
 
 fn parse_rfc3339_utc(value: Option<&DateTime<Utc>>) -> Option<String> {
@@ -1365,6 +1693,127 @@ async fn collect_internal_order_levels(
     }
 
     Ok((yes_bid_levels, no_bid_levels))
+}
+
+async fn collect_recent_bootstrap_flow(
+    state: &AppState,
+    market_id: u64,
+    now: u64,
+) -> Result<BootstrapRecentFlow, ApiError> {
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for Base trades",
+    )?;
+    let latest_block = state
+        .evm_rpc
+        .eth_block_number()
+        .await
+        .map_err(map_evm_rpc_error)?;
+    if latest_block == 0 {
+        return Ok(BootstrapRecentFlow::default());
+    }
+
+    let from_block = latest_block.saturating_sub(TRADES_BLOCK_SCAN_WINDOW);
+    let cutoff = now.saturating_sub(BOOTSTRAP_FLOW_WINDOW_SECONDS);
+    let _ = state
+        .evm_indexer
+        .sync(
+            state.config.market_core_address.trim(),
+            order_book.as_str(),
+            TRADES_BLOCK_SCAN_WINDOW,
+            &[ORDER_FILLED_TOPIC],
+            Some(latest_block),
+        )
+        .await;
+
+    let indexed_logs = state.evm_indexer.logs_by_topic(ORDER_FILLED_TOPIC).await;
+    let mut logs = indexed_logs
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .block_number
+                .as_deref()
+                .and_then(|value| parse_u64_hex(value).ok())
+                .map(|block| block >= from_block && block <= latest_block)
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    if logs.is_empty() {
+        logs = state
+            .evm_rpc
+            .eth_get_logs(
+                order_book.as_str(),
+                ORDER_FILLED_TOPIC,
+                from_block,
+                latest_block,
+            )
+            .await
+            .map_err(map_evm_rpc_error)?;
+    }
+
+    let mut block_timestamp_cache: HashMap<u64, u64> = HashMap::new();
+    let mut flow = BootstrapRecentFlow::default();
+    for log in logs {
+        let Some(order_topic) = log.topics.get(1) else {
+            continue;
+        };
+        let order_id = match parse_u64_hex(order_topic) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let block_number = match log
+            .block_number
+            .as_deref()
+            .and_then(|value| parse_u64_hex(value).ok())
+        {
+            Some(value) => value,
+            None => continue,
+        };
+        let fill_size = match word_at(&log.data, 0).and_then(parse_u64_hex) {
+            Ok(value) if value > 0 => value,
+            _ => continue,
+        };
+        let timestamp = if let Some(value) = block_timestamp_cache.get(&block_number) {
+            *value
+        } else {
+            let value = state
+                .evm_rpc
+                .eth_get_block_timestamp(block_number)
+                .await
+                .map_err(map_evm_rpc_error)?;
+            block_timestamp_cache.insert(block_number, value);
+            value
+        };
+        if timestamp < cutoff {
+            continue;
+        }
+
+        let calldata = format!(
+            "{}{}",
+            ORDER_BOOK_ORDERS_SELECTOR,
+            encode_u256_hex(order_id)
+        );
+        let payload = state
+            .evm_rpc
+            .eth_call(order_book.as_str(), calldata.as_str())
+            .await
+            .map_err(map_evm_rpc_error)?;
+        let Some(order) = decode_order_snapshot(&payload)? else {
+            continue;
+        };
+        if order.market_id != market_id {
+            continue;
+        }
+
+        if order.is_yes {
+            flow.yes_quantity = flow.yes_quantity.saturating_add(fill_size);
+        } else {
+            flow.no_quantity = flow.no_quantity.saturating_add(fill_size);
+        }
+    }
+
+    Ok(flow)
 }
 
 async fn fetch_manager_approval(
@@ -1547,36 +1996,111 @@ fn bootstrap_active_agent_ids(records: &[BaseMarketBootstrapAgentRecord]) -> Vec
         .collect()
 }
 
-fn bootstrap_status_for_runtime(
+fn bootstrap_active_slot_count(records: &[BaseMarketBootstrapAgentRecord]) -> u64 {
+    records.iter().filter(|record| record.active).count() as u64
+}
+
+fn bootstrap_reserved_microusdc(desired: &[BootstrapDesiredAgent]) -> u64 {
+    desired
+        .iter()
+        .map(|agent| agent.size)
+        .fold(0_u64, u64::saturating_add)
+}
+
+fn bootstrap_runtime_assessment(
     current: &BaseMarketBootstrapConfigRecord,
     approved: bool,
     available_balance: u64,
     has_live_slots: bool,
-) -> &'static str {
+    signals: &BootstrapPlannerSignals,
+    reserved_microusdc: u64,
+    active_slots: u64,
+) -> BootstrapRuntimeAssessment {
     if current.status == BOOTSTRAP_STATUS_DISABLED {
-        return BOOTSTRAP_STATUS_DISABLED;
+        return BootstrapRuntimeAssessment {
+            status: BOOTSTRAP_STATUS_DISABLED.to_string(),
+            pause_reason: None,
+            reserved_microusdc,
+            available_microusdc: available_balance,
+            active_slots,
+            organic_depth_ratio: signals.organic_depth_ratio,
+        };
     }
-    if current.status == "graduated" {
-        return "graduated";
+    if current.status == BOOTSTRAP_STATUS_GRADUATED {
+        return BootstrapRuntimeAssessment {
+            status: BOOTSTRAP_STATUS_GRADUATED.to_string(),
+            pause_reason: if has_live_slots {
+                Some(BOOTSTRAP_PAUSE_REASON_GRADUATION_PENDING.to_string())
+            } else {
+                None
+            },
+            reserved_microusdc,
+            available_microusdc: available_balance,
+            active_slots,
+            organic_depth_ratio: signals.organic_depth_ratio,
+        };
     }
 
-    let required_balance = bootstrap_seed_microusdc(current.seed_usdc);
-    if !approved {
+    if current.status == BOOTSTRAP_STATUS_PAUSED
+        && current.pause_reason.as_deref() == Some(BOOTSTRAP_PAUSE_REASON_ADMIN_PAUSED)
+    {
+        return BootstrapRuntimeAssessment {
+            status: BOOTSTRAP_STATUS_PAUSED.to_string(),
+            pause_reason: Some(BOOTSTRAP_PAUSE_REASON_ADMIN_PAUSED.to_string()),
+            reserved_microusdc,
+            available_microusdc: available_balance,
+            active_slots,
+            organic_depth_ratio: signals.organic_depth_ratio,
+        };
+    }
+
+    let (status, pause_reason) = if signals.inventory_cap_hit {
+        (
+            BOOTSTRAP_STATUS_PAUSED,
+            Some(BOOTSTRAP_PAUSE_REASON_INVENTORY_CAP),
+        )
+    } else if !approved {
         if has_live_slots {
-            BOOTSTRAP_STATUS_PAUSED
+            (
+                BOOTSTRAP_STATUS_PAUSED,
+                Some(BOOTSTRAP_PAUSE_REASON_APPROVAL_MISSING),
+            )
         } else {
-            BOOTSTRAP_STATUS_PENDING_AUTHORIZATION
+            (
+                BOOTSTRAP_STATUS_PENDING_AUTHORIZATION,
+                Some(BOOTSTRAP_PAUSE_REASON_APPROVAL_MISSING),
+            )
         }
-    } else if available_balance < required_balance {
+    } else if available_balance < reserved_microusdc {
         if has_live_slots {
-            BOOTSTRAP_STATUS_PAUSED
+            (
+                BOOTSTRAP_STATUS_PAUSED,
+                Some(BOOTSTRAP_PAUSE_REASON_INSUFFICIENT_FUNDS),
+            )
         } else {
-            BOOTSTRAP_STATUS_PENDING_FUNDING
+            (
+                BOOTSTRAP_STATUS_PENDING_FUNDING,
+                Some(BOOTSTRAP_PAUSE_REASON_INSUFFICIENT_FUNDS),
+            )
         }
+    } else if current.consecutive_failures >= 3 {
+        (
+            BOOTSTRAP_STATUS_ERROR,
+            Some(BOOTSTRAP_PAUSE_REASON_OPERATOR_ERROR),
+        )
     } else if has_live_slots {
-        BOOTSTRAP_STATUS_ACTIVE
+        (BOOTSTRAP_STATUS_ACTIVE, None)
     } else {
-        BOOTSTRAP_STATUS_PENDING_LAUNCH
+        (BOOTSTRAP_STATUS_PENDING_LAUNCH, None)
+    };
+
+    BootstrapRuntimeAssessment {
+        status: status.to_string(),
+        pause_reason: pause_reason.map(str::to_string),
+        reserved_microusdc,
+        available_microusdc: available_balance,
+        active_slots,
+        organic_depth_ratio: signals.organic_depth_ratio,
     }
 }
 
@@ -1661,6 +2185,7 @@ fn apply_bootstrap_snapshot(
     snapshot.bootstrap_status = Some(config.status.clone());
     snapshot.bootstrap_seed_usdc = Some(config.seed_usdc);
     snapshot.bootstrap_manager = config.manager.clone();
+    snapshot.bootstrap_preset = Some(config.preset.clone());
     snapshot.bootstrap_strategy = Some(config.strategy.clone());
     snapshot.bootstrap_levels = Some(config.levels);
     snapshot.bootstrap_initial_yes_bps = Some(config.initial_yes_bps);
@@ -1668,6 +2193,12 @@ fn apply_bootstrap_snapshot(
     snapshot.bootstrap_step_bps = Some(config.step_bps);
     snapshot.bootstrap_cadence_seconds = Some(config.cadence_seconds);
     snapshot.bootstrap_expiry_seconds = Some(config.expiry_seconds);
+    snapshot.bootstrap_pause_reason = config.pause_reason.clone();
+    snapshot.bootstrap_reserved_usdc = Some(config.reserved_usdc);
+    snapshot.bootstrap_available_usdc = Some(config.available_usdc);
+    snapshot.bootstrap_active_slots = Some(config.active_slots);
+    snapshot.bootstrap_organic_depth_ratio = Some(config.organic_depth_ratio);
+    snapshot.bootstrap_consecutive_failures = Some(config.consecutive_failures);
     snapshot.bootstrap_graduated_at = parse_rfc3339_utc(config.graduated_at.as_ref());
     snapshot.bootstrap_launch_tx_hash = config.launch_tx_hash.clone();
     snapshot.bootstrap_last_reconciled_at = parse_rfc3339_utc(config.last_reconciled_at.as_ref());
@@ -1692,6 +2223,7 @@ fn apply_bootstrap_snapshot(
 
 fn validate_bootstrap_registration(
     body: &RegisterBaseMarketBootstrapRequest,
+    user_role: Option<UserRole>,
 ) -> Result<ValidatedBootstrapRegistration, ApiError> {
     let liquidity_mode = body.liquidity_mode.trim().to_ascii_lowercase();
     if liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY
@@ -1703,33 +2235,87 @@ fn validate_bootstrap_registration(
         ));
     }
 
-    let strategy = body.strategy.trim().to_ascii_lowercase();
+    let preset = body
+        .preset
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(BOOTSTRAP_PRESET_BALANCED)
+        .to_ascii_lowercase();
+    let preset_config = bootstrap_preset_config(preset.as_str()).ok_or_else(|| {
+        ApiError::bad_request(
+            "INVALID_BOOTSTRAP_PRESET",
+            "preset must be one of tight, balanced, or wide",
+        )
+    })?;
+    let raw_requested = body.strategy.is_some()
+        || body.levels.is_some()
+        || body.base_spread_bps.is_some()
+        || body.step_bps.is_some()
+        || body.cadence_seconds.is_some()
+        || body.expiry_seconds.is_some()
+        || body.exposure_cap_bps.is_some();
+    if raw_requested && user_role != Some(UserRole::Admin) {
+        return Err(ApiError::forbidden(
+            "raw bootstrap parameters require admin access",
+        ));
+    }
+
+    let strategy = body
+        .strategy
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(preset_config.strategy)
+        .to_ascii_lowercase();
     if strategy == BOOTSTRAP_STRATEGY_LMSR_EXPERIMENTAL
         || strategy == BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL
     {
         return Err(ApiError::bad_request(
             "BOOTSTRAP_STRATEGY_DISABLED",
-            "only ladder_v1 is enabled in this build",
+            "experimental bootstrap strategies are disabled in this build",
         ));
     }
-    if strategy != BOOTSTRAP_STRATEGY_LADDER_V1 {
+    if strategy != BOOTSTRAP_STRATEGY_LADDER_V1 && strategy != BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1
+    {
         return Err(ApiError::bad_request(
             "INVALID_BOOTSTRAP_STRATEGY",
-            "strategy must be ladder_v1",
+            "strategy must be ladder_v1 or ladder_adaptive_v1",
         ));
     }
 
     let initial_yes_bps = clamp_u64(body.initial_yes_bps, 1, PAR_PRICE_BPS - 1);
-    let levels = clamp_u64(body.levels, 1, 12);
-    let base_spread_bps = clamp_u64(body.base_spread_bps, 25, 1_000);
-    let step_bps = clamp_u64(body.step_bps, 10, 1_000);
-    let cadence_seconds = clamp_u64(body.cadence_seconds, 30, 3_600);
-    let expiry_seconds = clamp_u64(body.expiry_seconds, cadence_seconds, 7_200);
+    let levels = clamp_u64(body.levels.unwrap_or(preset_config.levels), 1, 12);
+    let base_spread_bps = clamp_u64(
+        body.base_spread_bps
+            .unwrap_or(preset_config.base_spread_bps),
+        25,
+        1_000,
+    );
+    let step_bps = clamp_u64(body.step_bps.unwrap_or(preset_config.step_bps), 10, 1_000);
+    let cadence_seconds = clamp_u64(
+        body.cadence_seconds
+            .unwrap_or(preset_config.cadence_seconds),
+        30,
+        3_600,
+    );
+    let expiry_seconds = clamp_u64(
+        body.expiry_seconds.unwrap_or(preset_config.expiry_seconds),
+        cadence_seconds,
+        7_200,
+    );
+    let exposure_cap_bps = clamp_u64(
+        body.exposure_cap_bps
+            .unwrap_or(preset_config.exposure_cap_bps),
+        500,
+        9_000,
+    );
 
     if liquidity_mode == BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY {
         return Ok(ValidatedBootstrapRegistration {
             liquidity_mode,
             status: BOOTSTRAP_STATUS_DISABLED.to_string(),
+            preset: preset_config.preset.to_string(),
             seed_usdc: 0.0,
             initial_yes_bps,
             strategy,
@@ -1742,7 +2328,7 @@ fn validate_bootstrap_registration(
             target_depth_multiplier: BOOTSTRAP_DEFAULT_TARGET_DEPTH_MULTIPLIER,
             target_volume_multiplier: BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER,
             max_age_seconds: BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS,
-            exposure_cap_bps: BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS,
+            exposure_cap_bps,
         });
     }
 
@@ -1759,6 +2345,7 @@ fn validate_bootstrap_registration(
     Ok(ValidatedBootstrapRegistration {
         liquidity_mode,
         status: BOOTSTRAP_STATUS_PENDING_LAUNCH.to_string(),
+        preset: preset_config.preset.to_string(),
         seed_usdc: (body.seed_usdc * 100.0).round() / 100.0,
         initial_yes_bps,
         strategy,
@@ -1771,7 +2358,7 @@ fn validate_bootstrap_registration(
         target_depth_multiplier: BOOTSTRAP_DEFAULT_TARGET_DEPTH_MULTIPLIER,
         target_volume_multiplier: BOOTSTRAP_DEFAULT_TARGET_VOLUME_MULTIPLIER,
         max_age_seconds: BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS,
-        exposure_cap_bps: BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS,
+        exposure_cap_bps,
     })
 }
 
@@ -1946,21 +2533,13 @@ async fn maybe_refresh_bootstrap_state(
             .unwrap_or(config));
     }
 
-    let synthetic = generate_bootstrap_synthetic_book(&config);
-    let yes_mid = bootstrap_reference_yes_bps(&config);
-    let no_mid = PAR_PRICE_BPS - yes_mid;
-    let window_bps = config.organic_depth_window_bps;
-    let organic_depth = sum_depth_near_mid(organic_yes_bids, yes_mid, window_bps)
-        .saturating_add(sum_depth_near_mid(organic_no_bids, no_mid, window_bps));
-    let bootstrap_depth = sum_depth_near_mid(&synthetic.yes_bids, yes_mid, window_bps)
-        .saturating_add(sum_depth_near_mid(&synthetic.no_bids, no_mid, window_bps));
-
-    if bootstrap_depth == 0 {
+    let depth = bootstrap_depth_snapshot(&config, organic_yes_bids, organic_no_bids);
+    if depth.bootstrap_depth == 0 {
         return Ok(config);
     }
 
-    let qualifies =
-        (organic_depth as f64) >= (bootstrap_depth as f64 * config.target_depth_multiplier);
+    let qualifies = (depth.organic_depth as f64)
+        >= (depth.bootstrap_depth as f64 * config.target_depth_multiplier);
     if qualifies {
         if let Some(since) = config.depth_qualified_since {
             if now.signed_duration_since(since)
@@ -2352,6 +2931,7 @@ pub async fn get_base_market(
 }
 
 pub async fn register_base_market_bootstrap(
+    req: HttpRequest,
     state: web::Data<Arc<AppState>>,
     path: web::Path<u64>,
     body: web::Json<RegisterBaseMarketBootstrapRequest>,
@@ -2366,7 +2946,8 @@ pub async fn register_base_market_bootstrap(
         ));
     }
 
-    let validated = validate_bootstrap_registration(&body)?;
+    let user_role = extract_jwt_user(&req, &state).ok().map(|user| user.role);
+    let validated = validate_bootstrap_registration(&body, user_role)?;
     let manager = if validated.liquidity_mode == BOOTSTRAP_LIQUIDITY_MODE_HYBRID {
         let configured_manager = configured_bootstrap_operator(&state)?;
         if let Some(requested) = body.manager.as_ref() {
@@ -2404,6 +2985,7 @@ pub async fn register_base_market_bootstrap(
             liquidity_mode: validated.liquidity_mode.as_str(),
             status: validated.status.as_str(),
             manager: manager.as_deref(),
+            preset: validated.preset.as_str(),
             seed_usdc: validated.seed_usdc,
             initial_yes_bps: validated.initial_yes_bps,
             strategy: validated.strategy.as_str(),
@@ -2418,6 +3000,12 @@ pub async fn register_base_market_bootstrap(
             max_age_seconds: validated.max_age_seconds,
             inventory_skew_bps: 0,
             exposure_cap_bps: validated.exposure_cap_bps,
+            pause_reason: None,
+            reserved_usdc: 0.0,
+            available_usdc: 0.0,
+            active_slots: 0,
+            organic_depth_ratio: 0.0,
+            consecutive_failures: 0,
             activated_at: Some(Utc::now()),
             graduated_at: None,
             graduation_reason: None,
@@ -2461,7 +3049,11 @@ pub async fn update_base_market_bootstrap_runtime(
     let updated = state
         .db
         .update_base_market_bootstrap_runtime(
-            market_id, next_skew, None, None, None, None, None, false,
+            market_id,
+            &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                inventory_skew_bps: next_skew,
+                ..Default::default()
+            },
         )
         .await?
         .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
@@ -2492,6 +3084,310 @@ pub async fn get_bootstrap_operator_status(
         operator,
         owner,
         approved,
+    }))
+}
+
+async fn reconcile_bootstrap_runtime_health(
+    state: &AppState,
+    original: BaseMarketBootstrapConfigRecord,
+) -> Result<BaseMarketBootstrapConfigRecord, ApiError> {
+    let operator = configured_bootstrap_operator(state)?;
+    let now = now_seconds()?;
+    let market = fetch_internal_market_snapshot_by_id(state, original.market_id).await?;
+    let (organic_yes_bids, organic_no_bids) =
+        collect_internal_order_levels(state, original.market_id, now).await?;
+    let mut config = maybe_refresh_bootstrap_state(
+        state,
+        &market,
+        original,
+        &organic_yes_bids,
+        &organic_no_bids,
+    )
+    .await?;
+    let records = state
+        .db
+        .list_base_market_bootstrap_agents(config.market_id)
+        .await?;
+    let approved =
+        fetch_manager_approval(state, config.creator.as_str(), operator.as_str()).await?;
+    let available_balance = fetch_vault_available_balance(state, config.creator.as_str()).await?;
+    let position =
+        fetch_position_snapshot(state, config.market_id, config.creator.as_str()).await?;
+    let recent_flow = collect_recent_bootstrap_flow(state, config.market_id, now).await?;
+    let depth = bootstrap_depth_snapshot(&config, &organic_yes_bids, &organic_no_bids);
+    let signals = bootstrap_planner_signals(&config, &position, &depth, &recent_flow);
+    let desired = bootstrap_desired_agents(&config, &signals);
+    let assessment = bootstrap_runtime_assessment(
+        &config,
+        approved,
+        available_balance,
+        bootstrap_has_live_slots(&records),
+        &signals,
+        bootstrap_reserved_microusdc(&desired),
+        bootstrap_active_slot_count(&records),
+    );
+    let next_skew = bootstrap_inventory_skew_bps(&config, &position);
+    let reserved_usdc = assessment.reserved_microusdc as f64 / 1_000_000.0;
+    let available_usdc = assessment.available_microusdc as f64 / 1_000_000.0;
+    let needs_update = config.inventory_skew_bps != next_skew
+        || config.status != assessment.status
+        || config.manager.as_deref() != Some(operator.as_str())
+        || config.pause_reason != assessment.pause_reason
+        || (config.reserved_usdc - reserved_usdc).abs() > 0.000_001
+        || (config.available_usdc - available_usdc).abs() > 0.000_001
+        || config.active_slots != assessment.active_slots
+        || (config.organic_depth_ratio - assessment.organic_depth_ratio).abs() > 0.000_001;
+    if !needs_update {
+        return Ok(config);
+    }
+
+    if let Some(updated) = state
+        .db
+        .update_base_market_bootstrap_runtime(
+            config.market_id,
+            &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                inventory_skew_bps: Some(next_skew),
+                status: Some(assessment.status.as_str()),
+                manager: Some(operator.as_str()),
+                pause_reason: assessment.pause_reason.as_deref(),
+                clear_pause_reason: assessment.pause_reason.is_none(),
+                last_reconciled_at: Some(Utc::now()),
+                reserved_usdc: Some(reserved_usdc),
+                available_usdc: Some(available_usdc),
+                active_slots: Some(assessment.active_slots),
+                organic_depth_ratio: Some(assessment.organic_depth_ratio),
+                ..Default::default()
+            },
+        )
+        .await?
+    {
+        config = updated;
+    }
+
+    Ok(config)
+}
+
+pub async fn pause_base_market_bootstrap(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+    body: web::Json<BootstrapAdminControlRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+    let _reason = body
+        .reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let market_id = path.into_inner();
+    let updated = state
+        .db
+        .update_base_market_bootstrap_runtime(
+            market_id,
+            &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                status: Some(BOOTSTRAP_STATUS_PAUSED),
+                pause_reason: Some(BOOTSTRAP_PAUSE_REASON_ADMIN_PAUSED),
+                last_reconciled_at: Some(Utc::now()),
+                ..Default::default()
+            },
+        )
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+
+    Ok(HttpResponse::Ok().json(updated))
+}
+
+pub async fn resume_base_market_bootstrap(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let market_id = path.into_inner();
+    let config = state
+        .db
+        .update_base_market_bootstrap_runtime(
+            market_id,
+            &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                status: Some(BOOTSTRAP_STATUS_PENDING_LAUNCH),
+                clear_pause_reason: true,
+                clear_last_error: true,
+                consecutive_failures: Some(0),
+                last_reconciled_at: Some(Utc::now()),
+                ..Default::default()
+            },
+        )
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+    let refreshed = reconcile_bootstrap_runtime_health(&state, config).await?;
+
+    Ok(HttpResponse::Ok().json(refreshed))
+}
+
+pub async fn refresh_base_market_bootstrap(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let market_id = path.into_inner();
+    let config = state
+        .db
+        .get_base_market_bootstrap(market_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+    let refreshed = reconcile_bootstrap_runtime_health(&state, config).await?;
+
+    Ok(HttpResponse::Ok().json(refreshed))
+}
+
+pub async fn graduate_base_market_bootstrap_now(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let market_id = path.into_inner();
+    let updated = state
+        .db
+        .graduate_base_market_bootstrap(market_id, "manual")
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+
+    Ok(HttpResponse::Ok().json(updated))
+}
+
+pub async fn backfill_base_market_bootstrap(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<BootstrapBackfillRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let dry_run = body.dry_run.unwrap_or(false);
+    let preset = body
+        .preset
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            bootstrap_preset_config(value).ok_or_else(|| {
+                ApiError::bad_request(
+                    "INVALID_BOOTSTRAP_PRESET",
+                    "preset must be one of tight, balanced, or wide",
+                )
+            })
+        })
+        .transpose()?;
+    let strategy = body
+        .strategy
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+    let strategy = match strategy {
+        Some(value)
+            if value == BOOTSTRAP_STRATEGY_LADDER_V1
+                || value == BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1 =>
+        {
+            Some(value)
+        }
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "INVALID_BOOTSTRAP_STRATEGY",
+                "strategy must be ladder_v1 or ladder_adaptive_v1",
+            ));
+        }
+        None => None,
+    };
+
+    let selected_ids = body
+        .market_ids
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|market_id| *market_id > 0)
+        .collect::<Vec<_>>();
+    let filter_selected = !selected_ids.is_empty();
+    let configs = state.db.list_base_market_bootstrap_configs().await?;
+    let mut entries = Vec::new();
+    let mut updated = 0_u64;
+
+    for config in configs.into_iter().filter(|config| {
+        config.liquidity_mode == BOOTSTRAP_LIQUIDITY_MODE_HYBRID
+            && (!filter_selected || selected_ids.contains(&config.market_id))
+    }) {
+        let mut changed = false;
+        let mut update = crate::services::database::BaseMarketBootstrapRuntimeUpdate::default();
+
+        if let Some(preset_config) = preset {
+            changed = true;
+            update.preset = Some(preset_config.preset);
+            update.levels = Some(preset_config.levels);
+            update.base_spread_bps = Some(preset_config.base_spread_bps);
+            update.step_bps = Some(preset_config.step_bps);
+            update.cadence_seconds = Some(preset_config.cadence_seconds);
+            update.expiry_seconds = Some(preset_config.expiry_seconds);
+            update.exposure_cap_bps = Some(preset_config.exposure_cap_bps);
+            if strategy.is_none() {
+                update.strategy = Some(preset_config.strategy);
+            }
+        }
+        if let Some(strategy) = strategy.as_deref() {
+            changed = true;
+            update.strategy = Some(strategy);
+        }
+
+        if dry_run {
+            entries.push(BootstrapBackfillEntry {
+                market_id: config.market_id,
+                status: config.status,
+                pause_reason: config.pause_reason,
+                strategy: update
+                    .strategy
+                    .unwrap_or(config.strategy.as_str())
+                    .to_string(),
+                preset: update.preset.unwrap_or(config.preset.as_str()).to_string(),
+                changed,
+            });
+            continue;
+        }
+
+        let next_config = if changed {
+            updated = updated.saturating_add(1);
+            state
+                .db
+                .update_base_market_bootstrap_runtime(config.market_id, &update)
+                .await?
+                .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?
+        } else {
+            config
+        };
+        let refreshed = reconcile_bootstrap_runtime_health(&state, next_config).await?;
+        entries.push(BootstrapBackfillEntry {
+            market_id: refreshed.market_id,
+            status: refreshed.status,
+            pause_reason: refreshed.pause_reason,
+            strategy: refreshed.strategy,
+            preset: refreshed.preset,
+            changed,
+        });
+    }
+
+    Ok(HttpResponse::Ok().json(BootstrapBackfillResponse {
+        dry_run,
+        total: entries.len() as u64,
+        updated,
+        entries,
     }))
 }
 
@@ -2528,7 +3424,6 @@ pub async fn bootstrap_runner_tick(
     'configs: for original in configs {
         if original.liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID
             || original.status == BOOTSTRAP_STATUS_DISABLED
-            || original.status == BOOTSTRAP_STATUS_ERROR
         {
             continue;
         }
@@ -2556,26 +3451,51 @@ pub async fn bootstrap_runner_tick(
             fetch_vault_available_balance(&state, config.creator.as_str()).await?;
         let position =
             fetch_position_snapshot(&state, config.market_id, config.creator.as_str()).await?;
+        let recent_flow = collect_recent_bootstrap_flow(&state, config.market_id, now).await?;
+        let depth = bootstrap_depth_snapshot(&config, &organic_yes_bids, &organic_no_bids);
+        let signals = bootstrap_planner_signals(&config, &position, &depth, &recent_flow);
         let next_skew = bootstrap_inventory_skew_bps(&config, &position);
         let has_live_slots = bootstrap_has_live_slots(&records);
-        let next_status =
-            bootstrap_status_for_runtime(&config, approved, available_balance, has_live_slots);
+        let desired = bootstrap_desired_agents(&config, &signals);
+        let active_slots = bootstrap_active_slot_count(&records);
+        let assessment = bootstrap_runtime_assessment(
+            &config,
+            approved,
+            available_balance,
+            has_live_slots,
+            &signals,
+            bootstrap_reserved_microusdc(&desired),
+            active_slots,
+        );
 
         if config.inventory_skew_bps != next_skew
-            || config.status != next_status
+            || config.status != assessment.status
             || config.manager.as_deref() != Some(operator.as_str())
+            || config.pause_reason != assessment.pause_reason
+            || (config.reserved_usdc - (assessment.reserved_microusdc as f64 / 1_000_000.0)).abs()
+                > 0.000_001
+            || (config.available_usdc - (assessment.available_microusdc as f64 / 1_000_000.0)).abs()
+                > 0.000_001
+            || config.active_slots != assessment.active_slots
+            || (config.organic_depth_ratio - assessment.organic_depth_ratio).abs() > 0.000_001
         {
             if let Some(updated) = state
                 .db
                 .update_base_market_bootstrap_runtime(
                     config.market_id,
-                    Some(next_skew),
-                    Some(next_status),
-                    Some(operator.as_str()),
-                    None,
-                    Some(Utc::now()),
-                    None,
-                    false,
+                    &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                        inventory_skew_bps: Some(next_skew),
+                        status: Some(assessment.status.as_str()),
+                        manager: Some(operator.as_str()),
+                        pause_reason: assessment.pause_reason.as_deref(),
+                        clear_pause_reason: assessment.pause_reason.is_none(),
+                        last_reconciled_at: Some(Utc::now()),
+                        reserved_usdc: Some(assessment.reserved_microusdc as f64 / 1_000_000.0),
+                        available_usdc: Some(assessment.available_microusdc as f64 / 1_000_000.0),
+                        active_slots: Some(assessment.active_slots),
+                        organic_depth_ratio: Some(assessment.organic_depth_ratio),
+                        ..Default::default()
+                    },
                 )
                 .await?
             {
@@ -2586,7 +3506,7 @@ pub async fn bootstrap_runner_tick(
         let active_ids = bootstrap_active_agent_ids(&records);
         if matches!(
             config.status.as_str(),
-            BOOTSTRAP_STATUS_PAUSED | "graduated"
+            BOOTSTRAP_STATUS_PAUSED | BOOTSTRAP_STATUS_GRADUATED | BOOTSTRAP_STATUS_ERROR
         ) && !active_ids.is_empty()
         {
             let slots = records
@@ -2619,7 +3539,6 @@ pub async fn bootstrap_runner_tick(
             continue;
         }
 
-        let desired = bootstrap_desired_agents(&config);
         let existing = bootstrap_slot_records_map(&records);
         let missing_agents =
             bootstrap_launch_inputs(desired.as_slice(), &existing, config.market_id);
@@ -2764,28 +3683,43 @@ pub async fn bootstrap_runner_report(
     let now = Utc::now();
 
     if !success {
-        let next_status = if body.kind == BOOTSTRAP_RUNNER_ACTION_LAUNCH {
-            BOOTSTRAP_STATUS_ERROR
-        } else {
-            config.status.as_str()
-        };
+        let next_failures = config.consecutive_failures.saturating_add(1);
+        let escalation = next_failures >= 3;
         let updated = state
             .db
             .update_base_market_bootstrap_runtime(
                 body.market_id,
-                None,
-                Some(next_status),
-                None,
-                None,
-                Some(now),
-                body.error
-                    .as_deref()
-                    .or(Some("bootstrap runner transaction failed")),
-                false,
+                &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                    status: Some(if escalation {
+                        BOOTSTRAP_STATUS_ERROR
+                    } else {
+                        config.status.as_str()
+                    }),
+                    pause_reason: if escalation {
+                        Some(BOOTSTRAP_PAUSE_REASON_OPERATOR_ERROR)
+                    } else {
+                        None
+                    },
+                    clear_pause_reason: false,
+                    last_reconciled_at: Some(now),
+                    last_error: body
+                        .error
+                        .as_deref()
+                        .or(Some("bootstrap runner transaction failed")),
+                    consecutive_failures: Some(next_failures),
+                    ..Default::default()
+                },
             )
             .await?
             .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
-        return Ok(HttpResponse::Ok().json(updated));
+        return Ok(HttpResponse::Ok().json(BootstrapRunnerReportResponse {
+            market_id: updated.market_id,
+            kind: body.kind.clone(),
+            status: updated.status,
+            pause_reason: updated.pause_reason,
+            consecutive_failures: updated.consecutive_failures,
+            last_error: updated.last_error,
+        }));
     }
 
     match body.kind.as_str() {
@@ -2824,13 +3758,15 @@ pub async fn bootstrap_runner_report(
                 .db
                 .update_base_market_bootstrap_runtime(
                     body.market_id,
-                    None,
-                    Some(BOOTSTRAP_STATUS_ACTIVE),
-                    None,
-                    Some(tx_hash.as_str()),
-                    Some(now),
-                    None,
-                    true,
+                    &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                        status: Some(BOOTSTRAP_STATUS_ACTIVE),
+                        clear_pause_reason: true,
+                        launch_tx_hash: Some(tx_hash.as_str()),
+                        last_reconciled_at: Some(now),
+                        clear_last_error: true,
+                        consecutive_failures: Some(0),
+                        ..Default::default()
+                    },
                 )
                 .await?
                 .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
@@ -2863,13 +3799,14 @@ pub async fn bootstrap_runner_report(
                 .db
                 .update_base_market_bootstrap_runtime(
                     body.market_id,
-                    None,
-                    Some(BOOTSTRAP_STATUS_ACTIVE),
-                    None,
-                    None,
-                    Some(now),
-                    None,
-                    true,
+                    &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                        status: Some(BOOTSTRAP_STATUS_ACTIVE),
+                        clear_pause_reason: true,
+                        last_reconciled_at: Some(now),
+                        clear_last_error: true,
+                        consecutive_failures: Some(0),
+                        ..Default::default()
+                    },
                 )
                 .await?
                 .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
@@ -2902,13 +3839,14 @@ pub async fn bootstrap_runner_report(
                 .db
                 .update_base_market_bootstrap_runtime(
                     body.market_id,
-                    None,
-                    Some(config.status.as_str()),
-                    None,
-                    None,
-                    Some(now),
-                    None,
-                    true,
+                    &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                        status: Some(config.status.as_str()),
+                        clear_pause_reason: config.status == BOOTSTRAP_STATUS_GRADUATED,
+                        last_reconciled_at: Some(now),
+                        clear_last_error: true,
+                        consecutive_failures: Some(0),
+                        ..Default::default()
+                    },
                 )
                 .await?
                 .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
@@ -2941,13 +3879,14 @@ pub async fn bootstrap_runner_report(
                 .db
                 .update_base_market_bootstrap_runtime(
                     body.market_id,
-                    None,
-                    Some(BOOTSTRAP_STATUS_ACTIVE),
-                    None,
-                    None,
-                    Some(now),
-                    None,
-                    true,
+                    &crate::services::database::BaseMarketBootstrapRuntimeUpdate {
+                        status: Some(BOOTSTRAP_STATUS_ACTIVE),
+                        clear_pause_reason: true,
+                        last_reconciled_at: Some(now),
+                        clear_last_error: true,
+                        consecutive_failures: Some(0),
+                        ..Default::default()
+                    },
                 )
                 .await?
                 .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
@@ -2960,7 +3899,14 @@ pub async fn bootstrap_runner_report(
         }
     }
 
-    Ok(HttpResponse::Ok().json(config))
+    Ok(HttpResponse::Ok().json(BootstrapRunnerReportResponse {
+        market_id: config.market_id,
+        kind: body.kind.clone(),
+        status: config.status,
+        pause_reason: config.pause_reason,
+        consecutive_failures: config.consecutive_failures,
+        last_error: config.last_error,
+    }))
 }
 
 pub async fn get_base_agents(
@@ -3586,6 +4532,9 @@ pub async fn get_base_orderbook(
             chain_id: snapshot.chain_id,
             provider_market_ref: snapshot.provider_market_ref,
             is_synthetic: snapshot.is_synthetic,
+            includes_bootstrap: false,
+            bootstrap_depth: 0.0,
+            organic_depth: 0.0,
         }));
     }
 
@@ -3663,6 +4612,9 @@ pub async fn get_base_orderbook(
 
     let market_snapshot = fetch_internal_market_snapshot_by_id(&state, market_id).await?;
     let mut bootstrap_config = state.db.get_base_market_bootstrap(market_id).await?;
+    let mut includes_bootstrap = false;
+    let mut bootstrap_depth = 0_u64;
+    let mut organic_depth = 0_u64;
     if let Some(config) = bootstrap_config.take() {
         let refreshed = maybe_refresh_bootstrap_state(
             &state,
@@ -3672,11 +4624,24 @@ pub async fn get_base_orderbook(
             &no_bid_levels,
         )
         .await?;
+        let depth = bootstrap_depth_snapshot(&refreshed, &yes_bid_levels, &no_bid_levels);
+        organic_depth = depth.organic_depth;
 
         if bootstrap_active_for_market(&refreshed, &market_snapshot, now) {
-            let synthetic = generate_bootstrap_synthetic_book(&refreshed);
+            let position =
+                fetch_position_snapshot(&state, refreshed.market_id, refreshed.creator.as_str())
+                    .await?;
+            let flow = collect_recent_bootstrap_flow(&state, refreshed.market_id, now).await?;
+            let signals = bootstrap_planner_signals(&refreshed, &position, &depth, &flow);
+            let synthetic = generate_bootstrap_synthetic_book(&refreshed, &signals);
+            let yes_mid = bootstrap_reference_yes_bps(&refreshed);
+            let no_mid = PAR_PRICE_BPS - yes_mid;
+            let window_bps = refreshed.organic_depth_window_bps;
+            bootstrap_depth = sum_depth_near_mid(&synthetic.yes_bids, yes_mid, window_bps)
+                .saturating_add(sum_depth_near_mid(&synthetic.no_bids, no_mid, window_bps));
             merge_level_maps(&mut yes_bid_levels, &synthetic.yes_bids);
             merge_level_maps(&mut no_bid_levels, &synthetic.no_bids);
+            includes_bootstrap = bootstrap_depth > 0;
             bootstrap_config = Some(refreshed);
         } else {
             bootstrap_config = Some(refreshed);
@@ -3709,6 +4674,9 @@ pub async fn get_base_orderbook(
         chain_id: state.config.base_chain_id,
         provider_market_ref: market_id.to_string(),
         is_synthetic,
+        includes_bootstrap,
+        bootstrap_depth: bootstrap_depth as f64 / 1_000_000.0,
+        organic_depth: organic_depth as f64 / 1_000_000.0,
     }))
 }
 
@@ -5487,6 +6455,7 @@ fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, 
         bootstrap_active: None,
         bootstrap_seed_usdc: None,
         bootstrap_manager: None,
+        bootstrap_preset: None,
         bootstrap_strategy: None,
         bootstrap_levels: None,
         bootstrap_initial_yes_bps: None,
@@ -5494,6 +6463,12 @@ fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, 
         bootstrap_step_bps: None,
         bootstrap_cadence_seconds: None,
         bootstrap_expiry_seconds: None,
+        bootstrap_pause_reason: None,
+        bootstrap_reserved_usdc: None,
+        bootstrap_available_usdc: None,
+        bootstrap_active_slots: None,
+        bootstrap_organic_depth_ratio: None,
+        bootstrap_consecutive_failures: None,
         bootstrap_graduated_at: None,
         bootstrap_launch_tx_hash: None,
         bootstrap_last_reconciled_at: None,
@@ -5767,6 +6742,7 @@ mod tests {
             liquidity_mode: BOOTSTRAP_LIQUIDITY_MODE_HYBRID.to_string(),
             status: BOOTSTRAP_STATUS_ACTIVE.to_string(),
             manager: Some("0x0000000000000000000000000000000000000042".to_string()),
+            preset: BOOTSTRAP_PRESET_BALANCED.to_string(),
             seed_usdc: 100.0,
             initial_yes_bps: 5_000,
             strategy: BOOTSTRAP_STRATEGY_LADDER_V1.to_string(),
@@ -5781,6 +6757,12 @@ mod tests {
             max_age_seconds: BOOTSTRAP_DEFAULT_MAX_AGE_SECONDS,
             inventory_skew_bps: 0,
             exposure_cap_bps: BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS,
+            pause_reason: None,
+            reserved_usdc: 0.0,
+            available_usdc: 0.0,
+            active_slots: 0,
+            organic_depth_ratio: 0.0,
+            consecutive_failures: 0,
             depth_qualified_since: None,
             activated_at: now,
             graduated_at: None,
@@ -5803,22 +6785,25 @@ mod tests {
             seed_usdc: 100.0,
             initial_yes_bps: 5_000,
             manager: Some("0x0000000000000000000000000000000000000042".to_string()),
-            strategy: BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL.to_string(),
-            levels: 5,
-            base_spread_bps: 150,
-            step_bps: 100,
-            cadence_seconds: 300,
-            expiry_seconds: 900,
+            preset: Some(BOOTSTRAP_PRESET_BALANCED.to_string()),
+            strategy: Some(BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL.to_string()),
+            levels: Some(5),
+            base_spread_bps: Some(150),
+            step_bps: Some(100),
+            cadence_seconds: Some(300),
+            expiry_seconds: Some(900),
+            exposure_cap_bps: Some(BOOTSTRAP_DEFAULT_EXPOSURE_CAP_BPS),
         };
 
-        let error = validate_bootstrap_registration(&request).unwrap_err();
+        let error = validate_bootstrap_registration(&request, Some(UserRole::Admin)).unwrap_err();
         assert_eq!(error.code, "BOOTSTRAP_STRATEGY_DISABLED");
     }
 
     #[test]
     fn test_generate_bootstrap_synthetic_book_is_symmetric_without_skew() {
         let config = sample_bootstrap_config();
-        let synthetic = generate_bootstrap_synthetic_book(&config);
+        let synthetic =
+            generate_bootstrap_synthetic_book(&config, &BootstrapPlannerSignals::default());
         let yes_prices = synthetic.yes_bids.keys().copied().collect::<Vec<_>>();
         let no_prices = synthetic.no_bids.keys().copied().collect::<Vec<_>>();
 
@@ -5847,7 +6832,8 @@ mod tests {
         let mut config = sample_bootstrap_config();
         config.inventory_skew_bps = config.exposure_cap_bps as i32;
 
-        let synthetic = generate_bootstrap_synthetic_book(&config);
+        let synthetic =
+            generate_bootstrap_synthetic_book(&config, &BootstrapPlannerSignals::default());
 
         assert!(synthetic.yes_bids.is_empty());
         assert_eq!(
@@ -5902,6 +6888,93 @@ mod tests {
 
         assert_eq!(yes_budget_bps, 7_500);
         assert_eq!(no_budget_bps, 2_500);
+    }
+
+    #[test]
+    fn test_bootstrap_adaptive_spread_widens_to_cap_when_all_signals_hit() {
+        let signals = BootstrapPlannerSignals {
+            organic_depth_ratio: 0.5,
+            one_sided_flow_ratio: 0.85,
+            one_sided_inventory_ratio: 0.4,
+            inventory_cap_hit: false,
+        };
+
+        assert_eq!(
+            bootstrap_adaptive_spread_multiplier_bps(&signals),
+            BOOTSTRAP_SPREAD_CAP_BPS
+        );
+    }
+
+    #[test]
+    fn test_bootstrap_adaptive_spread_can_tighten_when_market_is_healthy() {
+        let signals = BootstrapPlannerSignals {
+            organic_depth_ratio: 1.25,
+            one_sided_flow_ratio: 0.4,
+            one_sided_inventory_ratio: 0.1,
+            inventory_cap_hit: false,
+        };
+
+        assert_eq!(
+            bootstrap_adaptive_spread_multiplier_bps(&signals),
+            BOOTSTRAP_SPREAD_TIGHTEN_BPS
+        );
+    }
+
+    #[test]
+    fn test_bootstrap_adaptive_size_cuts_to_half_when_flow_and_inventory_are_toxic() {
+        let signals = BootstrapPlannerSignals {
+            organic_depth_ratio: 0.8,
+            one_sided_flow_ratio: 0.9,
+            one_sided_inventory_ratio: 0.45,
+            inventory_cap_hit: false,
+        };
+
+        assert_eq!(
+            bootstrap_adaptive_size_multiplier_bps(&signals),
+            BOOTSTRAP_SIZE_MIN_BPS
+        );
+    }
+
+    #[test]
+    fn test_bootstrap_runtime_assessment_marks_pending_funding_without_live_slots() {
+        let config = sample_bootstrap_config();
+        let signals = BootstrapPlannerSignals {
+            organic_depth_ratio: 0.7,
+            ..Default::default()
+        };
+
+        let assessment =
+            bootstrap_runtime_assessment(&config, true, 20_000_000, false, &signals, 30_000_000, 0);
+
+        assert_eq!(assessment.status, BOOTSTRAP_STATUS_PENDING_FUNDING);
+        assert_eq!(
+            assessment.pause_reason.as_deref(),
+            Some(BOOTSTRAP_PAUSE_REASON_INSUFFICIENT_FUNDS)
+        );
+        assert_eq!(assessment.available_microusdc, 20_000_000);
+        assert_eq!(assessment.reserved_microusdc, 30_000_000);
+        assert_eq!(assessment.organic_depth_ratio, 0.7);
+    }
+
+    #[test]
+    fn test_bootstrap_runtime_assessment_pauses_on_inventory_cap() {
+        let config = sample_bootstrap_config();
+        let signals = BootstrapPlannerSignals {
+            organic_depth_ratio: 0.6,
+            one_sided_flow_ratio: 0.8,
+            one_sided_inventory_ratio: 0.41,
+            inventory_cap_hit: true,
+        };
+
+        let assessment =
+            bootstrap_runtime_assessment(&config, true, 100_000_000, true, &signals, 50_000_000, 6);
+
+        assert_eq!(assessment.status, BOOTSTRAP_STATUS_PAUSED);
+        assert_eq!(
+            assessment.pause_reason.as_deref(),
+            Some(BOOTSTRAP_PAUSE_REASON_INVENTORY_CAP)
+        );
+        assert_eq!(assessment.active_slots, 6);
     }
 
     #[test]
