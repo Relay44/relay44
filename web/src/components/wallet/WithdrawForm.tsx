@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useConfig, useWalletClient } from 'wagmi';
 import { useRuntimeMode } from '@/hooks';
 import { ReadOnlyNotice } from '@/components/runtime/ReadOnlyNotice';
@@ -10,6 +10,7 @@ import { sendPreparedTransactions } from '@/lib/evmWallet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
+import { estimateWithdrawFees } from '@/lib/gasFees';
 
 interface WithdrawFormProps {
   availableBalance: number;
@@ -25,6 +26,7 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [networkFeeEth, setNetworkFeeEth] = useState<string | null>(null);
   const wallet = useBaseWallet();
   const config = useConfig();
   const { data: walletClient } = useWalletClient();
@@ -35,9 +37,14 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
       wallet.chainId !== BASE_CHAIN_ID &&
       wallet.isSwitchingChain);
 
+  useEffect(() => {
+    estimateWithdrawFees()
+      .then((fees) => setNetworkFeeEth(fees.totalFeeEth))
+      .catch(() => {});
+  }, []);
+
   const amountNumber = parseFloat(amount) || 0;
   const amountLamports = Math.floor(amountNumber * 1_000_000);
-  const fee = 0;
   const netAmount = amountLamports;
 
   const handleWithdraw = async () => {
@@ -173,8 +180,10 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
             <span className="text-text-primary">${amountNumber.toFixed(2)}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-text-secondary">Network Fee</span>
-            <span className="text-text-secondary">-${formatUsdc(fee)}</span>
+            <span className="text-text-secondary">Est. Network Fee</span>
+            <span className="text-text-secondary font-mono">
+              {networkFeeEth ? `${parseFloat(networkFeeEth).toFixed(6)} ETH` : '...'}
+            </span>
           </div>
           <div className="border-t border-border pt-2 mt-2">
             <div className="flex justify-between font-medium">

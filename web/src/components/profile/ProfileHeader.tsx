@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/Card';
 import type { PublicProfile } from '@/types';
 import { cn } from '@/lib/utils';
+import { useBasename } from '@/hooks/useBasename';
 
 interface ProfileHeaderProps {
   wallet: string;
@@ -30,6 +31,7 @@ export function ProfileHeader({ wallet }: ProfileHeaderProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const { basename } = useBasename(wallet);
 
   useEffect(() => {
     if (!wallet || !WALLET_REGEX.test(wallet)) {
@@ -124,9 +126,9 @@ export function ProfileHeader({ wallet }: ProfileHeaderProps) {
           <div className="flex-1">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-2">
               <h1 className="text-2xl font-bold text-text-primary">
-                {profile.username || truncateAddress(wallet)}
+                {profile.username || basename || truncateAddress(wallet)}
               </h1>
-              {profile.username && (
+              {(profile.username || basename) && (
                 <button
                   type="button"
                   onClick={handleCopyAddress}

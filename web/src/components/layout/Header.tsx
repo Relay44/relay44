@@ -7,6 +7,7 @@ import { Search } from "lucide-react";
 import { NotificationBell } from "@/components/notifications";
 import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { useSolanaWallet } from "@/hooks/useSolanaWallet";
+import { useBasename } from "@/hooks/useBasename";
 import { useRuntimeMode, useSessionState } from "@/hooks";
 import { BrandLogo } from "@/components/layout/BrandLogo";
 import { SidebarMenu } from "@/components/layout/SidebarMenu";
@@ -25,6 +26,7 @@ const primaryLinks = [
 function ConnectWalletButton() {
   const baseWallet = useBaseWallet();
   const solanaWallet = useSolanaWallet();
+  const { basename } = useBasename(baseWallet.address);
   const { addToast } = useToast();
   const baseEnabled = CHAIN_MODE === "base" || CHAIN_MODE === "dual";
   const solanaEnabled = CHAIN_MODE === "solana" || CHAIN_MODE === "dual";
@@ -59,6 +61,7 @@ function ConnectWalletButton() {
   const truncateAddress = (address: string) => {
     return `${address.slice(0, 4)}...${address.slice(-4)}`;
   };
+  const displayBaseAddress = (address: string) => basename || truncateAddress(address);
   const walletButtonClass =
     'inline-flex h-10 items-center border border-border bg-transparent px-4 text-[0.7rem] font-mono text-text-primary transition-colors hover:bg-bg-hover';
 
@@ -76,7 +79,7 @@ function ConnectWalletButton() {
   if (singleMode && baseEnabled) {
     const compactLabel =
       baseWallet.isConnected && baseWallet.address
-        ? truncateAddress(baseWallet.address)
+        ? displayBaseAddress(baseWallet.address)
         : "Connect";
 
     return (
@@ -84,7 +87,7 @@ function ConnectWalletButton() {
         onClick={handleBaseClick}
         aria-label={
           baseWallet.isConnected && baseWallet.address
-            ? `Connected wallet ${truncateAddress(baseWallet.address)}`
+            ? `Connected wallet ${displayBaseAddress(baseWallet.address)}`
             : "Connect Wallet"
         }
         className="inline-flex h-10 max-w-[8.5rem] items-center border border-border bg-transparent px-3 text-[0.7rem] font-mono text-text-primary transition-colors cursor-pointer hover:bg-bg-hover sm:max-w-none sm:px-4"
@@ -92,7 +95,7 @@ function ConnectWalletButton() {
         <span className="truncate sm:hidden">{compactLabel}</span>
         <span className="hidden sm:inline">
           {baseWallet.isConnected && baseWallet.address
-            ? truncateAddress(baseWallet.address)
+            ? displayBaseAddress(baseWallet.address)
             : "Connect Wallet"}
         </span>
       </button>
@@ -134,13 +137,13 @@ function ConnectWalletButton() {
           onClick={handleBaseClick}
           aria-label={
             baseWallet.isConnected && baseWallet.address
-              ? `Connected Base wallet ${truncateAddress(baseWallet.address)}`
+              ? `Connected Base wallet ${displayBaseAddress(baseWallet.address)}`
               : "Connect Base Wallet"
           }
           className={walletButtonClass}
         >
           {baseWallet.isConnected && baseWallet.address
-            ? `Base ${truncateAddress(baseWallet.address)}`
+            ? `Base ${displayBaseAddress(baseWallet.address)}`
             : "Connect Base Wallet"}
         </button>
       )}

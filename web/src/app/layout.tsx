@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Space_Grotesk, JetBrains_Mono, Inter } from 'next/font/google';
+import Script from 'next/script';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { StructuredData } from '@/components/seo/StructuredData';
@@ -176,6 +177,10 @@ export default function RootLayout({
         } as React.CSSProperties}
       >
         <Providers>{children}</Providers>
+        <Script
+          src="https://unpkg.com/@base-org/account/dist/base-account.min.js"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );
