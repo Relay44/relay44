@@ -50,6 +50,18 @@ export interface Market {
   outcomes?: MarketOutcome[];
   frequency?: MarketFrequency;
   imageUrl?: string;
+  liquidityMode?: 'clob_only' | 'bootstrap_hybrid';
+  bootstrapStatus?: string;
+  bootstrapActive?: boolean;
+  bootstrapSeedUsdc?: number;
+  bootstrapStrategy?: string;
+  bootstrapLevels?: number;
+  bootstrapInitialYesBps?: number;
+  bootstrapBaseSpreadBps?: number;
+  bootstrapStepBps?: number;
+  bootstrapCadenceSeconds?: number;
+  bootstrapExpirySeconds?: number;
+  bootstrapGraduatedAt?: string;
 }
 
 export interface Order {

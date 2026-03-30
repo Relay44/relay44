@@ -31,6 +31,36 @@ function orderStatus(
   return 'open';
 }
 
+function isExecutablePrice(price?: number): price is number {
+  return typeof price === 'number' && Number.isFinite(price) && price > 0 && price < 1;
+}
+
+async function resolveExecutablePrice(
+  marketId: string,
+  outcome: PlaceOrderRequest['outcome'],
+  side: PlaceOrderRequest['side']
+): Promise<number> {
+  const orderbook = await api.getBaseOrderBook(marketId, outcome, 5);
+  const bestAsk = orderbook.asks[0]?.price;
+  const bestBid = orderbook.bids[0]?.price;
+
+  if (side === 'buy') {
+    if (isExecutablePrice(bestAsk)) return bestAsk;
+    if (isExecutablePrice(bestBid)) return bestBid;
+  } else {
+    if (isExecutablePrice(bestBid)) return bestBid;
+    if (isExecutablePrice(bestAsk)) return bestAsk;
+  }
+
+  const market = await api.getBaseMarket(marketId);
+  const fallback = outcome === 'yes' ? market.yesPrice : market.noPrice;
+  if (isExecutablePrice(fallback)) {
+    return fallback;
+  }
+
+  throw new Error('No executable price is available for this market yet');
+}
+
 export function useOrders(filters?: OrderFilters) {
   const publicClient = usePublicClient();
   const baseWallet = useBaseWallet();
@@ -188,7 +218,10 @@ export function usePlaceOrder() {
       if (!Number.isInteger(marketId) || marketId < 1) {
         throw new Error('Invalid market id');
       }
-      const priceBps = Math.max(1, Math.min(9_999, Math.round((data.price ?? 0.5) * 10_000)));
+      const executionPrice = isExecutablePrice(data.price)
+        ? data.price
+        : await resolveExecutablePrice(data.marketId, data.outcome, data.side);
+      const priceBps = Math.max(1, Math.min(9_999, Math.round(executionPrice * 10_000)));
       const size = toBaseUnits(data.quantity);
       const expiry = Math.floor(Date.now() / 1000) + (data.expiresIn || DEFAULT_EXPIRY_SECONDS);
 
