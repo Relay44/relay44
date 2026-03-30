@@ -1,11 +1,24 @@
 import { Coinbase, Wallet } from "@coinbase/coinbase-sdk";
-import { createWalletClient, createPublicClient, http, custom } from "viem";
+import { createWalletClient, createPublicClient, http } from "viem";
 import { base } from "viem/chains";
 
-let _wallet = null;
-let _account = null;
+let _initPromise = null;
+let _result = null;
 
 export async function initCdpWallet({ chainId = 8453, rpcUrls = [] } = {}) {
+  if (_initPromise) return _initPromise;
+
+  _initPromise = _doInit({ chainId, rpcUrls });
+  try {
+    _result = await _initPromise;
+    return _result;
+  } catch (err) {
+    _initPromise = null;
+    throw err;
+  }
+}
+
+async function _doInit({ chainId, rpcUrls }) {
   const apiKeyName = process.env.CDP_API_KEY_NAME?.trim();
   const apiKeyPrivateKey = process.env.CDP_API_KEY_PRIVATE_KEY?.trim();
 
@@ -15,50 +28,48 @@ export async function initCdpWallet({ chainId = 8453, rpcUrls = [] } = {}) {
 
   Coinbase.configure({ apiKeyName, privateKey: apiKeyPrivateKey });
 
+  let wallet;
   const walletId = process.env.CDP_WALLET_ID?.trim();
   if (walletId) {
-    _wallet = await Wallet.fetch(walletId);
+    wallet = await Wallet.fetch(walletId);
   } else {
-    _wallet = await Wallet.create({ networkId: "base-mainnet" });
-    console.log(`Created new CDP wallet: ${_wallet.getId()}`);
-    console.log("Set CDP_WALLET_ID to persist this wallet across restarts.");
+    wallet = await Wallet.create({ networkId: "base-mainnet" });
+    console.log("New CDP wallet created. Set CDP_WALLET_ID=%s to persist.", wallet.getId());
   }
 
-  const address = await _wallet.getDefaultAddress();
-  const addr = address.getId();
+  const defaultAddress = await wallet.getDefaultAddress();
+  const addr = defaultAddress.getId();
 
-  _account = {
+  const account = {
     address: addr,
     type: "local",
-    signMessage: async ({ message }) => {
-      const signed = await address.signMessage(message);
-      return signed;
-    },
-    signTransaction: async (tx) => {
-      const signed = await address.signTransaction(tx);
-      return signed;
+    signMessage: async ({ message }) => defaultAddress.signMessage(message),
+    signTransaction: async (tx) => defaultAddress.signTransaction(tx),
+    signTypedData: async () => {
+      throw new Error("signTypedData not supported by CDP wallet");
     },
   };
 
   const chain = { ...base, id: chainId };
-  const transport = rpcUrls.length
-    ? http(rpcUrls[0])
-    : http("https://mainnet.base.org");
+  const rpcUrl = rpcUrls.length
+    ? rpcUrls[0]
+    : process.env.BASE_RPC_URL || "https://mainnet.base.org";
+  const transport = http(rpcUrl);
 
   return {
-    account: _account,
-    wallet: _wallet,
+    account,
+    wallet,
     chain,
     publicClient: createPublicClient({ chain, transport }),
-    walletClient: createWalletClient({ account: _account, chain, transport }),
+    walletClient: createWalletClient({ account, chain, transport }),
     address: addr,
   };
 }
 
 export function getCdpWallet() {
-  return _wallet;
+  return _result?.wallet ?? null;
 }
 
 export function getCdpAccount() {
-  return _account;
+  return _result?.account ?? null;
 }

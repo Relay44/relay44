@@ -62,7 +62,7 @@ export async function getBaseFee(): Promise<bigint> {
 const TYPICAL_ERC20_APPROVE_TX_SIZE = 200;
 const TYPICAL_DEPOSIT_TX_SIZE = 250;
 const TYPICAL_WITHDRAW_TX_SIZE = 220;
-const TYPICAL_GAS_UNITS = 80_000n;
+const TYPICAL_GAS_UNITS = BigInt(80_000);
 
 export async function estimateDepositFees(): Promise<{
   l1Fee: bigint;

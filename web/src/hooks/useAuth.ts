@@ -94,10 +94,13 @@ export function useAuth() {
             ],
           });
           const account = (result as any).accounts?.[0];
-          if (!account?.capabilities?.signInWithEthereum) {
+          if (!account?.address || !account?.capabilities?.signInWithEthereum) {
             throw new Error('Sign In With Base failed');
           }
           const { message, signature } = account.capabilities.signInWithEthereum;
+          if (!message || !signature) {
+            throw new Error('Sign In With Base returned incomplete data');
+          }
           await api.loginSiwe(account.address, signature, message);
         } else {
           const nonce = await api.getSiweNonce();
@@ -134,7 +137,7 @@ export function useAuth() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeFlow, baseWallet, signMessageAsync, solanaWallet]);
+  }, [activeFlow, baseWallet, signMessageAsync, solanaWallet, connectorClient]);
 
   const logout = useCallback(async () => {
     try {

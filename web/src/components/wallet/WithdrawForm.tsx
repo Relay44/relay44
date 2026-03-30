@@ -38,9 +38,18 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
       wallet.isSwitchingChain);
 
   useEffect(() => {
-    estimateWithdrawFees()
-      .then((fees) => setNetworkFeeEth(fees.totalFeeEth))
-      .catch(() => {});
+    const fetchFees = () => {
+      estimateWithdrawFees()
+        .then((fees) => setNetworkFeeEth(fees.totalFeeEth))
+        .catch(() => setNetworkFeeEth(null));
+    };
+    fetchFees();
+    const interval = setInterval(fetchFees, 60_000);
+    window.addEventListener('focus', fetchFees);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', fetchFees);
+    };
   }, []);
 
   const amountNumber = parseFloat(amount) || 0;
