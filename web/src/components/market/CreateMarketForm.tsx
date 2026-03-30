@@ -66,14 +66,34 @@ const RESOLUTION_SOURCES = [
   { id: "custom", label: "Custom", description: "Specify your own source" },
 ] as const;
 
-const BOOTSTRAP_DEFAULTS = {
-  strategy: "ladder_v1",
-  levels: 5,
-  baseSpreadBps: 150,
-  stepBps: 100,
-  cadenceSeconds: 300,
-  expirySeconds: 900,
+const BOOTSTRAP_PRESETS = {
+  tight: {
+    label: "Tight",
+    description: "Tighter spread for markets you expect to start with real flow.",
+    levels: 4,
+    spread: "2c base / 1c steps",
+    cadence: "45s refresh / 120s expiry",
+    exposure: "30% max one-sided exposure",
+  },
+  balanced: {
+    label: "Balanced",
+    description: "Default choice for most new markets.",
+    levels: 5,
+    spread: "4c base / 2c steps",
+    cadence: "60s refresh / 180s expiry",
+    exposure: "35% max one-sided exposure",
+  },
+  wide: {
+    label: "Wide",
+    description: "More defensive quoting for thin or noisy markets.",
+    levels: 6,
+    spread: "6c base / 3c steps",
+    cadence: "90s refresh / 240s expiry",
+    exposure: "40% max one-sided exposure",
+  },
 } as const;
+
+type BootstrapPreset = keyof typeof BOOTSTRAP_PRESETS;
 
 function splitTradingEnd(value?: string): { date: string; time: string } {
   if (!value) {
@@ -238,6 +258,8 @@ export function CreateMarketForm({
   >("bootstrap_hybrid");
   const [initialLiquidity, setInitialLiquidity] = useState("100");
   const [initialYesPrice, setInitialYesPrice] = useState("50");
+  const [bootstrapPreset, setBootstrapPreset] =
+    useState<BootstrapPreset>("balanced");
   const [confirmedQuestion, setConfirmedQuestion] = useState(false);
   const [confirmedSource, setConfirmedSource] = useState(false);
   const [confirmedDeadline, setConfirmedDeadline] = useState(false);
@@ -580,12 +602,7 @@ export function CreateMarketForm({
             liquidityMode === "bootstrap_hybrid" ? Number(initialLiquidity) : 0,
           initialYesBps: Math.round(Number(initialYesPrice) * 100),
           manager: bootstrapOperator,
-          strategy: BOOTSTRAP_DEFAULTS.strategy,
-          levels: BOOTSTRAP_DEFAULTS.levels,
-          baseSpreadBps: BOOTSTRAP_DEFAULTS.baseSpreadBps,
-          stepBps: BOOTSTRAP_DEFAULTS.stepBps,
-          cadenceSeconds: BOOTSTRAP_DEFAULTS.cadenceSeconds,
-          expirySeconds: BOOTSTRAP_DEFAULTS.expirySeconds,
+          preset: bootstrapPreset,
         });
       } catch (bootstrapError) {
         bootstrapWarning =
@@ -610,6 +627,7 @@ export function CreateMarketForm({
       setLiquidityMode("bootstrap_hybrid");
       setInitialLiquidity("100");
       setInitialYesPrice("50");
+      setBootstrapPreset("balanced");
       setConfirmedQuestion(false);
       setConfirmedSource(false);
       setConfirmedDeadline(false);
@@ -1026,6 +1044,14 @@ export function CreateMarketForm({
                     : "CLOB only"}
                 </p>
               </div>
+              {liquidityMode === "bootstrap_hybrid" ? (
+                <div>
+                  <p className="text-sm text-text-secondary">Bootstrap Preset</p>
+                  <p className="text-text-primary">
+                    {BOOTSTRAP_PRESETS[bootstrapPreset].label}
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-4 border border-border bg-bg-secondary p-4">
@@ -1080,40 +1106,76 @@ export function CreateMarketForm({
               </div>
 
               {liquidityMode === "bootstrap_hybrid" ? (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-text-secondary">
-                      Initial Liquidity (USDC)
-                    </label>
-                    <Input
-                      type="number"
-                      value={initialLiquidity}
-                      onChange={(e) => setInitialLiquidity(e.target.value)}
-                      min="50"
-                      step="10"
-                    />
-                    <p className="mt-1 text-xs text-text-secondary">
-                      Minimum: 50 USDC. Default ladder config uses five levels.
-                    </p>
-                  </div>
+                <>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-text-secondary">
+                        Initial Liquidity (USDC)
+                      </label>
+                      <Input
+                        type="number"
+                        value={initialLiquidity}
+                        onChange={(e) => setInitialLiquidity(e.target.value)}
+                        min="50"
+                        step="10"
+                      />
+                      <p className="mt-1 text-xs text-text-secondary">
+                        Minimum: 50 USDC. Default ladder config uses five
+                        levels.
+                      </p>
+                    </div>
 
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-text-secondary">
-                      Opening YES Price (%)
-                    </label>
-                    <Input
-                      type="number"
-                      value={initialYesPrice}
-                      onChange={(e) => setInitialYesPrice(e.target.value)}
-                      min="1"
-                      max="99"
-                      step="1"
-                    />
-                    <p className="mt-1 text-xs text-text-secondary">
-                      Sets the starting midpoint for the bootstrap ladder.
-                    </p>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-text-secondary">
+                        Opening YES Price (%)
+                      </label>
+                      <Input
+                        type="number"
+                        value={initialYesPrice}
+                        onChange={(e) => setInitialYesPrice(e.target.value)}
+                        min="1"
+                        max="99"
+                        step="1"
+                      />
+                      <p className="mt-1 text-xs text-text-secondary">
+                        Sets the starting midpoint for the bootstrap ladder.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {(Object.entries(BOOTSTRAP_PRESETS) as Array<
+                      [BootstrapPreset, (typeof BOOTSTRAP_PRESETS)[BootstrapPreset]]
+                    >).map(([key, preset]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setBootstrapPreset(key)}
+                        className={cn(
+                          "border p-4 text-left transition-colors",
+                          bootstrapPreset === key
+                            ? "border-accent bg-accent/10"
+                            : "border-border hover:border-border-hover hover:bg-bg-primary",
+                        )}
+                      >
+                        <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
+                          {preset.label}
+                        </p>
+                        <p className="mt-2 text-sm text-text-primary">
+                          {preset.description}
+                        </p>
+                        <p className="mt-3 text-xs text-text-secondary">
+                          {preset.levels} levels • {preset.spread}
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          {preset.cadence}
+                        </p>
+                        <p className="mt-1 text-xs text-text-secondary">
+                          {preset.exposure}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <p className="text-sm text-text-secondary">
                   Bootstrap seed capital is disabled for this market.

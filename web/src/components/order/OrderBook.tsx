@@ -37,7 +37,18 @@ export function OrderBookDisplay({ marketId }: OrderBookProps) {
   return (
     <Card>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="font-semibold">Order Book</h3>
+        <div>
+          <h3 className="font-semibold">Order Book</h3>
+          {orderBook ? (
+            <p className="mt-1 text-xs text-text-secondary">
+              {orderBook.includesBootstrap
+                ? `Unified depth includes bootstrap quotes. Organic $${formatPrice(
+                    orderBook.organicDepth || 0,
+                  )} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)}`
+                : `Organic depth $${formatPrice(orderBook.organicDepth || 0)}`}
+            </p>
+          ) : null}
+        </div>
         <Tabs
           tabs={[
             { value: 'yes', label: 'Yes' },

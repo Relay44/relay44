@@ -71,6 +71,7 @@
     "decision-runner:tick": "node scripts/decision-runner-tick.mjs",
     "agents:operator": "node scripts/base-agent-operator.mjs",
     "agents:operator:dry": "BASE_AGENT_OPERATOR_DRY_RUN=true node scripts/base-agent-operator.mjs",
+    "bootstrap:backfill": "node scripts/bootstrap-backfill.mjs",
     "polymarket:forwarder": "node services/polymarket-forwarder/server.mjs",
     "x402:facilitator": "node services/x402-facilitator/server.mjs",
     "launch:onchain:verify": "node scripts/verify-base-mainnet-deployment.mjs",

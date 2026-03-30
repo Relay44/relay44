@@ -117,6 +117,7 @@ pub struct BaseMarketBootstrapConfigRecord {
     pub liquidity_mode: String,
     pub status: String,
     pub manager: Option<String>,
+    pub preset: String,
     pub seed_usdc: f64,
     pub initial_yes_bps: u64,
     pub strategy: String,
@@ -131,6 +132,12 @@ pub struct BaseMarketBootstrapConfigRecord {
     pub max_age_seconds: u64,
     pub inventory_skew_bps: i32,
     pub exposure_cap_bps: u64,
+    pub pause_reason: Option<String>,
+    pub reserved_usdc: f64,
+    pub available_usdc: f64,
+    pub active_slots: u64,
+    pub organic_depth_ratio: f64,
+    pub consecutive_failures: u64,
     pub depth_qualified_since: Option<DateTime<Utc>>,
     pub activated_at: DateTime<Utc>,
     pub graduated_at: Option<DateTime<Utc>>,
@@ -150,6 +157,7 @@ pub struct BaseMarketBootstrapUpsert<'a> {
     pub liquidity_mode: &'a str,
     pub status: &'a str,
     pub manager: Option<&'a str>,
+    pub preset: &'a str,
     pub seed_usdc: f64,
     pub initial_yes_bps: u64,
     pub strategy: &'a str,
@@ -164,6 +172,12 @@ pub struct BaseMarketBootstrapUpsert<'a> {
     pub max_age_seconds: u64,
     pub inventory_skew_bps: i32,
     pub exposure_cap_bps: u64,
+    pub pause_reason: Option<&'a str>,
+    pub reserved_usdc: f64,
+    pub available_usdc: f64,
+    pub active_slots: u64,
+    pub organic_depth_ratio: f64,
+    pub consecutive_failures: u64,
     pub activated_at: Option<DateTime<Utc>>,
     pub graduated_at: Option<DateTime<Utc>>,
     pub graduation_reason: Option<&'a str>,
@@ -215,6 +229,32 @@ pub struct BaseMarketBootstrapAgentUpsert<'a> {
     pub last_error: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct BaseMarketBootstrapRuntimeUpdate<'a> {
+    pub inventory_skew_bps: Option<i32>,
+    pub status: Option<&'a str>,
+    pub manager: Option<&'a str>,
+    pub preset: Option<&'a str>,
+    pub strategy: Option<&'a str>,
+    pub levels: Option<u64>,
+    pub base_spread_bps: Option<u64>,
+    pub step_bps: Option<u64>,
+    pub cadence_seconds: Option<u64>,
+    pub expiry_seconds: Option<u64>,
+    pub exposure_cap_bps: Option<u64>,
+    pub pause_reason: Option<&'a str>,
+    pub clear_pause_reason: bool,
+    pub launch_tx_hash: Option<&'a str>,
+    pub last_reconciled_at: Option<DateTime<Utc>>,
+    pub last_error: Option<&'a str>,
+    pub clear_last_error: bool,
+    pub reserved_usdc: Option<f64>,
+    pub available_usdc: Option<f64>,
+    pub active_slots: Option<u64>,
+    pub organic_depth_ratio: Option<f64>,
+    pub consecutive_failures: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ComplianceDecisionEntry<'a> {
     pub request_id: Option<&'a str>,
@@ -236,6 +276,7 @@ impl DatabaseService {
             liquidity_mode: row.get("liquidity_mode"),
             status: row.get("status"),
             manager: row.try_get("manager").ok(),
+            preset: row.get("preset"),
             seed_usdc: row.get("seed_usdc"),
             initial_yes_bps: row.get::<i32, _>("initial_yes_bps") as u64,
             strategy: row.get("strategy"),
@@ -250,6 +291,12 @@ impl DatabaseService {
             max_age_seconds: row.get::<i64, _>("max_age_seconds") as u64,
             inventory_skew_bps: row.get("inventory_skew_bps"),
             exposure_cap_bps: row.get::<i32, _>("exposure_cap_bps") as u64,
+            pause_reason: row.try_get("pause_reason").ok(),
+            reserved_usdc: row.get("reserved_usdc"),
+            available_usdc: row.get("available_usdc"),
+            active_slots: row.get::<i32, _>("active_slots") as u64,
+            organic_depth_ratio: row.get("organic_depth_ratio"),
+            consecutive_failures: row.get::<i32, _>("consecutive_failures") as u64,
             depth_qualified_since: row.try_get("depth_qualified_since").ok(),
             activated_at: row.get("activated_at"),
             graduated_at: row.try_get("graduated_at").ok(),
@@ -1387,6 +1434,7 @@ impl DatabaseService {
                 liquidity_mode,
                 status,
                 manager,
+                preset,
                 seed_usdc,
                 initial_yes_bps,
                 strategy,
@@ -1401,6 +1449,12 @@ impl DatabaseService {
                 max_age_seconds,
                 inventory_skew_bps,
                 exposure_cap_bps,
+                pause_reason,
+                reserved_usdc,
+                available_usdc,
+                active_slots,
+                organic_depth_ratio,
+                consecutive_failures,
                 activated_at,
                 graduated_at,
                 graduation_reason,
@@ -1411,13 +1465,15 @@ impl DatabaseService {
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+                $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
+                $26, $27, $28, $29, $30, $31, $32, $33
             )
             ON CONFLICT (market_id) DO UPDATE
             SET creator = EXCLUDED.creator,
                 liquidity_mode = EXCLUDED.liquidity_mode,
                 status = EXCLUDED.status,
                 manager = COALESCE(EXCLUDED.manager, base_market_bootstrap_configs.manager),
+                preset = EXCLUDED.preset,
                 seed_usdc = EXCLUDED.seed_usdc,
                 initial_yes_bps = EXCLUDED.initial_yes_bps,
                 strategy = EXCLUDED.strategy,
@@ -1432,6 +1488,12 @@ impl DatabaseService {
                 max_age_seconds = EXCLUDED.max_age_seconds,
                 inventory_skew_bps = EXCLUDED.inventory_skew_bps,
                 exposure_cap_bps = EXCLUDED.exposure_cap_bps,
+                pause_reason = EXCLUDED.pause_reason,
+                reserved_usdc = EXCLUDED.reserved_usdc,
+                available_usdc = EXCLUDED.available_usdc,
+                active_slots = EXCLUDED.active_slots,
+                organic_depth_ratio = EXCLUDED.organic_depth_ratio,
+                consecutive_failures = EXCLUDED.consecutive_failures,
                 activated_at = COALESCE(base_market_bootstrap_configs.activated_at, EXCLUDED.activated_at),
                 graduated_at = EXCLUDED.graduated_at,
                 graduation_reason = EXCLUDED.graduation_reason,
@@ -1447,6 +1509,7 @@ impl DatabaseService {
         .bind(input.liquidity_mode)
         .bind(input.status)
         .bind(input.manager)
+        .bind(input.preset)
         .bind(input.seed_usdc)
         .bind(input.initial_yes_bps as i32)
         .bind(input.strategy)
@@ -1461,6 +1524,12 @@ impl DatabaseService {
         .bind(input.max_age_seconds as i64)
         .bind(input.inventory_skew_bps)
         .bind(input.exposure_cap_bps as i32)
+        .bind(input.pause_reason)
+        .bind(input.reserved_usdc)
+        .bind(input.available_usdc)
+        .bind(input.active_slots as i32)
+        .bind(input.organic_depth_ratio)
+        .bind(input.consecutive_failures as i32)
         .bind(activated_at)
         .bind(input.graduated_at)
         .bind(input.graduation_reason)
@@ -1503,13 +1572,7 @@ impl DatabaseService {
     pub async fn update_base_market_bootstrap_runtime(
         &self,
         market_id: u64,
-        inventory_skew_bps: Option<i32>,
-        status: Option<&str>,
-        manager: Option<&str>,
-        launch_tx_hash: Option<&str>,
-        last_reconciled_at: Option<DateTime<Utc>>,
-        last_error: Option<&str>,
-        clear_last_error: bool,
+        update: &BaseMarketBootstrapRuntimeUpdate<'_>,
     ) -> Result<Option<BaseMarketBootstrapConfigRecord>> {
         let row = sqlx::query(
             r#"
@@ -1517,24 +1580,56 @@ impl DatabaseService {
             SET inventory_skew_bps = COALESCE($2, inventory_skew_bps),
                 status = COALESCE($3, status),
                 manager = COALESCE($4, manager),
-                launch_tx_hash = COALESCE($5, launch_tx_hash),
-                last_reconciled_at = COALESCE($6, last_reconciled_at),
+                preset = COALESCE($5, preset),
+                strategy = COALESCE($6, strategy),
+                levels = COALESCE($7, levels),
+                base_spread_bps = COALESCE($8, base_spread_bps),
+                step_bps = COALESCE($9, step_bps),
+                cadence_seconds = COALESCE($10, cadence_seconds),
+                expiry_seconds = COALESCE($11, expiry_seconds),
+                exposure_cap_bps = COALESCE($12, exposure_cap_bps),
+                pause_reason = CASE
+                    WHEN $14 THEN NULL
+                    ELSE COALESCE($13, pause_reason)
+                END,
+                launch_tx_hash = COALESCE($15, launch_tx_hash),
+                last_reconciled_at = COALESCE($16, last_reconciled_at),
                 last_error = CASE
-                    WHEN $8 THEN NULL
-                    ELSE COALESCE($7, last_error)
-                END
+                    WHEN $18 THEN NULL
+                    ELSE COALESCE($17, last_error)
+                END,
+                reserved_usdc = COALESCE($19, reserved_usdc),
+                available_usdc = COALESCE($20, available_usdc),
+                active_slots = COALESCE($21, active_slots),
+                organic_depth_ratio = COALESCE($22, organic_depth_ratio),
+                consecutive_failures = COALESCE($23, consecutive_failures)
             WHERE market_id = $1
             RETURNING *
             "#,
         )
         .bind(market_id as i64)
-        .bind(inventory_skew_bps)
-        .bind(status)
-        .bind(manager)
-        .bind(launch_tx_hash)
-        .bind(last_reconciled_at)
-        .bind(last_error)
-        .bind(clear_last_error)
+        .bind(update.inventory_skew_bps)
+        .bind(update.status)
+        .bind(update.manager)
+        .bind(update.preset)
+        .bind(update.strategy)
+        .bind(update.levels.map(|value| value as i32))
+        .bind(update.base_spread_bps.map(|value| value as i32))
+        .bind(update.step_bps.map(|value| value as i32))
+        .bind(update.cadence_seconds.map(|value| value as i32))
+        .bind(update.expiry_seconds.map(|value| value as i32))
+        .bind(update.exposure_cap_bps.map(|value| value as i32))
+        .bind(update.pause_reason)
+        .bind(update.clear_pause_reason)
+        .bind(update.launch_tx_hash)
+        .bind(update.last_reconciled_at)
+        .bind(update.last_error)
+        .bind(update.clear_last_error)
+        .bind(update.reserved_usdc)
+        .bind(update.available_usdc)
+        .bind(update.active_slots.map(|value| value as i32))
+        .bind(update.organic_depth_ratio)
+        .bind(update.consecutive_failures.map(|value| value as i32))
         .fetch_optional(&self.pool)
         .await?;
 
@@ -1570,7 +1665,8 @@ impl DatabaseService {
             UPDATE base_market_bootstrap_configs
             SET status = 'graduated',
                 graduated_at = COALESCE(graduated_at, NOW()),
-                graduation_reason = $2
+                graduation_reason = $2,
+                pause_reason = 'graduation_pending'
             WHERE market_id = $1
             RETURNING *
             "#,
