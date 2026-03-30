@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useConfig, useWalletClient } from 'wagmi';
 import { useRuntimeMode } from '@/hooks';
 import { ReadOnlyNotice } from '@/components/runtime/ReadOnlyNotice';
@@ -29,6 +29,8 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
   const config = useConfig();
   const { data: walletClient } = useWalletClient();
   const { readOnly } = useRuntimeMode();
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   const walletBusy =
     (!wallet.isConnected && wallet.isConnecting) ||
     (wallet.chainId !== undefined &&
@@ -67,8 +69,9 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
   }
 
   const handleBasePay = async () => {
-    if (!amount || parseFloat(amount) < 1) {
-      setError('Minimum deposit is 1 USDC');
+    const parsed = parseFloat(amount);
+    if (!amount || isNaN(parsed) || parsed < 1 || parsed > 100_000) {
+      setError('Enter a valid amount between 1 and 100,000 USDC');
       return;
     }
     if (!depositAddress) {
@@ -81,19 +84,20 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
     setSuccess(null);
 
     try {
-      const result = await payWithBase(amount, depositAddress.address);
+      const result = await payWithBase(parsed.toFixed(2), depositAddress.address);
 
       let attempts = 0;
-      while (attempts < 30) {
+      while (attempts < 30 && mountedRef.current) {
         const status = await getBasePaymentStatus(result.id);
         if (status.status === 'completed') {
-          const amountLamports = Math.floor(parseFloat(amount) * 1_000_000);
+          const amountLamports = Math.floor(parsed * 1_000_000);
           await api.deposit({
             amount: amountLamports,
             source: 'wallet',
             mode: 'confirm',
             txSignature: result.id,
           });
+          if (!mountedRef.current) return;
           setSuccess('Deposit confirmed via Base Pay.');
           setAmount('');
           onSuccess?.();
@@ -105,11 +109,17 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
         await new Promise((r) => setTimeout(r, 2000));
         attempts++;
       }
-      throw new Error('Payment confirmation timed out');
+      if (mountedRef.current) {
+        throw new Error('Payment confirmation timed out');
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Base Pay deposit failed');
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : 'Base Pay deposit failed');
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 
