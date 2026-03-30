@@ -173,6 +173,47 @@ export function useExternalAgents(filters?: {
   });
 }
 
+export function usePublicExternalAgents(filters?: {
+  provider?: 'limitless' | 'polymarket';
+  active?: boolean;
+  limit?: number;
+  offset?: number;
+  enabled?: boolean;
+}) {
+  const enabled = filters?.enabled ?? true;
+  const requestFilters = {
+    provider: filters?.provider,
+    active: filters?.active,
+    limit: filters?.limit,
+    offset: filters?.offset,
+  };
+
+  return useQuery({
+    queryKey: ['external-agents-public', requestFilters, enabled],
+    enabled,
+    queryFn: async () => {
+      const response = await api.listPublicExternalAgents(requestFilters);
+      return {
+        data: response.agents,
+        total: response.total,
+        limit: response.limit,
+        offset: response.offset,
+        hasMore: response.offset + response.limit < response.total,
+      };
+    },
+    refetchInterval: 10000,
+  });
+}
+
+export function usePublicExternalAgentsPerformance(enabled = true) {
+  return useQuery({
+    queryKey: ['external-agents-public-performance', enabled],
+    enabled,
+    queryFn: async () => api.getPublicExternalAgentsPerformance(),
+    refetchInterval: 15000,
+  });
+}
+
 export function useCreateExternalAgent() {
   const queryClient = useQueryClient();
 
@@ -183,6 +224,8 @@ export function useCreateExternalAgent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['external-agents'] });
+      queryClient.invalidateQueries({ queryKey: ['external-agents-public'] });
+      queryClient.invalidateQueries({ queryKey: ['external-agents-public-performance'] });
     },
   });
 }
@@ -197,6 +240,8 @@ export function useExecuteExternalAgent() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['external-agents'] });
+      queryClient.invalidateQueries({ queryKey: ['external-agents-public'] });
+      queryClient.invalidateQueries({ queryKey: ['external-agents-public-performance'] });
       queryClient.invalidateQueries({ queryKey: ['trades'] });
     },
   });

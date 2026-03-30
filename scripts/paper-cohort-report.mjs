@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { apiGet, loginAdmin, writeOutputFile } from "./paper-cohort-lib.mjs";
+import { apiGet, writeOutputFile } from "./paper-cohort-lib.mjs";
 
 function toFixed(value) {
   const numeric = Number(value || 0);
@@ -8,11 +8,7 @@ function toFixed(value) {
 }
 
 async function main() {
-  const { accessToken } = await loginAdmin();
-  const payload = await apiGet(
-    "/external/agents/performance?scope=all",
-    accessToken,
-  );
+  const payload = await apiGet("/external/agents/public/performance");
 
   const markdown = [
     "# Paper Cohort Report",

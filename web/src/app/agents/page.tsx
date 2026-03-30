@@ -13,6 +13,8 @@ import {
   useExecuteAgent,
   useExecuteExternalAgent,
   useExternalAgents,
+  usePublicExternalAgents,
+  usePublicExternalAgentsPerformance,
   useMarkets,
   useRuntimeMode,
   useSessionState,
@@ -31,6 +33,38 @@ function statusLabel(status: string) {
   if (status === 'ready') return 'Ready';
   if (status === 'cooldown') return 'Cooldown';
   return 'Inactive';
+}
+
+function formatCompactUsd(value: number) {
+  if (!Number.isFinite(value) || value === 0) return '$0';
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}k`;
+  return `${sign}$${abs.toFixed(abs >= 100 ? 0 : 2)}`;
+}
+
+function formatPublicAgentSchedule(lastExecutedAt?: string | null, nextExecutionAt?: string) {
+  const value = lastExecutedAt || nextExecutionAt || '';
+  if (!value) return 'schedule n/a';
+
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return 'schedule n/a';
+
+  const diffMs = timestamp - Date.now();
+  const absMinutes = Math.max(1, Math.round(Math.abs(diffMs) / 60_000));
+
+  if (absMinutes < 60) {
+    return diffMs >= 0 ? `next in ${absMinutes}m` : `last ${absMinutes}m ago`;
+  }
+
+  const absHours = Math.round(absMinutes / 60);
+  if (absHours < 48) {
+    return diffMs >= 0 ? `next in ${absHours}h` : `last ${absHours}h ago`;
+  }
+
+  const absDays = Math.round(absHours / 24);
+  return diffMs >= 0 ? `next in ${absDays}d` : `last ${absDays}d ago`;
 }
 
 function FieldLabel({ label, hint }: { label: string; hint?: string }) {
@@ -183,9 +217,16 @@ export default function AgentsPage() {
     active: filterActiveOnly ? true : undefined,
     enabled: canManageExternal,
   });
+  const { data: publicAgentsData, isLoading: isLoadingPublicAgents } = usePublicExternalAgents({
+    limit: 12,
+    active: true,
+  });
+  const { data: publicPerformance, isLoading: isLoadingPublicPerformance } =
+    usePublicExternalAgentsPerformance();
 
   const agents = agentsData?.data ?? [];
   const externalAgents = externalAgentsData?.data ?? [];
+  const publicAgents = publicAgentsData?.data ?? [];
   const selectedMarket = marketOptions.find((entry) => entry.id === marketId);
   const selectedExternalMarket = externalMarketOptions.find((entry) => entry.id === externalMarketId);
 
@@ -390,6 +431,130 @@ export default function AgentsPage() {
               />
             </div>
           ) : null}
+        </section>
+
+        <section className="mb-8">
+          <Card className="space-y-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-text-primary">Relay44 Paper Lab</h2>
+                <p className="mt-1 text-sm text-text-secondary">
+                  Relay44-run paper agents continuously research, prove, and optimize live venue markets.
+                </p>
+              </div>
+              <span className="font-mono text-[0.72rem] uppercase tracking-[0.14em] text-accent">
+                Public cohort
+              </span>
+            </div>
+
+            {isLoadingPublicPerformance ? (
+              <div className="grid gap-3 md:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="border border-border p-4 animate-pulse">
+                    <div className="h-3 w-20 bg-bg-secondary" />
+                    <div className="mt-3 h-6 w-16 bg-bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-5">
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Active agents
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {publicPerformance?.totals.activeAgents ?? 0}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Open positions
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {publicPerformance?.totals.openPositions ?? 0}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Fills
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {publicPerformance?.totals.fills ?? 0}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Volume
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {formatCompactUsd(publicPerformance?.totals.volumeUsdc ?? 0)}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Net PnL
+                  </div>
+                  <div
+                    className={cn(
+                      'mt-2 text-2xl font-semibold',
+                      (publicPerformance?.totals.netPnlUsdc ?? 0) >= 0 ? 'text-bid' : 'text-ask'
+                    )}
+                  >
+                    {formatCompactUsd(publicPerformance?.totals.netPnlUsdc ?? 0)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isLoadingPublicAgents ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="border border-border p-4 animate-pulse">
+                    <div className="h-4 w-24 bg-bg-secondary" />
+                    <div className="mt-3 h-5 w-3/4 bg-bg-secondary" />
+                    <div className="mt-2 h-4 w-1/2 bg-bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : publicAgents.length === 0 ? (
+              <div className="border border-border p-4 text-sm text-text-secondary">
+                Relay44 paper agents are warming up. This section will populate as soon as the public cohort is seeded.
+              </div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {publicAgents.map((agent) => (
+                  <Card
+                    key={agent.id}
+                    className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="border border-accent px-2 py-1 text-[0.68rem] uppercase tracking-[0.12em] text-accent">
+                          {agent.strategy_label}
+                        </span>
+                        <span className="text-xs text-text-muted">{agent.provider}</span>
+                      </div>
+                      <p className="text-sm text-text-primary">{agent.market_id}</p>
+                      <p className="text-xs text-text-muted">
+                        {agent.outcome.toUpperCase()} {agent.side.toUpperCase()} · price {Math.round(agent.price * 100)}% · qty {agent.quantity}
+                      </p>
+                      <p className="text-xs text-text-muted">
+                        Cadence {agent.cadence_seconds}s · {formatPublicAgentSchedule(agent.last_executed_at, agent.next_execution_at)}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Link
+                        href={`/markets/${encodeURIComponent(agent.market_id)}`}
+                        className="flex h-9 items-center justify-center border border-border px-3 text-sm sm:w-auto"
+                      >
+                        Open Market
+                      </Link>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </Card>
         </section>
 
         <section className="mb-6">
