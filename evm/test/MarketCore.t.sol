@@ -78,9 +78,7 @@ contract MarketCoreTest is Test {
 
     function test_anyoneCanCreateWhenResolverIsSelf() external {
         vm.prank(outsider);
-        uint256 marketId = marketCore.createMarket(
-            keccak256("question"), uint64(block.timestamp + 1 days), outsider
-        );
+        uint256 marketId = marketCore.createMarket(keccak256("question"), uint64(block.timestamp + 1 days), outsider);
         assertEq(marketId, 1);
         assertEq(marketCore.marketCreators(marketId), outsider);
     }
@@ -100,12 +98,8 @@ contract MarketCoreTest is Test {
         vm.prank(outsider);
         marketCore.setMarketMetadata(marketId, "Will relay44 stay live?", "updated", "ops", "runbook");
 
-        (
-            string memory question,
-            string memory description,
-            string memory category,
-            string memory resolutionSource
-        ) = marketCore.getMarketMetadata(marketId);
+        (string memory question, string memory description, string memory category, string memory resolutionSource) =
+            marketCore.getMarketMetadata(marketId);
         assertEq(question, "Will relay44 stay live?");
         assertEq(description, "updated");
         assertEq(category, "ops");

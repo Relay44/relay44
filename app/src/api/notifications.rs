@@ -129,7 +129,10 @@ fn default_preferences() -> NotificationPreferences {
     }
 }
 
-fn notification_allowed_by_preferences(kind: &NotificationType, prefs: &NotificationPreferences) -> bool {
+fn notification_allowed_by_preferences(
+    kind: &NotificationType,
+    prefs: &NotificationPreferences,
+) -> bool {
     match kind {
         NotificationType::OrderFilled | NotificationType::OrderCancelled => prefs.order_fills,
         NotificationType::MarketResolved => prefs.market_resolutions,
@@ -146,11 +149,15 @@ fn notification_allowed_by_preferences(kind: &NotificationType, prefs: &Notifica
 
 fn parse_preferences_row(row: sqlx::postgres::PgRow) -> Result<NotificationPreferences, ApiError> {
     Ok(NotificationPreferences {
-        order_fills: row.try_get("order_fills").map_err(|err| ApiError::internal(&err.to_string()))?,
+        order_fills: row
+            .try_get("order_fills")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         market_resolutions: row
             .try_get("market_resolutions")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
-        price_alerts: row.try_get("price_alerts").map_err(|err| ApiError::internal(&err.to_string()))?,
+        price_alerts: row
+            .try_get("price_alerts")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         system_announcements: row
             .try_get("system_announcements")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
@@ -229,10 +236,18 @@ fn parse_notification_row(row: sqlx::postgres::PgRow) -> Result<NotificationReco
         .map_err(|err| ApiError::internal(&err.to_string()))?;
 
     Ok(NotificationRecord {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
-        kind: row.try_get("type").map_err(|err| ApiError::internal(&err.to_string()))?,
-        title: row.try_get("title").map_err(|err| ApiError::internal(&err.to_string()))?,
-        message: row.try_get("message").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        kind: row
+            .try_get("type")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        title: row
+            .try_get("title")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        message: row
+            .try_get("message")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         read: row
             .try_get::<Option<DateTime<Utc>>, _>("read_at")
             .map_err(|err| ApiError::internal(&err.to_string()))?
@@ -381,14 +396,20 @@ pub async fn update_notification_preferences(
     let current = load_notification_preferences(&state, user.wallet_address.as_str()).await?;
     let next = NotificationPreferences {
         order_fills: body.order_fills.unwrap_or(current.order_fills),
-        market_resolutions: body.market_resolutions.unwrap_or(current.market_resolutions),
+        market_resolutions: body
+            .market_resolutions
+            .unwrap_or(current.market_resolutions),
         price_alerts: body.price_alerts.unwrap_or(current.price_alerts),
         system_announcements: body
             .system_announcements
             .unwrap_or(current.system_announcements),
         decision_alerts: body.decision_alerts.unwrap_or(current.decision_alerts),
-        email_notifications: body.email_notifications.unwrap_or(current.email_notifications),
-        push_notifications: body.push_notifications.unwrap_or(current.push_notifications),
+        email_notifications: body
+            .email_notifications
+            .unwrap_or(current.email_notifications),
+        push_notifications: body
+            .push_notifications
+            .unwrap_or(current.push_notifications),
     };
 
     sqlx::query(
@@ -429,6 +450,9 @@ mod tests {
             &NotificationType::DecisionThresholdCrossed,
             &prefs,
         ));
-        assert!(notification_allowed_by_preferences(&NotificationType::OrderFilled, &prefs));
+        assert!(notification_allowed_by_preferences(
+            &NotificationType::OrderFilled,
+            &prefs
+        ));
     }
 }
