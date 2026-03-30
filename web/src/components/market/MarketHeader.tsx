@@ -98,9 +98,7 @@ export function MarketHeader({
             {MARKET_STATUS_LABELS[market.status]}
           </Badge>
           {market.liquidityMode === "bootstrap_hybrid" ? (
-            <Badge variant={bootstrapTone}>
-              {`bootstrap ${bootstrapLabel}`}
-            </Badge>
+            <Badge variant={bootstrapTone}>{bootstrapLabel}</Badge>
           ) : null}
         </div>
         <h1 className="mb-2 text-xl font-bold sm:text-2xl">

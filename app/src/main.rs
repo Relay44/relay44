@@ -509,8 +509,28 @@ async fn main() -> std::io::Result<()> {
                                 web::patch().to(api::evm::update_base_market_bootstrap_runtime),
                             )
                             .route(
+                                "/internal/markets/{market_id}/bootstrap/pause",
+                                web::post().to(api::evm::pause_base_market_bootstrap),
+                            )
+                            .route(
+                                "/internal/markets/{market_id}/bootstrap/resume",
+                                web::post().to(api::evm::resume_base_market_bootstrap),
+                            )
+                            .route(
+                                "/internal/markets/{market_id}/bootstrap/refresh",
+                                web::post().to(api::evm::refresh_base_market_bootstrap),
+                            )
+                            .route(
+                                "/internal/markets/{market_id}/bootstrap/graduate",
+                                web::post().to(api::evm::graduate_base_market_bootstrap_now),
+                            )
+                            .route(
                                 "/bootstrap/operator",
                                 web::get().to(api::evm::get_bootstrap_operator_status),
+                            )
+                            .route(
+                                "/bootstrap/admin/backfill",
+                                web::post().to(api::evm::backfill_base_market_bootstrap),
                             )
                             .route(
                                 "/bootstrap/runner/tick",

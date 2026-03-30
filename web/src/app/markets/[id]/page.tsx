@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { PageShell } from "@/components/layout";
 import { ReadOnlyNotice } from "@/components/runtime/ReadOnlyNotice";
@@ -28,6 +29,8 @@ import {
   useRuntimeMode,
   useSessionState,
 } from "@/hooks";
+import { isAdminWallet } from "@/lib/admin";
+import { api } from "@/lib/api";
 import { SITE_URL } from "@/lib/seo";
 import { extractTradingViewReference } from "@/lib/tradingView";
 
@@ -41,8 +44,10 @@ export default function MarketDetailPage() {
   const { hasSession, sessionRestored } = useSessionState();
   const claimWinnings = useClaimWinnings();
   const resolveMarket = useResolveMarket();
+  const [adminAction, setAdminAction] = useState<string | null>(null);
+  const isAdmin = useMemo(() => isAdminWallet(baseWallet.address), [baseWallet.address]);
 
-  const { data: market, isLoading, error } = useMarket(marketId);
+  const { data: market, isLoading, error, refetch } = useMarket(marketId);
   const { data: positionsData } = usePositions();
   const { data: decisionCellsData } = useDecisionCells({
     limit: 50,
@@ -84,6 +89,31 @@ export default function MarketDetailPage() {
       const message =
         resolveError instanceof Error ? resolveError.message : "Resolve failed";
       addToast(message, "error");
+    }
+  };
+
+  const handleBootstrapAdmin = async (
+    action: "pause" | "resume" | "refresh" | "graduate",
+  ) => {
+    try {
+      setAdminAction(action);
+      if (action === "pause") {
+        await api.pauseBaseMarketBootstrap(marketId);
+      } else if (action === "resume") {
+        await api.resumeBaseMarketBootstrap(marketId);
+      } else if (action === "refresh") {
+        await api.refreshBaseMarketBootstrap(marketId);
+      } else {
+        await api.graduateBaseMarketBootstrap(marketId);
+      }
+      await refetch();
+      addToast(`Bootstrap ${action} completed`, "success");
+    } catch (adminError) {
+      const message =
+        adminError instanceof Error ? adminError.message : `Bootstrap ${action} failed`;
+      addToast(message, "error");
+    } finally {
+      setAdminAction(null);
     }
   };
 
@@ -169,6 +199,58 @@ export default function MarketDetailPage() {
                 disabled={readOnly || resolveMarket.isPending}
               >
                 Resolve YES
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isAdmin && market.liquidityMode === "bootstrap_hybrid" ? (
+        <div className="mb-6 border border-border bg-bg-secondary p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium text-text-primary">
+                Bootstrap controls
+              </div>
+              <div className="mt-1 text-sm text-text-secondary">
+                Pause, resume, refresh, or graduate the managed bootstrap ladder for this market.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleBootstrapAdmin("pause")}
+                loading={adminAction === "pause"}
+                disabled={Boolean(adminAction)}
+              >
+                Pause
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleBootstrapAdmin("resume")}
+                loading={adminAction === "resume"}
+                disabled={Boolean(adminAction)}
+              >
+                Resume
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void handleBootstrapAdmin("refresh")}
+                loading={adminAction === "refresh"}
+                disabled={Boolean(adminAction)}
+              >
+                Refresh now
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleBootstrapAdmin("graduate")}
+                loading={adminAction === "graduate"}
+                disabled={Boolean(adminAction)}
+              >
+                Graduate now
               </Button>
             </div>
           </div>
