@@ -269,6 +269,7 @@ pub struct CreateExternalAgentRequest {
     pub cadence_seconds: u64,
     pub strategy: String,
     pub credential_id: Option<String>,
+    pub execution_mode: Option<String>,
     pub active: Option<bool>,
 }
 
@@ -283,6 +284,7 @@ pub struct UpdateExternalAgentRequest {
     pub cadence_seconds: Option<u64>,
     pub strategy: Option<String>,
     pub credential_id: Option<String>,
+    pub execution_mode: Option<String>,
     pub active: Option<bool>,
 }
 
@@ -304,6 +306,15 @@ pub struct ListExternalAgentsQuery {
     pub offset: Option<i64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicExternalAgentsQuery {
+    pub provider: Option<String>,
+    pub active: Option<bool>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAgentResponse {
@@ -318,7 +329,11 @@ pub struct ExternalAgentResponse {
     pub quantity: f64,
     pub cadence_seconds: u64,
     pub strategy: String,
+    pub strategy_label: String,
+    pub execution_mode: String,
     pub credential_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub active: bool,
     pub last_executed_at: Option<String>,
     pub next_execution_at: String,
@@ -384,6 +399,8 @@ pub struct ExternalAgentPerformanceResponse {
     pub timeline: Vec<ExternalAgentPerformancePoint>,
     pub updated_at: String,
 }
+
+const PUBLIC_PAPER_AGENT_SOURCE: &str = "relay44-paper";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -457,6 +474,7 @@ pub(crate) struct ExternalAgentRecord {
     pub(crate) quantity: f64,
     pub(crate) cadence_seconds: i64,
     pub(crate) strategy: String,
+    pub(crate) execution_mode: ExternalExecutionMode,
     pub(crate) credential_id: Option<String>,
     pub(crate) active: bool,
     pub(crate) next_execution_at: chrono::DateTime<Utc>,
@@ -491,6 +509,58 @@ fn normalize_provider(raw: &str) -> Result<ExternalProvider, ApiError> {
             "provider must be one of: limitless, polymarket",
         )
     })
+}
+
+fn parse_external_execution_mode(raw: &str) -> Result<ExternalExecutionMode, ApiError> {
+    ExternalExecutionMode::from_str(raw).ok_or_else(|| {
+        ApiError::bad_request(
+            "INVALID_EXECUTION_MODE",
+            "executionMode must be one of: live, paper",
+        )
+    })
+}
+
+fn strategy_label(strategy: &str) -> String {
+    match strategy.trim().to_ascii_lowercase().as_str() {
+        "momentum" => "proving".to_string(),
+        "mean-revert" => "research".to_string(),
+        "market-maker" => "optimization".to_string(),
+        _ => strategy.trim().to_string(),
+    }
+}
+
+fn public_paper_cohort_owner(state: &AppState) -> Option<&str> {
+    if !state.config.paper_cohort_public_enabled {
+        return None;
+    }
+
+    let owner = state.config.paper_cohort_public_owner.trim();
+    if owner.is_empty() {
+        None
+    } else {
+        Some(owner)
+    }
+}
+
+fn requested_execution_mode(
+    default_mode: ExternalExecutionMode,
+    role: UserRole,
+    requested: Option<&str>,
+) -> Result<ExternalExecutionMode, ApiError> {
+    match requested {
+        Some(raw) if matches!(role, UserRole::Admin) => parse_external_execution_mode(raw),
+        Some(_) => Err(ApiError::forbidden(
+            "Only admins can override external agent execution mode",
+        )),
+        None => Ok(default_mode),
+    }
+}
+
+fn run_skip_status_for_mode(mode: ExternalExecutionMode) -> &'static str {
+    match mode {
+        ExternalExecutionMode::Paper => "paper_skipped",
+        ExternalExecutionMode::Live => "skipped",
+    }
 }
 
 fn to_rail_provider(provider: ExternalProvider) -> RailProvider {
@@ -631,10 +701,6 @@ fn resolve_external_agent_owner_scope(
         "owner" => Ok(Some(requested_owner.unwrap_or(wallet))),
         _ => Ok(Some(requested_owner.unwrap_or(wallet))),
     }
-}
-
-fn requires_live_credentials(state: &AppState) -> bool {
-    execution_mode(state) == ExternalExecutionMode::Live
 }
 
 fn ensure_live_write_mode(state: &AppState) -> Result<(), ApiError> {
@@ -897,6 +963,7 @@ async fn import_external_state_rows(
                 quantity,
                 cadence_seconds,
                 strategy,
+                execution_mode,
                 credential_id,
                 active,
                 last_executed_at,
@@ -917,6 +984,7 @@ async fn import_external_state_rows(
                 entry.quantity,
                 entry.cadence_seconds,
                 entry.strategy,
+                COALESCE(NULLIF(LOWER(entry.execution_mode), ''), 'live'),
                 entry.credential_id,
                 entry.active,
                 entry.last_executed_at,
@@ -936,6 +1004,7 @@ async fn import_external_state_rows(
                 quantity DOUBLE PRECISION,
                 cadence_seconds BIGINT,
                 strategy TEXT,
+                execution_mode TEXT,
                 credential_id TEXT,
                 active BOOLEAN,
                 last_executed_at TIMESTAMPTZ,
@@ -955,6 +1024,7 @@ async fn import_external_state_rows(
                 quantity = EXCLUDED.quantity,
                 cadence_seconds = EXCLUDED.cadence_seconds,
                 strategy = EXCLUDED.strategy,
+                execution_mode = EXCLUDED.execution_mode,
                 credential_id = EXCLUDED.credential_id,
                 active = EXCLUDED.active,
                 last_executed_at = EXCLUDED.last_executed_at,
@@ -1081,6 +1151,9 @@ fn parse_external_agent_record(
     let provider_raw: String = row
         .try_get("provider")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let execution_mode_raw: String = row
+        .try_get("execution_mode")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
 
     Ok(ExternalAgentRecord {
         id: row
@@ -1114,6 +1187,7 @@ fn parse_external_agent_record(
         strategy: row
             .try_get("strategy")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
+        execution_mode: parse_external_execution_mode(execution_mode_raw.as_str())?,
         credential_id: row.try_get("credential_id").ok(),
         active: row
             .try_get("active")
@@ -1154,7 +1228,7 @@ pub(crate) async fn load_external_agent_for_owner(
 ) -> Result<ExternalAgentRecord, ApiError> {
     let row = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, credential_id, active, last_executed_at, next_execution_at
+                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at
          FROM external_agents
          WHERE id = $1 AND owner = $2",
     )
@@ -1174,7 +1248,7 @@ async fn load_due_external_agents(
 ) -> Result<Vec<ExternalAgentRecord>, ApiError> {
     let rows = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, credential_id, active, last_executed_at, next_execution_at
+                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at
          FROM external_agents
          WHERE active = TRUE
          ORDER BY next_execution_at ASC, id ASC
@@ -3291,7 +3365,10 @@ fn build_external_order_response(
     })
 }
 
-fn parse_external_agent(row: sqlx::postgres::PgRow) -> Result<ExternalAgentResponse, ApiError> {
+fn parse_external_agent(
+    row: sqlx::postgres::PgRow,
+    source: Option<&str>,
+) -> Result<ExternalAgentResponse, ApiError> {
     let created_at: chrono::DateTime<Utc> = row
         .try_get("created_at")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
@@ -3302,6 +3379,13 @@ fn parse_external_agent(row: sqlx::postgres::PgRow) -> Result<ExternalAgentRespo
         .try_get("next_execution_at")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
     let last_executed_at: Option<chrono::DateTime<Utc>> = row.try_get("last_executed_at").ok();
+    let execution_mode_raw: String = row
+        .try_get("execution_mode")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let strategy: String = row
+        .try_get("strategy")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let execution_mode = parse_external_execution_mode(execution_mode_raw.as_str())?;
 
     Ok(ExternalAgentResponse {
         id: row
@@ -3335,10 +3419,11 @@ fn parse_external_agent(row: sqlx::postgres::PgRow) -> Result<ExternalAgentRespo
             .try_get::<i64, _>("cadence_seconds")
             .map_err(|err| ApiError::internal(&err.to_string()))?
             .max(1) as u64,
-        strategy: row
-            .try_get("strategy")
-            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        strategy_label: strategy_label(strategy.as_str()),
+        strategy,
+        execution_mode: execution_mode.as_str().to_string(),
         credential_id: row.try_get("credential_id").ok(),
+        source: source.map(str::to_string),
         active: row
             .try_get("active")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
@@ -4093,6 +4178,8 @@ async fn execute_live_agent(
     agent: &ExternalAgentRecord,
     signed_order_override: Option<Value>,
 ) -> Result<AgentExecutionOutcome, ApiError> {
+    ensure_live_write_mode(state)?;
+
     let credential = load_credential(
         state,
         agent.owner.as_str(),
@@ -4186,7 +4273,7 @@ pub(crate) async fn execute_agent_record(
     agent: &ExternalAgentRecord,
     signed_order_override: Option<Value>,
 ) -> Result<AgentExecutionOutcome, ApiError> {
-    match execution_mode(state) {
+    match agent.execution_mode {
         ExternalExecutionMode::Paper => execute_paper_agent(state, agent).await,
         ExternalExecutionMode::Live => {
             execute_live_agent(state, agent, signed_order_override).await
@@ -5169,7 +5256,7 @@ pub async fn list_external_agents(
 
     let mut sql = QueryBuilder::<Postgres>::new(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
-                strategy, credential_id, active, last_executed_at, next_execution_at, created_at, updated_at
+                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at, created_at, updated_at
          FROM external_agents
          WHERE TRUE",
     );
@@ -5218,7 +5305,113 @@ pub async fn list_external_agents(
 
     let mut agents = Vec::new();
     for row in rows {
-        agents.push(parse_external_agent(row)?);
+        agents.push(parse_external_agent(row, None)?);
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalAgentsListResponse {
+        agents,
+        total: total.max(0) as u64,
+        limit: limit as u64,
+        offset: offset as u64,
+    }))
+}
+
+fn empty_public_agents_response(limit: i64, offset: i64) -> ExternalAgentsListResponse {
+    ExternalAgentsListResponse {
+        agents: Vec::new(),
+        total: 0,
+        limit: limit.max(0) as u64,
+        offset: offset.max(0) as u64,
+    }
+}
+
+fn empty_public_agents_performance(owner: Option<String>) -> ExternalAgentPerformanceResponse {
+    ExternalAgentPerformanceResponse {
+        scope: "public".to_string(),
+        owner,
+        totals: ExternalAgentPerformanceTotals {
+            agents: 0,
+            active_agents: 0,
+            open_positions: 0,
+            closed_positions: 0,
+            fills: 0,
+            volume_usdc: 0.0,
+            fees_usdc: 0.0,
+            realized_pnl_usdc: 0.0,
+            unrealized_pnl_usdc: 0.0,
+            net_pnl_usdc: 0.0,
+        },
+        strategies: Vec::new(),
+        timeline: Vec::new(),
+        updated_at: Utc::now().to_rfc3339(),
+    }
+}
+
+pub async fn list_public_external_agents(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<PublicExternalAgentsQuery>,
+) -> Result<impl Responder, ApiError> {
+    let limit = query.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+
+    let Some(owner) = public_paper_cohort_owner(&state).map(str::to_string) else {
+        return Ok(HttpResponse::Ok().json(empty_public_agents_response(limit, offset)));
+    };
+
+    let mut sql = QueryBuilder::<Postgres>::new(
+        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
+                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at, created_at, updated_at
+         FROM external_agents
+         WHERE owner = ",
+    );
+    sql.push_bind(owner.as_str())
+        .push(" AND execution_mode = 'paper' AND LOWER(name) LIKE 'paper-%'");
+
+    let mut count_sql = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*) AS total
+         FROM external_agents
+         WHERE owner = ",
+    );
+    count_sql
+        .push_bind(owner.as_str())
+        .push(" AND execution_mode = 'paper' AND LOWER(name) LIKE 'paper-%'");
+
+    if let Some(provider_raw) = query.provider.as_ref() {
+        let provider = normalize_provider(provider_raw.as_str())?;
+        sql.push(" AND provider = ").push_bind(provider.as_str());
+        count_sql
+            .push(" AND provider = ")
+            .push_bind(provider.as_str());
+    }
+
+    if let Some(active) = query.active {
+        sql.push(" AND active = ").push_bind(active);
+        count_sql.push(" AND active = ").push_bind(active);
+    }
+
+    sql.push(" ORDER BY last_executed_at DESC NULLS LAST, next_execution_at ASC, id ASC LIMIT ")
+        .push_bind(limit)
+        .push(" OFFSET ")
+        .push_bind(offset);
+
+    let rows = sql
+        .build()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let count_row = count_sql
+        .build()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let total: i64 = count_row
+        .try_get("total")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut agents = Vec::with_capacity(rows.len());
+    for row in rows {
+        agents.push(parse_external_agent(row, Some(PUBLIC_PAPER_AGENT_SOURCE))?);
     }
 
     Ok(HttpResponse::Ok().json(ExternalAgentsListResponse {
@@ -5243,10 +5436,13 @@ pub async fn create_external_agent(
     }
 
     let user = extract_authenticated_user(&req, &state).await?;
+    let user_role = extract_jwt_user(&req, &state)?.role;
     let provider = normalize_provider(body.provider.as_str())?;
     ensure_provider_action_allowed(&req, provider, ProviderRailAction::TradeOpen)?;
     let outcome = normalize_outcome(body.outcome.as_str())?;
     let side = normalize_side(body.side.as_str())?;
+    let execution_mode =
+        requested_execution_mode(execution_mode(&state), user_role, body.execution_mode.as_deref())?;
 
     if body.name.trim().is_empty() {
         return Err(ApiError::bad_request("INVALID_NAME", "name is required"));
@@ -5280,7 +5476,7 @@ pub async fn create_external_agent(
         ));
     }
 
-    let credential_id = if requires_live_credentials(&state) || body.credential_id.is_some() {
+    let credential_id = if execution_mode == ExternalExecutionMode::Live || body.credential_id.is_some() {
         let credential = load_credential(
             &state,
             user.wallet_address.as_str(),
@@ -5298,11 +5494,11 @@ pub async fn create_external_agent(
     let row = sqlx::query(
         "INSERT INTO external_agents (
             id, owner, name, provider, market_id, provider_market_ref,
-            outcome, side, price, quantity, cadence_seconds, strategy,
+            outcome, side, price, quantity, cadence_seconds, strategy, execution_mode,
             credential_id, active, next_execution_at, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),NOW(),NOW())
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW(),NOW())
         RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
-                  cadence_seconds, strategy, credential_id, active, last_executed_at,
+                  cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
                   next_execution_at, created_at, updated_at",
     )
     .bind(id.as_str())
@@ -5317,13 +5513,14 @@ pub async fn create_external_agent(
     .bind(body.quantity)
     .bind(body.cadence_seconds as i64)
     .bind(body.strategy.trim())
+    .bind(execution_mode.as_str())
     .bind(credential_id.as_deref())
     .bind(body.active.unwrap_or(true))
     .fetch_one(state.db.pool())
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
-    Ok(HttpResponse::Ok().json(parse_external_agent(row)?))
+    Ok(HttpResponse::Ok().json(parse_external_agent(row, None)?))
 }
 
 pub async fn update_external_agent(
@@ -5338,7 +5535,7 @@ pub async fn update_external_agent(
     let agent_id = path.into_inner();
     let current = if matches!(user.role, UserRole::Admin) {
         sqlx::query(
-            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, credential_id, active
+            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, execution_mode, credential_id, active
              FROM external_agents
              WHERE id = $1",
         )
@@ -5349,7 +5546,7 @@ pub async fn update_external_agent(
         .ok_or_else(|| ApiError::not_found("External agent"))?
     } else {
         sqlx::query(
-            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, credential_id, active
+            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, execution_mode, credential_id, active
              FROM external_agents
              WHERE id = $1 AND owner = $2",
         )
@@ -5368,6 +5565,12 @@ pub async fn update_external_agent(
     let owner: String = current
         .try_get("owner")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let current_execution_mode = parse_external_execution_mode(
+        current
+            .try_get::<String, _>("execution_mode")
+            .map_err(|err| ApiError::internal(&err.to_string()))?
+            .as_str(),
+    )?;
 
     let next_outcome = if let Some(outcome) = body.outcome.as_deref() {
         normalize_outcome(outcome)?
@@ -5402,6 +5605,15 @@ pub async fn update_external_agent(
     let next_active = body
         .active
         .unwrap_or_else(|| current.try_get("active").unwrap_or(true));
+    let next_execution_mode = match body.execution_mode.as_deref() {
+        Some(raw) if matches!(user.role, UserRole::Admin) => parse_external_execution_mode(raw)?,
+        Some(_) => {
+            return Err(ApiError::forbidden(
+                "Only admins can override external agent execution mode",
+            ));
+        }
+        None => current_execution_mode,
+    };
 
     let credential_id = if let Some(id) = body.credential_id.as_deref() {
         let credential = load_credential(&state, owner.as_str(), provider, Some(id)).await?;
@@ -5410,6 +5622,13 @@ pub async fn update_external_agent(
     } else {
         current.try_get::<String, _>("credential_id").ok()
     };
+
+    if next_execution_mode == ExternalExecutionMode::Live && credential_id.is_none() {
+        return Err(ApiError::bad_request(
+            "CREDENTIAL_REQUIRED",
+            "live external agents require a ready credential",
+        ));
+    }
 
     let row = if matches!(user.role, UserRole::Admin) {
         sqlx::query(
@@ -5421,12 +5640,13 @@ pub async fn update_external_agent(
                  quantity = $6,
                  cadence_seconds = $7,
                  strategy = $8,
-                 credential_id = $9,
-                 active = $10,
+                 execution_mode = $9,
+                 credential_id = $10,
+                 active = $11,
                  updated_at = NOW()
              WHERE id = $1
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
-                       cadence_seconds, strategy, credential_id, active, last_executed_at,
+                       cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
                        next_execution_at, created_at, updated_at",
         )
         .bind(agent_id.as_str())
@@ -5437,6 +5657,7 @@ pub async fn update_external_agent(
         .bind(next_quantity)
         .bind(next_cadence as i64)
         .bind(next_strategy)
+        .bind(next_execution_mode.as_str())
         .bind(credential_id.as_deref())
         .bind(next_active)
         .fetch_one(state.db.pool())
@@ -5452,12 +5673,13 @@ pub async fn update_external_agent(
                  quantity = $7,
                  cadence_seconds = $8,
                  strategy = $9,
-                 credential_id = $10,
-                 active = $11,
+                 execution_mode = $10,
+                 credential_id = $11,
+                 active = $12,
                  updated_at = NOW()
              WHERE id = $1 AND owner = $2
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
-                       cadence_seconds, strategy, credential_id, active, last_executed_at,
+                       cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
                        next_execution_at, created_at, updated_at",
         )
         .bind(agent_id.as_str())
@@ -5469,6 +5691,7 @@ pub async fn update_external_agent(
         .bind(next_quantity)
         .bind(next_cadence as i64)
         .bind(next_strategy)
+        .bind(next_execution_mode.as_str())
         .bind(credential_id.as_deref())
         .bind(next_active)
         .fetch_one(state.db.pool())
@@ -5476,7 +5699,7 @@ pub async fn update_external_agent(
         .map_err(|err| ApiError::internal(&err.to_string()))?
     };
 
-    Ok(HttpResponse::Ok().json(parse_external_agent(row)?))
+    Ok(HttpResponse::Ok().json(parse_external_agent(row, None)?))
 }
 
 pub async fn execute_external_agent(
@@ -5518,7 +5741,7 @@ pub async fn execute_external_agent(
 
     Ok(HttpResponse::Ok().json(json!({
         "ok": outcome.executed,
-        "mode": execution_mode(&state).as_str(),
+        "mode": agent.execution_mode.as_str(),
         "agentId": agent_id,
         "runId": outcome.run_id,
         "externalOrderId": outcome.external_order_id,
@@ -5569,11 +5792,11 @@ pub async fn run_external_agents_tick(
                 &state,
                 run_id.as_str(),
                 agent,
-                "paper_skipped",
+                run_skip_status_for_mode(agent.execution_mode),
                 None,
                 Some(reason.as_str()),
                 &json!({
-                    "mode": execution_mode(&state).as_str(),
+                    "mode": agent.execution_mode.as_str(),
                     "error": {
                         "code": err.code,
                         "message": err.message,
@@ -5621,7 +5844,7 @@ pub async fn run_external_agents_tick(
                     None,
                     Some(reason.as_str()),
                     &json!({
-                        "mode": execution_mode(&state).as_str(),
+                        "mode": agent.execution_mode.as_str(),
                         "error": {
                             "code": err.code,
                             "message": err.message,
@@ -6216,6 +6439,408 @@ pub async fn get_external_agents_performance(
     }))
 }
 
+pub async fn get_public_external_agents_performance(
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    let Some(owner) = public_paper_cohort_owner(&state).map(str::to_string) else {
+        return Ok(HttpResponse::Ok().json(empty_public_agents_performance(None)));
+    };
+
+    let agents_row = sqlx::query(
+        "SELECT COUNT(*) AS agents,
+                COUNT(*) FILTER (WHERE ea.active) AS active_agents
+         FROM external_agents ea
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'",
+    )
+    .bind(owner.as_str())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let positions_row = sqlx::query(
+        "SELECT COUNT(*) FILTER (WHERE pp.status = 'open') AS open_positions,
+                COUNT(*) FILTER (WHERE pp.status = 'closed') AS closed_positions,
+                COALESCE(SUM(CASE WHEN pp.status = 'open' THEN pp.unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+         FROM paper_positions pp
+         JOIN external_agents ea ON ea.id = pp.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'",
+    )
+    .bind(owner.as_str())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let fills_row = sqlx::query(
+        "SELECT COUNT(*) AS fills,
+                COALESCE(SUM(pf.notional_usdc), 0) AS volume_usdc,
+                COALESCE(SUM(pf.fee_usdc), 0) AS fees_usdc
+         FROM paper_fills pf
+         JOIN external_agents ea ON ea.id = pf.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'",
+    )
+    .bind(owner.as_str())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let outcomes_row = sqlx::query(
+        "SELECT COALESCE(SUM(po.realized_pnl_usdc), 0) AS realized_pnl_usdc
+         FROM paper_outcomes po
+         JOIN external_agents ea ON ea.id = po.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'",
+    )
+    .bind(owner.as_str())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let agents = agents_row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64;
+    let active_agents = agents_row
+        .try_get::<i64, _>("active_agents")
+        .unwrap_or(0)
+        .max(0) as u64;
+    let open_positions = positions_row
+        .try_get::<i64, _>("open_positions")
+        .unwrap_or(0)
+        .max(0) as u64;
+    let closed_positions = positions_row
+        .try_get::<i64, _>("closed_positions")
+        .unwrap_or(0)
+        .max(0) as u64;
+    let fills = fills_row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
+    let volume_usdc = fills_row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
+    let fees_usdc = fills_row.try_get::<f64, _>("fees_usdc").unwrap_or(0.0);
+    let realized_pnl_usdc = outcomes_row
+        .try_get::<f64, _>("realized_pnl_usdc")
+        .unwrap_or(0.0);
+    let unrealized_pnl_usdc = positions_row
+        .try_get::<f64, _>("unrealized_pnl_usdc")
+        .unwrap_or(0.0);
+
+    let strategy_rows = sqlx::query(
+        "SELECT ea.strategy,
+                COUNT(*) AS agents,
+                COUNT(*) FILTER (WHERE ea.active) AS active_agents
+         FROM external_agents ea
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+         GROUP BY ea.strategy
+         ORDER BY ea.strategy ASC",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let position_strategy_rows = sqlx::query(
+        "SELECT ea.strategy,
+                COUNT(*) FILTER (WHERE pp.status = 'open') AS open_positions,
+                COUNT(*) FILTER (WHERE pp.status = 'closed') AS closed_positions,
+                COALESCE(SUM(CASE WHEN pp.status = 'open' THEN pp.unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+         FROM paper_positions pp
+         JOIN external_agents ea ON ea.id = pp.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+         GROUP BY ea.strategy",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let fill_strategy_rows = sqlx::query(
+        "SELECT ea.strategy,
+                COUNT(*) AS fills,
+                COALESCE(SUM(pf.notional_usdc), 0) AS volume_usdc,
+                COALESCE(SUM(pf.fee_usdc), 0) AS fees_usdc
+         FROM paper_fills pf
+         JOIN external_agents ea ON ea.id = pf.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+         GROUP BY ea.strategy",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let outcome_strategy_rows = sqlx::query(
+        "SELECT ea.strategy,
+                COALESCE(SUM(po.realized_pnl_usdc), 0) AS realized_pnl_usdc,
+                COALESCE(AVG(CASE WHEN po.realized_pnl_usdc > 0 THEN 1.0 ELSE 0.0 END), 0) AS win_rate
+         FROM paper_outcomes po
+         JOIN external_agents ea ON ea.id = po.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+         GROUP BY ea.strategy",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut strategy_map = BTreeMap::<String, ExternalAgentStrategyPerformance>::new();
+
+    for row in strategy_rows {
+        let strategy: String = row
+            .try_get("strategy")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        strategy_map.insert(
+            strategy.clone(),
+            ExternalAgentStrategyPerformance {
+                strategy: strategy_label(strategy.as_str()),
+                agents: row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64,
+                active_agents: row
+                    .try_get::<i64, _>("active_agents")
+                    .unwrap_or(0)
+                    .max(0) as u64,
+                open_positions: 0,
+                closed_positions: 0,
+                fills: 0,
+                volume_usdc: 0.0,
+                fees_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+                win_rate: 0.0,
+            },
+        );
+    }
+
+    for row in position_strategy_rows {
+        let strategy: String = row
+            .try_get("strategy")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let entry = strategy_map
+            .entry(strategy.clone())
+            .or_insert(ExternalAgentStrategyPerformance {
+                strategy: strategy_label(strategy.as_str()),
+                agents: 0,
+                active_agents: 0,
+                open_positions: 0,
+                closed_positions: 0,
+                fills: 0,
+                volume_usdc: 0.0,
+                fees_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+                win_rate: 0.0,
+            });
+        entry.open_positions = row
+            .try_get::<i64, _>("open_positions")
+            .unwrap_or(0)
+            .max(0) as u64;
+        entry.closed_positions = row
+            .try_get::<i64, _>("closed_positions")
+            .unwrap_or(0)
+            .max(0) as u64;
+        entry.unrealized_pnl_usdc = row.try_get::<f64, _>("unrealized_pnl_usdc").unwrap_or(0.0);
+        entry.net_pnl_usdc = entry.realized_pnl_usdc + entry.unrealized_pnl_usdc;
+    }
+
+    for row in fill_strategy_rows {
+        let strategy: String = row
+            .try_get("strategy")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let entry = strategy_map
+            .entry(strategy.clone())
+            .or_insert(ExternalAgentStrategyPerformance {
+                strategy: strategy_label(strategy.as_str()),
+                agents: 0,
+                active_agents: 0,
+                open_positions: 0,
+                closed_positions: 0,
+                fills: 0,
+                volume_usdc: 0.0,
+                fees_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+                win_rate: 0.0,
+            });
+        entry.fills = row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
+        entry.volume_usdc = row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
+        entry.fees_usdc = row.try_get::<f64, _>("fees_usdc").unwrap_or(0.0);
+    }
+
+    for row in outcome_strategy_rows {
+        let strategy: String = row
+            .try_get("strategy")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let entry = strategy_map
+            .entry(strategy.clone())
+            .or_insert(ExternalAgentStrategyPerformance {
+                strategy: strategy_label(strategy.as_str()),
+                agents: 0,
+                active_agents: 0,
+                open_positions: 0,
+                closed_positions: 0,
+                fills: 0,
+                volume_usdc: 0.0,
+                fees_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+                win_rate: 0.0,
+            });
+        entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+        entry.win_rate = row.try_get::<f64, _>("win_rate").unwrap_or(0.0);
+        entry.net_pnl_usdc = entry.realized_pnl_usdc + entry.unrealized_pnl_usdc;
+    }
+
+    let strategies = strategy_map.into_values().collect::<Vec<_>>();
+
+    let volume_timeline_rows = sqlx::query(
+        "SELECT date_trunc('hour', pf.created_at) AS bucket,
+                COALESCE(SUM(pf.notional_usdc), 0) AS volume_usdc
+         FROM paper_fills pf
+         JOIN external_agents ea ON ea.id = pf.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+           AND pf.created_at >= NOW() - INTERVAL '24 hours'
+         GROUP BY bucket
+         ORDER BY bucket ASC",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let realized_timeline_rows = sqlx::query(
+        "SELECT date_trunc('hour', po.closed_at) AS bucket,
+                COALESCE(SUM(po.realized_pnl_usdc), 0) AS realized_pnl_usdc
+         FROM paper_outcomes po
+         JOIN external_agents ea ON ea.id = po.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+           AND po.closed_at >= NOW() - INTERVAL '24 hours'
+         GROUP BY bucket
+         ORDER BY bucket ASC",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let unrealized_timeline_rows = sqlx::query(
+        "SELECT bucket, COALESCE(SUM(unrealized_pnl_usdc), 0) AS unrealized_pnl_usdc
+         FROM (
+             SELECT DISTINCT ON (pm.position_id, bucket)
+                    pm.position_id,
+                    date_trunc('hour', pm.created_at) AS bucket,
+                    pm.unrealized_pnl_usdc
+             FROM paper_marks pm
+             JOIN external_agents ea ON ea.id = pm.agent_id
+             WHERE ea.owner = $1
+               AND ea.execution_mode = 'paper'
+               AND LOWER(ea.name) LIKE 'paper-%'
+               AND pm.created_at >= NOW() - INTERVAL '24 hours'
+             ORDER BY pm.position_id, bucket, pm.created_at DESC
+         ) AS scoped
+         GROUP BY bucket
+         ORDER BY bucket ASC",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut timeline_map: BTreeMap<String, ExternalAgentPerformancePoint> = BTreeMap::new();
+    for row in volume_timeline_rows {
+        let bucket: chrono::DateTime<Utc> = row
+            .try_get("bucket")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key = bucket.to_rfc3339();
+        timeline_map.insert(
+            key.clone(),
+            ExternalAgentPerformancePoint {
+                bucket: key,
+                volume_usdc: row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0),
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+            },
+        );
+    }
+
+    for row in realized_timeline_rows {
+        let bucket: chrono::DateTime<Utc> = row
+            .try_get("bucket")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key = bucket.to_rfc3339();
+        let entry = timeline_map
+            .entry(key.clone())
+            .or_insert(ExternalAgentPerformancePoint {
+                bucket: key,
+                volume_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+            });
+        entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+    }
+
+    for row in unrealized_timeline_rows {
+        let bucket: chrono::DateTime<Utc> = row
+            .try_get("bucket")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let key = bucket.to_rfc3339();
+        let entry = timeline_map
+            .entry(key.clone())
+            .or_insert(ExternalAgentPerformancePoint {
+                bucket: key,
+                volume_usdc: 0.0,
+                realized_pnl_usdc: 0.0,
+                unrealized_pnl_usdc: 0.0,
+                net_pnl_usdc: 0.0,
+            });
+        entry.unrealized_pnl_usdc = row.try_get::<f64, _>("unrealized_pnl_usdc").unwrap_or(0.0);
+    }
+
+    let mut cumulative_realized = 0.0;
+    let mut timeline = timeline_map.into_values().collect::<Vec<_>>();
+    for point in &mut timeline {
+        cumulative_realized += point.realized_pnl_usdc;
+        point.realized_pnl_usdc = cumulative_realized;
+        point.net_pnl_usdc = point.realized_pnl_usdc + point.unrealized_pnl_usdc;
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalAgentPerformanceResponse {
+        scope: "public".to_string(),
+        owner: Some(owner),
+        totals: ExternalAgentPerformanceTotals {
+            agents,
+            active_agents,
+            open_positions,
+            closed_positions,
+            fills,
+            volume_usdc,
+            fees_usdc,
+            realized_pnl_usdc,
+            unrealized_pnl_usdc,
+            net_pnl_usdc: realized_pnl_usdc + unrealized_pnl_usdc,
+        },
+        strategies,
+        timeline,
+        updated_at: Utc::now().to_rfc3339(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6668,5 +7293,35 @@ mod tests {
             "skipped"
         );
         assert_eq!(run_status_from_error(&ApiError::internal("boom")), "failed");
+    }
+
+    #[test]
+    fn parse_external_execution_mode_accepts_live_and_paper() {
+        assert_eq!(
+            parse_external_execution_mode("live").unwrap(),
+            ExternalExecutionMode::Live
+        );
+        assert_eq!(
+            parse_external_execution_mode("paper").unwrap(),
+            ExternalExecutionMode::Paper
+        );
+        assert!(parse_external_execution_mode("demo").is_err());
+    }
+
+    #[test]
+    fn strategy_label_maps_public_cohort_terms() {
+        assert_eq!(strategy_label("momentum"), "proving");
+        assert_eq!(strategy_label("mean-revert"), "research");
+        assert_eq!(strategy_label("market-maker"), "optimization");
+        assert_eq!(strategy_label("custom"), "custom");
+    }
+
+    #[test]
+    fn requested_execution_mode_blocks_non_admin_paper_override() {
+        let err =
+            requested_execution_mode(ExternalExecutionMode::Live, UserRole::User, Some("paper"))
+                .unwrap_err();
+
+        assert_eq!(err.message, "Only admins can override external agent execution mode");
     }
 }

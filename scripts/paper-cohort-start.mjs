@@ -45,15 +45,21 @@ async function main() {
     const existing = existingByName.get(spec.name);
 
     if (!existing) {
-      await apiPost("/external/agents", accessToken, spec);
+      await apiPost("/external/agents", accessToken, {
+        ...spec,
+        executionMode: "paper",
+      });
       created += 1;
       continue;
     }
 
     const sameStrategy = existing.strategy === spec.strategy;
     const sameActive = existing.active === true;
+    const existingExecutionMode =
+      existing.executionMode || existing.execution_mode || "live";
+    const sameExecutionMode = existingExecutionMode === "paper";
 
-    if (sameStrategy && sameActive) {
+    if (sameStrategy && sameActive && sameExecutionMode) {
       unchanged += 1;
       continue;
     }
@@ -65,6 +71,7 @@ async function main() {
       quantity: spec.quantity,
       cadenceSeconds: spec.cadenceSeconds,
       strategy: spec.strategy,
+      executionMode: "paper",
       active: true,
     });
     activated += 1;

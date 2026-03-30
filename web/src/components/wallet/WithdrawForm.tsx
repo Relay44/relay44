@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { waitForTransactionReceipt } from '@wagmi/core';
 import { useConfig, useWalletClient } from 'wagmi';
 import { useRuntimeMode } from '@/hooks';
 import { ReadOnlyNotice } from '@/components/runtime/ReadOnlyNotice';
 import { api } from '@/lib/api';
 import { BASE_CHAIN_ID } from '@/lib/constants';
+import { sendPreparedTransactions } from '@/lib/evmWallet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import type { PreparedWalletTransaction } from '@/types';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 
 interface WithdrawFormProps {
@@ -40,27 +39,6 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
   const amountLamports = Math.floor(amountNumber * 1_000_000);
   const fee = 0;
   const netAmount = amountLamports;
-
-  const sendPreparedTransactions = async (
-    txs: PreparedWalletTransaction[],
-    account: `0x${string}`
-  ): Promise<`0x${string}`> => {
-    let finalHash: `0x${string}` | null = null;
-    for (const tx of txs) {
-      const hash = await walletClient!.sendTransaction({
-        account,
-        to: tx.to as `0x${string}`,
-        data: tx.data,
-        value: BigInt(tx.value),
-      });
-      await waitForTransactionReceipt(config, { hash });
-      finalHash = hash;
-    }
-    if (!finalHash) {
-      throw new Error('No transactions were submitted');
-    }
-    return finalHash;
-  };
 
   const handleWithdraw = async () => {
     if (amountLamports < 1_000_000) {
@@ -93,6 +71,8 @@ export function WithdrawForm({ availableBalance, onSuccess }: WithdrawFormProps)
         throw new Error('Withdraw preparation failed: missing intent or transactions');
       }
       const txHash = await sendPreparedTransactions(
+        walletClient,
+        config,
         prepared.preparedTransactions,
         wallet.address as `0x${string}`
       );
