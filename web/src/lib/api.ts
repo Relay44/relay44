@@ -22,6 +22,7 @@ import type {
   DepositResponse,
   WithdrawRequest,
   WithdrawResponse,
+  BootstrapOperatorStatus,
   DecisionCell,
   DecisionCellListItem,
   DecisionNodeEffect,
@@ -34,21 +35,22 @@ import type {
   LeaderboardMetric,
   PublicProfile,
   ProfileActivity,
-} from '@/types';
-import { CURATED_MARKETS_BY_ID } from '@/lib/curatedMarkets';
+} from "@/types";
+import { CURATED_MARKETS_BY_ID } from "@/lib/curatedMarkets";
 import {
   isReadOnlyMode,
   readOnlyPreviewEnabled,
   setRuntimeCapabilities,
-} from '@/lib/runtimeMode';
+} from "@/lib/runtimeMode";
 
 const PRIMARY_API_BASE =
   process.env.NEXT_PUBLIC_API_PROXY_URL?.trim() ||
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
-  '/api/proxy';
-const FALLBACK_API_BASE = process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || '';
+  "/api/proxy";
+const FALLBACK_API_BASE =
+  process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || "";
 const LOCAL_BASE_READ_API_BASE =
-  process.env.NEXT_PUBLIC_LOCAL_BASE_READ_API_URL?.trim() || '/v1';
+  process.env.NEXT_PUBLIC_LOCAL_BASE_READ_API_URL?.trim() || "/v1";
 
 export interface BaseTokenState {
   chain_id: number;
@@ -80,7 +82,7 @@ export interface BaseMarketSnapshot {
   close_time: number;
   resolve_time: number;
   resolved: boolean;
-  outcome?: 'yes' | 'no' | null;
+  outcome?: "yes" | "no" | null;
   status: string;
   source?: string;
   provider?: string;
@@ -95,7 +97,7 @@ export interface BaseMarketSnapshot {
   no_price?: number;
   volume?: number;
   provider_market_ref?: string;
-  liquidity_mode?: 'clob_only' | 'bootstrap_hybrid';
+  liquidity_mode?: "clob_only" | "bootstrap_hybrid";
   bootstrap_status?: string;
   bootstrap_active?: boolean;
   bootstrap_seed_usdc?: number;
@@ -124,7 +126,7 @@ interface BaseOrderBookLevel {
 
 interface BaseOrderBookResponse {
   market_id: string;
-  outcome: 'yes' | 'no';
+  outcome: "yes" | "no";
   bids: BaseOrderBookLevel[];
   asks: BaseOrderBookLevel[];
   last_updated: string;
@@ -137,7 +139,7 @@ interface BaseOrderBookResponse {
 interface BaseTradeSnapshot {
   id: string;
   market_id: string;
-  outcome: 'yes' | 'no';
+  outcome: "yes" | "no";
   price: number;
   price_bps: number;
   quantity: number;
@@ -171,7 +173,7 @@ interface BaseAgentSnapshot {
   next_execution_at: number;
   can_execute: boolean;
   active: boolean;
-  status: Agent['status'];
+  status: Agent["status"];
   strategy: string;
   identity_id?: string;
   identity_tier?: number;
@@ -192,7 +194,7 @@ interface BaseAgentsResponse {
 
 export interface ExternalCredential {
   id: string;
-  provider: 'limitless' | 'polymarket';
+  provider: "limitless" | "polymarket";
   label: string;
   key_id: string;
   created_at: string;
@@ -207,7 +209,7 @@ export interface ExternalCredentialCheck {
 }
 
 export interface ExternalCredentialStatus {
-  provider: 'limitless' | 'polymarket';
+  provider: "limitless" | "polymarket";
   credential_id?: string | null;
   ready: boolean;
   base_wallet?: string | null;
@@ -222,7 +224,7 @@ interface ExternalCredentialsListResponse {
 
 export interface ExternalOrderIntent {
   id: string;
-  provider: 'limitless' | 'polymarket';
+  provider: "limitless" | "polymarket";
   market_id: string;
   preflight: Record<string, unknown>;
   typed_data?: Record<string, unknown>;
@@ -233,7 +235,7 @@ export interface ExternalOrderIntent {
 
 export interface ExternalOrderRecord {
   id: string;
-  provider: 'limitless' | 'polymarket';
+  provider: "limitless" | "polymarket";
   market_id: string;
   provider_order_id: string;
   status: string;
@@ -244,9 +246,9 @@ export interface ExternalOrderRecord {
 }
 
 export interface PreparedExternalProviderRequest {
-  provider: 'limitless' | 'polymarket';
+  provider: "limitless" | "polymarket";
   url: string;
-  method: 'POST' | 'DELETE';
+  method: "POST" | "DELETE";
   headers: Record<string, string>;
   body: string;
 }
@@ -262,16 +264,16 @@ export interface ExternalAgentRecord {
   id: string;
   owner: string;
   name: string;
-  provider: 'limitless' | 'polymarket';
+  provider: "limitless" | "polymarket";
   market_id: string;
-  outcome: 'yes' | 'no';
-  side: 'buy' | 'sell';
+  outcome: "yes" | "no";
+  side: "buy" | "sell";
   price: number;
   quantity: number;
   cadence_seconds: number;
   strategy: string;
   strategy_label: string;
-  execution_mode: 'live' | 'paper';
+  execution_mode: "live" | "paper";
   credential_id?: string | null;
   source?: string | null;
   active: boolean;
@@ -354,7 +356,7 @@ interface DecisionEventsResponse {
 export interface CreateDecisionCellRequest {
   title: string;
   statement: string;
-  decisionType: 'timing' | 'choice' | 'hedge' | 'allocation';
+  decisionType: "timing" | "choice" | "hedge" | "allocation";
   horizonAt?: string;
   actions?: string[];
 }
@@ -392,7 +394,7 @@ export interface UpdateDecisionAutomationRequest {
   maxAgentNotionalUsdc?: number;
   maxTriggersPerDay?: number;
   minTriggerIntervalSeconds?: number;
-  allowedProvider?: 'limitless' | 'polymarket';
+  allowedProvider?: "limitless" | "polymarket";
   requireConfidenceBps?: number;
   active?: boolean;
 }
@@ -418,8 +420,8 @@ export interface Web4Capabilities {
     deposit_enabled: boolean;
     withdraw_enabled: boolean;
     claim_enabled: boolean;
-    deposit_mode: 'chain' | 'disabled';
-    withdraw_mode: 'chain' | 'disabled';
+    deposit_mode: "chain" | "disabled";
+    withdraw_mode: "chain" | "disabled";
   };
   launch?: {
     beta: boolean;
@@ -443,9 +445,12 @@ export interface RelayRawTxResponse {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
@@ -461,24 +466,24 @@ function extractApiErrorMessage(raw: string, fallback: string): string {
       | string
       | null;
 
-    if (typeof parsed === 'string' && parsed.trim()) {
+    if (typeof parsed === "string" && parsed.trim()) {
       return parsed;
     }
 
-    if (parsed && typeof parsed === 'object') {
-      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.message === "string" && parsed.message.trim()) {
         return parsed.message;
       }
 
-      if (typeof parsed.error === 'string' && parsed.error.trim()) {
+      if (typeof parsed.error === "string" && parsed.error.trim()) {
         return parsed.error;
       }
 
       if (
         parsed.error &&
-        typeof parsed.error === 'object' &&
-        'message' in parsed.error &&
-        typeof parsed.error.message === 'string' &&
+        typeof parsed.error === "object" &&
+        "message" in parsed.error &&
+        typeof parsed.error.message === "string" &&
         parsed.error.message.trim()
       ) {
         return parsed.error.message;
@@ -492,8 +497,8 @@ function extractApiErrorMessage(raw: string, fallback: string): string {
 }
 
 function toNumber(value: unknown, fallback = 0): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) return parsed;
   }
@@ -501,8 +506,8 @@ function toNumber(value: unknown, fallback = 0): number {
 }
 
 function toOptionalNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) return parsed;
   }
@@ -510,7 +515,7 @@ function toOptionalNumber(value: unknown): number | undefined {
 }
 
 function toIsoString(value: unknown): string {
-  if (typeof value === 'string' && value.length > 0) return value;
+  if (typeof value === "string" && value.length > 0) return value;
   return new Date().toISOString();
 }
 
@@ -523,48 +528,56 @@ function fromUnixSeconds(value: number | undefined): string {
 
 function fromUnixSecondsOptional(value: number | undefined): string {
   if (!value || !Number.isFinite(value) || value <= 0) {
-    return '';
+    return "";
   }
   return new Date(value * 1000).toISOString();
 }
 
-function normalizeMarketStatus(value: unknown): Market['status'] {
+function normalizeMarketStatus(value: unknown): Market["status"] {
   if (
-    value === 'active' ||
-    value === 'paused' ||
-    value === 'closed' ||
-    value === 'resolved' ||
-    value === 'cancelled'
+    value === "active" ||
+    value === "paused" ||
+    value === "closed" ||
+    value === "resolved" ||
+    value === "cancelled"
   ) {
     return value;
   }
-  return 'active';
+  return "active";
 }
 
 function normalizeMarket(raw: Record<string, unknown>): Market {
   const yesPrice = toNumber(raw.yesPrice ?? raw.yes_price, 0.5);
   const noPrice = toNumber(raw.noPrice ?? raw.no_price, 1 - yesPrice);
-  const sourceRaw = String(raw.source ?? 'internal').toLowerCase();
+  const sourceRaw = String(raw.source ?? "internal").toLowerCase();
   const source =
-    sourceRaw === 'limitless' || sourceRaw === 'polymarket' || sourceRaw === 'all'
+    sourceRaw === "limitless" ||
+    sourceRaw === "polymarket" ||
+    sourceRaw === "all"
       ? sourceRaw
-      : 'internal';
+      : "internal";
 
   return {
-    id: String(raw.id ?? ''),
-    address: String(raw.address ?? raw.id ?? ''),
+    id: String(raw.id ?? ""),
+    address: String(raw.address ?? raw.id ?? ""),
     source,
-    provider: String(raw.provider ?? 'internal'),
+    provider: String(raw.provider ?? "internal"),
     isExternal: Boolean(raw.isExternal ?? raw.is_external ?? false),
-    externalUrl: String(raw.externalUrl ?? raw.external_url ?? '') || undefined,
+    externalUrl: String(raw.externalUrl ?? raw.external_url ?? "") || undefined,
     chainId: toNumber(raw.chainId ?? raw.chain_id, 8453),
-    requiresCredentials: Boolean(raw.requiresCredentials ?? raw.requires_credentials ?? false),
+    requiresCredentials: Boolean(
+      raw.requiresCredentials ?? raw.requires_credentials ?? false,
+    ),
     executionUsers: Boolean(raw.executionUsers ?? raw.execution_users ?? true),
-    executionAgents: Boolean(raw.executionAgents ?? raw.execution_agents ?? true),
-    isSyntheticTrades: Boolean(raw.isSyntheticTrades ?? raw.is_synthetic_trades ?? false),
-    question: String(raw.question ?? ''),
-    description: String(raw.description ?? ''),
-    category: String(raw.category ?? 'unknown'),
+    executionAgents: Boolean(
+      raw.executionAgents ?? raw.execution_agents ?? true,
+    ),
+    isSyntheticTrades: Boolean(
+      raw.isSyntheticTrades ?? raw.is_synthetic_trades ?? false,
+    ),
+    question: String(raw.question ?? ""),
+    description: String(raw.description ?? ""),
+    category: String(raw.category ?? "unknown"),
     status: normalizeMarketStatus(raw.status),
     yesPrice,
     noPrice,
@@ -574,65 +587,88 @@ function normalizeMarket(raw: Record<string, unknown>): Market {
     totalVolume: toNumber(raw.totalVolume ?? raw.total_volume),
     totalCollateral: toNumber(raw.totalCollateral ?? raw.total_collateral),
     feeBps: toNumber(raw.feeBps ?? raw.fee_bps),
-    oracle: String(raw.oracle ?? ''),
-    collateralMint: String(raw.collateralMint ?? raw.collateral_mint ?? ''),
-    yesMint: String(raw.yesMint ?? raw.yes_mint ?? ''),
-    noMint: String(raw.noMint ?? raw.no_mint ?? ''),
-    resolutionDeadline: toIsoString(raw.resolutionDeadline ?? raw.resolution_deadline),
+    oracle: String(raw.oracle ?? ""),
+    collateralMint: String(raw.collateralMint ?? raw.collateral_mint ?? ""),
+    yesMint: String(raw.yesMint ?? raw.yes_mint ?? ""),
+    noMint: String(raw.noMint ?? raw.no_mint ?? ""),
+    resolutionDeadline: toIsoString(
+      raw.resolutionDeadline ?? raw.resolution_deadline,
+    ),
     tradingEnd: toIsoString(raw.tradingEnd ?? raw.trading_end),
-    resolvedOutcome: (raw.resolvedOutcome ?? raw.resolved_outcome) as Market['resolvedOutcome'],
+    resolvedOutcome: (raw.resolvedOutcome ??
+      raw.resolved_outcome) as Market["resolvedOutcome"],
     createdAt: toIsoString(raw.createdAt ?? raw.created_at),
-    resolvedAt: raw.resolvedAt || raw.resolved_at ? toIsoString(raw.resolvedAt ?? raw.resolved_at) : undefined,
+    resolvedAt:
+      raw.resolvedAt || raw.resolved_at
+        ? toIsoString(raw.resolvedAt ?? raw.resolved_at)
+        : undefined,
   };
 }
 
 export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
   const curated = CURATED_MARKETS_BY_ID[Number(snapshot.id)];
-  const resolvedOutcome = snapshot.outcome === 'yes' || snapshot.outcome === 'no'
-    ? snapshot.outcome
-    : undefined;
+  const resolvedOutcome =
+    snapshot.outcome === "yes" || snapshot.outcome === "no"
+      ? snapshot.outcome
+      : undefined;
   const derivedYesPrice = snapshot.outcomes?.find(
-    (outcome) => outcome.label.trim().toLowerCase() === 'yes'
+    (outcome) => outcome.label.trim().toLowerCase() === "yes",
   )?.probability;
   const derivedNoPrice = snapshot.outcomes?.find(
-    (outcome) => outcome.label.trim().toLowerCase() === 'no'
+    (outcome) => outcome.label.trim().toLowerCase() === "no",
   )?.probability;
 
   let yesPrice = toNumber(
     snapshot.yes_price,
-    derivedYesPrice ?? (resolvedOutcome === 'yes' ? 1 : resolvedOutcome === 'no' ? 0 : 0.5)
+    derivedYesPrice ??
+      (resolvedOutcome === "yes" ? 1 : resolvedOutcome === "no" ? 0 : 0.5),
   );
   let noPrice = toNumber(
     snapshot.no_price,
-    derivedNoPrice ?? (resolvedOutcome === 'yes' ? 0 : resolvedOutcome === 'no' ? 1 : 1 - yesPrice)
+    derivedNoPrice ??
+      (resolvedOutcome === "yes"
+        ? 0
+        : resolvedOutcome === "no"
+          ? 1
+          : 1 - yesPrice),
   );
 
-  if (resolvedOutcome === 'yes') {
+  if (resolvedOutcome === "yes") {
     yesPrice = 1;
     noPrice = 0;
-  } else if (resolvedOutcome === 'no') {
+  } else if (resolvedOutcome === "no") {
     yesPrice = 0;
     noPrice = 1;
   }
 
   const tradingEnd = fromUnixSeconds(snapshot.close_time);
-  const resolutionDeadline = fromUnixSeconds(snapshot.resolve_time || snapshot.close_time);
-  const question = snapshot.question?.trim() || curated?.question || `Base market #${snapshot.id}`;
-  const description = snapshot.description?.trim()
-    || (curated ? `Outcomes: ${curated.outcomes}. Context: ${curated.rationale}` : `Question hash: ${snapshot.question_hash}`);
-  const category = snapshot.category?.trim() || curated?.category || 'base';
-  const sourceRaw = String(snapshot.source || 'internal').toLowerCase();
+  const resolutionDeadline = fromUnixSeconds(
+    snapshot.resolve_time || snapshot.close_time,
+  );
+  const question =
+    snapshot.question?.trim() ||
+    curated?.question ||
+    `Base market #${snapshot.id}`;
+  const description =
+    snapshot.description?.trim() ||
+    (curated
+      ? `Outcomes: ${curated.outcomes}. Context: ${curated.rationale}`
+      : `Question hash: ${snapshot.question_hash}`);
+  const category = snapshot.category?.trim() || curated?.category || "base";
+  const sourceRaw = String(snapshot.source || "internal").toLowerCase();
   const source =
-    sourceRaw === 'limitless' || sourceRaw === 'polymarket' || sourceRaw === 'all'
+    sourceRaw === "limitless" ||
+    sourceRaw === "polymarket" ||
+    sourceRaw === "all"
       ? sourceRaw
-      : 'internal';
+      : "internal";
   const totalVolume = toNumber(snapshot.volume, 0);
 
   return {
     id: snapshot.id,
     address: `base-market-${snapshot.id}`,
     source,
-    provider: snapshot.provider || (snapshot.is_external ? source : 'internal'),
+    provider: snapshot.provider || (snapshot.is_external ? source : "internal"),
     isExternal: Boolean(snapshot.is_external),
     externalUrl: snapshot.external_url || undefined,
     chainId: toNumber(snapshot.chain_id, 8453),
@@ -653,27 +689,36 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
     totalCollateral: 0,
     feeBps: 0,
     oracle: snapshot.resolver,
-    collateralMint: '',
-    yesMint: '',
-    noMint: '',
+    collateralMint: "",
+    yesMint: "",
+    noMint: "",
     resolutionDeadline,
     tradingEnd,
     resolvedOutcome,
     createdAt: tradingEnd,
-    resolvedAt: snapshot.resolved ? fromUnixSeconds(snapshot.resolve_time) : undefined,
-    outcomes: snapshot.outcomes && snapshot.outcomes.length > 0
-      ? snapshot.outcomes
+    resolvedAt: snapshot.resolved
+      ? fromUnixSeconds(snapshot.resolve_time)
       : undefined,
+    outcomes:
+      snapshot.outcomes && snapshot.outcomes.length > 0
+        ? snapshot.outcomes
+        : undefined,
     liquidityMode: snapshot.liquidity_mode,
     bootstrapStatus: snapshot.bootstrap_status,
     bootstrapActive: snapshot.bootstrap_active,
     bootstrapSeedUsdc: toOptionalNumber(snapshot.bootstrap_seed_usdc),
     bootstrapStrategy: snapshot.bootstrap_strategy,
     bootstrapLevels: toOptionalNumber(snapshot.bootstrap_levels),
-    bootstrapInitialYesBps: toOptionalNumber(snapshot.bootstrap_initial_yes_bps),
-    bootstrapBaseSpreadBps: toOptionalNumber(snapshot.bootstrap_base_spread_bps),
+    bootstrapInitialYesBps: toOptionalNumber(
+      snapshot.bootstrap_initial_yes_bps,
+    ),
+    bootstrapBaseSpreadBps: toOptionalNumber(
+      snapshot.bootstrap_base_spread_bps,
+    ),
     bootstrapStepBps: toOptionalNumber(snapshot.bootstrap_step_bps),
-    bootstrapCadenceSeconds: toOptionalNumber(snapshot.bootstrap_cadence_seconds),
+    bootstrapCadenceSeconds: toOptionalNumber(
+      snapshot.bootstrap_cadence_seconds,
+    ),
     bootstrapExpirySeconds: toOptionalNumber(snapshot.bootstrap_expiry_seconds),
     bootstrapGraduatedAt: snapshot.bootstrap_graduated_at
       ? toIsoString(snapshot.bootstrap_graduated_at)
@@ -682,7 +727,7 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
 }
 
 export function normalizeBaseMarketsResponse(
-  response: BaseMarketsResponse
+  response: BaseMarketsResponse,
 ): PaginatedResponse<Market> {
   const data = response.markets.map(mapBaseSnapshotToMarket);
   const total = toNumber(response.total, data.length);
@@ -699,113 +744,132 @@ export function normalizeBaseMarketsResponse(
 }
 
 function normalizeOutcome(value: unknown): Outcome {
-  return value === 'no' ? 'no' : 'yes';
+  return value === "no" ? "no" : "yes";
 }
 
-function normalizeTransactionType(value: unknown): Transaction['txType'] {
+function normalizeTransactionType(value: unknown): Transaction["txType"] {
   switch (value) {
-    case 'deposit':
-    case 'withdraw':
-    case 'buy':
-    case 'sell':
-    case 'claim':
-    case 'mint':
-    case 'redeem':
+    case "deposit":
+    case "withdraw":
+    case "buy":
+    case "sell":
+    case "claim":
+    case "mint":
+    case "redeem":
       return value;
     default:
-      return 'deposit';
+      return "deposit";
   }
 }
 
 function normalizeTransaction(raw: Record<string, unknown>): Transaction {
-  const txSignature = String(raw.txSignature ?? raw.tx_signature ?? '');
+  const txSignature = String(raw.txSignature ?? raw.tx_signature ?? "");
 
   return {
-    id: String(raw.id ?? ''),
-    owner: String(raw.owner ?? ''),
+    id: String(raw.id ?? ""),
+    owner: String(raw.owner ?? ""),
     txType: normalizeTransactionType(raw.txType ?? raw.tx_type),
-    marketId: raw.marketId ?? raw.market_id ? String(raw.marketId ?? raw.market_id) : undefined,
+    marketId:
+      (raw.marketId ?? raw.market_id)
+        ? String(raw.marketId ?? raw.market_id)
+        : undefined,
     amount: toNumber(raw.amount),
     fee: toNumber(raw.fee),
     txSignature: txSignature || undefined,
-    status: String(raw.status ?? 'pending'),
+    status: String(raw.status ?? "pending"),
     createdAt: toIsoString(raw.createdAt ?? raw.created_at),
   };
 }
 
 function normalizeTrade(raw: Record<string, unknown>): Trade {
   return {
-    id: String(raw.id ?? ''),
-    marketId: String(raw.marketId ?? raw.market_id ?? ''),
+    id: String(raw.id ?? ""),
+    marketId: String(raw.marketId ?? raw.market_id ?? ""),
     outcome: normalizeOutcome(raw.outcome),
     price: toNumber(raw.price),
     quantity: toNumber(raw.quantity),
-    buyer: String(raw.buyer ?? ''),
-    seller: String(raw.seller ?? ''),
-    txSignature: String(raw.txSignature ?? raw.tx_signature ?? raw.tx_hash ?? ''),
+    buyer: String(raw.buyer ?? ""),
+    seller: String(raw.seller ?? ""),
+    txSignature: String(
+      raw.txSignature ?? raw.tx_signature ?? raw.tx_hash ?? "",
+    ),
     createdAt: toIsoString(raw.createdAt ?? raw.created_at),
   };
 }
 
-function normalizeExternalOrderRecord(raw: Record<string, unknown>): ExternalOrderRecord {
+function normalizeExternalOrderRecord(
+  raw: Record<string, unknown>,
+): ExternalOrderRecord {
   const responsePayload = raw.responsePayload ?? raw.response_payload;
 
   return {
-    id: String(raw.id ?? ''),
-    provider: String(raw.provider ?? 'limitless') as ExternalOrderRecord['provider'],
-    market_id: String(raw.marketId ?? raw.market_id ?? ''),
-    provider_order_id: String(raw.providerOrderId ?? raw.provider_order_id ?? ''),
-    status: String(raw.status ?? 'pending'),
+    id: String(raw.id ?? ""),
+    provider: String(
+      raw.provider ?? "limitless",
+    ) as ExternalOrderRecord["provider"],
+    market_id: String(raw.marketId ?? raw.market_id ?? ""),
+    provider_order_id: String(
+      raw.providerOrderId ?? raw.provider_order_id ?? "",
+    ),
+    status: String(raw.status ?? "pending"),
     created_at: toIsoString(raw.createdAt ?? raw.created_at),
     updated_at: toIsoString(raw.updatedAt ?? raw.updated_at),
     response_payload:
-      responsePayload && typeof responsePayload === 'object' && !Array.isArray(responsePayload)
+      responsePayload &&
+      typeof responsePayload === "object" &&
+      !Array.isArray(responsePayload)
         ? (responsePayload as Record<string, unknown>)
         : {},
     error_message:
       raw.errorMessage === null || raw.error_message === null
         ? null
-        : raw.errorMessage ?? raw.error_message
+        : (raw.errorMessage ?? raw.error_message)
           ? String(raw.errorMessage ?? raw.error_message)
           : undefined,
   };
 }
 
-function normalizeExternalAgentRecord(raw: Record<string, unknown>): ExternalAgentRecord {
+function normalizeExternalAgentRecord(
+  raw: Record<string, unknown>,
+): ExternalAgentRecord {
   return {
-    id: String(raw.id ?? ''),
-    owner: String(raw.owner ?? ''),
-    name: String(raw.name ?? ''),
-    provider: String(raw.provider ?? 'limitless') as ExternalAgentRecord['provider'],
-    market_id: String(raw.marketId ?? raw.market_id ?? ''),
-    outcome: String(raw.outcome ?? 'yes') as ExternalAgentRecord['outcome'],
-    side: String(raw.side ?? 'buy') as ExternalAgentRecord['side'],
+    id: String(raw.id ?? ""),
+    owner: String(raw.owner ?? ""),
+    name: String(raw.name ?? ""),
+    provider: String(
+      raw.provider ?? "limitless",
+    ) as ExternalAgentRecord["provider"],
+    market_id: String(raw.marketId ?? raw.market_id ?? ""),
+    outcome: String(raw.outcome ?? "yes") as ExternalAgentRecord["outcome"],
+    side: String(raw.side ?? "buy") as ExternalAgentRecord["side"],
     price: toNumber(raw.price),
     quantity: toNumber(raw.quantity),
     cadence_seconds: toNumber(raw.cadenceSeconds ?? raw.cadence_seconds),
-    strategy: String(raw.strategy ?? ''),
-    strategy_label: String(raw.strategyLabel ?? raw.strategy_label ?? raw.strategy ?? ''),
-    execution_mode: String(raw.executionMode ?? raw.execution_mode ?? 'live') as ExternalAgentRecord['execution_mode'],
+    strategy: String(raw.strategy ?? ""),
+    strategy_label: String(
+      raw.strategyLabel ?? raw.strategy_label ?? raw.strategy ?? "",
+    ),
+    execution_mode: String(
+      raw.executionMode ?? raw.execution_mode ?? "live",
+    ) as ExternalAgentRecord["execution_mode"],
     credential_id:
       raw.credentialId === null || raw.credential_id === null
         ? null
-        : raw.credentialId ?? raw.credential_id
+        : (raw.credentialId ?? raw.credential_id)
           ? String(raw.credentialId ?? raw.credential_id)
           : undefined,
     source:
-      raw.source === null
-        ? null
-        : raw.source
-          ? String(raw.source)
-          : undefined,
+      raw.source === null ? null : raw.source ? String(raw.source) : undefined,
     active: Boolean(raw.active),
     last_executed_at:
       raw.lastExecutedAt === null || raw.last_executed_at === null
         ? null
-        : raw.lastExecutedAt ?? raw.last_executed_at
+        : (raw.lastExecutedAt ?? raw.last_executed_at)
           ? toIsoString(raw.lastExecutedAt ?? raw.last_executed_at)
           : undefined,
-    next_execution_at: toIsoString(raw.nextExecutionAt ?? raw.next_execution_at),
+    next_execution_at: toIsoString(
+      raw.nextExecutionAt ?? raw.next_execution_at,
+    ),
     created_at: toIsoString(raw.createdAt ?? raw.created_at),
     updated_at: toIsoString(raw.updatedAt ?? raw.updated_at),
   };
@@ -815,56 +879,78 @@ function normalizeExternalAgentPerformanceResponse(
   raw: Record<string, unknown>,
 ): ExternalAgentPerformanceResponse {
   const totalsRaw =
-    raw.totals && typeof raw.totals === 'object' && !Array.isArray(raw.totals)
+    raw.totals && typeof raw.totals === "object" && !Array.isArray(raw.totals)
       ? (raw.totals as Record<string, unknown>)
       : {};
   const strategiesRaw = Array.isArray(raw.strategies) ? raw.strategies : [];
   const timelineRaw = Array.isArray(raw.timeline) ? raw.timeline : [];
 
   return {
-    scope: String(raw.scope ?? ''),
+    scope: String(raw.scope ?? ""),
     owner:
-      raw.owner === null
-        ? null
-        : raw.owner
-          ? String(raw.owner)
-          : undefined,
+      raw.owner === null ? null : raw.owner ? String(raw.owner) : undefined,
     totals: {
       agents: toNumber(totalsRaw.agents),
       activeAgents: toNumber(totalsRaw.activeAgents ?? totalsRaw.active_agents),
-      openPositions: toNumber(totalsRaw.openPositions ?? totalsRaw.open_positions),
-      closedPositions: toNumber(totalsRaw.closedPositions ?? totalsRaw.closed_positions),
+      openPositions: toNumber(
+        totalsRaw.openPositions ?? totalsRaw.open_positions,
+      ),
+      closedPositions: toNumber(
+        totalsRaw.closedPositions ?? totalsRaw.closed_positions,
+      ),
       fills: toNumber(totalsRaw.fills),
       volumeUsdc: toNumber(totalsRaw.volumeUsdc ?? totalsRaw.volume_usdc),
       feesUsdc: toNumber(totalsRaw.feesUsdc ?? totalsRaw.fees_usdc),
-      realizedPnlUsdc: toNumber(totalsRaw.realizedPnlUsdc ?? totalsRaw.realized_pnl_usdc),
-      unrealizedPnlUsdc: toNumber(totalsRaw.unrealizedPnlUsdc ?? totalsRaw.unrealized_pnl_usdc),
+      realizedPnlUsdc: toNumber(
+        totalsRaw.realizedPnlUsdc ?? totalsRaw.realized_pnl_usdc,
+      ),
+      unrealizedPnlUsdc: toNumber(
+        totalsRaw.unrealizedPnlUsdc ?? totalsRaw.unrealized_pnl_usdc,
+      ),
       netPnlUsdc: toNumber(totalsRaw.netPnlUsdc ?? totalsRaw.net_pnl_usdc),
     },
     strategies: strategiesRaw.map((entry) => {
-      const strategy = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+      const strategy =
+        entry && typeof entry === "object"
+          ? (entry as Record<string, unknown>)
+          : {};
       return {
-        strategy: String(strategy.strategy ?? ''),
+        strategy: String(strategy.strategy ?? ""),
         agents: toNumber(strategy.agents),
         activeAgents: toNumber(strategy.activeAgents ?? strategy.active_agents),
-        openPositions: toNumber(strategy.openPositions ?? strategy.open_positions),
-        closedPositions: toNumber(strategy.closedPositions ?? strategy.closed_positions),
+        openPositions: toNumber(
+          strategy.openPositions ?? strategy.open_positions,
+        ),
+        closedPositions: toNumber(
+          strategy.closedPositions ?? strategy.closed_positions,
+        ),
         fills: toNumber(strategy.fills),
         volumeUsdc: toNumber(strategy.volumeUsdc ?? strategy.volume_usdc),
         feesUsdc: toNumber(strategy.feesUsdc ?? strategy.fees_usdc),
-        realizedPnlUsdc: toNumber(strategy.realizedPnlUsdc ?? strategy.realized_pnl_usdc),
-        unrealizedPnlUsdc: toNumber(strategy.unrealizedPnlUsdc ?? strategy.unrealized_pnl_usdc),
+        realizedPnlUsdc: toNumber(
+          strategy.realizedPnlUsdc ?? strategy.realized_pnl_usdc,
+        ),
+        unrealizedPnlUsdc: toNumber(
+          strategy.unrealizedPnlUsdc ?? strategy.unrealized_pnl_usdc,
+        ),
         netPnlUsdc: toNumber(strategy.netPnlUsdc ?? strategy.net_pnl_usdc),
         winRate: toNumber(strategy.winRate ?? strategy.win_rate),
       };
     }),
     timeline: timelineRaw.map((entry) => {
-      const point = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+      const point =
+        entry && typeof entry === "object"
+          ? (entry as Record<string, unknown>)
+          : {};
       return {
         bucket: toIsoString(point.bucket),
         volumeUsdc: toNumber(point.volumeUsdc ?? point.volume_usdc),
-        realizedPnlUsdc: toNumber(point.realizedPnlUsdc ?? point.realized_pnl_usdc),
-        unrealizedPnlUsdc: toNumber(point.unrealizedPnlUsdc ?? point.unrealized_pnl_usdc),
+        realizedPnlUsdc: toNumber(
+          point.realizedPnlUsdc ?? point.realized_pnl_usdc,
+        ),
+        unrealizedPnlUsdc: toNumber(
+          point.unrealizedPnlUsdc ?? point.unrealized_pnl_usdc,
+        ),
         netPnlUsdc: toNumber(point.netPnlUsdc ?? point.net_pnl_usdc),
       };
     }),
@@ -879,8 +965,8 @@ function mapBaseTradeToTrade(snapshot: BaseTradeSnapshot): Trade {
     outcome: snapshot.outcome,
     price: snapshot.price,
     quantity: snapshot.quantity,
-    buyer: '',
-    seller: '',
+    buyer: "",
+    seller: "",
     txSignature: snapshot.tx_hash,
     createdAt: snapshot.created_at,
   };
@@ -893,28 +979,40 @@ function mapBaseAgentToAgent(snapshot: BaseAgentSnapshot): Agent {
     marketId: snapshot.market_id,
     isYes: snapshot.is_yes,
     priceBps: toNumber(snapshot.price_bps),
-    size: String(snapshot.size ?? '0'),
+    size: String(snapshot.size ?? "0"),
     cadence: toNumber(snapshot.cadence),
     expiryWindow: toNumber(snapshot.expiry_window),
     lastExecutedAt: fromUnixSecondsOptional(snapshot.last_executed_at),
     nextExecutionAt: fromUnixSecondsOptional(snapshot.next_execution_at),
     canExecute: Boolean(snapshot.can_execute),
     active: Boolean(snapshot.active),
-    status: snapshot.status ?? 'inactive',
-    strategy: String(snapshot.strategy ?? ''),
+    status: snapshot.status ?? "inactive",
+    strategy: String(snapshot.strategy ?? ""),
     identityId: snapshot.identity_id ? String(snapshot.identity_id) : undefined,
-    identityTier: typeof snapshot.identity_tier === 'number' ? snapshot.identity_tier : undefined,
-    identityActive: typeof snapshot.identity_active === 'boolean' ? snapshot.identity_active : undefined,
-    identityUpdatedAt: typeof snapshot.identity_updated_at === 'number'
-      ? fromUnixSecondsOptional(snapshot.identity_updated_at)
-      : undefined,
+    identityTier:
+      typeof snapshot.identity_tier === "number"
+        ? snapshot.identity_tier
+        : undefined,
+    identityActive:
+      typeof snapshot.identity_active === "boolean"
+        ? snapshot.identity_active
+        : undefined,
+    identityUpdatedAt:
+      typeof snapshot.identity_updated_at === "number"
+        ? fromUnixSecondsOptional(snapshot.identity_updated_at)
+        : undefined,
     reputationScoreBps:
-      typeof snapshot.reputation_score_bps === 'number' ? snapshot.reputation_score_bps : undefined,
+      typeof snapshot.reputation_score_bps === "number"
+        ? snapshot.reputation_score_bps
+        : undefined,
     reputationConfidenceBps:
-      typeof snapshot.reputation_confidence_bps === 'number'
+      typeof snapshot.reputation_confidence_bps === "number"
         ? snapshot.reputation_confidence_bps
         : undefined,
-    reputationEvents: typeof snapshot.reputation_events === 'number' ? snapshot.reputation_events : undefined,
+    reputationEvents:
+      typeof snapshot.reputation_events === "number"
+        ? snapshot.reputation_events
+        : undefined,
     reputationNotionalMicrousdc: snapshot.reputation_notional_microusdc
       ? String(snapshot.reputation_notional_microusdc)
       : undefined,
@@ -958,7 +1056,7 @@ class ApiClient {
   // Check if we have a refresh token (httpOnly cookie)
   async checkSession(): Promise<boolean> {
     try {
-      const res = await fetch('/api/auth', { method: 'GET' });
+      const res = await fetch("/api/auth", { method: "GET" });
       const data = await res.json();
       return data.hasRefreshToken;
     } catch {
@@ -970,9 +1068,9 @@ class ApiClient {
     path: string,
     options: RequestInit = {},
     skipRefresh = false,
-    skipWriteGuard = false
+    skipWriteGuard = false,
   ): Promise<T> {
-    const method = String(options.method || 'GET').toUpperCase();
+    const method = String(options.method || "GET").toUpperCase();
 
     if (!skipWriteGuard) {
       await this.assertRequestWritable(method);
@@ -987,15 +1085,19 @@ class ApiClient {
       ...options.headers,
     };
 
-    if (options.body !== undefined && !('Content-Type' in (headers as Record<string, string>))) {
-      (headers as Record<string, string>)['Content-Type'] = 'application/json';
+    if (
+      options.body !== undefined &&
+      !("Content-Type" in (headers as Record<string, string>))
+    ) {
+      (headers as Record<string, string>)["Content-Type"] = "application/json";
     }
 
     if (this.accessToken) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.accessToken}`;
+      (headers as Record<string, string>)["Authorization"] =
+        `Bearer ${this.accessToken}`;
     }
     const canUseFallback =
-      method === 'GET' &&
+      method === "GET" &&
       !this.accessToken &&
       !!FALLBACK_API_BASE &&
       FALLBACK_API_BASE !== PRIMARY_API_BASE;
@@ -1041,13 +1143,16 @@ class ApiClient {
         return this.request(path, options, true, skipWriteGuard);
       } catch {
         this.clearAccessToken();
-        throw new ApiError(401, 'Session expired');
+        throw new ApiError(401, "Session expired");
       }
     }
 
     if (!res.ok) {
       const text = await res.text();
-      throw new ApiError(res.status, extractApiErrorMessage(text, res.statusText));
+      throw new ApiError(
+        res.status,
+        extractApiErrorMessage(text, res.statusText),
+      );
     }
 
     if (res.status === 204) {
@@ -1060,18 +1165,22 @@ class ApiClient {
   private async requestFromBase<T>(
     base: string,
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
   ): Promise<T> {
     const headers: HeadersInit = {
       ...options.headers,
     };
 
-    if (options.body !== undefined && !('Content-Type' in (headers as Record<string, string>))) {
-      (headers as Record<string, string>)['Content-Type'] = 'application/json';
+    if (
+      options.body !== undefined &&
+      !("Content-Type" in (headers as Record<string, string>))
+    ) {
+      (headers as Record<string, string>)["Content-Type"] = "application/json";
     }
 
     if (this.accessToken) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.accessToken}`;
+      (headers as Record<string, string>)["Authorization"] =
+        `Bearer ${this.accessToken}`;
     }
 
     const response = await fetch(`${base}${path}`, {
@@ -1081,7 +1190,10 @@ class ApiClient {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new ApiError(response.status, extractApiErrorMessage(text, response.statusText));
+      throw new ApiError(
+        response.status,
+        extractApiErrorMessage(text, response.statusText),
+      );
     }
 
     if (response.status === 204) {
@@ -1112,20 +1224,23 @@ class ApiClient {
   }
 
   private async assertRequestWritable(method: string) {
-    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
       return;
     }
 
     if (readOnlyPreviewEnabled || isReadOnlyMode(this.capabilities)) {
-      throw new ApiError(403, 'This action is unavailable in this environment');
+      throw new ApiError(403, "This action is unavailable in this environment");
     }
 
     const capabilities = await this.loadCapabilities();
     if (!capabilities) {
-      throw new ApiError(503, 'Runtime status is unavailable, write actions are disabled');
+      throw new ApiError(
+        503,
+        "Runtime status is unavailable, write actions are disabled",
+      );
     }
     if (isReadOnlyMode(capabilities)) {
-      throw new ApiError(403, 'This action is unavailable in this environment');
+      throw new ApiError(403, "This action is unavailable in this environment");
     }
   }
 
@@ -1140,7 +1255,8 @@ class ApiClient {
 
     this.capabilitiesPromise = (async () => {
       try {
-        const capabilities = await this.requestBaseRead<Web4Capabilities>('/web4/capabilities');
+        const capabilities =
+          await this.requestBaseRead<Web4Capabilities>("/web4/capabilities");
         this.setCapabilities(capabilities);
         return capabilities;
       } catch {
@@ -1162,10 +1278,10 @@ class ApiClient {
 
     this.refreshPromise = (async () => {
       try {
-        const res = await fetch('/api/auth', { method: 'PUT' });
+        const res = await fetch("/api/auth", { method: "PUT" });
         if (!res.ok) {
           this.clearAccessToken();
-          throw new Error('Refresh failed');
+          throw new Error("Refresh failed");
         }
         const data = await res.json();
         this.setAccessToken(data.accessToken, data.expiresAt);
@@ -1179,16 +1295,19 @@ class ApiClient {
 
   private buildQuery(params: Record<string, unknown> | object): string {
     const filtered = Object.entries(params).filter(
-      ([, v]) => v !== undefined && v !== null
+      ([, v]) => v !== undefined && v !== null,
     );
-    if (filtered.length === 0) return '';
-    return '?' + new URLSearchParams(
-      filtered.map(([k, v]) => [k, String(v)])
-    ).toString();
+    if (filtered.length === 0) return "";
+    return (
+      "?" +
+      new URLSearchParams(filtered.map(([k, v]) => [k, String(v)])).toString()
+    );
   }
 
   // Markets
-  async getMarkets(filters?: MarketFilters): Promise<PaginatedResponse<Market>> {
+  async getMarkets(
+    filters?: MarketFilters,
+  ): Promise<PaginatedResponse<Market>> {
     const query = this.buildQuery(filters || {});
     const response = await this.request<{
       markets?: Record<string, unknown>[];
@@ -1215,14 +1334,16 @@ class ApiClient {
   }
 
   async getMarket(id: string): Promise<Market> {
-    const response = await this.request<Record<string, unknown>>(`/markets/${id}`);
+    const response = await this.request<Record<string, unknown>>(
+      `/markets/${id}`,
+    );
     return normalizeMarket(response);
   }
 
   async getOrderBook(
     marketId: string,
     outcome: Outcome,
-    depth = 20
+    depth = 20,
   ): Promise<OrderBook> {
     const response = await this.request<{
       marketId?: string;
@@ -1233,22 +1354,22 @@ class ApiClient {
       timestamp?: string;
       lastUpdated?: string;
       last_updated?: string;
-    }>(
-      `/markets/${marketId}/orderbook?outcome=${outcome}&depth=${depth}`
-    );
+    }>(`/markets/${marketId}/orderbook?outcome=${outcome}&depth=${depth}`);
 
     return {
       marketId: String(response.marketId ?? response.market_id ?? marketId),
-      outcome: response.outcome === 'no' ? 'no' : 'yes',
+      outcome: response.outcome === "no" ? "no" : "yes",
       bids: response.bids ?? [],
       asks: response.asks ?? [],
-      lastUpdated: toIsoString(response.lastUpdated ?? response.last_updated ?? response.timestamp),
+      lastUpdated: toIsoString(
+        response.lastUpdated ?? response.last_updated ?? response.timestamp,
+      ),
     };
   }
 
   async getTrades(
     marketId: string,
-    params?: { outcome?: Outcome; limit?: number; before?: string }
+    params?: { outcome?: Outcome; limit?: number; before?: string },
   ): Promise<PaginatedResponse<Trade>> {
     return this.getBaseTrades(marketId, params);
   }
@@ -1264,37 +1385,40 @@ class ApiClient {
   }
 
   async placeOrder(data: PlaceOrderRequest): Promise<PlaceOrderResponse> {
-    return this.request('/orders', {
-      method: 'POST',
+    return this.request("/orders", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async cancelOrder(orderId: string): Promise<CancelOrderResponse> {
     return this.request(`/orders/${orderId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
   // Positions
   async getPositions(): Promise<PaginatedResponse<Position>> {
-    return this.request<PaginatedResponse<Position>>('/positions');
+    return this.request<PaginatedResponse<Position>>("/positions");
   }
 
   async getPosition(marketId: string): Promise<Position> {
     return this.request(`/positions/${marketId}`);
   }
 
-  async claimWinnings(marketId: string, txSignature: string): Promise<ClaimWinningsResponse> {
+  async claimWinnings(
+    marketId: string,
+    txSignature: string,
+  ): Promise<ClaimWinningsResponse> {
     return this.request(`/positions/${marketId}/claim`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({ txSignature }),
     });
   }
 
   // User
   async getProfile(): Promise<User> {
-    return this.request('/user/profile');
+    return this.request("/user/profile");
   }
 
   async getTransactions(params?: {
@@ -1313,7 +1437,7 @@ class ApiClient {
     }>(`/user/transactions${query}`);
 
     const data = (response.transactions ?? response.data ?? []).map((entry) =>
-      normalizeTransaction(entry)
+      normalizeTransaction(entry),
     );
     const total = toNumber(response.total, data.length);
     const limit = toNumber(response.limit, params?.limit ?? data.length);
@@ -1330,11 +1454,12 @@ class ApiClient {
 
   // Wallet
   async getWalletBalance(): Promise<WalletBalance> {
-    return this.request('/wallet/balance');
+    return this.request("/wallet/balance");
   }
 
   async getWeb4Capabilities(): Promise<Web4Capabilities> {
-    const capabilities = await this.requestBaseRead<Web4Capabilities>('/web4/capabilities');
+    const capabilities =
+      await this.requestBaseRead<Web4Capabilities>("/web4/capabilities");
     this.setCapabilities(capabilities);
     return capabilities;
   }
@@ -1342,24 +1467,26 @@ class ApiClient {
   async getBaseMarkets(params?: {
     limit?: number;
     offset?: number;
-    source?: 'all' | 'internal' | 'limitless' | 'polymarket';
-    tradable?: 'all' | 'user' | 'agent';
+    source?: "all" | "internal" | "limitless" | "polymarket";
+    tradable?: "all" | "user" | "agent";
     includeLowLiquidity?: boolean;
   }): Promise<PaginatedResponse<Market>> {
     const query = this.buildQuery(params || {});
-    const response = await this.requestBaseRead<BaseMarketsResponse>(`/evm/markets${query}`);
+    const response = await this.requestBaseRead<BaseMarketsResponse>(
+      `/evm/markets${query}`,
+    );
     return normalizeBaseMarketsResponse(response);
   }
 
   async getBaseOrderBook(
     marketId: string,
     outcome: Outcome,
-    depth = 20
+    depth = 20,
   ): Promise<OrderBook> {
     const query = this.buildQuery({ outcome, depth });
     const encodedMarketId = encodeURIComponent(marketId);
     const response = await this.requestBaseRead<BaseOrderBookResponse>(
-      `/evm/markets/${encodedMarketId}/orderbook${query}`
+      `/evm/markets/${encodedMarketId}/orderbook${query}`,
     );
 
     return {
@@ -1373,7 +1500,12 @@ class ApiClient {
 
   async getBaseTrades(
     marketId: string,
-    params?: { outcome?: Outcome; limit?: number; before?: string; offset?: number }
+    params?: {
+      outcome?: Outcome;
+      limit?: number;
+      before?: string;
+      offset?: number;
+    },
   ): Promise<PaginatedResponse<Trade>> {
     const query = this.buildQuery({
       outcome: params?.outcome,
@@ -1382,7 +1514,7 @@ class ApiClient {
     });
     const encodedMarketId = encodeURIComponent(marketId);
     const response = await this.requestBaseRead<BaseTradesResponse>(
-      `/evm/markets/${encodedMarketId}/trades${query}`
+      `/evm/markets/${encodedMarketId}/trades${query}`,
     );
     const data = (response.trades ?? []).map(mapBaseTradeToTrade);
     const total = toNumber(response.total, data.length);
@@ -1400,7 +1532,7 @@ class ApiClient {
 
   async getBaseMarket(id: string): Promise<Market> {
     const response = await this.requestBaseRead<BaseMarketSnapshot>(
-      `/evm/markets/${encodeURIComponent(id)}`
+      `/evm/markets/${encodeURIComponent(id)}`,
     );
     return mapBaseSnapshotToMarket(response);
   }
@@ -1409,24 +1541,39 @@ class ApiClient {
     marketId: string,
     data: {
       txHash: string;
-      liquidityMode: 'clob_only' | 'bootstrap_hybrid';
+      liquidityMode: "clob_only" | "bootstrap_hybrid";
       seedUsdc: number;
       initialYesBps: number;
+      manager?: string;
       strategy: string;
       levels: number;
       baseSpreadBps: number;
       stepBps: number;
       cadenceSeconds: number;
       expirySeconds: number;
-    }
+    },
   ) {
-    return this.request(`/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
+    return this.request(
+      `/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      },
+    );
   }
 
-  async getBaseAgents(filters?: AgentFilters): Promise<PaginatedResponse<Agent>> {
+  async getBootstrapOperatorStatus(
+    owner: string,
+  ): Promise<BootstrapOperatorStatus> {
+    const query = this.buildQuery({ owner });
+    return this.requestBaseRead<BootstrapOperatorStatus>(
+      `/evm/bootstrap/operator${query}`,
+    );
+  }
+
+  async getBaseAgents(
+    filters?: AgentFilters,
+  ): Promise<PaginatedResponse<Agent>> {
     const query = this.buildQuery({
       limit: filters?.limit,
       offset: filters?.offset,
@@ -1434,7 +1581,9 @@ class ApiClient {
       market_id: filters?.marketId,
       active: filters?.active,
     });
-    const response = await this.requestBaseRead<BaseAgentsResponse>(`/evm/agents${query}`);
+    const response = await this.requestBaseRead<BaseAgentsResponse>(
+      `/evm/agents${query}`,
+    );
     const data = (response.agents ?? []).map(mapBaseAgentToAgent);
     const total = toNumber(response.total, data.length);
     const limit = toNumber(response.limit, filters?.limit ?? data.length);
@@ -1452,48 +1601,58 @@ class ApiClient {
   async getBaseAgent(id: string): Promise<Agent> {
     const parsedId = Number(id);
     if (!Number.isInteger(parsedId) || parsedId < 1) {
-      throw new ApiError(404, 'Agent not found');
+      throw new ApiError(404, "Agent not found");
     }
-    const response = await this.requestBaseRead<BaseAgentSnapshot>(`/evm/agents/${parsedId}`);
+    const response = await this.requestBaseRead<BaseAgentSnapshot>(
+      `/evm/agents/${parsedId}`,
+    );
     return mapBaseAgentToAgent(response);
   }
 
   async getBaseTokenState(): Promise<BaseTokenState> {
-    return this.request('/evm/token/state');
+    return this.request("/evm/token/state");
   }
 
-  async getBaseValidationStatus(requestHash: string): Promise<BaseValidationStatus> {
+  async getBaseValidationStatus(
+    requestHash: string,
+  ): Promise<BaseValidationStatus> {
     return this.request(`/evm/validation/${encodeURIComponent(requestHash)}`);
   }
 
-  async getExternalCredentials(provider?: 'limitless' | 'polymarket'): Promise<ExternalCredential[]> {
+  async getExternalCredentials(
+    provider?: "limitless" | "polymarket",
+  ): Promise<ExternalCredential[]> {
     const query = this.buildQuery({ provider });
-    const response = await this.request<ExternalCredentialsListResponse>(`/external/credentials${query}`);
+    const response = await this.request<ExternalCredentialsListResponse>(
+      `/external/credentials${query}`,
+    );
     return response.credentials ?? [];
   }
 
   async getExternalCredentialStatus(
-    provider: 'limitless' | 'polymarket',
-    credentialId?: string
+    provider: "limitless" | "polymarket",
+    credentialId?: string,
   ): Promise<ExternalCredentialStatus> {
     const query = this.buildQuery({ provider, credentialId });
     return this.request(`/external/credentials/status${query}`);
   }
 
   async upsertExternalCredential(data: {
-    provider: 'limitless' | 'polymarket';
+    provider: "limitless" | "polymarket";
     label?: string;
     credentials: Record<string, unknown>;
   }): Promise<ExternalCredential> {
-    return this.request('/external/credentials', {
-      method: 'POST',
+    return this.request("/external/credentials", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async deleteExternalCredential(credentialId: string): Promise<{ ok: boolean }> {
+  async deleteExternalCredential(
+    credentialId: string,
+  ): Promise<{ ok: boolean }> {
     return this.request(`/external/credentials/${credentialId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     });
   }
 
@@ -1501,8 +1660,8 @@ class ApiClient {
     credentialId: string;
     baseWallet: string;
   }): Promise<ExternalCredentialStatus> {
-    return this.request('/external/credentials/limitless/wallet-bind', {
-      method: 'POST',
+    return this.request("/external/credentials/limitless/wallet-bind", {
+      method: "POST",
       body: JSON.stringify({
         credentialId: data.credentialId,
         baseWallet: data.baseWallet,
@@ -1511,16 +1670,16 @@ class ApiClient {
   }
 
   async createExternalOrderIntent(data: {
-    provider: 'limitless' | 'polymarket';
+    provider: "limitless" | "polymarket";
     marketId: string;
-    outcome: 'yes' | 'no';
-    side: 'buy' | 'sell';
+    outcome: "yes" | "no";
+    side: "buy" | "sell";
     price: number;
     quantity: number;
     credentialId?: string;
   }): Promise<ExternalOrderIntent> {
-    return this.request('/external/orders/intent', {
-      method: 'POST',
+    return this.request("/external/orders/intent", {
+      method: "POST",
       body: JSON.stringify({
         provider: data.provider,
         marketId: data.marketId,
@@ -1540,16 +1699,19 @@ class ApiClient {
     providerResponse?: Record<string, unknown>;
     providerStatus?: number;
   }): Promise<ExternalOrderRecord> {
-    const response = await this.request<Record<string, unknown>>('/external/orders/submit', {
-      method: 'POST',
-      body: JSON.stringify({
-        intentId: data.intentId,
-        signedOrder: data.signedOrder,
-        credentialId: data.credentialId,
-        providerResponse: data.providerResponse,
-        providerStatus: data.providerStatus,
-      }),
-    });
+    const response = await this.request<Record<string, unknown>>(
+      "/external/orders/submit",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          intentId: data.intentId,
+          signedOrder: data.signedOrder,
+          credentialId: data.credentialId,
+          providerResponse: data.providerResponse,
+          providerStatus: data.providerStatus,
+        }),
+      },
+    );
     return normalizeExternalOrderRecord(response);
   }
 
@@ -1558,8 +1720,8 @@ class ApiClient {
     signedOrder: Record<string, unknown>;
     credentialId?: string;
   }): Promise<PreparedExternalProviderRequest> {
-    return this.request('/external/orders/prepare-submit', {
-      method: 'POST',
+    return this.request("/external/orders/prepare-submit", {
+      method: "POST",
       body: JSON.stringify({
         intentId: data.intentId,
         signedOrder: data.signedOrder,
@@ -1569,15 +1731,15 @@ class ApiClient {
   }
 
   async cancelExternalOrder(data: {
-    provider: 'limitless' | 'polymarket';
+    provider: "limitless" | "polymarket";
     providerOrderId: string;
     credentialId?: string;
     payload?: Record<string, unknown>;
     providerResponse?: Record<string, unknown>;
     providerStatus?: number;
   }): Promise<{ ok: boolean }> {
-    return this.request('/external/orders/cancel', {
-      method: 'POST',
+    return this.request("/external/orders/cancel", {
+      method: "POST",
       body: JSON.stringify({
         provider: data.provider,
         providerOrderId: data.providerOrderId,
@@ -1590,13 +1752,13 @@ class ApiClient {
   }
 
   async prepareExternalOrderCancel(data: {
-    provider: 'limitless' | 'polymarket';
+    provider: "limitless" | "polymarket";
     providerOrderId: string;
     credentialId?: string;
     payload?: Record<string, unknown>;
   }): Promise<PreparedExternalProviderRequest> {
-    return this.request('/external/orders/prepare-cancel', {
-      method: 'POST',
+    return this.request("/external/orders/prepare-cancel", {
+      method: "POST",
       body: JSON.stringify({
         provider: data.provider,
         providerOrderId: data.providerOrderId,
@@ -1607,15 +1769,20 @@ class ApiClient {
   }
 
   async listExternalOrders(params?: {
-    provider?: 'limitless' | 'polymarket';
+    provider?: "limitless" | "polymarket";
     limit?: number;
     offset?: number;
   }): Promise<ExternalOrdersListResponse> {
     const query = this.buildQuery(params || {});
-    const response = await this.request<Record<string, unknown>>(`/external/orders${query}`);
+    const response = await this.request<Record<string, unknown>>(
+      `/external/orders${query}`,
+    );
     const orders = Array.isArray(response.orders)
       ? response.orders
-          .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object')
+          .filter(
+            (entry): entry is Record<string, unknown> =>
+              !!entry && typeof entry === "object",
+          )
           .map((entry) => normalizeExternalOrderRecord(entry))
       : [];
 
@@ -1628,17 +1795,21 @@ class ApiClient {
   }
 
   async listExternalAgents(params?: {
-    provider?: 'limitless' | 'polymarket';
+    provider?: "limitless" | "polymarket";
     active?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<ExternalAgentsListResponse> {
     const query = this.buildQuery(params || {});
-    const response = await this.request<ExternalAgentsListResponse>(`/external/agents${query}`);
+    const response = await this.request<ExternalAgentsListResponse>(
+      `/external/agents${query}`,
+    );
     const agents = Array.isArray(response.agents) ? response.agents : [];
     return {
       agents: agents.map((entry) =>
-        normalizeExternalAgentRecord(entry as unknown as Record<string, unknown>)
+        normalizeExternalAgentRecord(
+          entry as unknown as Record<string, unknown>,
+        ),
       ),
       total: toNumber(response.total),
       limit: toNumber(response.limit),
@@ -1647,17 +1818,21 @@ class ApiClient {
   }
 
   async listPublicExternalAgents(params?: {
-    provider?: 'limitless' | 'polymarket';
+    provider?: "limitless" | "polymarket";
     active?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<ExternalAgentsListResponse> {
     const query = this.buildQuery(params || {});
-    const response = await this.request<ExternalAgentsListResponse>(`/external/agents/public${query}`);
+    const response = await this.request<ExternalAgentsListResponse>(
+      `/external/agents/public${query}`,
+    );
     const agents = Array.isArray(response.agents) ? response.agents : [];
     return {
       agents: agents.map((entry) =>
-        normalizeExternalAgentRecord(entry as unknown as Record<string, unknown>)
+        normalizeExternalAgentRecord(
+          entry as unknown as Record<string, unknown>,
+        ),
       ),
       total: toNumber(response.total),
       limit: toNumber(response.limit),
@@ -1666,41 +1841,46 @@ class ApiClient {
   }
 
   async getPublicExternalAgentsPerformance(): Promise<ExternalAgentPerformanceResponse> {
-    const response = await this.request<Record<string, unknown>>('/external/agents/public/performance');
+    const response = await this.request<Record<string, unknown>>(
+      "/external/agents/public/performance",
+    );
     return normalizeExternalAgentPerformanceResponse(response);
   }
 
   async createExternalAgent(data: {
     name: string;
-    provider: 'limitless' | 'polymarket';
+    provider: "limitless" | "polymarket";
     marketId: string;
-    outcome: 'yes' | 'no';
-    side: 'buy' | 'sell';
+    outcome: "yes" | "no";
+    side: "buy" | "sell";
     price: number;
     quantity: number;
     cadenceSeconds: number;
     strategy: string;
     credentialId?: string;
-    executionMode?: 'live' | 'paper';
+    executionMode?: "live" | "paper";
     active?: boolean;
   }): Promise<ExternalAgentRecord> {
-    const response = await this.request<Record<string, unknown>>('/external/agents', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: data.name,
-        provider: data.provider,
-        marketId: data.marketId,
-        outcome: data.outcome,
-        side: data.side,
-        price: data.price,
-        quantity: data.quantity,
-        cadenceSeconds: data.cadenceSeconds,
-        strategy: data.strategy,
-        credentialId: data.credentialId,
-        executionMode: data.executionMode,
-        active: data.active,
-      }),
-    });
+    const response = await this.request<Record<string, unknown>>(
+      "/external/agents",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: data.name,
+          provider: data.provider,
+          marketId: data.marketId,
+          outcome: data.outcome,
+          side: data.side,
+          price: data.price,
+          quantity: data.quantity,
+          cadenceSeconds: data.cadenceSeconds,
+          strategy: data.strategy,
+          credentialId: data.credentialId,
+          executionMode: data.executionMode,
+          active: data.active,
+        }),
+      },
+    );
     return normalizeExternalAgentRecord(response);
   }
 
@@ -1708,21 +1888,24 @@ class ApiClient {
     agentId: string,
     data: Partial<{
       name: string;
-      outcome: 'yes' | 'no';
-      side: 'buy' | 'sell';
+      outcome: "yes" | "no";
+      side: "buy" | "sell";
       price: number;
       quantity: number;
       cadenceSeconds: number;
       strategy: string;
       credentialId: string;
-      executionMode: 'live' | 'paper';
+      executionMode: "live" | "paper";
       active: boolean;
     }>,
   ): Promise<ExternalAgentRecord> {
-    const response = await this.request<Record<string, unknown>>(`/external/agents/${agentId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
+    const response = await this.request<Record<string, unknown>>(
+      `/external/agents/${agentId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      },
+    );
     return normalizeExternalAgentRecord(response);
   }
 
@@ -1731,7 +1914,7 @@ class ApiClient {
     data?: { force?: boolean; signedOrder?: Record<string, unknown> },
   ): Promise<Record<string, unknown>> {
     return this.request(`/external/agents/${agentId}/execute`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data || {}),
     });
   }
@@ -1742,7 +1925,9 @@ class ApiClient {
     status?: string;
   }): Promise<PaginatedResponse<DecisionCellListItem>> {
     const query = this.buildQuery(params || {});
-    const response = await this.request<DecisionCellsListResponse>(`/decisions${query}`);
+    const response = await this.request<DecisionCellsListResponse>(
+      `/decisions${query}`,
+    );
     return {
       data: response.data,
       total: response.total,
@@ -1752,9 +1937,11 @@ class ApiClient {
     };
   }
 
-  async createDecisionCell(data: CreateDecisionCellRequest): Promise<DecisionCell> {
-    return this.request('/decisions', {
-      method: 'POST',
+  async createDecisionCell(
+    data: CreateDecisionCellRequest,
+  ): Promise<DecisionCell> {
+    return this.request("/decisions", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1763,23 +1950,32 @@ class ApiClient {
     return this.request(`/decisions/${encodeURIComponent(cellId)}`);
   }
 
-  async updateDecisionCell(cellId: string, data: UpdateDecisionCellRequest): Promise<DecisionCell> {
+  async updateDecisionCell(
+    cellId: string,
+    data: UpdateDecisionCellRequest,
+  ): Promise<DecisionCell> {
     return this.request(`/decisions/${encodeURIComponent(cellId)}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: JSON.stringify(data),
     });
   }
 
-  async addDecisionAction(cellId: string, label: string): Promise<DecisionCell> {
+  async addDecisionAction(
+    cellId: string,
+    label: string,
+  ): Promise<DecisionCell> {
     return this.request(`/decisions/${encodeURIComponent(cellId)}/actions`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({ label }),
     });
   }
 
-  async addDecisionNode(cellId: string, data: CreateDecisionNodeRequest): Promise<DecisionCell> {
+  async addDecisionNode(
+    cellId: string,
+    data: CreateDecisionNodeRequest,
+  ): Promise<DecisionCell> {
     return this.request(`/decisions/${encodeURIComponent(cellId)}/nodes`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1792,7 +1988,7 @@ class ApiClient {
     return this.request(
       `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}`,
       {
-        method: 'PATCH',
+        method: "PATCH",
         body: JSON.stringify(data),
       },
     );
@@ -1809,7 +2005,7 @@ class ApiClient {
     return this.request(
       `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}/attach-market`,
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(data),
       },
     );
@@ -1827,17 +2023,20 @@ class ApiClient {
     return this.request(
       `/decisions/${encodeURIComponent(cellId)}/nodes/${encodeURIComponent(nodeId)}/attach-agent`,
       {
-        method: 'POST',
+        method: "POST",
         body: JSON.stringify(data),
       },
     );
   }
 
   async recalculateDecisionCell(cellId: string): Promise<DecisionCell> {
-    return this.request(`/decisions/${encodeURIComponent(cellId)}/recalculate`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
+    return this.request(
+      `/decisions/${encodeURIComponent(cellId)}/recalculate`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
   }
 
   async updateDecisionAutomation(
@@ -1845,7 +2044,7 @@ class ApiClient {
     data: UpdateDecisionAutomationRequest,
   ): Promise<DecisionCell> {
     return this.request(`/decisions/${encodeURIComponent(cellId)}/automation`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1859,12 +2058,12 @@ class ApiClient {
     },
   ): Promise<DecisionCell> {
     return this.request(`/decisions/${encodeURIComponent(cellId)}/alerts`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async getDecisionEvents(cellId: string): Promise<DecisionCell['events']> {
+  async getDecisionEvents(cellId: string): Promise<DecisionCell["events"]> {
     const response = await this.request<DecisionEventsResponse>(
       `/decisions/${encodeURIComponent(cellId)}/events`,
     );
@@ -1880,8 +2079,78 @@ class ApiClient {
     closeTime: number;
     resolver: string;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/markets/create', {
-      method: 'POST',
+    return this.request("/evm/write/markets/create", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSetManagerApproval(data: {
+    from?: string;
+    manager: string;
+    approved: boolean;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/agents/manager-approval", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseBootstrapCreateAgents(data: {
+    from?: string;
+    owner: string;
+    manager: string;
+    strategy: string;
+    agents: Array<{
+      marketId: number;
+      isYes: boolean;
+      priceBps: number;
+      size: string;
+      cadence: number;
+      expiryWindow: number;
+    }>;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/agents/bootstrap-create", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseUpdateAgents(data: {
+    from?: string;
+    strategy: string;
+    updates: Array<{
+      agentId: number;
+      isYes: boolean;
+      priceBps: number;
+      size: string;
+      cadence: number;
+      expiryWindow: number;
+    }>;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/agents/update", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseDeactivateAgents(data: {
+    from?: string;
+    agentIds: number[];
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/agents/deactivate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseSetAgentManager(data: {
+    from?: string;
+    agentId: number;
+    manager: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/agents/manager", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1891,8 +2160,8 @@ class ApiClient {
     marketId: number;
     outcome: boolean;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/markets/resolve', {
-      method: 'POST',
+    return this.request("/evm/write/markets/resolve", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1905,8 +2174,8 @@ class ApiClient {
     size: string;
     expiry: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/orders/place', {
-      method: 'POST',
+    return this.request("/evm/write/orders/place", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1915,8 +2184,8 @@ class ApiClient {
     from?: string;
     orderId: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/orders/cancel', {
-      method: 'POST',
+    return this.request("/evm/write/orders/cancel", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1925,8 +2194,8 @@ class ApiClient {
     from?: string;
     marketId: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/positions/claim', {
-      method: 'POST',
+    return this.request("/evm/write/positions/claim", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1936,8 +2205,8 @@ class ApiClient {
     user: string;
     marketId: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/positions/claim-for', {
-      method: 'POST',
+    return this.request("/evm/write/positions/claim-for", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1948,8 +2217,8 @@ class ApiClient {
     secondOrderId: number;
     fillSize: string;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/orders/match', {
-      method: 'POST',
+    return this.request("/evm/write/orders/match", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1964,8 +2233,8 @@ class ApiClient {
     expiryWindow: number;
     strategy: string;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/agents/create', {
-      method: 'POST',
+    return this.request("/evm/write/agents/create", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1974,8 +2243,8 @@ class ApiClient {
     from?: string;
     agentId: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/agents/execute', {
-      method: 'POST',
+    return this.request("/evm/write/agents/execute", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1985,8 +2254,8 @@ class ApiClient {
     wallet: string;
     tier: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/identity/register', {
-      method: 'POST',
+    return this.request("/evm/write/identity/register", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1996,8 +2265,8 @@ class ApiClient {
     wallet: string;
     tier: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/identity/tier', {
-      method: 'POST',
+    return this.request("/evm/write/identity/tier", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -2007,8 +2276,8 @@ class ApiClient {
     wallet: string;
     active: boolean;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/identity/active', {
-      method: 'POST',
+    return this.request("/evm/write/identity/active", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -2020,8 +2289,8 @@ class ApiClient {
     notionalMicrousdc: string;
     confidenceWeightBps: number;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/reputation/outcome', {
-      method: 'POST',
+    return this.request("/evm/write/reputation/outcome", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -2033,8 +2302,8 @@ class ApiClient {
     requestUri: string;
     requestHash?: string;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/validation/request', {
-      method: 'POST',
+    return this.request("/evm/write/validation/request", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -2047,33 +2316,33 @@ class ApiClient {
     responseHash: string;
     tag: string;
   }): Promise<PreparedEvmWriteTx> {
-    return this.request('/evm/write/validation/response', {
-      method: 'POST',
+    return this.request("/evm/write/validation/response", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async relayBaseRawTransaction(rawTx: string): Promise<RelayRawTxResponse> {
-    return this.request('/evm/write/relay', {
-      method: 'POST',
+    return this.request("/evm/write/relay", {
+      method: "POST",
       body: JSON.stringify({ rawTx }),
     });
   }
 
   async getDepositAddress(): Promise<DepositAddress> {
-    return this.request('/wallet/deposit/address');
+    return this.request("/wallet/deposit/address");
   }
 
   async deposit(data: DepositRequest): Promise<DepositResponse> {
-    return this.request('/wallet/deposit', {
-      method: 'POST',
+    return this.request("/wallet/deposit", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async withdraw(data: WithdrawRequest): Promise<WithdrawResponse> {
-    return this.request('/wallet/withdraw', {
-      method: 'POST',
+    return this.request("/wallet/withdraw", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -2084,24 +2353,36 @@ class ApiClient {
   }
 
   async getSiweNonce(): Promise<string> {
-    const res = await this.request<{ nonce: string }>('/auth/siwe/nonce', {}, true);
+    const res = await this.request<{ nonce: string }>(
+      "/auth/siwe/nonce",
+      {},
+      true,
+    );
     return res.nonce;
   }
 
   async getSolanaNonce(): Promise<string> {
-    const res = await this.request<{ nonce: string }>('/auth/solana/nonce', {}, true);
+    const res = await this.request<{ nonce: string }>(
+      "/auth/solana/nonce",
+      {},
+      true,
+    );
     return res.nonce;
   }
 
   async getFarcasterNonce(): Promise<string> {
-    const res = await this.request<{ nonce: string }>('/auth/farcaster/nonce', {}, true);
+    const res = await this.request<{ nonce: string }>(
+      "/auth/farcaster/nonce",
+      {},
+      true,
+    );
     return res.nonce;
   }
 
   async login(
     wallet: string,
     signature: string,
-    message: string
+    message: string,
   ): Promise<{ accessToken: string; expiresAt: number }> {
     return this.loginSiwe(wallet, signature, message);
   }
@@ -2109,17 +2390,17 @@ class ApiClient {
   async loginSiwe(
     wallet: string,
     signature: string,
-    message: string
+    message: string,
   ): Promise<{ accessToken: string; expiresAt: number }> {
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wallet, signature, message, flow: 'siwe' }),
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet, signature, message, flow: "siwe" }),
     });
 
     if (!res.ok) {
       const data = await res.json();
-      throw new ApiError(res.status, data.error || 'SIWE login failed');
+      throw new ApiError(res.status, data.error || "SIWE login failed");
     }
 
     const data = await res.json();
@@ -2130,17 +2411,17 @@ class ApiClient {
   async loginSolana(
     wallet: string,
     signature: string,
-    message: string
+    message: string,
   ): Promise<{ accessToken: string; expiresAt: number }> {
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wallet, signature, message, flow: 'solana' }),
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet, signature, message, flow: "solana" }),
     });
 
     if (!res.ok) {
       const data = await res.json();
-      throw new ApiError(res.status, data.error || 'Solana login failed');
+      throw new ApiError(res.status, data.error || "Solana login failed");
     }
 
     const data = await res.json();
@@ -2151,17 +2432,17 @@ class ApiClient {
   async loginFarcaster(
     message: string,
     signature: string,
-    nonce: string
+    nonce: string,
   ): Promise<{ accessToken: string; expiresAt: number }> {
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, signature, nonce, flow: 'farcaster' }),
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, signature, nonce, flow: "farcaster" }),
     });
 
     if (!res.ok) {
       const data = await res.json();
-      throw new ApiError(res.status, data.error || 'Farcaster login failed');
+      throw new ApiError(res.status, data.error || "Farcaster login failed");
     }
 
     const data = await res.json();
@@ -2169,30 +2450,38 @@ class ApiClient {
     return data;
   }
 
-  async post<T = unknown>(path: string, body: Record<string, unknown>): Promise<T> {
+  async post<T = unknown>(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
     const res = await fetch(`${PRIMARY_API_BASE}${path}`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        ...(this.accessToken ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+        "Content-Type": "application/json",
+        ...(this.accessToken
+          ? { Authorization: `Bearer ${this.accessToken}` }
+          : {}),
       },
       body: JSON.stringify(body),
     });
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new ApiError(res.status, (data as Record<string, string>).error || 'Request failed');
+      throw new ApiError(
+        res.status,
+        (data as Record<string, string>).error || "Request failed",
+      );
     }
 
     return res.json();
   }
 
   async refresh(): Promise<{ accessToken: string; expiresAt: number }> {
-    const res = await fetch('/api/auth', { method: 'PUT' });
+    const res = await fetch("/api/auth", { method: "PUT" });
 
     if (!res.ok) {
       this.clearAccessToken();
-      throw new ApiError(res.status, 'Token refresh failed');
+      throw new ApiError(res.status, "Token refresh failed");
     }
 
     const data = await res.json();
@@ -2202,7 +2491,7 @@ class ApiClient {
 
   async logout(): Promise<void> {
     try {
-      await fetch('/api/auth', { method: 'DELETE' });
+      await fetch("/api/auth", { method: "DELETE" });
     } finally {
       this.clearAccessToken();
     }
@@ -2233,49 +2522,53 @@ class ApiClient {
   }
 
   async getUnreadCount(): Promise<{ count: number }> {
-    return this.request('/notifications/unread-count');
+    return this.request("/notifications/unread-count");
   }
 
   async markAsRead(notificationId: string): Promise<void> {
     return this.request(`/notifications/${notificationId}/read`, {
-      method: 'PUT',
+      method: "PUT",
     });
   }
 
   async markAllAsRead(): Promise<void> {
-    return this.request('/notifications/read-all', {
-      method: 'PUT',
+    return this.request("/notifications/read-all", {
+      method: "PUT",
     });
   }
 
   async getNotificationPreferences(): Promise<NotificationPreferences> {
-    return this.request('/notifications/preferences');
+    return this.request("/notifications/preferences");
   }
 
   async updateNotificationPreferences(
-    prefs: Partial<NotificationPreferences>
+    prefs: Partial<NotificationPreferences>,
   ): Promise<NotificationPreferences> {
-    return this.request('/notifications/preferences', {
-      method: 'PUT',
+    return this.request("/notifications/preferences", {
+      method: "PUT",
       body: JSON.stringify(prefs),
     });
   }
 
   // Leaderboards
   async getLeaderboard(
-    period: LeaderboardPeriod = 'weekly',
-    metric: LeaderboardMetric = 'pnl',
-    limit = 100
+    period: LeaderboardPeriod = "weekly",
+    metric: LeaderboardMetric = "pnl",
+    limit = 100,
   ): Promise<Leaderboard> {
-    return this.request(`/leaderboard?period=${period}&metric=${metric}&limit=${limit}`);
+    return this.request(
+      `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
+    );
   }
 
   async getUserRank(
     wallet: string,
-    period: LeaderboardPeriod = 'weekly',
-    metric: LeaderboardMetric = 'pnl'
+    period: LeaderboardPeriod = "weekly",
+    metric: LeaderboardMetric = "pnl",
   ): Promise<{ rank: number; value: number }> {
-    return this.request(`/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`);
+    return this.request(
+      `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
+    );
   }
 
   // Public profiles
@@ -2285,13 +2578,15 @@ class ApiClient {
 
   async getProfileActivity(
     wallet: string,
-    params?: { limit?: number; offset?: number }
+    params?: { limit?: number; offset?: number },
   ): Promise<PaginatedResponse<ProfileActivity>> {
     const query = this.buildQuery(params || {});
     return this.request(`/profiles/${wallet}/activity${query}`);
   }
 
-  async getProfilePositions(wallet: string): Promise<PaginatedResponse<Position>> {
+  async getProfilePositions(
+    wallet: string,
+  ): Promise<PaginatedResponse<Position>> {
     return this.request(`/profiles/${wallet}/positions`);
   }
 }

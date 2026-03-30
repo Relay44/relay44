@@ -54,6 +54,7 @@ export interface Market {
   bootstrapStatus?: string;
   bootstrapActive?: boolean;
   bootstrapSeedUsdc?: number;
+  bootstrapManager?: string;
   bootstrapStrategy?: string;
   bootstrapLevels?: number;
   bootstrapInitialYesBps?: number;
@@ -62,6 +63,9 @@ export interface Market {
   bootstrapCadenceSeconds?: number;
   bootstrapExpirySeconds?: number;
   bootstrapGraduatedAt?: string;
+  bootstrapLaunchTxHash?: string;
+  bootstrapLastReconciledAt?: string;
+  bootstrapLastError?: string;
 }
 
 export interface Order {
@@ -88,6 +92,7 @@ export interface Order {
 export interface Agent {
   id: string;
   owner: string;
+  manager?: string;
   marketId: string;
   isYes: boolean;
   priceBps: number;
@@ -331,6 +336,12 @@ export interface WithdrawResponse {
   intentId?: string;
   preparedTransactions?: PreparedWalletTransaction[];
   txSignature?: string;
+}
+
+export interface BootstrapOperatorStatus {
+  operator: string;
+  owner: string;
+  approved: boolean;
 }
 
 // Notification types

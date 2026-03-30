@@ -116,6 +116,7 @@ pub struct BaseMarketBootstrapConfigRecord {
     pub creator: String,
     pub liquidity_mode: String,
     pub status: String,
+    pub manager: Option<String>,
     pub seed_usdc: f64,
     pub initial_yes_bps: u64,
     pub strategy: String,
@@ -135,6 +136,9 @@ pub struct BaseMarketBootstrapConfigRecord {
     pub graduated_at: Option<DateTime<Utc>>,
     pub graduation_reason: Option<String>,
     pub create_tx_hash: Option<String>,
+    pub launch_tx_hash: Option<String>,
+    pub last_reconciled_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -145,6 +149,7 @@ pub struct BaseMarketBootstrapUpsert<'a> {
     pub creator: &'a str,
     pub liquidity_mode: &'a str,
     pub status: &'a str,
+    pub manager: Option<&'a str>,
     pub seed_usdc: f64,
     pub initial_yes_bps: u64,
     pub strategy: &'a str,
@@ -163,6 +168,51 @@ pub struct BaseMarketBootstrapUpsert<'a> {
     pub graduated_at: Option<DateTime<Utc>>,
     pub graduation_reason: Option<&'a str>,
     pub create_tx_hash: Option<&'a str>,
+    pub launch_tx_hash: Option<&'a str>,
+    pub last_reconciled_at: Option<DateTime<Utc>>,
+    pub last_error: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseMarketBootstrapAgentRecord {
+    pub market_id: u64,
+    pub side: String,
+    pub level_index: u64,
+    pub agent_id: Option<u64>,
+    pub desired_price_bps: u64,
+    pub desired_size: u64,
+    pub current_price_bps: Option<u64>,
+    pub current_size: Option<u64>,
+    pub active: bool,
+    pub created_tx_hash: Option<String>,
+    pub updated_tx_hash: Option<String>,
+    pub deactivated_tx_hash: Option<String>,
+    pub last_execute_tx_hash: Option<String>,
+    pub last_executed_at: Option<DateTime<Utc>>,
+    pub last_reconciled_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseMarketBootstrapAgentUpsert<'a> {
+    pub market_id: u64,
+    pub side: &'a str,
+    pub level_index: u64,
+    pub agent_id: Option<u64>,
+    pub desired_price_bps: u64,
+    pub desired_size: u64,
+    pub current_price_bps: Option<u64>,
+    pub current_size: Option<u64>,
+    pub active: bool,
+    pub created_tx_hash: Option<&'a str>,
+    pub updated_tx_hash: Option<&'a str>,
+    pub deactivated_tx_hash: Option<&'a str>,
+    pub last_execute_tx_hash: Option<&'a str>,
+    pub last_executed_at: Option<DateTime<Utc>>,
+    pub last_reconciled_at: Option<DateTime<Utc>>,
+    pub last_error: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +235,7 @@ impl DatabaseService {
             creator: row.get("creator"),
             liquidity_mode: row.get("liquidity_mode"),
             status: row.get("status"),
+            manager: row.try_get("manager").ok(),
             seed_usdc: row.get("seed_usdc"),
             initial_yes_bps: row.get::<i32, _>("initial_yes_bps") as u64,
             strategy: row.get("strategy"),
@@ -204,6 +255,44 @@ impl DatabaseService {
             graduated_at: row.try_get("graduated_at").ok(),
             graduation_reason: row.try_get("graduation_reason").ok(),
             create_tx_hash: row.try_get("create_tx_hash").ok(),
+            launch_tx_hash: row.try_get("launch_tx_hash").ok(),
+            last_reconciled_at: row.try_get("last_reconciled_at").ok(),
+            last_error: row.try_get("last_error").ok(),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+
+    fn map_base_market_bootstrap_agent_row(row: &PgRow) -> BaseMarketBootstrapAgentRecord {
+        BaseMarketBootstrapAgentRecord {
+            market_id: row.get::<i64, _>("market_id") as u64,
+            side: row.get("side"),
+            level_index: row.get::<i32, _>("level_index") as u64,
+            agent_id: row
+                .try_get::<Option<i64>, _>("agent_id")
+                .ok()
+                .flatten()
+                .map(|value| value as u64),
+            desired_price_bps: row.get::<i32, _>("desired_price_bps") as u64,
+            desired_size: row.get::<i64, _>("desired_size") as u64,
+            current_price_bps: row
+                .try_get::<Option<i32>, _>("current_price_bps")
+                .ok()
+                .flatten()
+                .map(|value| value as u64),
+            current_size: row
+                .try_get::<Option<i64>, _>("current_size")
+                .ok()
+                .flatten()
+                .map(|value| value as u64),
+            active: row.get("active"),
+            created_tx_hash: row.try_get("created_tx_hash").ok(),
+            updated_tx_hash: row.try_get("updated_tx_hash").ok(),
+            deactivated_tx_hash: row.try_get("deactivated_tx_hash").ok(),
+            last_execute_tx_hash: row.try_get("last_execute_tx_hash").ok(),
+            last_executed_at: row.try_get("last_executed_at").ok(),
+            last_reconciled_at: row.try_get("last_reconciled_at").ok(),
+            last_error: row.try_get("last_error").ok(),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -1297,6 +1386,7 @@ impl DatabaseService {
                 creator,
                 liquidity_mode,
                 status,
+                manager,
                 seed_usdc,
                 initial_yes_bps,
                 strategy,
@@ -1314,16 +1404,20 @@ impl DatabaseService {
                 activated_at,
                 graduated_at,
                 graduation_reason,
-                create_tx_hash
+                create_tx_hash,
+                launch_tx_hash,
+                last_reconciled_at,
+                last_error
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+                $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
             )
             ON CONFLICT (market_id) DO UPDATE
             SET creator = EXCLUDED.creator,
                 liquidity_mode = EXCLUDED.liquidity_mode,
                 status = EXCLUDED.status,
+                manager = COALESCE(EXCLUDED.manager, base_market_bootstrap_configs.manager),
                 seed_usdc = EXCLUDED.seed_usdc,
                 initial_yes_bps = EXCLUDED.initial_yes_bps,
                 strategy = EXCLUDED.strategy,
@@ -1341,7 +1435,10 @@ impl DatabaseService {
                 activated_at = COALESCE(base_market_bootstrap_configs.activated_at, EXCLUDED.activated_at),
                 graduated_at = EXCLUDED.graduated_at,
                 graduation_reason = EXCLUDED.graduation_reason,
-                create_tx_hash = COALESCE(EXCLUDED.create_tx_hash, base_market_bootstrap_configs.create_tx_hash)
+                create_tx_hash = COALESCE(EXCLUDED.create_tx_hash, base_market_bootstrap_configs.create_tx_hash),
+                launch_tx_hash = COALESCE(EXCLUDED.launch_tx_hash, base_market_bootstrap_configs.launch_tx_hash),
+                last_reconciled_at = COALESCE(EXCLUDED.last_reconciled_at, base_market_bootstrap_configs.last_reconciled_at),
+                last_error = COALESCE(EXCLUDED.last_error, base_market_bootstrap_configs.last_error)
             RETURNING *
             "#,
         )
@@ -1349,6 +1446,7 @@ impl DatabaseService {
         .bind(input.creator)
         .bind(input.liquidity_mode)
         .bind(input.status)
+        .bind(input.manager)
         .bind(input.seed_usdc)
         .bind(input.initial_yes_bps as i32)
         .bind(input.strategy)
@@ -1367,6 +1465,9 @@ impl DatabaseService {
         .bind(input.graduated_at)
         .bind(input.graduation_reason)
         .bind(input.create_tx_hash)
+        .bind(input.launch_tx_hash)
+        .bind(input.last_reconciled_at)
+        .bind(input.last_error)
         .fetch_one(&self.pool)
         .await?;
 
@@ -1388,11 +1489,10 @@ impl DatabaseService {
     pub async fn list_base_market_bootstrap_configs(
         &self,
     ) -> Result<Vec<BaseMarketBootstrapConfigRecord>> {
-        let rows = sqlx::query(
-            "SELECT * FROM base_market_bootstrap_configs ORDER BY market_id ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query("SELECT * FROM base_market_bootstrap_configs ORDER BY market_id ASC")
+                .fetch_all(&self.pool)
+                .await?;
 
         Ok(rows
             .iter()
@@ -1404,17 +1504,37 @@ impl DatabaseService {
         &self,
         market_id: u64,
         inventory_skew_bps: Option<i32>,
+        status: Option<&str>,
+        manager: Option<&str>,
+        launch_tx_hash: Option<&str>,
+        last_reconciled_at: Option<DateTime<Utc>>,
+        last_error: Option<&str>,
+        clear_last_error: bool,
     ) -> Result<Option<BaseMarketBootstrapConfigRecord>> {
         let row = sqlx::query(
             r#"
             UPDATE base_market_bootstrap_configs
-            SET inventory_skew_bps = COALESCE($2, inventory_skew_bps)
+            SET inventory_skew_bps = COALESCE($2, inventory_skew_bps),
+                status = COALESCE($3, status),
+                manager = COALESCE($4, manager),
+                launch_tx_hash = COALESCE($5, launch_tx_hash),
+                last_reconciled_at = COALESCE($6, last_reconciled_at),
+                last_error = CASE
+                    WHEN $8 THEN NULL
+                    ELSE COALESCE($7, last_error)
+                END
             WHERE market_id = $1
             RETURNING *
             "#,
         )
         .bind(market_id as i64)
         .bind(inventory_skew_bps)
+        .bind(status)
+        .bind(manager)
+        .bind(launch_tx_hash)
+        .bind(last_reconciled_at)
+        .bind(last_error)
+        .bind(clear_last_error)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -1461,6 +1581,95 @@ impl DatabaseService {
         .await?;
 
         Ok(row.as_ref().map(Self::map_base_market_bootstrap_row))
+    }
+
+    pub async fn list_base_market_bootstrap_agents(
+        &self,
+        market_id: u64,
+    ) -> Result<Vec<BaseMarketBootstrapAgentRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT *
+            FROM base_market_bootstrap_agents
+            WHERE market_id = $1
+            ORDER BY side ASC, level_index ASC
+            "#,
+        )
+        .bind(market_id as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(Self::map_base_market_bootstrap_agent_row)
+            .collect())
+    }
+
+    pub async fn upsert_base_market_bootstrap_agent(
+        &self,
+        input: &BaseMarketBootstrapAgentUpsert<'_>,
+    ) -> Result<BaseMarketBootstrapAgentRecord> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO base_market_bootstrap_agents (
+                market_id,
+                side,
+                level_index,
+                agent_id,
+                desired_price_bps,
+                desired_size,
+                current_price_bps,
+                current_size,
+                active,
+                created_tx_hash,
+                updated_tx_hash,
+                deactivated_tx_hash,
+                last_execute_tx_hash,
+                last_executed_at,
+                last_reconciled_at,
+                last_error
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13, $14, $15, $16
+            )
+            ON CONFLICT (market_id, side, level_index) DO UPDATE
+            SET agent_id = COALESCE(EXCLUDED.agent_id, base_market_bootstrap_agents.agent_id),
+                desired_price_bps = EXCLUDED.desired_price_bps,
+                desired_size = EXCLUDED.desired_size,
+                current_price_bps = COALESCE(EXCLUDED.current_price_bps, base_market_bootstrap_agents.current_price_bps),
+                current_size = COALESCE(EXCLUDED.current_size, base_market_bootstrap_agents.current_size),
+                active = EXCLUDED.active,
+                created_tx_hash = COALESCE(EXCLUDED.created_tx_hash, base_market_bootstrap_agents.created_tx_hash),
+                updated_tx_hash = COALESCE(EXCLUDED.updated_tx_hash, base_market_bootstrap_agents.updated_tx_hash),
+                deactivated_tx_hash = COALESCE(EXCLUDED.deactivated_tx_hash, base_market_bootstrap_agents.deactivated_tx_hash),
+                last_execute_tx_hash = COALESCE(EXCLUDED.last_execute_tx_hash, base_market_bootstrap_agents.last_execute_tx_hash),
+                last_executed_at = COALESCE(EXCLUDED.last_executed_at, base_market_bootstrap_agents.last_executed_at),
+                last_reconciled_at = COALESCE(EXCLUDED.last_reconciled_at, base_market_bootstrap_agents.last_reconciled_at),
+                last_error = COALESCE(EXCLUDED.last_error, base_market_bootstrap_agents.last_error)
+            RETURNING *
+            "#,
+        )
+        .bind(input.market_id as i64)
+        .bind(input.side)
+        .bind(input.level_index as i32)
+        .bind(input.agent_id.map(|value| value as i64))
+        .bind(input.desired_price_bps as i32)
+        .bind(input.desired_size as i64)
+        .bind(input.current_price_bps.map(|value| value as i32))
+        .bind(input.current_size.map(|value| value as i64))
+        .bind(input.active)
+        .bind(input.created_tx_hash)
+        .bind(input.updated_tx_hash)
+        .bind(input.deactivated_tx_hash)
+        .bind(input.last_execute_tx_hash)
+        .bind(input.last_executed_at)
+        .bind(input.last_reconciled_at)
+        .bind(input.last_error)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Self::map_base_market_bootstrap_agent_row(&row))
     }
 }
 

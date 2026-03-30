@@ -7,8 +7,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::api::auth::extract_jwt_user;
+use crate::api::jwt::{check_role, UserRole};
 use crate::api::ApiError;
 use crate::services::database::{
+    BaseMarketBootstrapAgentRecord, BaseMarketBootstrapAgentUpsert,
     BaseMarketBootstrapConfigRecord, BaseMarketBootstrapUpsert, PayoutJobRecord,
 };
 use crate::services::external::types::ExternalMarketId;
@@ -28,6 +31,8 @@ const MARKET_CORE_CREATE_RICH_SELECTOR: &str = "0xddabefe7";
 const MARKET_CORE_RESOLVE_SELECTOR: &str = "0x57bde446";
 const MARKET_CREATED_TOPIC: &str =
     "0x550857481380e1875f94e5eac6470eff69ecd368405067d9d5dfdf645d3d1f8e";
+const AGENT_CREATED_TOPIC: &str =
+    "0xb8300ae81d50fe3e07f6ea631ab27e47cfc97f4ac11caef13f608d1471d428f9";
 const ORDER_BOOK_COUNT_SELECTOR: &str = "0x2453ffa8";
 const ORDER_BOOK_ORDERS_SELECTOR: &str = "0xa85c38ef";
 const ORDER_BOOK_PLACE_SELECTOR: &str = "0xa8dd6515";
@@ -35,10 +40,17 @@ const ORDER_BOOK_CANCEL_SELECTOR: &str = "0x514fcac7";
 const ORDER_BOOK_CLAIM_SELECTOR: &str = "0x379607f5";
 const ORDER_BOOK_CLAIM_FOR_SELECTOR: &str = "0x0de05659";
 const ORDER_BOOK_MATCH_SELECTOR: &str = "0xc6437097";
+const ORDER_BOOK_POSITIONS_SELECTOR: &str = "0xe684d718";
 const AGENT_RUNTIME_COUNT_SELECTOR: &str = "0xb7dc1284";
 const AGENT_RUNTIME_AGENTS_SELECTOR: &str = "0x513856c8";
 const AGENT_RUNTIME_CREATE_SELECTOR: &str = "0x325993ba";
 const AGENT_RUNTIME_EXECUTE_SELECTOR: &str = "0xe2a343a5";
+const AGENT_RUNTIME_MANAGER_APPROVALS_SELECTOR: &str = "0xfd9ac808";
+const AGENT_RUNTIME_SET_MANAGER_APPROVAL_SELECTOR: &str = "0xf3ea4160";
+const AGENT_RUNTIME_CREATE_FOR_SELECTOR: &str = "0x77c19c89";
+const AGENT_RUNTIME_UPDATE_BATCH_SELECTOR: &str = "0x689fd457";
+const AGENT_RUNTIME_DEACTIVATE_BATCH_SELECTOR: &str = "0x7fa805d3";
+const AGENT_RUNTIME_SET_MANAGER_SELECTOR: &str = "0x0ceddbbb";
 const ERC8004_IDENTITY_PROFILE_SELECTOR: &str = "0x9dd9d0fd";
 const ERC8004_REPUTATION_OF_SELECTOR: &str = "0xdb89c044";
 const ERC8004_IDENTITY_REGISTER_SELECTOR: &str = "0x07e49598";
@@ -80,9 +92,19 @@ const BOOTSTRAP_LIQUIDITY_MODE_CLOB_ONLY: &str = "clob_only";
 const BOOTSTRAP_LIQUIDITY_MODE_HYBRID: &str = "bootstrap_hybrid";
 const BOOTSTRAP_STATUS_ACTIVE: &str = "active";
 const BOOTSTRAP_STATUS_DISABLED: &str = "disabled";
+const BOOTSTRAP_STATUS_PENDING_AUTHORIZATION: &str = "pending_authorization";
+const BOOTSTRAP_STATUS_PENDING_FUNDING: &str = "pending_funding";
+const BOOTSTRAP_STATUS_PENDING_LAUNCH: &str = "pending_launch";
+const BOOTSTRAP_STATUS_PAUSED: &str = "paused";
+const BOOTSTRAP_STATUS_ERROR: &str = "error";
 const BOOTSTRAP_STRATEGY_LADDER_V1: &str = "ladder_v1";
 const BOOTSTRAP_STRATEGY_LMSR_EXPERIMENTAL: &str = "ls_lmsr_v1";
 const BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL: &str = "pmm_experimental";
+const COLLATERAL_AVAILABLE_SELECTOR: &str = "0xa0821be3";
+const BOOTSTRAP_RUNNER_ACTION_LAUNCH: &str = "launch";
+const BOOTSTRAP_RUNNER_ACTION_UPDATE: &str = "update";
+const BOOTSTRAP_RUNNER_ACTION_DEACTIVATE: &str = "deactivate";
+const BOOTSTRAP_RUNNER_ACTION_EXECUTE: &str = "execute";
 
 #[derive(Serialize)]
 pub struct BaseTokenStateResponse {
@@ -160,6 +182,7 @@ pub struct RegisterBaseMarketBootstrapRequest {
     pub liquidity_mode: String,
     pub seed_usdc: f64,
     pub initial_yes_bps: u64,
+    pub manager: Option<String>,
     pub strategy: String,
     pub levels: u64,
     pub base_spread_bps: u64,
@@ -172,6 +195,12 @@ pub struct RegisterBaseMarketBootstrapRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateBaseMarketBootstrapRuntimeRequest {
     pub inventory_skew_bps: Option<i32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapOperatorStatusQuery {
+    pub owner: String,
 }
 
 #[derive(Deserialize)]
@@ -252,6 +281,8 @@ pub struct BaseMarketSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_seed_usdc: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_manager: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_strategy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_levels: Option<u64>,
@@ -267,6 +298,12 @@ pub struct BaseMarketSnapshot {
     pub bootstrap_expiry_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_graduated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_launch_tx_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_last_reconciled_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_last_error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -441,6 +478,7 @@ pub struct BaseValidationResponse {
 pub struct BaseAgentSnapshot {
     pub id: String,
     pub owner: String,
+    pub manager: Option<String>,
     pub market_id: String,
     pub is_yes: bool,
     pub price_bps: u64,
@@ -471,7 +509,7 @@ pub struct BaseAgentSnapshot {
     pub reputation_notional_microusdc: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PreparedEvmWriteResponse {
     pub chain_id: u64,
     pub from: Option<String>,
@@ -485,6 +523,61 @@ pub struct PreparedEvmWriteResponse {
 pub struct RelayRawTransactionResponse {
     pub chain_id: u64,
     pub tx_hash: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapOperatorStatusResponse {
+    pub operator: String,
+    pub owner: String,
+    pub approved: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapRunnerSlot {
+    pub side: String,
+    pub level_index: u64,
+    pub agent_id: Option<u64>,
+    pub is_yes: bool,
+    pub price_bps: u64,
+    pub size: String,
+    pub cadence: u64,
+    pub expiry_window: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapRunnerAction {
+    pub kind: String,
+    pub market_id: u64,
+    pub config_status: String,
+    pub prepared_write: PreparedEvmWriteResponse,
+    pub slots: Vec<BootstrapRunnerSlot>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapRunnerTickResponse {
+    pub scanned: u64,
+    pub actions: Vec<BootstrapRunnerAction>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapRunnerTickRequest {
+    pub limit: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapRunnerReportRequest {
+    pub market_id: u64,
+    pub kind: String,
+    pub tx_hash: String,
+    pub success: bool,
+    pub slots: Vec<BootstrapRunnerSlot>,
+    pub error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -567,6 +660,69 @@ pub struct PrepareCreateAgentWriteRequest {
 pub struct PrepareExecuteAgentWriteRequest {
     pub from: Option<String>,
     pub agent_id: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareSetManagerApprovalWriteRequest {
+    pub from: Option<String>,
+    pub manager: String,
+    pub approved: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapAgentConfigInput {
+    pub market_id: u64,
+    pub is_yes: bool,
+    pub price_bps: u64,
+    pub size: String,
+    pub cadence: u64,
+    pub expiry_window: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareBootstrapCreateAgentsWriteRequest {
+    pub from: Option<String>,
+    pub owner: String,
+    pub manager: String,
+    pub strategy: String,
+    pub agents: Vec<BootstrapAgentConfigInput>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapAgentUpdateInput {
+    pub agent_id: u64,
+    pub is_yes: bool,
+    pub price_bps: u64,
+    pub size: String,
+    pub cadence: u64,
+    pub expiry_window: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareUpdateAgentsWriteRequest {
+    pub from: Option<String>,
+    pub strategy: String,
+    pub updates: Vec<BootstrapAgentUpdateInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareDeactivateAgentsWriteRequest {
+    pub from: Option<String>,
+    pub agent_ids: Vec<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareSetAgentManagerWriteRequest {
+    pub from: Option<String>,
+    pub agent_id: u64,
+    pub manager: String,
 }
 
 #[derive(Deserialize)]
@@ -672,6 +828,7 @@ struct BaseRawOrder {
 
 struct BaseRawAgent {
     owner: String,
+    manager: Option<String>,
     market_id: u64,
     is_yes: bool,
     price_bps: u64,
@@ -681,6 +838,24 @@ struct BaseRawAgent {
     last_executed_at: u64,
     active: bool,
     strategy: String,
+}
+
+#[derive(Clone)]
+struct BasePositionSnapshot {
+    yes_shares: u128,
+    no_shares: u128,
+    claimed: bool,
+}
+
+#[derive(Clone)]
+struct BootstrapDesiredAgent {
+    side: &'static str,
+    level_index: u64,
+    is_yes: bool,
+    price_bps: u64,
+    size: u64,
+    cadence: u64,
+    expiry_window: u64,
 }
 
 #[derive(Clone)]
@@ -880,6 +1055,7 @@ fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> Ba
         bootstrap_status: None,
         bootstrap_active: None,
         bootstrap_seed_usdc: None,
+        bootstrap_manager: None,
         bootstrap_strategy: None,
         bootstrap_levels: None,
         bootstrap_initial_yes_bps: None,
@@ -888,6 +1064,9 @@ fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> Ba
         bootstrap_cadence_seconds: None,
         bootstrap_expiry_seconds: None,
         bootstrap_graduated_at: None,
+        bootstrap_launch_tx_hash: None,
+        bootstrap_last_reconciled_at: None,
+        bootstrap_last_error: None,
     }
 }
 
@@ -940,7 +1119,10 @@ fn merge_level_maps(
     }
 }
 
-fn book_side_from_levels(levels: &BTreeMap<u64, LevelAggregate>, depth: u64) -> Vec<BaseOrderBookLevel> {
+fn book_side_from_levels(
+    levels: &BTreeMap<u64, LevelAggregate>,
+    depth: u64,
+) -> Vec<BaseOrderBookLevel> {
     levels
         .iter()
         .rev()
@@ -1014,28 +1196,27 @@ fn bootstrap_seed_microusdc(seed_usdc: f64) -> u64 {
     (seed_usdc.max(0.0) * 1_000_000.0).round() as u64
 }
 
-fn generate_bootstrap_synthetic_book(config: &BaseMarketBootstrapConfigRecord) -> BootstrapSyntheticBook {
+fn bootstrap_desired_agents(
+    config: &BaseMarketBootstrapConfigRecord,
+) -> Vec<BootstrapDesiredAgent> {
+    let levels = config.levels.max(1);
     let reference_yes_bps = bootstrap_reference_yes_bps(config);
     let reference_no_bps = PAR_PRICE_BPS.saturating_sub(reference_yes_bps);
     let (yes_budget_bps, no_budget_bps) = bootstrap_side_budget_bps(config);
     let seed_microusdc = bootstrap_seed_microusdc(config.seed_usdc);
     let yes_budget = seed_microusdc.saturating_mul(yes_budget_bps) / PAR_PRICE_BPS;
     let no_budget = seed_microusdc.saturating_mul(no_budget_bps) / PAR_PRICE_BPS;
-    let yes_quantities = bootstrap_budget_levels(yes_budget, config.levels.max(1));
-    let no_quantities = bootstrap_budget_levels(no_budget, config.levels.max(1));
+    let yes_quantities = bootstrap_budget_levels(yes_budget, levels);
+    let no_quantities = bootstrap_budget_levels(no_budget, levels);
 
     let exposure_cap = config.exposure_cap_bps.max(1) as i64;
     let skew = (config.inventory_skew_bps as i64).clamp(-exposure_cap, exposure_cap);
-    let spread_extra =
-        (config.step_bps.saturating_mul(config.levels.max(1)) as i64 * skew.abs()) / exposure_cap;
+    let spread_extra = (config.step_bps.saturating_mul(levels) as i64 * skew.abs()) / exposure_cap;
     let tighten = (spread_extra / 2) as u64;
 
-    let mut yes_bids = BTreeMap::new();
-    let mut no_bids = BTreeMap::new();
-
-    for level_index in 0..config.levels.max(1) {
-        let base_spread =
-            config.base_spread_bps + level_index.saturating_mul(config.step_bps);
+    let mut desired = Vec::with_capacity((levels * 2) as usize);
+    for level_index in 0..levels {
+        let base_spread = config.base_spread_bps + level_index.saturating_mul(config.step_bps);
         let yes_spread = if skew > 0 {
             base_spread.saturating_add(spread_extra as u64)
         } else {
@@ -1047,20 +1228,51 @@ fn generate_bootstrap_synthetic_book(config: &BaseMarketBootstrapConfigRecord) -
             base_spread.saturating_sub(tighten)
         };
 
-        let yes_price_bps = reference_yes_bps.saturating_sub(yes_spread).clamp(1, PAR_PRICE_BPS - 1);
-        let no_price_bps = reference_no_bps.saturating_sub(no_spread).clamp(1, PAR_PRICE_BPS - 1);
+        desired.push(BootstrapDesiredAgent {
+            side: "yes",
+            level_index,
+            is_yes: true,
+            price_bps: reference_yes_bps
+                .saturating_sub(yes_spread)
+                .clamp(1, PAR_PRICE_BPS - 1),
+            size: yes_quantities
+                .get(level_index as usize)
+                .copied()
+                .unwrap_or_default(),
+            cadence: config.cadence_seconds,
+            expiry_window: config.expiry_seconds,
+        });
+        desired.push(BootstrapDesiredAgent {
+            side: "no",
+            level_index,
+            is_yes: false,
+            price_bps: reference_no_bps
+                .saturating_sub(no_spread)
+                .clamp(1, PAR_PRICE_BPS - 1),
+            size: no_quantities
+                .get(level_index as usize)
+                .copied()
+                .unwrap_or_default(),
+            cadence: config.cadence_seconds,
+            expiry_window: config.expiry_seconds,
+        });
+    }
 
-        let yes_quantity = yes_quantities
-            .get(level_index as usize)
-            .copied()
-            .unwrap_or_default();
-        let no_quantity = no_quantities
-            .get(level_index as usize)
-            .copied()
-            .unwrap_or_default();
+    desired
+}
 
-        insert_level(&mut yes_bids, yes_price_bps, yes_quantity);
-        insert_level(&mut no_bids, no_price_bps, no_quantity);
+fn generate_bootstrap_synthetic_book(
+    config: &BaseMarketBootstrapConfigRecord,
+) -> BootstrapSyntheticBook {
+    let mut yes_bids = BTreeMap::new();
+    let mut no_bids = BTreeMap::new();
+
+    for agent in bootstrap_desired_agents(config) {
+        if agent.is_yes {
+            insert_level(&mut yes_bids, agent.price_bps, agent.size);
+        } else {
+            insert_level(&mut no_bids, agent.price_bps, agent.size);
+        }
     }
 
     BootstrapSyntheticBook { yes_bids, no_bids }
@@ -1080,6 +1292,348 @@ fn sum_depth_near_mid(
 
 fn parse_rfc3339_utc(value: Option<&DateTime<Utc>>) -> Option<String> {
     value.map(DateTime::<Utc>::to_rfc3339)
+}
+
+fn configured_bootstrap_operator(state: &AppState) -> Result<String, ApiError> {
+    configured_address(
+        state.config.bootstrap_operator_address.as_str(),
+        "BOOTSTRAP_OPERATOR_ADDRESS_NOT_CONFIGURED",
+        "BOOTSTRAP_OPERATOR_ADDRESS must be configured for bootstrap automation",
+    )
+}
+
+fn bootstrap_slot_key(side: &str, level_index: u64) -> String {
+    format!("{side}:{level_index}")
+}
+
+async fn collect_internal_order_levels(
+    state: &AppState,
+    market_id: u64,
+    now: u64,
+) -> Result<(BTreeMap<u64, LevelAggregate>, BTreeMap<u64, LevelAggregate>), ApiError> {
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for Base order book reads",
+    )?;
+    let total_hex = state
+        .evm_rpc
+        .eth_call(order_book.as_str(), ORDER_BOOK_COUNT_SELECTOR)
+        .await
+        .map_err(map_evm_rpc_error)?;
+    let total = parse_u64_hex(total_hex.as_str())?;
+    let start = total
+        .saturating_sub(ORDERBOOK_SCAN_WINDOW.saturating_sub(1))
+        .max(1);
+
+    let mut yes_bid_levels: BTreeMap<u64, LevelAggregate> = BTreeMap::new();
+    let mut no_bid_levels: BTreeMap<u64, LevelAggregate> = BTreeMap::new();
+
+    if total == 0 {
+        return Ok((yes_bid_levels, no_bid_levels));
+    }
+
+    for order_id in (start..=total).rev() {
+        let calldata = format!(
+            "{}{}",
+            ORDER_BOOK_ORDERS_SELECTOR,
+            encode_u256_hex(order_id)
+        );
+        let payload = state
+            .evm_rpc
+            .eth_call(order_book.as_str(), &calldata)
+            .await
+            .map_err(map_evm_rpc_error)?;
+        let Some(order) = decode_order_snapshot(&payload)? else {
+            continue;
+        };
+
+        if order.market_id != market_id
+            || order.canceled
+            || order.remaining == 0
+            || order.expiry < now
+            || !(1..PAR_PRICE_BPS).contains(&order.price_bps)
+        {
+            continue;
+        }
+
+        if order.is_yes {
+            insert_level(&mut yes_bid_levels, order.price_bps, order.remaining);
+        } else {
+            insert_level(&mut no_bid_levels, order.price_bps, order.remaining);
+        }
+    }
+
+    Ok((yes_bid_levels, no_bid_levels))
+}
+
+async fn fetch_manager_approval(
+    state: &AppState,
+    owner: &str,
+    manager: &str,
+) -> Result<bool, ApiError> {
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for Base agents",
+    )?;
+    let calldata = format!(
+        "{}{}{}",
+        AGENT_RUNTIME_MANAGER_APPROVALS_SELECTOR,
+        encode_address_word(owner)?,
+        encode_address_word(manager)?,
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(agent_runtime.as_str(), calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+    parse_bool_word(word_at(payload.as_str(), 0)?)
+}
+
+async fn fetch_vault_available_balance(state: &AppState, wallet: &str) -> Result<u64, ApiError> {
+    let vault = configured_address(
+        &state.config.collateral_vault_address,
+        "COLLATERAL_VAULT_ADDRESS_NOT_CONFIGURED",
+        "COLLATERAL_VAULT_ADDRESS must be configured for bootstrap funding checks",
+    )?;
+    let calldata = format!(
+        "{}{}",
+        COLLATERAL_AVAILABLE_SELECTOR,
+        encode_address_word(wallet)?,
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(vault.as_str(), calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+    parse_u64_hex(word_at(payload.as_str(), 0)?)
+}
+
+async fn fetch_position_snapshot(
+    state: &AppState,
+    market_id: u64,
+    owner: &str,
+) -> Result<BasePositionSnapshot, ApiError> {
+    let order_book = configured_address(
+        &state.config.order_book_address,
+        "ORDER_BOOK_ADDRESS_NOT_CONFIGURED",
+        "ORDER_BOOK_ADDRESS must be configured for Base order book reads",
+    )?;
+    let calldata = format!(
+        "{}{}{}",
+        ORDER_BOOK_POSITIONS_SELECTOR,
+        encode_u256_hex(market_id),
+        encode_address_word(owner)?,
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(order_book.as_str(), calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
+    Ok(BasePositionSnapshot {
+        yes_shares: parse_u128_hex(word_at(payload.as_str(), 0)?)?,
+        no_shares: parse_u128_hex(word_at(payload.as_str(), 1)?)?,
+        claimed: parse_bool_word(word_at(payload.as_str(), 2)?)?,
+    })
+}
+
+fn bootstrap_inventory_skew_bps(
+    config: &BaseMarketBootstrapConfigRecord,
+    position: &BasePositionSnapshot,
+) -> i32 {
+    if position.claimed {
+        return 0;
+    }
+
+    let exposure_cap_bps = config.exposure_cap_bps.max(1) as i128;
+    let cap_notional = (bootstrap_seed_microusdc(config.seed_usdc) as i128 * exposure_cap_bps)
+        / PAR_PRICE_BPS as i128;
+    if cap_notional <= 0 {
+        return 0;
+    }
+
+    let net = position.yes_shares as i128 - position.no_shares as i128;
+    let raw = (net * exposure_cap_bps) / cap_notional;
+    raw.clamp(-exposure_cap_bps, exposure_cap_bps) as i32
+}
+
+fn extract_created_agent_ids(
+    receipt: &crate::services::evm_rpc::RpcTransactionReceipt,
+    agent_runtime: &str,
+    market_id: u64,
+) -> Result<Vec<u64>, ApiError> {
+    let mut agent_ids = Vec::new();
+    for log in &receipt.logs {
+        let Some(address) = log.address.as_ref() else {
+            continue;
+        };
+        if !address.eq_ignore_ascii_case(agent_runtime) {
+            continue;
+        }
+        if log.topics.len() < 4 || !log.topics[0].eq_ignore_ascii_case(AGENT_CREATED_TOPIC) {
+            continue;
+        }
+        if parse_u64_hex(log.topics[3].as_str()).ok() != Some(market_id) {
+            continue;
+        }
+        agent_ids.push(parse_u64_hex(log.topics[1].as_str())?);
+    }
+    Ok(agent_ids)
+}
+
+fn runner_slot_from_desired(
+    desired: &BootstrapDesiredAgent,
+    agent_id: Option<u64>,
+) -> BootstrapRunnerSlot {
+    BootstrapRunnerSlot {
+        side: desired.side.to_string(),
+        level_index: desired.level_index,
+        agent_id,
+        is_yes: desired.is_yes,
+        price_bps: desired.price_bps,
+        size: desired.size.to_string(),
+        cadence: desired.cadence,
+        expiry_window: desired.expiry_window,
+    }
+}
+
+fn runner_slot_from_record(
+    record: &BaseMarketBootstrapAgentRecord,
+    config: &BaseMarketBootstrapConfigRecord,
+) -> BootstrapRunnerSlot {
+    BootstrapRunnerSlot {
+        side: record.side.clone(),
+        level_index: record.level_index,
+        agent_id: record.agent_id,
+        is_yes: record.side == "yes",
+        price_bps: record.current_price_bps.unwrap_or(record.desired_price_bps),
+        size: record
+            .current_size
+            .unwrap_or(record.desired_size)
+            .to_string(),
+        cadence: config.cadence_seconds,
+        expiry_window: config.expiry_seconds,
+    }
+}
+
+fn bootstrap_has_live_slots(records: &[BaseMarketBootstrapAgentRecord]) -> bool {
+    records
+        .iter()
+        .any(|record| record.active && record.agent_id.is_some())
+}
+
+fn bootstrap_slot_records_map(
+    records: &[BaseMarketBootstrapAgentRecord],
+) -> HashMap<String, BaseMarketBootstrapAgentRecord> {
+    records
+        .iter()
+        .cloned()
+        .map(|record| {
+            (
+                bootstrap_slot_key(record.side.as_str(), record.level_index),
+                record,
+            )
+        })
+        .collect()
+}
+
+fn bootstrap_active_agent_ids(records: &[BaseMarketBootstrapAgentRecord]) -> Vec<u64> {
+    records
+        .iter()
+        .filter(|record| record.active)
+        .filter_map(|record| record.agent_id)
+        .collect()
+}
+
+fn bootstrap_status_for_runtime(
+    current: &BaseMarketBootstrapConfigRecord,
+    approved: bool,
+    available_balance: u64,
+    has_live_slots: bool,
+) -> &'static str {
+    if current.status == BOOTSTRAP_STATUS_DISABLED {
+        return BOOTSTRAP_STATUS_DISABLED;
+    }
+    if current.status == "graduated" {
+        return "graduated";
+    }
+
+    let required_balance = bootstrap_seed_microusdc(current.seed_usdc);
+    if !approved {
+        if has_live_slots {
+            BOOTSTRAP_STATUS_PAUSED
+        } else {
+            BOOTSTRAP_STATUS_PENDING_AUTHORIZATION
+        }
+    } else if available_balance < required_balance {
+        if has_live_slots {
+            BOOTSTRAP_STATUS_PAUSED
+        } else {
+            BOOTSTRAP_STATUS_PENDING_FUNDING
+        }
+    } else if has_live_slots {
+        BOOTSTRAP_STATUS_ACTIVE
+    } else {
+        BOOTSTRAP_STATUS_PENDING_LAUNCH
+    }
+}
+
+fn bootstrap_launch_inputs(
+    desired: &[BootstrapDesiredAgent],
+    existing: &HashMap<String, BaseMarketBootstrapAgentRecord>,
+    market_id: u64,
+) -> Vec<BootstrapAgentConfigInput> {
+    desired
+        .iter()
+        .filter(|agent| {
+            !existing
+                .get(bootstrap_slot_key(agent.side, agent.level_index).as_str())
+                .is_some_and(|record| record.active && record.agent_id.is_some())
+        })
+        .map(|agent| BootstrapAgentConfigInput {
+            market_id,
+            is_yes: agent.is_yes,
+            price_bps: agent.price_bps,
+            size: agent.size.to_string(),
+            cadence: agent.cadence,
+            expiry_window: agent.expiry_window,
+        })
+        .collect()
+}
+
+fn bootstrap_update_inputs(
+    desired: &[BootstrapDesiredAgent],
+    existing: &HashMap<String, BaseMarketBootstrapAgentRecord>,
+) -> (Vec<BootstrapAgentUpdateInput>, Vec<BootstrapRunnerSlot>) {
+    let mut updates = Vec::new();
+    let mut slots = Vec::new();
+
+    for agent in desired {
+        let key = bootstrap_slot_key(agent.side, agent.level_index);
+        let Some(record) = existing.get(key.as_str()) else {
+            continue;
+        };
+        let Some(agent_id) = record.agent_id else {
+            continue;
+        };
+        let current_price = record.current_price_bps.unwrap_or(record.desired_price_bps);
+        let current_size = record.current_size.unwrap_or(record.desired_size);
+        if !record.active || current_price != agent.price_bps || current_size != agent.size {
+            updates.push(BootstrapAgentUpdateInput {
+                agent_id,
+                is_yes: agent.is_yes,
+                price_bps: agent.price_bps,
+                size: agent.size.to_string(),
+                cadence: agent.cadence,
+                expiry_window: agent.expiry_window,
+            });
+            slots.push(runner_slot_from_desired(agent, Some(agent_id)));
+        }
+    }
+
+    (updates, slots)
 }
 
 fn bootstrap_active_for_market(
@@ -1106,6 +1660,7 @@ fn apply_bootstrap_snapshot(
     snapshot.liquidity_mode = Some(config.liquidity_mode.clone());
     snapshot.bootstrap_status = Some(config.status.clone());
     snapshot.bootstrap_seed_usdc = Some(config.seed_usdc);
+    snapshot.bootstrap_manager = config.manager.clone();
     snapshot.bootstrap_strategy = Some(config.strategy.clone());
     snapshot.bootstrap_levels = Some(config.levels);
     snapshot.bootstrap_initial_yes_bps = Some(config.initial_yes_bps);
@@ -1114,6 +1669,9 @@ fn apply_bootstrap_snapshot(
     snapshot.bootstrap_cadence_seconds = Some(config.cadence_seconds);
     snapshot.bootstrap_expiry_seconds = Some(config.expiry_seconds);
     snapshot.bootstrap_graduated_at = parse_rfc3339_utc(config.graduated_at.as_ref());
+    snapshot.bootstrap_launch_tx_hash = config.launch_tx_hash.clone();
+    snapshot.bootstrap_last_reconciled_at = parse_rfc3339_utc(config.last_reconciled_at.as_ref());
+    snapshot.bootstrap_last_error = config.last_error.clone();
 
     if config.liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID {
         snapshot.bootstrap_active = Some(false);
@@ -1200,7 +1758,7 @@ fn validate_bootstrap_registration(
 
     Ok(ValidatedBootstrapRegistration {
         liquidity_mode,
-        status: BOOTSTRAP_STATUS_ACTIVE.to_string(),
+        status: BOOTSTRAP_STATUS_PENDING_LAUNCH.to_string(),
         seed_usdc: (body.seed_usdc * 100.0).round() / 100.0,
         initial_yes_bps,
         strategy,
@@ -1237,13 +1795,17 @@ async fn verify_market_bootstrap_registration_tx(
         .evm_rpc
         .eth_get_transaction_receipt(tx_hash.as_str())
         .await
-        .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "unable to fetch transaction receipt"))?
+        .map_err(|_| {
+            ApiError::bad_request("INVALID_TX_HASH", "unable to fetch transaction receipt")
+        })?
         .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction receipt not found"))?;
     let status = receipt
         .status
         .as_deref()
         .and_then(|value| parse_u64_hex(value).ok())
-        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction status unavailable"))?;
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_HASH", "transaction status unavailable")
+        })?;
     if status != 1 {
         return Err(ApiError::bad_request(
             "INVALID_TX_HASH",
@@ -1262,26 +1824,22 @@ async fn verify_market_bootstrap_registration_tx(
         .from
         .as_deref()
         .map(|value| {
-            normalize_required_address(
-                value,
-                "INVALID_TX_HASH",
-                "transaction sender unavailable",
-            )
+            normalize_required_address(value, "INVALID_TX_HASH", "transaction sender unavailable")
         })
         .transpose()?
-        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction sender unavailable"))?;
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_HASH", "transaction sender unavailable")
+        })?;
     let target = tx
         .to
         .as_deref()
         .map(|value| {
-            normalize_required_address(
-                value,
-                "INVALID_TX_HASH",
-                "transaction target unavailable",
-            )
+            normalize_required_address(value, "INVALID_TX_HASH", "transaction target unavailable")
         })
         .transpose()?
-        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction target unavailable"))?;
+        .ok_or_else(|| {
+            ApiError::bad_request("INVALID_TX_HASH", "transaction target unavailable")
+        })?;
     if target != market_core {
         return Err(ApiError::bad_request(
             "INVALID_TX_HASH",
@@ -1306,8 +1864,9 @@ async fn verify_market_bootstrap_registration_tx(
     if let (Some(tx_block), Some(receipt_block)) =
         (tx.block_number.as_deref(), receipt.block_number.as_deref())
     {
-        let tx_block = parse_u64_hex(tx_block)
-            .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "transaction block is invalid"))?;
+        let tx_block = parse_u64_hex(tx_block).map_err(|_| {
+            ApiError::bad_request("INVALID_TX_HASH", "transaction block is invalid")
+        })?;
         let receipt_block = parse_u64_hex(receipt_block)
             .map_err(|_| ApiError::bad_request("INVALID_TX_HASH", "receipt block is invalid"))?;
         if tx_block != receipt_block {
@@ -1322,11 +1881,9 @@ async fn verify_market_bootstrap_registration_tx(
         let Some(address) = log.address.as_deref() else {
             return false;
         };
-        let Ok(log_address) = normalize_required_address(
-            address,
-            "INVALID_TX_HASH",
-            "invalid receipt log address",
-        ) else {
+        let Ok(log_address) =
+            normalize_required_address(address, "INVALID_TX_HASH", "invalid receipt log address")
+        else {
             return false;
         };
 
@@ -1406,7 +1963,8 @@ async fn maybe_refresh_bootstrap_state(
         (organic_depth as f64) >= (bootstrap_depth as f64 * config.target_depth_multiplier);
     if qualifies {
         if let Some(since) = config.depth_qualified_since {
-            if now.signed_duration_since(since) >= ChronoDuration::hours(BOOTSTRAP_QUALIFY_DURATION_HOURS)
+            if now.signed_duration_since(since)
+                >= ChronoDuration::hours(BOOTSTRAP_QUALIFY_DURATION_HOURS)
             {
                 return Ok(state
                     .db
@@ -1809,6 +2367,25 @@ pub async fn register_base_market_bootstrap(
     }
 
     let validated = validate_bootstrap_registration(&body)?;
+    let manager = if validated.liquidity_mode == BOOTSTRAP_LIQUIDITY_MODE_HYBRID {
+        let configured_manager = configured_bootstrap_operator(&state)?;
+        if let Some(requested) = body.manager.as_ref() {
+            let requested = normalize_required_address(
+                requested.as_str(),
+                "INVALID_MANAGER",
+                "manager must be a valid 0x EVM address",
+            )?;
+            if requested != configured_manager {
+                return Err(ApiError::bad_request(
+                    "INVALID_MANAGER",
+                    "manager must match BOOTSTRAP_OPERATOR_ADDRESS",
+                ));
+            }
+        }
+        Some(configured_manager)
+    } else {
+        None
+    };
     let market = fetch_internal_market_snapshot_by_id(&state, market_id).await?;
     if market.resolved {
         return Err(ApiError::conflict(
@@ -1817,7 +2394,8 @@ pub async fn register_base_market_bootstrap(
         ));
     }
 
-    let creator = verify_market_bootstrap_registration_tx(&state, market_id, body.tx_hash.as_str()).await?;
+    let creator =
+        verify_market_bootstrap_registration_tx(&state, market_id, body.tx_hash.as_str()).await?;
     let record = state
         .db
         .upsert_base_market_bootstrap(&BaseMarketBootstrapUpsert {
@@ -1825,6 +2403,7 @@ pub async fn register_base_market_bootstrap(
             creator: creator.as_str(),
             liquidity_mode: validated.liquidity_mode.as_str(),
             status: validated.status.as_str(),
+            manager: manager.as_deref(),
             seed_usdc: validated.seed_usdc,
             initial_yes_bps: validated.initial_yes_bps,
             strategy: validated.strategy.as_str(),
@@ -1843,6 +2422,9 @@ pub async fn register_base_market_bootstrap(
             graduated_at: None,
             graduation_reason: None,
             create_tx_hash: Some(body.tx_hash.as_str()),
+            launch_tx_hash: None,
+            last_reconciled_at: None,
+            last_error: None,
         })
         .await?;
 
@@ -1878,11 +2460,507 @@ pub async fn update_base_market_bootstrap_runtime(
     });
     let updated = state
         .db
-        .update_base_market_bootstrap_runtime(market_id, next_skew)
+        .update_base_market_bootstrap_runtime(
+            market_id, next_skew, None, None, None, None, None, false,
+        )
         .await?
         .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
 
     Ok(HttpResponse::Ok().json(updated))
+}
+
+pub async fn get_bootstrap_operator_status(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<BootstrapOperatorStatusQuery>,
+) -> Result<impl Responder, ApiError> {
+    if !state.config.evm_enabled || !state.config.evm_reads_enabled {
+        return Err(ApiError::bad_request(
+            "EVM_DISABLED",
+            "EVM services are disabled",
+        ));
+    }
+
+    let owner = normalize_required_address(
+        query.owner.as_str(),
+        "INVALID_OWNER",
+        "owner must be a valid 0x EVM address",
+    )?;
+    let operator = configured_bootstrap_operator(&state)?;
+    let approved = fetch_manager_approval(&state, owner.as_str(), operator.as_str()).await?;
+
+    Ok(HttpResponse::Ok().json(BootstrapOperatorStatusResponse {
+        operator,
+        owner,
+        approved,
+    }))
+}
+
+pub async fn bootstrap_runner_tick(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<BootstrapRunnerTickRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    if !state.config.evm_enabled
+        || !state.config.evm_reads_enabled
+        || !state.config.evm_writes_enabled
+    {
+        return Err(ApiError::bad_request(
+            "EVM_DISABLED",
+            "EVM reads and writes must be enabled for bootstrap automation",
+        ));
+    }
+
+    let operator = configured_bootstrap_operator(&state)?;
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for Base agents",
+    )?;
+    let now = now_seconds()?;
+    let limit = body.limit.unwrap_or(100).clamp(1, 500) as usize;
+    let configs = state.db.list_base_market_bootstrap_configs().await?;
+    let mut actions = Vec::new();
+    let mut scanned = 0_u64;
+
+    'configs: for original in configs {
+        if original.liquidity_mode != BOOTSTRAP_LIQUIDITY_MODE_HYBRID
+            || original.status == BOOTSTRAP_STATUS_DISABLED
+            || original.status == BOOTSTRAP_STATUS_ERROR
+        {
+            continue;
+        }
+        scanned = scanned.saturating_add(1);
+
+        let market = fetch_internal_market_snapshot_by_id(&state, original.market_id).await?;
+        let (organic_yes_bids, organic_no_bids) =
+            collect_internal_order_levels(&state, original.market_id, now).await?;
+        let mut config = maybe_refresh_bootstrap_state(
+            &state,
+            &market,
+            original,
+            &organic_yes_bids,
+            &organic_no_bids,
+        )
+        .await?;
+        let records = state
+            .db
+            .list_base_market_bootstrap_agents(config.market_id)
+            .await?;
+
+        let approved =
+            fetch_manager_approval(&state, config.creator.as_str(), operator.as_str()).await?;
+        let available_balance =
+            fetch_vault_available_balance(&state, config.creator.as_str()).await?;
+        let position =
+            fetch_position_snapshot(&state, config.market_id, config.creator.as_str()).await?;
+        let next_skew = bootstrap_inventory_skew_bps(&config, &position);
+        let has_live_slots = bootstrap_has_live_slots(&records);
+        let next_status =
+            bootstrap_status_for_runtime(&config, approved, available_balance, has_live_slots);
+
+        if config.inventory_skew_bps != next_skew
+            || config.status != next_status
+            || config.manager.as_deref() != Some(operator.as_str())
+        {
+            if let Some(updated) = state
+                .db
+                .update_base_market_bootstrap_runtime(
+                    config.market_id,
+                    Some(next_skew),
+                    Some(next_status),
+                    Some(operator.as_str()),
+                    None,
+                    Some(Utc::now()),
+                    None,
+                    false,
+                )
+                .await?
+            {
+                config = updated;
+            }
+        }
+
+        let active_ids = bootstrap_active_agent_ids(&records);
+        if matches!(
+            config.status.as_str(),
+            BOOTSTRAP_STATUS_PAUSED | "graduated"
+        ) && !active_ids.is_empty()
+        {
+            let slots = records
+                .iter()
+                .filter(|record| record.active && record.agent_id.is_some())
+                .map(|record| runner_slot_from_record(record, &config))
+                .collect::<Vec<_>>();
+            actions.push(BootstrapRunnerAction {
+                kind: BOOTSTRAP_RUNNER_ACTION_DEACTIVATE.to_string(),
+                market_id: config.market_id,
+                config_status: config.status.clone(),
+                prepared_write: prepared_write_response(
+                    state.config.base_chain_id,
+                    Some(operator.clone()),
+                    agent_runtime.clone(),
+                    encode_deactivate_agents_calldata(active_ids.as_slice()),
+                    "deactivateAgents",
+                ),
+                slots,
+            });
+            if actions.len() >= limit {
+                break 'configs;
+            }
+            continue;
+        }
+
+        if config.status != BOOTSTRAP_STATUS_ACTIVE
+            && config.status != BOOTSTRAP_STATUS_PENDING_LAUNCH
+        {
+            continue;
+        }
+
+        let desired = bootstrap_desired_agents(&config);
+        let existing = bootstrap_slot_records_map(&records);
+        let missing_agents =
+            bootstrap_launch_inputs(desired.as_slice(), &existing, config.market_id);
+        if !missing_agents.is_empty() {
+            let slots = desired
+                .iter()
+                .filter(|agent| {
+                    !existing
+                        .get(bootstrap_slot_key(agent.side, agent.level_index).as_str())
+                        .is_some_and(|record| record.active && record.agent_id.is_some())
+                })
+                .map(|agent| runner_slot_from_desired(agent, None))
+                .collect::<Vec<_>>();
+            actions.push(BootstrapRunnerAction {
+                kind: BOOTSTRAP_RUNNER_ACTION_LAUNCH.to_string(),
+                market_id: config.market_id,
+                config_status: config.status.clone(),
+                prepared_write: prepared_write_response(
+                    state.config.base_chain_id,
+                    Some(operator.clone()),
+                    agent_runtime.clone(),
+                    encode_create_agents_for_calldata(
+                        config.creator.as_str(),
+                        operator.as_str(),
+                        missing_agents.as_slice(),
+                        config.strategy.as_str(),
+                    )?,
+                    "createAgentsFor",
+                ),
+                slots,
+            });
+            if actions.len() >= limit {
+                break 'configs;
+            }
+            continue;
+        }
+
+        let (updates, update_slots) = bootstrap_update_inputs(desired.as_slice(), &existing);
+        if !updates.is_empty() {
+            actions.push(BootstrapRunnerAction {
+                kind: BOOTSTRAP_RUNNER_ACTION_UPDATE.to_string(),
+                market_id: config.market_id,
+                config_status: config.status.clone(),
+                prepared_write: prepared_write_response(
+                    state.config.base_chain_id,
+                    Some(operator.clone()),
+                    agent_runtime.clone(),
+                    encode_update_agents_calldata(updates.as_slice(), config.strategy.as_str())?,
+                    "updateAgents",
+                ),
+                slots: update_slots,
+            });
+            if actions.len() >= limit {
+                break 'configs;
+            }
+            continue;
+        }
+
+        for record in records.iter().filter(|record| record.active) {
+            let Some(agent_id) = record.agent_id else {
+                continue;
+            };
+            let calldata = format!(
+                "{}{}",
+                AGENT_RUNTIME_AGENTS_SELECTOR,
+                encode_u256_hex(agent_id)
+            );
+            let slot = state
+                .evm_rpc
+                .eth_call(agent_runtime.as_str(), calldata.as_str())
+                .await
+                .map_err(map_evm_rpc_error)?;
+            let Some(snapshot) = decode_agent_snapshot(agent_id, slot.as_str(), now)? else {
+                continue;
+            };
+            if !snapshot.can_execute {
+                continue;
+            }
+
+            actions.push(BootstrapRunnerAction {
+                kind: BOOTSTRAP_RUNNER_ACTION_EXECUTE.to_string(),
+                market_id: config.market_id,
+                config_status: config.status.clone(),
+                prepared_write: prepared_write_response(
+                    state.config.base_chain_id,
+                    Some(operator.clone()),
+                    agent_runtime.clone(),
+                    format!(
+                        "{}{}",
+                        AGENT_RUNTIME_EXECUTE_SELECTOR,
+                        encode_u256_hex(agent_id)
+                    ),
+                    "executeAgent",
+                ),
+                slots: vec![runner_slot_from_record(record, &config)],
+            });
+            if actions.len() >= limit {
+                break 'configs;
+            }
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(BootstrapRunnerTickResponse { scanned, actions }))
+}
+
+pub async fn bootstrap_runner_report(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<BootstrapRunnerReportRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let tx_hash = normalize_required_bytes32(
+        body.tx_hash.as_str(),
+        "INVALID_TX_HASH",
+        "txHash must be a valid 0x-prefixed transaction hash",
+    )?;
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for Base agents",
+    )?;
+    let mut config = state
+        .db
+        .get_base_market_bootstrap(body.market_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+    let receipt = state
+        .evm_rpc
+        .eth_get_transaction_receipt(tx_hash.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?
+        .ok_or_else(|| ApiError::bad_request("INVALID_TX_HASH", "transaction receipt not found"))?;
+    let receipt_success = receipt
+        .status
+        .as_deref()
+        .and_then(|value| parse_u64_hex(value).ok())
+        .unwrap_or(0)
+        == 1;
+    let success = body.success && receipt_success;
+    let now = Utc::now();
+
+    if !success {
+        let next_status = if body.kind == BOOTSTRAP_RUNNER_ACTION_LAUNCH {
+            BOOTSTRAP_STATUS_ERROR
+        } else {
+            config.status.as_str()
+        };
+        let updated = state
+            .db
+            .update_base_market_bootstrap_runtime(
+                body.market_id,
+                None,
+                Some(next_status),
+                None,
+                None,
+                Some(now),
+                body.error
+                    .as_deref()
+                    .or(Some("bootstrap runner transaction failed")),
+                false,
+            )
+            .await?
+            .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+        return Ok(HttpResponse::Ok().json(updated));
+    }
+
+    match body.kind.as_str() {
+        BOOTSTRAP_RUNNER_ACTION_LAUNCH => {
+            let agent_ids =
+                extract_created_agent_ids(&receipt, agent_runtime.as_str(), body.market_id)?;
+            if agent_ids.len() != body.slots.len() {
+                return Err(ApiError::internal(
+                    "bootstrap launch receipt did not match planned slots",
+                ));
+            }
+            for (index, slot) in body.slots.iter().enumerate() {
+                state
+                    .db
+                    .upsert_base_market_bootstrap_agent(&BaseMarketBootstrapAgentUpsert {
+                        market_id: body.market_id,
+                        side: slot.side.as_str(),
+                        level_index: slot.level_index,
+                        agent_id: Some(agent_ids[index]),
+                        desired_price_bps: slot.price_bps,
+                        desired_size: parse_u64_decimal(slot.size.as_str(), "size")?,
+                        current_price_bps: Some(slot.price_bps),
+                        current_size: Some(parse_u64_decimal(slot.size.as_str(), "size")?),
+                        active: true,
+                        created_tx_hash: Some(tx_hash.as_str()),
+                        updated_tx_hash: None,
+                        deactivated_tx_hash: None,
+                        last_execute_tx_hash: None,
+                        last_executed_at: None,
+                        last_reconciled_at: Some(now),
+                        last_error: None,
+                    })
+                    .await?;
+            }
+            config = state
+                .db
+                .update_base_market_bootstrap_runtime(
+                    body.market_id,
+                    None,
+                    Some(BOOTSTRAP_STATUS_ACTIVE),
+                    None,
+                    Some(tx_hash.as_str()),
+                    Some(now),
+                    None,
+                    true,
+                )
+                .await?
+                .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+        }
+        BOOTSTRAP_RUNNER_ACTION_UPDATE => {
+            for slot in &body.slots {
+                state
+                    .db
+                    .upsert_base_market_bootstrap_agent(&BaseMarketBootstrapAgentUpsert {
+                        market_id: body.market_id,
+                        side: slot.side.as_str(),
+                        level_index: slot.level_index,
+                        agent_id: slot.agent_id,
+                        desired_price_bps: slot.price_bps,
+                        desired_size: parse_u64_decimal(slot.size.as_str(), "size")?,
+                        current_price_bps: Some(slot.price_bps),
+                        current_size: Some(parse_u64_decimal(slot.size.as_str(), "size")?),
+                        active: true,
+                        created_tx_hash: None,
+                        updated_tx_hash: Some(tx_hash.as_str()),
+                        deactivated_tx_hash: None,
+                        last_execute_tx_hash: None,
+                        last_executed_at: None,
+                        last_reconciled_at: Some(now),
+                        last_error: None,
+                    })
+                    .await?;
+            }
+            config = state
+                .db
+                .update_base_market_bootstrap_runtime(
+                    body.market_id,
+                    None,
+                    Some(BOOTSTRAP_STATUS_ACTIVE),
+                    None,
+                    None,
+                    Some(now),
+                    None,
+                    true,
+                )
+                .await?
+                .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+        }
+        BOOTSTRAP_RUNNER_ACTION_DEACTIVATE => {
+            for slot in &body.slots {
+                state
+                    .db
+                    .upsert_base_market_bootstrap_agent(&BaseMarketBootstrapAgentUpsert {
+                        market_id: body.market_id,
+                        side: slot.side.as_str(),
+                        level_index: slot.level_index,
+                        agent_id: slot.agent_id,
+                        desired_price_bps: slot.price_bps,
+                        desired_size: parse_u64_decimal(slot.size.as_str(), "size")?,
+                        current_price_bps: Some(slot.price_bps),
+                        current_size: Some(parse_u64_decimal(slot.size.as_str(), "size")?),
+                        active: false,
+                        created_tx_hash: None,
+                        updated_tx_hash: None,
+                        deactivated_tx_hash: Some(tx_hash.as_str()),
+                        last_execute_tx_hash: None,
+                        last_executed_at: None,
+                        last_reconciled_at: Some(now),
+                        last_error: None,
+                    })
+                    .await?;
+            }
+            config = state
+                .db
+                .update_base_market_bootstrap_runtime(
+                    body.market_id,
+                    None,
+                    Some(config.status.as_str()),
+                    None,
+                    None,
+                    Some(now),
+                    None,
+                    true,
+                )
+                .await?
+                .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+        }
+        BOOTSTRAP_RUNNER_ACTION_EXECUTE => {
+            for slot in &body.slots {
+                state
+                    .db
+                    .upsert_base_market_bootstrap_agent(&BaseMarketBootstrapAgentUpsert {
+                        market_id: body.market_id,
+                        side: slot.side.as_str(),
+                        level_index: slot.level_index,
+                        agent_id: slot.agent_id,
+                        desired_price_bps: slot.price_bps,
+                        desired_size: parse_u64_decimal(slot.size.as_str(), "size")?,
+                        current_price_bps: Some(slot.price_bps),
+                        current_size: Some(parse_u64_decimal(slot.size.as_str(), "size")?),
+                        active: true,
+                        created_tx_hash: None,
+                        updated_tx_hash: None,
+                        deactivated_tx_hash: None,
+                        last_execute_tx_hash: Some(tx_hash.as_str()),
+                        last_executed_at: Some(now),
+                        last_reconciled_at: Some(now),
+                        last_error: None,
+                    })
+                    .await?;
+            }
+            config = state
+                .db
+                .update_base_market_bootstrap_runtime(
+                    body.market_id,
+                    None,
+                    Some(BOOTSTRAP_STATUS_ACTIVE),
+                    None,
+                    None,
+                    Some(now),
+                    None,
+                    true,
+                )
+                .await?
+                .ok_or_else(|| ApiError::not_found("Base market bootstrap config"))?;
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_RUNNER_ACTION",
+                "kind must be one of launch, update, deactivate, execute",
+            ));
+        }
+    }
+
+    Ok(HttpResponse::Ok().json(config))
 }
 
 pub async fn get_base_agents(
@@ -2616,9 +3694,9 @@ pub async fn get_base_orderbook(
             complementary_asks_from_levels(&yes_bid_levels, depth),
         )
     };
-    let is_synthetic = bootstrap_config.as_ref().is_some_and(|config| {
-        bootstrap_active_for_market(config, &market_snapshot, now)
-    });
+    let is_synthetic = bootstrap_config
+        .as_ref()
+        .is_some_and(|config| bootstrap_active_for_market(config, &market_snapshot, now));
 
     Ok(HttpResponse::Ok().json(BaseOrderBookResponse {
         market_id: market_id_raw,
@@ -3329,6 +4407,211 @@ pub async fn prepare_execute_agent_write(
     )))
 }
 
+pub async fn prepare_set_manager_approval_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareSetManagerApprovalWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let manager = normalize_required_address(
+        body.manager.as_str(),
+        "INVALID_MANAGER",
+        "manager must be a valid 0x EVM address",
+    )?;
+    let data = encode_set_manager_approval_calldata(manager.as_str(), body.approved)?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "setManagerApproval",
+    )))
+}
+
+pub async fn prepare_bootstrap_create_agents_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareBootstrapCreateAgentsWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let owner = normalize_required_address(
+        body.owner.as_str(),
+        "INVALID_OWNER",
+        "owner must be a valid 0x EVM address",
+    )?;
+    let manager = normalize_required_address(
+        body.manager.as_str(),
+        "INVALID_MANAGER",
+        "manager must be a valid 0x EVM address",
+    )?;
+    let strategy = body.strategy.trim();
+    if strategy.is_empty() || strategy.len() > MAX_MARKET_TEXT_LENGTH {
+        return Err(ApiError::bad_request(
+            "INVALID_STRATEGY",
+            "strategy must be present and within length limits",
+        ));
+    }
+    if body.agents.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_AGENTS",
+            "agents must contain at least one config",
+        ));
+    }
+
+    for config in &body.agents {
+        let _ = parse_u128_decimal(config.size.as_str(), "size")?;
+        if config.price_bps == 0 || config.price_bps >= 10_000 {
+            return Err(ApiError::bad_request(
+                "INVALID_PRICE_BPS",
+                "priceBps must be between 1 and 9999",
+            ));
+        }
+        if config.cadence == 0 || config.expiry_window == 0 {
+            return Err(ApiError::bad_request(
+                "INVALID_AGENT_TIMING",
+                "cadence and expiryWindow must be greater than zero",
+            ));
+        }
+    }
+
+    let data = encode_create_agents_for_calldata(
+        owner.as_str(),
+        manager.as_str(),
+        &body.agents,
+        strategy,
+    )?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "createAgentsFor",
+    )))
+}
+
+pub async fn prepare_update_agents_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareUpdateAgentsWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let strategy = body.strategy.trim();
+    if strategy.is_empty() || strategy.len() > MAX_MARKET_TEXT_LENGTH {
+        return Err(ApiError::bad_request(
+            "INVALID_STRATEGY",
+            "strategy must be present and within length limits",
+        ));
+    }
+    if body.updates.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_UPDATES",
+            "updates must contain at least one agent update",
+        ));
+    }
+    for update in &body.updates {
+        let _ = parse_u128_decimal(update.size.as_str(), "size")?;
+        if update.price_bps == 0 || update.price_bps >= 10_000 {
+            return Err(ApiError::bad_request(
+                "INVALID_PRICE_BPS",
+                "priceBps must be between 1 and 9999",
+            ));
+        }
+        if update.cadence == 0 || update.expiry_window == 0 {
+            return Err(ApiError::bad_request(
+                "INVALID_AGENT_TIMING",
+                "cadence and expiryWindow must be greater than zero",
+            ));
+        }
+    }
+
+    let data = encode_update_agents_calldata(&body.updates, strategy)?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "updateAgents",
+    )))
+}
+
+pub async fn prepare_deactivate_agents_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareDeactivateAgentsWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    if body.agent_ids.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_AGENT_IDS",
+            "agentIds must contain at least one agent id",
+        ));
+    }
+    let data = encode_deactivate_agents_calldata(&body.agent_ids);
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "deactivateAgents",
+    )))
+}
+
+pub async fn prepare_set_agent_manager_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareSetAgentManagerWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let agent_runtime = configured_address(
+        &state.config.agent_runtime_address,
+        "AGENT_RUNTIME_ADDRESS_NOT_CONFIGURED",
+        "AGENT_RUNTIME_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let manager = normalize_required_address(
+        body.manager.as_str(),
+        "INVALID_MANAGER",
+        "manager must be a valid 0x EVM address",
+    )?;
+    let data = encode_set_agent_manager_calldata(body.agent_id, manager.as_str())?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        agent_runtime,
+        data,
+        "setAgentManager",
+    )))
+}
+
 pub async fn prepare_erc8004_register_identity_write(
     state: web::Data<Arc<AppState>>,
     body: web::Json<PrepareErc8004RegisterIdentityWriteRequest>,
@@ -3889,6 +5172,128 @@ fn encode_create_agent_calldata(
     ))
 }
 
+fn encode_agent_config_array_tail(
+    configs: &[BootstrapAgentConfigInput],
+) -> Result<String, ApiError> {
+    let mut encoded = encode_u256_hex_u128(configs.len() as u128);
+    for config in configs {
+        let size = parse_u128_decimal(config.size.as_str(), "size")?;
+        encoded.push_str(
+            format!(
+                "{}{}{}{}{}{}",
+                encode_u256_hex(config.market_id),
+                encode_bool_word(config.is_yes),
+                encode_u256_hex_u128(config.price_bps as u128),
+                encode_u256_hex_u128(size),
+                encode_u256_hex(config.cadence),
+                encode_u256_hex(config.expiry_window),
+            )
+            .as_str(),
+        );
+    }
+    Ok(encoded)
+}
+
+fn encode_agent_update_array_tail(
+    updates: &[BootstrapAgentUpdateInput],
+) -> Result<String, ApiError> {
+    let mut encoded = encode_u256_hex_u128(updates.len() as u128);
+    for update in updates {
+        let size = parse_u128_decimal(update.size.as_str(), "size")?;
+        encoded.push_str(
+            format!(
+                "{}{}{}{}{}{}",
+                encode_u256_hex(update.agent_id),
+                encode_bool_word(update.is_yes),
+                encode_u256_hex_u128(update.price_bps as u128),
+                encode_u256_hex_u128(size),
+                encode_u256_hex(update.cadence),
+                encode_u256_hex(update.expiry_window),
+            )
+            .as_str(),
+        );
+    }
+    Ok(encoded)
+}
+
+fn encode_u64_array_tail(values: &[u64]) -> String {
+    let mut encoded = encode_u256_hex_u128(values.len() as u128);
+    for value in values {
+        encoded.push_str(encode_u256_hex(*value).as_str());
+    }
+    encoded
+}
+
+fn encode_set_manager_approval_calldata(manager: &str, approved: bool) -> Result<String, ApiError> {
+    Ok(format!(
+        "{}{}{}",
+        AGENT_RUNTIME_SET_MANAGER_APPROVAL_SELECTOR,
+        encode_address_word(manager)?,
+        encode_bool_word(approved),
+    ))
+}
+
+fn encode_create_agents_for_calldata(
+    owner: &str,
+    manager: &str,
+    configs: &[BootstrapAgentConfigInput],
+    strategy: &str,
+) -> Result<String, ApiError> {
+    let configs_tail = encode_agent_config_array_tail(configs)?;
+    let strategy_tail = encode_dynamic_string_tail(strategy);
+    let head_len_bytes = 32usize * 4usize;
+    let strategy_offset = head_len_bytes + (configs_tail.len() / 2);
+
+    Ok(format!(
+        "{}{}{}{}{}{}{}",
+        AGENT_RUNTIME_CREATE_FOR_SELECTOR,
+        encode_address_word(owner)?,
+        encode_address_word(manager)?,
+        encode_u256_hex_u128(head_len_bytes as u128),
+        encode_u256_hex_u128(strategy_offset as u128),
+        configs_tail,
+        strategy_tail,
+    ))
+}
+
+fn encode_update_agents_calldata(
+    updates: &[BootstrapAgentUpdateInput],
+    strategy: &str,
+) -> Result<String, ApiError> {
+    let updates_tail = encode_agent_update_array_tail(updates)?;
+    let strategy_tail = encode_dynamic_string_tail(strategy);
+    let head_len_bytes = 32usize * 2usize;
+    let strategy_offset = head_len_bytes + (updates_tail.len() / 2);
+
+    Ok(format!(
+        "{}{}{}{}{}",
+        AGENT_RUNTIME_UPDATE_BATCH_SELECTOR,
+        encode_u256_hex_u128(head_len_bytes as u128),
+        encode_u256_hex_u128(strategy_offset as u128),
+        updates_tail,
+        strategy_tail,
+    ))
+}
+
+fn encode_deactivate_agents_calldata(agent_ids: &[u64]) -> String {
+    let ids_tail = encode_u64_array_tail(agent_ids);
+    format!(
+        "{}{}{}",
+        AGENT_RUNTIME_DEACTIVATE_BATCH_SELECTOR,
+        encode_u256_hex_u128(32),
+        ids_tail,
+    )
+}
+
+fn encode_set_agent_manager_calldata(agent_id: u64, manager: &str) -> Result<String, ApiError> {
+    Ok(format!(
+        "{}{}{}",
+        AGENT_RUNTIME_SET_MANAGER_SELECTOR,
+        encode_u256_hex(agent_id),
+        encode_address_word(manager)?,
+    ))
+}
+
 fn encode_validation_request_calldata(
     validator: &str,
     agent_id: u128,
@@ -3945,6 +5350,17 @@ fn parse_u128_decimal(value: &str, field: &str) -> Result<u128, ApiError> {
             &format!("{} must be an unsigned integer string", field),
         )
     })
+}
+
+fn parse_u64_decimal(value: &str, field: &str) -> Result<u64, ApiError> {
+    let parsed = parse_u128_decimal(value, field)?;
+    if parsed > u64::MAX as u128 {
+        return Err(ApiError::bad_request(
+            "INVALID_NUMERIC_FIELD",
+            &format!("{} exceeds supported range", field),
+        ));
+    }
+    Ok(parsed as u64)
 }
 
 fn prepared_write_response(
@@ -4070,6 +5486,7 @@ fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, 
         bootstrap_status: None,
         bootstrap_active: None,
         bootstrap_seed_usdc: None,
+        bootstrap_manager: None,
         bootstrap_strategy: None,
         bootstrap_levels: None,
         bootstrap_initial_yes_bps: None,
@@ -4078,6 +5495,9 @@ fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, 
         bootstrap_cadence_seconds: None,
         bootstrap_expiry_seconds: None,
         bootstrap_graduated_at: None,
+        bootstrap_launch_tx_hash: None,
+        bootstrap_last_reconciled_at: None,
+        bootstrap_last_error: None,
     })
 }
 
@@ -4107,6 +5527,7 @@ fn decode_agent_snapshot(
     Ok(Some(BaseAgentSnapshot {
         id: index.to_string(),
         owner: raw.owner,
+        manager: raw.manager,
         market_id: raw.market_id.to_string(),
         is_yes: raw.is_yes,
         price_bps: raw.price_bps,
@@ -4287,15 +5708,23 @@ fn decode_agent_slot(slot: &str) -> Result<Option<BaseRawAgent>, ApiError> {
 
     Ok(Some(BaseRawAgent {
         owner: format!("0x{}", &owner_word[24..]).to_ascii_lowercase(),
-        market_id: parse_u64_hex(word_at(slot, 1)?)?,
-        is_yes: parse_bool_word(word_at(slot, 2)?)?,
-        price_bps: parse_u64_hex(word_at(slot, 3)?)?,
-        size: parse_u128_hex(word_at(slot, 4)?)?,
-        cadence: parse_u64_hex(word_at(slot, 5)?)?,
-        expiry_window: parse_u64_hex(word_at(slot, 6)?)?,
-        last_executed_at: parse_u64_hex(word_at(slot, 7)?)?,
-        active: parse_bool_word(word_at(slot, 8)?)?,
-        strategy: decode_abi_string_at_offset(slot, word_at(slot, 9)?)?,
+        manager: {
+            let manager_word = word_at(slot, 1)?;
+            if manager_word.chars().all(|c| c == '0') {
+                None
+            } else {
+                Some(format!("0x{}", &manager_word[24..]).to_ascii_lowercase())
+            }
+        },
+        market_id: parse_u64_hex(word_at(slot, 2)?)?,
+        is_yes: parse_bool_word(word_at(slot, 3)?)?,
+        price_bps: parse_u64_hex(word_at(slot, 4)?)?,
+        size: parse_u128_hex(word_at(slot, 5)?)?,
+        cadence: parse_u64_hex(word_at(slot, 6)?)?,
+        expiry_window: parse_u64_hex(word_at(slot, 7)?)?,
+        last_executed_at: parse_u64_hex(word_at(slot, 8)?)?,
+        active: parse_bool_word(word_at(slot, 9)?)?,
+        strategy: decode_abi_string_at_offset(slot, word_at(slot, 10)?)?,
     }))
 }
 
@@ -4337,6 +5766,7 @@ mod tests {
             creator: "0x71c7656ec7ab88b098defb751b7401b5f6d8976f".to_string(),
             liquidity_mode: BOOTSTRAP_LIQUIDITY_MODE_HYBRID.to_string(),
             status: BOOTSTRAP_STATUS_ACTIVE.to_string(),
+            manager: Some("0x0000000000000000000000000000000000000042".to_string()),
             seed_usdc: 100.0,
             initial_yes_bps: 5_000,
             strategy: BOOTSTRAP_STRATEGY_LADDER_V1.to_string(),
@@ -4356,6 +5786,9 @@ mod tests {
             graduated_at: None,
             graduation_reason: None,
             create_tx_hash: None,
+            launch_tx_hash: None,
+            last_reconciled_at: None,
+            last_error: None,
             created_at: now,
             updated_at: now,
         }
@@ -4369,6 +5802,7 @@ mod tests {
             liquidity_mode: BOOTSTRAP_LIQUIDITY_MODE_HYBRID.to_string(),
             seed_usdc: 100.0,
             initial_yes_bps: 5_000,
+            manager: Some("0x0000000000000000000000000000000000000042".to_string()),
             strategy: BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL.to_string(),
             levels: 5,
             base_spread_bps: 150,
@@ -4584,6 +6018,7 @@ mod tests {
     #[test]
     fn test_decode_agent_snapshot() {
         let owner = "00000000000000000000000039e4939df3763e342db531a2a58867bc26a22b98";
+        let manager = "0000000000000000000000000000000000000000000000000000000000000000";
         let market_id = format!("{:064x}", 12u64);
         let is_yes = format!("{:064x}", 1u64);
         let price_bps = format!("{:064x}", 5500u64);
@@ -4592,12 +6027,13 @@ mod tests {
         let expiry_window = format!("{:064x}", 1800u64);
         let last_executed_at = format!("{:064x}", 100u64);
         let active = format!("{:064x}", 1u64);
-        let strategy_offset = encode_u256_hex_u128((32 * 10) as u128);
+        let strategy_offset = encode_u256_hex_u128((32 * 11) as u128);
         let strategy = encode_dynamic_string_tail("momentum-v1");
 
         let payload = format!(
-            "0x{}{}{}{}{}{}{}{}{}{}{}",
+            "0x{}{}{}{}{}{}{}{}{}{}{}{}",
             owner,
+            manager,
             market_id,
             is_yes,
             price_bps,

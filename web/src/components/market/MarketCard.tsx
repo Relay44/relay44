@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowUpRight, RefreshCw } from "lucide-react";
 import { MarketArtwork } from "@/components/market/MarketArtwork";
+import { getBootstrapStatusLabel } from "@/lib/bootstrap";
 import { cn } from "@/lib/utils";
 import type { Market } from "@/types";
 
@@ -36,6 +37,7 @@ export function MarketCard({ market }: MarketCardProps) {
     { label: "No", probability: market.noPrice },
   ];
   const displayOutcomes = outcomes.slice(0, 2);
+  const bootstrapLabel = getBootstrapStatusLabel(market);
 
   return (
     <Link
@@ -51,7 +53,11 @@ export function MarketCard({ market }: MarketCardProps) {
       >
         {/* Header: Image + Question */}
         <div className="relative flex items-start gap-3 mb-4">
-          <MarketArtwork market={market} className="h-12 w-12 shrink-0" sizes="48px" />
+          <MarketArtwork
+            market={market}
+            className="h-12 w-12 shrink-0"
+            sizes="48px"
+          />
           <div className="flex-1">
             <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.16em] text-text-muted mb-1">
               <span className="inline-flex items-center gap-1 px-2 py-0.5 border border-border bg-bg-secondary/60">
@@ -75,7 +81,7 @@ export function MarketCard({ market }: MarketCardProps) {
               </span>
               {market.liquidityMode === "bootstrap_hybrid" ? (
                 <span className="px-2 py-0.5 border border-accent/30 bg-accent/10 text-accent">
-                  bootstrap
+                  {bootstrapLabel}
                 </span>
               ) : null}
             </div>
@@ -120,9 +126,10 @@ export function MarketCard({ market }: MarketCardProps) {
             <span className="font-semibold text-text-primary">
               {formatVolume(market.totalVolume)}
             </span>
-            {market.liquidityMode === "bootstrap_hybrid" && market.bootstrapSeedUsdc ? (
+            {market.liquidityMode === "bootstrap_hybrid" &&
+            market.bootstrapSeedUsdc ? (
               <span className="text-text-secondary">
-                bootstrap ${Math.round(market.bootstrapSeedUsdc)}
+                {bootstrapLabel} ${Math.round(market.bootstrapSeedUsdc)}
               </span>
             ) : null}
             {market.frequency && (

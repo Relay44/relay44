@@ -49,6 +49,17 @@ const checks = [
     description: "siwe domain",
   },
   {
+    name: "ADMIN_WALLETS",
+    kind: "config",
+    validate: (value) =>
+      value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .every((entry) => isAddress(entry)),
+    description: "admin wallet allowlist",
+  },
+  {
     name: "BASE_RPC_URL",
     kind: "config",
     validate: (value) => value.startsWith("http"),
@@ -85,6 +96,12 @@ const checks = [
     kind: "config",
     validate: (value) => isAddress(value) && getAddress(value) === getAddress(expectedContracts.agentRuntime),
     description: "agent runtime address matches manifest",
+  },
+  {
+    name: "BOOTSTRAP_OPERATOR_ADDRESS",
+    kind: "config",
+    validate: (value) => isAddress(value),
+    description: "bootstrap operator address",
   },
   {
     name: "EVM_WRITES_ENABLED",
