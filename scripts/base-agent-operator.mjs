@@ -176,7 +176,8 @@ async function estimateL1Fee(publicClient) {
       functionName: "getL1FeeUpperBound",
       args: [BigInt(TYPICAL_EXECUTE_TX_SIZE)],
     });
-  } catch {
+  } catch (err) {
+    console.warn("L1 fee estimation failed, using static minimum:", err?.message);
     return 0n;
   }
 }
@@ -356,7 +357,7 @@ async function main() {
         {
           ok: true,
           startedAt,
-          operator: account.address,
+          operator: runtime.account.address,
           balanceEth: balanceCheck.balanceEth,
           minBalanceEth,
           scanned: plan?.scanned ?? 0,
@@ -400,7 +401,7 @@ async function main() {
       {
         ok: failures.length === 0,
         startedAt,
-        operator: account.address,
+        operator: runtime.account.address,
         balanceEth: balanceCheck.balanceEth,
         minBalanceEth,
         dryRun: false,

@@ -811,7 +811,10 @@ async fn verify_erc6492_signature(
 
     let calldata_hex = format!("0x{}", hex::encode(&calldata));
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client build failed: {}", e))?;
     let resp = client
         .post(rpc_url)
         .json(&serde_json::json!({
@@ -840,11 +843,11 @@ async fn verify_erc6492_signature(
         .as_str()
         .ok_or("missing result in RPC response")?;
 
-    // isValidSig returns true (non-zero) on success
     let result_bytes =
         hex::decode(result.strip_prefix("0x").unwrap_or(result)).map_err(|_| "invalid result hex")?;
 
-    if result_bytes.iter().all(|&b| b == 0) {
+    // isValidSig returns a bool — expect 32 bytes with the last byte == 1
+    if result_bytes.len() < 32 || result_bytes[31] != 1 {
         return Err("smart wallet signature verification failed".to_string());
     }
 
