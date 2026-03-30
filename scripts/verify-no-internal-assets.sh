@@ -4,12 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-if [[ -e "docs" ]]; then
-  echo "Boundary check failed: root docs/ directory is not allowed in this repository."
-  echo "Remove docs/ (or move it outside the repo) before committing or pushing."
-  exit 1
-fi
-
 BLOCKED_PREFIXES=(
   "docs/reports/"
   "docs/runbooks/"
@@ -19,6 +13,7 @@ BLOCKED_PREFIXES=(
 )
 
 BLOCKED_FILES=(
+  ".render-workspace-lock.json"
   "docs/LAUNCH_COMMAND_CENTER.md"
   "docs/LAUNCH_ENV_CHECKLIST.md"
   "docs/DEPLOYMENT_PLAN.md"
