@@ -260,6 +260,29 @@
     background-image: var(--texture-grain);
   }
 
+  .tape-stripe {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tape-stripe::before {
+    content: "";
+    position: absolute;
+    inset-inline: -32px;
+    top: 50%;
+    height: 12px;
+    transform: translateY(-50%);
+    background: repeating-linear-gradient(
+      90deg,
+      rgba(228, 71, 11, 0.16) 0,
+      rgba(228, 71, 11, 0.16) 32px,
+      transparent 32px,
+      transparent 64px
+    );
+    opacity: 0.8;
+    pointer-events: none;
+  }
+
   .pt-header {
     padding-top: var(--app-header-offset);
   }

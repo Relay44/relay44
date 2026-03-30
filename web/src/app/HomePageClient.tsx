@@ -19,6 +19,23 @@ interface HomePageClientProps {
 const HOME_MARKET_LIMIT = 16;
 const FEATURED_MARKET_COUNT = 16;
 
+function formatPriceForTape(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "--";
+  }
+
+  return `${Math.round(value * 100)}c`;
+}
+
+function truncateTapeQuestion(question: string): string {
+  const normalized = question.trim();
+  if (normalized.length <= 72) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 69).trimEnd()}...`;
+}
+
 function formatAgentSize(size: string): string {
   const parsed = Number(size) / 1_000_000;
   if (!Number.isFinite(parsed) || parsed <= 0) return "0";
@@ -290,6 +307,39 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
   );
 }
 
+function HomeMarketTape({
+  markets,
+  signal,
+}: {
+  markets: Market[];
+  signal: HomeLiveFeed["signal"];
+}) {
+  const items = [
+    `Relay44 live on Base`,
+    `${signal.marketsTracked} markets tracked`,
+    `${signal.feedsLive}/${signal.feedsExpected} sources live`,
+    `updated ${formatUtcTimestamp(signal.updatedAt)}`,
+    ...markets.slice(0, 8).map((market) => {
+      const yesPrice = formatPriceForTape(market.yesPrice);
+      const noPrice = formatPriceForTape(market.noPrice);
+      return `${truncateTapeQuestion(market.question)} | YES ${yesPrice} | NO ${noPrice}`;
+    }),
+  ];
+
+  const tickerText = `${items.join(" • ")} • `;
+
+  return (
+    <div className="tape-stripe fixed bottom-0 left-0 right-0 z-30 hidden overflow-hidden border-t border-border bg-bg-primary md:block">
+      <div className="overflow-hidden py-2.5 whitespace-nowrap">
+        <span className="animate-marquee relative inline-block text-[11px] font-mono uppercase tracking-[0.16em] text-accent">
+          {tickerText}
+          {tickerText}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function HomePageClient({
   initialMarkets,
   initialLiveFeed,
@@ -371,7 +421,7 @@ export default function HomePageClient({
           signal={liveFeed.signal}
         />
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto md:pb-10">
           <section className="border-b border-border h-[280px] sm:h-[320px]">
             <HeroTicket
               accessValue="PUBLIC WEB"
@@ -414,6 +464,7 @@ export default function HomePageClient({
         </main>
       </div>
 
+      <HomeMarketTape markets={markets} signal={liveFeed.signal} />
       <BottomNav />
     </div>
   );
