@@ -26,6 +26,9 @@ const O_BITMAP = [
   [0, 1, 1, 0],
 ] as const;
 
+const SIGNAL_RESOLVED_BINARY =
+  '01110011 01101001 01100111 01101110 01100001 01101100 00100000 01110010 01100101 01110011 01101111 01101100 01110110 01100101 01100100';
+
 function getGlyphBitmap(char: '0' | '1' | 'o') {
   if (char === '0') return ZERO_BITMAP;
   if (char === '1') return ONE_BITMAP;
@@ -559,7 +562,7 @@ export function HeroTicket({
             fontSize: '0.7rem',
           }}
         >
-          LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL
+          {SIGNAL_RESOLVED_BINARY}
         </div>
 
         <div style={dataGrid}>
