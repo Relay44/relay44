@@ -6,7 +6,16 @@ body:
   - type: markdown
     attributes:
       value: |
-        Provide a minimal, reproducible report.
+        Provide a minimal, reproducible report. Usage questions and security reports should not use this form.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I confirmed this problem affects open-core code in this repository.
+          required: true
+        - label: I checked for existing issues and pull requests before opening this report.
+          required: true
   - type: textarea
     id: summary
     attributes:
@@ -37,6 +46,16 @@ body:
       label: Actual behavior
     validations:
       required: true
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Regression?
+      options:
+        - "yes"
+        - "no"
+        - unknown
+    validations:
+      required: true
   - type: input
     id: version
     attributes:
@@ -59,8 +78,26 @@ body:
     validations:
       required: true
   - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Runtime, browser, wallet, chain, or local setup details that matter for repro.
+      placeholder: |
+        OS:
+        Browser:
+        Node/Rust/Foundry versions:
+        Chain or provider:
+        Env flags:
+    validations:
+      required: true
+  - type: textarea
     id: logs
     attributes:
       label: Logs/errors
       description: Paste relevant logs, traces, or screenshots.
       render: shell
+  - type: textarea
+    id: minimal_repro
+    attributes:
+      label: Minimal repro asset
+      description: Link a minimal PR, gist, failing request, or failing test if you have one.

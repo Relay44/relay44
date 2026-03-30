@@ -9,6 +9,7 @@
     "web:dev:watch": "bash scripts/web-dev.sh",
     "ops:silo-check": "./scripts/verify-project-silo.sh",
     "ops:silo-check:strict": "SILO_CHECK_INCLUDE_DOCS=1 ./scripts/verify-project-silo.sh",
+    "ops:repo-standards": "bash scripts/verify-public-repo-standards.sh",
     "ops:open-core-check": "node scripts/verify-open-core-boundary.mjs",
     "ops:no-internal-assets": "bash scripts/verify-no-internal-assets.sh staged",
     "ops:no-internal-assets:tracked": "bash scripts/verify-no-internal-assets.sh tracked",

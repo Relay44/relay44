@@ -3,6 +3,15 @@ description: Propose a scoped feature for relay44 open core.
 title: "[feature] "
 labels: ["enhancement", "triage"]
 body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I reviewed existing issues and pull requests for duplicates.
+          required: true
+        - label: This request targets open-core code only.
+          required: true
   - type: textarea
     id: problem
     attributes:
@@ -18,9 +27,21 @@ body:
     validations:
       required: true
   - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation and users affected
+      description: Who benefits, and why should this be part of the maintained open-source surface?
+    validations:
+      required: true
+  - type: textarea
     id: alternatives
     attributes:
       label: Alternatives considered
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What would have to be true for this request to be considered done?
   - type: dropdown
     id: scope
     attributes:
@@ -34,12 +55,8 @@ body:
         - Docs/tooling
     validations:
       required: true
-  - type: checkboxes
-    id: checks
+  - type: textarea
+    id: risks
     attributes:
-      label: Readiness
-      options:
-        - label: I reviewed existing issues and discussions for duplicates.
-          required: true
-        - label: This request targets open-core code only.
-          required: true
+      label: Risks or tradeoffs
+      description: Call out compatibility, maintenance cost, or security implications.
