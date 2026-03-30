@@ -39,10 +39,7 @@ contract ERC8004ValidationRegistry is AccessControl, Pausable {
     error InvalidResponse();
 
     event ValidationRequest(
-        address indexed validatorAddress,
-        uint256 indexed agentId,
-        string requestURI,
-        bytes32 indexed requestHash
+        address indexed validatorAddress, uint256 indexed agentId, string requestURI, bytes32 indexed requestHash
     );
     event ValidationResponse(
         address indexed validatorAddress,
@@ -69,10 +66,12 @@ contract ERC8004ValidationRegistry is AccessControl, Pausable {
         emit ValidatorAdded(admin);
     }
 
-    function validationRequest(address validatorAddress, uint256 agentId, string calldata requestURI, bytes32 requestHash)
-        external
-        whenNotPaused
-    {
+    function validationRequest(
+        address validatorAddress,
+        uint256 agentId,
+        string calldata requestURI,
+        bytes32 requestHash
+    ) external whenNotPaused {
         if (validatorAddress == address(0)) revert ZeroAddress();
         if (!isValidator[validatorAddress]) revert NotValidator();
         if (!_agentExists(agentId)) revert AgentNotFound();
@@ -118,13 +117,13 @@ contract ERC8004ValidationRegistry is AccessControl, Pausable {
         emit ValidationResponse(msg.sender, record.agentId, requestHash, response, responseURI, responseHash, tag);
     }
 
-    function validationResponseFromTier(bytes32 requestHash, uint8 tier, string calldata responseURI, bytes32 responseHash)
-        external
-        whenNotPaused
-    {
-        validationResponse(
-            requestHash, tierToResponse(tier), responseURI, responseHash, keccak256("validation_tier")
-        );
+    function validationResponseFromTier(
+        bytes32 requestHash,
+        uint8 tier,
+        string calldata responseURI,
+        bytes32 responseHash
+    ) external whenNotPaused {
+        validationResponse(requestHash, tierToResponse(tier), responseURI, responseHash, keccak256("validation_tier"));
     }
 
     function getValidationStatus(bytes32 requestHash)
@@ -142,9 +141,15 @@ contract ERC8004ValidationRegistry is AccessControl, Pausable {
         ValidationRecord storage record = _validations[requestHash];
         if (record.timestamp == 0) revert ValidationNotFound();
 
-        return (
-            record.validatorAddress, record.agentId, record.response, record.responseHash, record.tag, record.timestamp
-        );
+        return
+            (
+                record.validatorAddress,
+                record.agentId,
+                record.response,
+                record.responseHash,
+                record.tag,
+                record.timestamp
+            );
     }
 
     function getSummary(uint256 agentId, address[] calldata validatorAddresses, bytes32 tag)

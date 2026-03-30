@@ -478,7 +478,10 @@ fn parse_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>, ApiError
 fn clean_required(value: &str, field: &str, max_len: usize) -> Result<String, ApiError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(ApiError::bad_request("INVALID_INPUT", &format!("{field} is required")));
+        return Err(ApiError::bad_request(
+            "INVALID_INPUT",
+            &format!("{field} is required"),
+        ));
     }
     if trimmed.len() > max_len {
         return Err(ApiError::bad_request(
@@ -509,7 +512,10 @@ fn clean_optional(value: Option<&str>, max_len: usize) -> Result<Option<String>,
 fn normalize_decision_type(raw: &str) -> Result<String, ApiError> {
     let value = raw.trim().to_ascii_lowercase();
     match value.as_str() {
-        DECISION_TYPE_TIMING | DECISION_TYPE_CHOICE | DECISION_TYPE_HEDGE | DECISION_TYPE_ALLOCATION => Ok(value),
+        DECISION_TYPE_TIMING
+        | DECISION_TYPE_CHOICE
+        | DECISION_TYPE_HEDGE
+        | DECISION_TYPE_ALLOCATION => Ok(value),
         _ => Err(ApiError::bad_request(
             "INVALID_DECISION_TYPE",
             "decision type must be one of: timing, choice, hedge, allocation",
@@ -552,7 +558,10 @@ fn normalize_effect(raw: &str) -> Result<String, ApiError> {
     }
 }
 
-fn normalize_actions(decision_type: &str, actions: Option<Vec<String>>) -> Result<Vec<String>, ApiError> {
+fn normalize_actions(
+    decision_type: &str,
+    actions: Option<Vec<String>>,
+) -> Result<Vec<String>, ApiError> {
     let provided = actions.unwrap_or_default();
     if decision_type == DECISION_TYPE_TIMING {
         if provided.is_empty() {
@@ -587,7 +596,11 @@ fn normalize_actions(decision_type: &str, actions: Option<Vec<String>>) -> Resul
     Ok(cleaned)
 }
 
-fn action_effect_map(action_labels: &[String], supported_index: Option<usize>, opposed_index: Option<usize>) -> Value {
+fn action_effect_map(
+    action_labels: &[String],
+    supported_index: Option<usize>,
+    opposed_index: Option<usize>,
+) -> Value {
     let mut object = serde_json::Map::new();
     for (index, label) in action_labels.iter().enumerate() {
         let effect = if Some(index) == supported_index {
@@ -615,7 +628,8 @@ fn starter_templates(decision_type: &str) -> &'static [StarterNodeTemplate] {
             },
             StarterNodeTemplate {
                 label: "Broader trend persists",
-                description: "The surrounding market regime continues to support the same timing decision.",
+                description:
+                    "The surrounding market regime continues to support the same timing decision.",
             },
         ],
         DECISION_TYPE_CHOICE => &[
@@ -639,7 +653,8 @@ fn starter_templates(decision_type: &str) -> &'static [StarterNodeTemplate] {
             },
             StarterNodeTemplate {
                 label: "Hedge cost pressure",
-                description: "A signal that the hedge itself is becoming too expensive or inefficient.",
+                description:
+                    "A signal that the hedge itself is becoming too expensive or inefficient.",
             },
             StarterNodeTemplate {
                 label: "Correlation breakdown",
@@ -653,18 +668,23 @@ fn starter_templates(decision_type: &str) -> &'static [StarterNodeTemplate] {
             },
             StarterNodeTemplate {
                 label: "Downside catalyst",
-                description: "The strongest driver in favor of reducing or avoiding the allocation.",
+                description:
+                    "The strongest driver in favor of reducing or avoiding the allocation.",
             },
             StarterNodeTemplate {
                 label: "Liquidity or exit condition",
-                description: "The condition that determines whether the allocation can be changed safely.",
+                description:
+                    "The condition that determines whether the allocation can be changed safely.",
             },
         ],
         _ => &[],
     }
 }
 
-fn build_starter_nodes(decision_type: &str, actions: &[String]) -> Vec<(StarterNodeTemplate, Value)> {
+fn build_starter_nodes(
+    decision_type: &str,
+    actions: &[String],
+) -> Vec<(StarterNodeTemplate, Value)> {
     starter_templates(decision_type)
         .iter()
         .enumerate()
@@ -685,9 +705,15 @@ fn build_starter_nodes(decision_type: &str, actions: &[String]) -> Vec<(StarterN
 
 fn parse_cell_record(row: sqlx::postgres::PgRow) -> Result<DecisionCellRecord, ApiError> {
     Ok(DecisionCellRecord {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
-        owner: row.try_get("owner").map_err(|err| ApiError::internal(&err.to_string()))?,
-        title: row.try_get("title").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        owner: row
+            .try_get("owner")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        title: row
+            .try_get("title")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         statement: row
             .try_get("statement")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
@@ -695,7 +721,9 @@ fn parse_cell_record(row: sqlx::postgres::PgRow) -> Result<DecisionCellRecord, A
             .try_get("decision_type")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
         horizon_at: row.try_get("horizon_at").ok(),
-        status: row.try_get("status").map_err(|err| ApiError::internal(&err.to_string()))?,
+        status: row
+            .try_get("status")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         automation_enabled: row
             .try_get("automation_enabled")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
@@ -717,40 +745,71 @@ fn parse_cell_record(row: sqlx::postgres::PgRow) -> Result<DecisionCellRecord, A
 
 fn parse_action_record(row: sqlx::postgres::PgRow) -> Result<DecisionActionRecord, ApiError> {
     Ok(DecisionActionRecord {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
-        label: row.try_get("label").map_err(|err| ApiError::internal(&err.to_string()))?,
-        rank: row.try_get("rank").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        label: row
+            .try_get("label")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        rank: row
+            .try_get("rank")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
     })
 }
 
 fn parse_node_record(row: sqlx::postgres::PgRow) -> Result<DecisionNodeRecord, ApiError> {
     Ok(DecisionNodeRecord {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
-        label: row.try_get("label").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        label: row
+            .try_get("label")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         description: row.try_get("description").unwrap_or_default(),
-        weight_bps: row.try_get("weight_bps").map_err(|err| ApiError::internal(&err.to_string()))?,
-        source_type: row.try_get("source_type").map_err(|err| ApiError::internal(&err.to_string()))?,
+        weight_bps: row
+            .try_get("weight_bps")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        source_type: row
+            .try_get("source_type")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         source_ref: row.try_get("source_ref").ok(),
-        status: row.try_get("status").map_err(|err| ApiError::internal(&err.to_string()))?,
+        status: row
+            .try_get("status")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         last_probability_bps: row.try_get("last_probability_bps").ok(),
-        last_market_snapshot: row.try_get("last_market_snapshot").unwrap_or_else(|_| json!({})),
+        last_market_snapshot: row
+            .try_get("last_market_snapshot")
+            .unwrap_or_else(|_| json!({})),
         action_effects: row.try_get("action_effects").unwrap_or_else(|_| json!({})),
-        created_at: row.try_get("created_at").map_err(|err| ApiError::internal(&err.to_string()))?,
-        updated_at: row.try_get("updated_at").map_err(|err| ApiError::internal(&err.to_string()))?,
+        created_at: row
+            .try_get("created_at")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        updated_at: row
+            .try_get("updated_at")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
     })
 }
 
 fn parse_alert_record(row: sqlx::postgres::PgRow) -> Result<DecisionAlertRecord, ApiError> {
     Ok(DecisionAlertRecord {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
-        kind: row.try_get("kind").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        kind: row
+            .try_get("kind")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         threshold: row.try_get("threshold").unwrap_or_else(|_| json!({})),
-        active: row.try_get("active").map_err(|err| ApiError::internal(&err.to_string()))?,
+        active: row
+            .try_get("active")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         last_triggered_at: row.try_get("last_triggered_at").ok(),
     })
 }
 
-fn parse_policy_record(row: Option<sqlx::postgres::PgRow>, _cell_id: &str) -> Result<DecisionAutomationPolicyRecord, ApiError> {
+fn parse_policy_record(
+    row: Option<sqlx::postgres::PgRow>,
+    _cell_id: &str,
+) -> Result<DecisionAutomationPolicyRecord, ApiError> {
     if let Some(row) = row {
         return Ok(DecisionAutomationPolicyRecord {
             max_agent_notional_usdc: row
@@ -766,7 +825,9 @@ fn parse_policy_record(row: Option<sqlx::postgres::PgRow>, _cell_id: &str) -> Re
             require_confidence_bps: row
                 .try_get("require_confidence_bps")
                 .map_err(|err| ApiError::internal(&err.to_string()))?,
-            active: row.try_get("active").map_err(|err| ApiError::internal(&err.to_string()))?,
+            active: row
+                .try_get("active")
+                .map_err(|err| ApiError::internal(&err.to_string()))?,
         });
     }
 
@@ -780,17 +841,25 @@ fn parse_policy_record(row: Option<sqlx::postgres::PgRow>, _cell_id: &str) -> Re
     })
 }
 
-fn parse_node_agent_record(row: sqlx::postgres::PgRow) -> Result<DecisionNodeAgentRecord, ApiError> {
+fn parse_node_agent_record(
+    row: sqlx::postgres::PgRow,
+) -> Result<DecisionNodeAgentRecord, ApiError> {
     Ok(DecisionNodeAgentRecord {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
-        node_id: row.try_get("node_id").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        node_id: row
+            .try_get("node_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         external_agent_id: row
             .try_get("external_agent_id")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
         trigger_mode: row
             .try_get("trigger_mode")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
-        active: row.try_get("active").map_err(|err| ApiError::internal(&err.to_string()))?,
+        active: row
+            .try_get("active")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         agent_name: row.try_get("agent_name").ok(),
         provider: row.try_get("provider").ok(),
         agent_active: row.try_get("agent_active").ok(),
@@ -798,11 +867,17 @@ fn parse_node_agent_record(row: sqlx::postgres::PgRow) -> Result<DecisionNodeAge
 }
 
 fn parse_event_response(row: sqlx::postgres::PgRow) -> Result<DecisionEventResponse, ApiError> {
-    let created_at: DateTime<Utc> = row.try_get("created_at").map_err(|err| ApiError::internal(&err.to_string()))?;
+    let created_at: DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
     Ok(DecisionEventResponse {
-        id: row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?,
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         node_id: row.try_get("node_id").ok(),
-        kind: row.try_get("kind").map_err(|err| ApiError::internal(&err.to_string()))?,
+        kind: row
+            .try_get("kind")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
         payload: row.try_get("payload").unwrap_or_else(|_| json!({})),
         created_at: created_at.to_rfc3339(),
     })
@@ -812,11 +887,17 @@ fn summary_from_value(value: &Value) -> DecisionSummary {
     serde_json::from_value(value.clone()).unwrap_or_default()
 }
 
-fn normalize_action_effects(value: Option<Value>, actions: &[DecisionActionRecord]) -> Result<Value, ApiError> {
+fn normalize_action_effects(
+    value: Option<Value>,
+    actions: &[DecisionActionRecord],
+) -> Result<Value, ApiError> {
     let Some(payload) = value else {
         let mut map = serde_json::Map::new();
         for action in actions {
-            map.insert(action.label.clone(), Value::String(EFFECT_NEUTRAL.to_string()));
+            map.insert(
+                action.label.clone(),
+                Value::String(EFFECT_NEUTRAL.to_string()),
+            );
         }
         return Ok(Value::Object(map));
     };
@@ -839,7 +920,10 @@ fn normalize_action_effects(value: Option<Value>, actions: &[DecisionActionRecor
             .get(action.label.as_str())
             .and_then(Value::as_str)
             .unwrap_or(EFFECT_NEUTRAL);
-        normalized.insert(action.label.clone(), Value::String(normalize_effect(effect)?));
+        normalized.insert(
+            action.label.clone(),
+            Value::String(normalize_effect(effect)?),
+        );
     }
 
     for key in object.keys() {
@@ -1125,7 +1209,8 @@ async fn resolve_node_market(
             };
             match external::fetch_market_by_id(&state.config, &market_id).await {
                 Ok(snapshot) => {
-                    let probability_bps = (snapshot.yes_price.clamp(0.0, 1.0) * 10_000.0).round() as i32;
+                    let probability_bps =
+                        (snapshot.yes_price.clamp(0.0, 1.0) * 10_000.0).round() as i32;
                     Ok(Some(ResolvedNodeMarket {
                         probability_bps,
                         snapshot: serde_json::to_value(snapshot)
@@ -1220,11 +1305,12 @@ fn build_recommendation(
             let weighted_signal = centered_signal * node.weight_bps as f64;
 
             for (index, action) in actions.iter().enumerate() {
-                let contribution = match action_effect_for_label(&node.action_effects, action.label.as_str()) {
-                    EFFECT_SUPPORT => weighted_signal,
-                    EFFECT_OPPOSE => -weighted_signal,
-                    _ => 0.0,
-                };
+                let contribution =
+                    match action_effect_for_label(&node.action_effects, action.label.as_str()) {
+                        EFFECT_SUPPORT => weighted_signal,
+                        EFFECT_OPPOSE => -weighted_signal,
+                        _ => 0.0,
+                    };
                 raw_scores[index] += contribution;
             }
         }
@@ -1236,7 +1322,9 @@ fn build_recommendation(
             (None, None) => 0,
         };
 
-        if delta >= max_delta && (previous_probability_bps.is_some() || current_probability_bps.is_some()) {
+        if delta >= max_delta
+            && (previous_probability_bps.is_some() || current_probability_bps.is_some())
+        {
             max_delta = delta;
             last_changed_node = Some(DecisionNodeChange {
                 node_id: node.id.clone(),
@@ -1268,7 +1356,12 @@ fn build_recommendation(
         })
         .collect::<Vec<_>>();
 
-    action_scores.sort_by(|left, right| right.score_bps.cmp(&left.score_bps).then(left.rank.cmp(&right.rank)));
+    action_scores.sort_by(|left, right| {
+        right
+            .score_bps
+            .cmp(&left.score_bps)
+            .then(left.rank.cmp(&right.rank))
+    });
     let total_nodes = nodes.len();
     let live_ratio = if total_nodes == 0 {
         0.0
@@ -1285,13 +1378,14 @@ fn build_recommendation(
         0
     };
 
-    let state = if live_nodes < MIN_LIVE_NODES_FOR_SIGNAL || top_lead < RECOMMENDATION_LEAD_THRESHOLD_BPS {
-        RECOMMENDATION_INSUFFICIENT_SIGNAL.to_string()
-    } else if cell.decision_type == DECISION_TYPE_TIMING {
-        recommendation_from_timing_label(action_scores[0].label.as_str())
-    } else {
-        action_scores[0].label.clone()
-    };
+    let state =
+        if live_nodes < MIN_LIVE_NODES_FOR_SIGNAL || top_lead < RECOMMENDATION_LEAD_THRESHOLD_BPS {
+            RECOMMENDATION_INSUFFICIENT_SIGNAL.to_string()
+        } else if cell.decision_type == DECISION_TYPE_TIMING {
+            recommendation_from_timing_label(action_scores[0].label.as_str())
+        } else {
+            action_scores[0].label.clone()
+        };
 
     let winning_label = action_scores
         .first()
@@ -1308,11 +1402,12 @@ fn build_recommendation(
         };
         let centered_signal = (probability_bps as f64 - 5_000.0) / 5_000.0;
         let weighted_signal = centered_signal * node.weight_bps as f64;
-        let contribution = match action_effect_for_label(&node.action_effects, winning_label.as_str()) {
-            EFFECT_SUPPORT => weighted_signal,
-            EFFECT_OPPOSE => -weighted_signal,
-            _ => 0.0,
-        };
+        let contribution =
+            match action_effect_for_label(&node.action_effects, winning_label.as_str()) {
+                EFFECT_SUPPORT => weighted_signal,
+                EFFECT_OPPOSE => -weighted_signal,
+                _ => 0.0,
+            };
         if contribution.abs() <= f64::EPSILON {
             continue;
         }
@@ -1322,7 +1417,9 @@ fn build_recommendation(
             action_label: winning_label.clone(),
             score_bps: ((contribution / active_weight_bps.max(1) as f64) * 10_000.0).round() as i32,
             probability_bps,
-            delta_bps: node.last_probability_bps.map(|previous| probability_bps - previous),
+            delta_bps: node
+                .last_probability_bps
+                .map(|previous| probability_bps - previous),
             source_ref: node.source_ref.clone(),
         });
     }
@@ -1344,7 +1441,10 @@ fn build_recommendation(
             .current_probability_bps
             .or(change.previous_probability_bps)
             .unwrap_or_default();
-        let delta_bps = match (change.previous_probability_bps, change.current_probability_bps) {
+        let delta_bps = match (
+            change.previous_probability_bps,
+            change.current_probability_bps,
+        ) {
             (Some(previous), Some(current)) => Some(current - previous),
             (Some(previous), None) => Some(-previous),
             (None, Some(current)) => Some(current),
@@ -1392,7 +1492,8 @@ fn build_recommendation(
     } else if total_nodes == 0 {
         "Add nodes to start scoring this decision cell.".to_string()
     } else {
-        "Link live markets to at least two nodes before the cell can issue a recommendation.".to_string()
+        "Link live markets to at least two nodes before the cell can issue a recommendation."
+            .to_string()
     };
 
     let summary = DecisionSummary {
@@ -1428,21 +1529,26 @@ async fn persist_node_snapshots(
         let Some(value) = resolved_nodes.get(node.id.as_str()) else {
             continue;
         };
-        let (probability, snapshot, status) = if matches!(node.source_type.as_str(), SOURCE_TYPE_DRAFT_MARKET) {
-            (None, json!({ "status": "draft" }), NODE_STATUS_DRAFT)
-        } else if let Some(resolved) = value.as_ref() {
-            if let Some(probability_bps) = resolved_probability(resolved) {
-                (Some(probability_bps), resolved.snapshot.clone(), NODE_STATUS_LIVE)
+        let (probability, snapshot, status) =
+            if matches!(node.source_type.as_str(), SOURCE_TYPE_DRAFT_MARKET) {
+                (None, json!({ "status": "draft" }), NODE_STATUS_DRAFT)
+            } else if let Some(resolved) = value.as_ref() {
+                if let Some(probability_bps) = resolved_probability(resolved) {
+                    (
+                        Some(probability_bps),
+                        resolved.snapshot.clone(),
+                        NODE_STATUS_LIVE,
+                    )
+                } else {
+                    (
+                        None,
+                        unresolved_snapshot(node, Some(&resolved.snapshot)),
+                        NODE_STATUS_INACTIVE,
+                    )
+                }
             } else {
-                (
-                    None,
-                    unresolved_snapshot(node, Some(&resolved.snapshot)),
-                    NODE_STATUS_INACTIVE,
-                )
-            }
-        } else {
-            (None, unresolved_snapshot(node, None), NODE_STATUS_INACTIVE)
-        };
+                (None, unresolved_snapshot(node, None), NODE_STATUS_INACTIVE)
+            };
         sqlx::query(
             "UPDATE decision_nodes
              SET last_probability_bps = $2,
@@ -1658,15 +1764,20 @@ async fn evaluate_and_record_alerts(
             continue;
         }
 
-        sqlx::query(
-            "UPDATE decision_alerts SET last_triggered_at = NOW() WHERE id = $1",
-        )
-        .bind(alert.id.as_str())
-        .execute(state.db.pool())
-        .await
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
+        sqlx::query("UPDATE decision_alerts SET last_triggered_at = NOW() WHERE id = $1")
+            .bind(alert.id.as_str())
+            .execute(state.db.pool())
+            .await
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
 
-        let event = insert_decision_event(state, graph.cell.id.as_str(), None, event_kind, payload.clone()).await?;
+        let event = insert_decision_event(
+            state,
+            graph.cell.id.as_str(),
+            None,
+            event_kind,
+            payload.clone(),
+        )
+        .await?;
         let notification_kind = match event_kind {
             EVENT_RECOMMENDATION_CHANGED => NotificationType::DecisionRecommendationChanged,
             EVENT_CONFIDENCE_DROPPED => NotificationType::DecisionConfidenceDropped,
@@ -1716,7 +1827,8 @@ async fn maybe_run_automation(
         return Ok((events, executed, skipped));
     }
 
-    let has_new_event = flags.recommendation_changed || flags.threshold_crossed || flags.confidence_gain;
+    let has_new_event =
+        flags.recommendation_changed || flags.threshold_crossed || flags.confidence_gain;
     if !has_new_event {
         skipped.insert("steady_state".to_string(), 1);
         return Ok((events, executed, skipped));
@@ -1735,9 +1847,12 @@ async fn maybe_run_automation(
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
     if let Some(row) = last_success {
-        let created_at: DateTime<Utc> = row.try_get("created_at").map_err(|err| ApiError::internal(&err.to_string()))?;
+        let created_at: DateTime<Utc> = row
+            .try_get("created_at")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
         if graph.policy.min_trigger_interval_seconds > 0
-            && Utc::now() < created_at + Duration::seconds(graph.policy.min_trigger_interval_seconds)
+            && Utc::now()
+                < created_at + Duration::seconds(graph.policy.min_trigger_interval_seconds)
         {
             skipped.insert("cooldown_active".to_string(), 1);
             return Ok((events, executed, skipped));
@@ -1826,7 +1941,9 @@ async fn maybe_run_automation(
 
         if let Some(allowed_provider) = graph.policy.allowed_provider.as_deref() {
             if agent.provider.as_str() != allowed_provider {
-                *skipped.entry("provider_not_allowed".to_string()).or_insert(0) += 1;
+                *skipped
+                    .entry("provider_not_allowed".to_string())
+                    .or_insert(0) += 1;
                 events.push(
                     insert_decision_event(
                         state,
@@ -2139,7 +2256,11 @@ pub async fn list_decision_cells(
          FROM decision_cells WHERE owner = ",
     );
     builder.push_bind(user.wallet_address.as_str());
-    if let Some(status) = query.status.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(status) = query
+        .status
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         builder.push(" AND status = ");
         builder.push_bind(status.trim().to_ascii_lowercase());
     }
@@ -2162,7 +2283,11 @@ pub async fn list_decision_cells(
         "SELECT COUNT(*)::BIGINT AS total FROM decision_cells WHERE owner = ",
     );
     count_builder.push_bind(user.wallet_address.as_str());
-    if let Some(status) = query.status.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(status) = query
+        .status
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         count_builder.push(" AND status = ");
         count_builder.push_bind(status.trim().to_ascii_lowercase());
     }
@@ -2210,8 +2335,12 @@ pub async fn list_decision_cells(
 
         let mut grouped = HashMap::<String, Vec<String>>::new();
         for row in rows {
-            let cell_id: String = row.try_get("cell_id").map_err(|err| ApiError::internal(&err.to_string()))?;
-            let source_ref: String = row.try_get("source_ref").map_err(|err| ApiError::internal(&err.to_string()))?;
+            let cell_id: String = row
+                .try_get("cell_id")
+                .map_err(|err| ApiError::internal(&err.to_string()))?;
+            let source_ref: String = row
+                .try_get("source_ref")
+                .map_err(|err| ApiError::internal(&err.to_string()))?;
             grouped.entry(cell_id).or_default().push(source_ref);
         }
         for refs in grouped.values_mut() {
@@ -2349,10 +2478,22 @@ pub async fn update_decision_cell(
 ) -> Result<impl Responder, ApiError> {
     let user = extract_authenticated_user(&req, &state).await?;
     let cell_id = path.into_inner();
-    let current = ensure_cell_exists_for_owner(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
+    let current =
+        ensure_cell_exists_for_owner(&state, cell_id.as_str(), user.wallet_address.as_str())
+            .await?;
 
-    let title = body.title.as_ref().map(|value| clean_required(value, "title", 160)).transpose()?.unwrap_or(current.title);
-    let statement = body.statement.as_ref().map(|value| clean_required(value, "statement", 4000)).transpose()?.unwrap_or(current.statement);
+    let title = body
+        .title
+        .as_ref()
+        .map(|value| clean_required(value, "title", 160))
+        .transpose()?
+        .unwrap_or(current.title);
+    let statement = body
+        .statement
+        .as_ref()
+        .map(|value| clean_required(value, "statement", 4000))
+        .transpose()?
+        .unwrap_or(current.statement);
     let horizon_at = if body.horizon_at.is_some() {
         parse_datetime(body.horizon_at.as_deref())?
     } else {
@@ -2364,7 +2505,9 @@ pub async fn update_decision_cell(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .unwrap_or(current.status);
-    let automation_enabled = body.automation_enabled.unwrap_or(current.automation_enabled);
+    let automation_enabled = body
+        .automation_enabled
+        .unwrap_or(current.automation_enabled);
 
     sqlx::query(
         "UPDATE decision_cells
@@ -2386,8 +2529,15 @@ pub async fn update_decision_cell(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn add_decision_action(
@@ -2400,13 +2550,14 @@ pub async fn add_decision_action(
     let cell_id = path.into_inner();
     load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
 
-    let current_count = sqlx::query("SELECT COUNT(*)::INT AS total FROM decision_cell_actions WHERE cell_id = $1")
-        .bind(cell_id.as_str())
-        .fetch_one(state.db.pool())
-        .await
-        .map_err(|err| ApiError::internal(&err.to_string()))?
-        .try_get::<i32, _>("total")
-        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let current_count =
+        sqlx::query("SELECT COUNT(*)::INT AS total FROM decision_cell_actions WHERE cell_id = $1")
+            .bind(cell_id.as_str())
+            .fetch_one(state.db.pool())
+            .await
+            .map_err(|err| ApiError::internal(&err.to_string()))?
+            .try_get::<i32, _>("total")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
     if current_count >= 3 {
         return Err(ApiError::conflict(
             "TOO_MANY_ACTIONS",
@@ -2427,8 +2578,15 @@ pub async fn add_decision_action(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn add_decision_node(
@@ -2442,27 +2600,40 @@ pub async fn add_decision_node(
     let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
     let label = clean_required(body.label.as_str(), "label", 160)?;
     let description = clean_optional(body.description.as_deref(), 2000)?.unwrap_or_default();
-    let source_type = normalize_source_type(body.source_type.as_deref().unwrap_or(SOURCE_TYPE_DRAFT_MARKET))?;
+    let source_type = normalize_source_type(
+        body.source_type
+            .as_deref()
+            .unwrap_or(SOURCE_TYPE_DRAFT_MARKET),
+    )?;
     let source_ref = clean_optional(body.source_ref.as_deref(), 160)?;
     if source_type == SOURCE_TYPE_INTERNAL_MARKET {
         let Some(source_ref) = source_ref.as_deref() else {
-            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "internal market nodes require sourceRef"));
+            return Err(ApiError::bad_request(
+                "INVALID_SOURCE_REF",
+                "internal market nodes require sourceRef",
+            ));
         };
         ensure_internal_market_exists(&state, source_ref).await?;
     }
     if source_type == SOURCE_TYPE_EXTERNAL_MARKET {
         let Some(source_ref) = source_ref.as_deref() else {
-            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "external market nodes require sourceRef"));
+            return Err(ApiError::bad_request(
+                "INVALID_SOURCE_REF",
+                "external market nodes require sourceRef",
+            ));
         };
         ExternalMarketId::parse(source_ref)?;
     }
     let action_effects = normalize_action_effects(body.action_effects.clone(), &graph.actions)?;
     let weight_bps = body.weight_bps.unwrap_or(3333).clamp(0, 10_000);
-    let status = body.status.as_deref().unwrap_or(if source_type == SOURCE_TYPE_DRAFT_MARKET {
-        NODE_STATUS_DRAFT
-    } else {
-        NODE_STATUS_LIVE
-    });
+    let status = body
+        .status
+        .as_deref()
+        .unwrap_or(if source_type == SOURCE_TYPE_DRAFT_MARKET {
+            NODE_STATUS_DRAFT
+        } else {
+            NODE_STATUS_LIVE
+        });
 
     let node_id = Uuid::new_v4().to_string();
     sqlx::query(
@@ -2493,8 +2664,15 @@ pub async fn add_decision_node(
     )
     .await?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn update_decision_node(
@@ -2513,8 +2691,19 @@ pub async fn update_decision_node(
         .cloned()
         .ok_or_else(|| ApiError::not_found("Decision node"))?;
 
-    let label = body.label.as_ref().map(|value| clean_required(value, "label", 160)).transpose()?.unwrap_or(current.label);
-    let description = body.description.as_ref().map(|value| clean_optional(Some(value.as_str()), 2000)).transpose()?.flatten().unwrap_or(current.description);
+    let label = body
+        .label
+        .as_ref()
+        .map(|value| clean_required(value, "label", 160))
+        .transpose()?
+        .unwrap_or(current.label);
+    let description = body
+        .description
+        .as_ref()
+        .map(|value| clean_optional(Some(value.as_str()), 2000))
+        .transpose()?
+        .flatten()
+        .unwrap_or(current.description);
     let source_type = body
         .source_type
         .as_deref()
@@ -2528,24 +2717,41 @@ pub async fn update_decision_node(
     };
     if source_type == SOURCE_TYPE_INTERNAL_MARKET {
         let Some(source_ref) = source_ref.as_deref() else {
-            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "internal market nodes require sourceRef"));
+            return Err(ApiError::bad_request(
+                "INVALID_SOURCE_REF",
+                "internal market nodes require sourceRef",
+            ));
         };
         ensure_internal_market_exists(&state, source_ref).await?;
     }
     if source_type == SOURCE_TYPE_EXTERNAL_MARKET {
         let Some(source_ref) = source_ref.as_deref() else {
-            return Err(ApiError::bad_request("INVALID_SOURCE_REF", "external market nodes require sourceRef"));
+            return Err(ApiError::bad_request(
+                "INVALID_SOURCE_REF",
+                "external market nodes require sourceRef",
+            ));
         };
         ExternalMarketId::parse(source_ref)?;
     }
     let actions = graph.actions;
-    let action_effects = normalize_action_effects(body.action_effects.clone().or_else(|| Some(current.action_effects.clone())), &actions)?;
-    let weight_bps = body.weight_bps.unwrap_or(current.weight_bps).clamp(0, 10_000);
-    let status = body.status.as_deref().unwrap_or(if source_type == SOURCE_TYPE_DRAFT_MARKET {
-        NODE_STATUS_DRAFT
-    } else {
-        NODE_STATUS_LIVE
-    });
+    let action_effects = normalize_action_effects(
+        body.action_effects
+            .clone()
+            .or_else(|| Some(current.action_effects.clone())),
+        &actions,
+    )?;
+    let weight_bps = body
+        .weight_bps
+        .unwrap_or(current.weight_bps)
+        .clamp(0, 10_000);
+    let status = body
+        .status
+        .as_deref()
+        .unwrap_or(if source_type == SOURCE_TYPE_DRAFT_MARKET {
+            NODE_STATUS_DRAFT
+        } else {
+            NODE_STATUS_LIVE
+        });
 
     sqlx::query(
         "UPDATE decision_nodes
@@ -2580,8 +2786,15 @@ pub async fn update_decision_node(
     )
     .await?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn attach_market_to_decision_node(
@@ -2633,8 +2846,15 @@ pub async fn attach_market_to_decision_node(
     )
     .await?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn attach_agent_to_decision_node(
@@ -2648,7 +2868,12 @@ pub async fn attach_agent_to_decision_node(
     load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
 
     let trigger_mode = normalize_trigger_mode(body.trigger_mode.as_str())?;
-    load_external_agent_for_owner(&state, body.external_agent_id.as_str(), user.wallet_address.as_str()).await?;
+    load_external_agent_for_owner(
+        &state,
+        body.external_agent_id.as_str(),
+        user.wallet_address.as_str(),
+    )
+    .await?;
 
     sqlx::query(
         "INSERT INTO decision_node_agents (
@@ -2693,8 +2918,15 @@ pub async fn recalculate_decision_cell(
 ) -> Result<impl Responder, ApiError> {
     let user = extract_authenticated_user(&req, &state).await?;
     let cell_id = path.into_inner();
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn update_decision_automation(
@@ -2717,7 +2949,9 @@ pub async fn update_decision_automation(
         }
     }
 
-    let automation_enabled = body.automation_enabled.unwrap_or(graph.cell.automation_enabled);
+    let automation_enabled = body
+        .automation_enabled
+        .unwrap_or(graph.cell.automation_enabled);
     let max_agent_notional_usdc = body
         .max_agent_notional_usdc
         .unwrap_or(graph.policy.max_agent_notional_usdc)
@@ -2736,14 +2970,12 @@ pub async fn update_decision_automation(
         .clamp(0, 10_000);
     let active = body.active.unwrap_or(graph.policy.active);
 
-    sqlx::query(
-        "UPDATE decision_cells SET automation_enabled = $2 WHERE id = $1",
-    )
-    .bind(cell_id.as_str())
-    .bind(automation_enabled)
-    .execute(state.db.pool())
-    .await
-    .map_err(|err| ApiError::internal(&err.to_string()))?;
+    sqlx::query("UPDATE decision_cells SET automation_enabled = $2 WHERE id = $1")
+        .bind(cell_id.as_str())
+        .bind(automation_enabled)
+        .execute(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
 
     sqlx::query(
         "UPDATE decision_automation_policies
@@ -2783,8 +3015,15 @@ pub async fn update_decision_automation(
     )
     .await?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn upsert_decision_alert(
@@ -2825,8 +3064,15 @@ pub async fn upsert_decision_alert(
     )
     .await?;
 
-    let result = recalculate_cell(&state, cell_id.as_str(), user.wallet_address.as_str(), false).await?;
-    Ok(HttpResponse::Ok().json(build_cell_response(&state, result.graph, result.recommendation).await?))
+    let result = recalculate_cell(
+        &state,
+        cell_id.as_str(),
+        user.wallet_address.as_str(),
+        false,
+    )
+    .await?;
+    Ok(HttpResponse::Ok()
+        .json(build_cell_response(&state, result.graph, result.recommendation).await?))
 }
 
 pub async fn list_decision_events(
@@ -2869,8 +3115,12 @@ pub async fn run_decision_cells_tick(
     let mut skipped = BTreeMap::new();
 
     for row in rows {
-        let cell_id: String = row.try_get("id").map_err(|err| ApiError::internal(&err.to_string()))?;
-        let owner: String = row.try_get("owner").map_err(|err| ApiError::internal(&err.to_string()))?;
+        let cell_id: String = row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let owner: String = row
+            .try_get("owner")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
         scanned += 1;
         match recalculate_cell(&state, cell_id.as_str(), owner.as_str(), true).await {
             Ok(result) => {
@@ -2990,8 +3240,14 @@ mod tests {
             .collect::<Vec<_>>();
         let starters = build_starter_nodes(DECISION_TYPE_TIMING, &actions);
         assert_eq!(starters.len(), 3);
-        assert_eq!(starters[0].1.get("act now").and_then(Value::as_str), Some(EFFECT_SUPPORT));
-        assert_eq!(starters[0].1.get("wait").and_then(Value::as_str), Some(EFFECT_OPPOSE));
+        assert_eq!(
+            starters[0].1.get("act now").and_then(Value::as_str),
+            Some(EFFECT_SUPPORT)
+        );
+        assert_eq!(
+            starters[0].1.get("wait").and_then(Value::as_str),
+            Some(EFFECT_OPPOSE)
+        );
     }
 
     #[test]

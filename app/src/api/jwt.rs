@@ -247,7 +247,8 @@ impl JwtService {
                 let primary_kid = self.primary_kid.read().unwrap().clone();
                 log::debug!(
                     "Token signed with unknown key: {}. Falling back to primary key {}",
-                    kid, primary_kid
+                    kid,
+                    primary_kid
                 );
                 keys.get(&primary_kid)
                     .map(|key| &key.decoding_key)
@@ -406,7 +407,10 @@ mod tests {
         let validator = JwtService::new("test-secret-key-for-unit-tests-only-12345678");
 
         let token = issuer
-            .generate_access_token("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", UserRole::User)
+            .generate_access_token(
+                "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+                UserRole::User,
+            )
             .unwrap();
 
         let claims = validator.validate_token(&token).unwrap();

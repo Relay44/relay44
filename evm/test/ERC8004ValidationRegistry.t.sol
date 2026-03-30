@@ -39,10 +39,18 @@ contract ERC8004ValidationRegistryTest is Test {
         assertEq(requests[0], requestHash);
 
         vm.prank(validator);
-        validationRegistry.validationResponse(requestHash, 88, "ipfs://validation/response/1", keccak256("r1"), keccak256("quality"));
+        validationRegistry.validationResponse(
+            requestHash, 88, "ipfs://validation/response/1", keccak256("r1"), keccak256("quality")
+        );
 
-        (address assignedValidator, uint256 agentId, uint8 response, bytes32 responseHash, bytes32 tag, uint64 lastUpdate) =
-            validationRegistry.getValidationStatus(requestHash);
+        (
+            address assignedValidator,
+            uint256 agentId,
+            uint8 response,
+            bytes32 responseHash,
+            bytes32 tag,
+            uint64 lastUpdate
+        ) = validationRegistry.getValidationStatus(requestHash);
 
         assertEq(assignedValidator, validator);
         assertEq(agentId, 1);
@@ -99,9 +107,11 @@ contract ERC8004ValidationRegistryTest is Test {
         validationRegistry.validationRequest(validator, 1, "ipfs://tier", requestHash);
 
         vm.prank(validator);
-        validationRegistry.validationResponseFromTier(requestHash, 3, "ipfs://tier-response", keccak256("tier-response"));
+        validationRegistry.validationResponseFromTier(
+            requestHash, 3, "ipfs://tier-response", keccak256("tier-response")
+        );
 
-        (, , uint8 response, , bytes32 tag,) = validationRegistry.getValidationStatus(requestHash);
+        (,, uint8 response,, bytes32 tag,) = validationRegistry.getValidationStatus(requestHash);
         assertEq(response, 80);
         assertEq(tag, keccak256("validation_tier"));
         assertEq(validationRegistry.responseToTier(response), 3);

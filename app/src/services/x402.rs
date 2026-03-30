@@ -267,7 +267,9 @@ fn encode_payment_required_header(payment_required: &X402PaymentRequired) -> Str
     BASE64.encode(serde_json::to_vec(payment_required).unwrap_or_default())
 }
 
-pub fn encode_payment_signature_header(payment_payload: &X402PaymentPayload) -> Result<String, ApiError> {
+pub fn encode_payment_signature_header(
+    payment_payload: &X402PaymentPayload,
+) -> Result<String, ApiError> {
     serde_json::to_vec(payment_payload)
         .map(|bytes| BASE64.encode(bytes))
         .map_err(|_| ApiError::bad_request("INVALID_X402_PAYMENT", "payment payload is invalid"))
@@ -306,14 +308,18 @@ fn payment_required_error(
         details["context"] = extra;
     }
 
-    ApiError::payment_required_with_headers(message, None::<Value>, vec![
-        ("PAYMENT-REQUIRED".to_string(), encoded),
-        (
-            "WWW-Authenticate".to_string(),
-            "X402 realm=\"relay44\", scheme=\"exact\"".to_string(),
-        ),
-        ("Cache-Control".to_string(), "no-store".to_string()),
-    ])
+    ApiError::payment_required_with_headers(
+        message,
+        None::<Value>,
+        vec![
+            ("PAYMENT-REQUIRED".to_string(), encoded),
+            (
+                "WWW-Authenticate".to_string(),
+                "X402 realm=\"relay44\", scheme=\"exact\"".to_string(),
+            ),
+            ("Cache-Control".to_string(), "no-store".to_string()),
+        ],
+    )
     .with_details(Some(details))
 }
 
@@ -378,7 +384,15 @@ pub async fn ensure_payment_for_request(
         .get("payment-signature")
         .or_else(|| req.headers().get("PAYMENT-SIGNATURE"))
         .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| payment_required_error(state, resource, resource_url.clone(), "x402 payment required", None))?;
+        .ok_or_else(|| {
+            payment_required_error(
+                state,
+                resource,
+                resource_url.clone(),
+                "x402 payment required",
+                None,
+            )
+        })?;
 
     let payment_payload = decode_payment_signature_header(header).map_err(|_| {
         payment_required_error(
@@ -407,7 +421,12 @@ pub async fn ensure_payment_from_payload(
         let origin = primary_origin(state);
         resource_url_for_quote(origin.as_str(), resource)
     });
-    let envelope = build_envelope(state, resource, payment_payload.clone(), resource_url.clone());
+    let envelope = build_envelope(
+        state,
+        resource,
+        payment_payload.clone(),
+        resource_url.clone(),
+    );
 
     let (verify_status, verify_response) =
         facilitator_request::<X402VerifyResponse>(state, "/verify", &envelope).await?;

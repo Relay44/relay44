@@ -372,7 +372,7 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
                 key={market.id}
                 className="border-b border-border transition-colors hover:bg-bg-hover group"
               >
-                <td className="py-5 px-4" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem' }}>
+                <td className="px-4 py-5 font-display text-sm font-bold">
                   <Link href={`/markets/${market.id}`} className="flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
                     <span className="group-hover:underline">{market.question}</span>
