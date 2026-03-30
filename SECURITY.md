@@ -14,23 +14,25 @@ Security fixes are applied to the latest `main` branch and the latest tagged rel
 
 Do not open public issues for vulnerabilities.
 
-Use one of these private channels:
+Preferred channels:
 
-1. GitHub Security Advisory (preferred)
-2. Email: `hello@relay44.com` with subject `Security Report`
+1. GitHub Security Advisory for the repository
+2. Email `security@relay44.com` with subject `Security Report`
 
 Include:
 
-- affected component/path
-- clear reproduction steps
-- impact assessment
-- proposed fix (if available)
+- affected component or path
+- reproduction steps or proof of impact
+- severity or exploitability assessment
+- proposed fix or mitigation, if you have one
 
-## Disclosure Process
+## Response Targets
 
-- Initial acknowledgement target: within 72 hours
-- Triage status update target: within 7 days
-- Coordinated disclosure after fix validation and release
+- acknowledgement target: within 72 hours
+- initial triage update: within 7 days
+- coordinated disclosure after fix validation and release preparation
+
+These are targets, not guarantees, but maintainers treat them as the operating standard.
 
 ## Scope
 
@@ -39,13 +41,21 @@ In scope:
 - contracts under `evm/`
 - API services under `app/`
 - web client under `web/`
-- repository and CI/CD workflow security
+- repository CI/CD and release automation
+- credential handling, auth, and signing flows in the public mirror
 
 Out of scope:
 
-- vulnerabilities in private edge runtime (tracked privately)
-- issues requiring physical access to maintainer systems
+- closed-edge runtime code tracked outside this mirror
+- issues that require physical access to maintainer systems
+- unsupported historical tags with no active fix line
+
+## Disclosure Policy
+
+- keep reports private until maintainers confirm a fix or mitigation path
+- maintainers may request extra time when user safety or coordinated rollout requires it
+- public advisories should describe impact, affected versions, and upgrade guidance
 
 ## Safe Harbor
 
-Good-faith security research within this policy will not be pursued legally by maintainers.
+Good-faith security research that follows this policy will not be pursued legally by project maintainers. Do not exploit vulnerabilities for real-user impact, data access, service degradation, or financial gain.

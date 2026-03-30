@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 ./scripts/verify-git-hooks.sh
 SILO_CHECK_INCLUDE_DOCS=1 ./scripts/verify-project-silo.sh
+./scripts/verify-public-repo-standards.sh
 node ./scripts/verify-open-core-boundary.mjs
 ./scripts/verify-no-native-selects.sh tracked
 
