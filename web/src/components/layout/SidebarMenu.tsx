@@ -46,7 +46,7 @@ const externalLinks = [
     icon: XIcon,
   },
   {
-    href: "https://github.com/Relay44",
+    href: "https://github.com/Relay44/relay44",
     label: "GitHub",
     note: "Source code and issues",
     icon: Github,
