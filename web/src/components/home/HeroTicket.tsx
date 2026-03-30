@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 
 const ZERO_BITMAP = [
@@ -35,14 +35,18 @@ function getGlyphBitmap(char: '0' | '1' | 'o') {
 function TicketCanvas({
   backgroundImageSrc,
   isDark,
+  onMeshReady,
 }: {
   backgroundImageSrc: string;
   isDark: boolean;
+  onMeshReady?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const isDarkRef = useRef(isDark);
+  const onMeshReadyRef = useRef(onMeshReady);
   isDarkRef.current = isDark;
+  onMeshReadyRef.current = onMeshReady;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -55,6 +59,7 @@ function TicketCanvas({
     const context = canvasEl.getContext('2d');
     if (!context) return;
     const ctx: CanvasRenderingContext2D = context;
+    let meshReadySent = false;
 
     let glyphs: Array<{
       char: '0' | '1' | 'o';
@@ -198,7 +203,8 @@ function TicketCanvas({
           const detail = info.detail;
           const luminance = info.luminance;
           const darkness = 1 - luminance;
-          const shadowPenalty = Math.max(0, darkness - 0.54) / 0.46;
+          const shadowPenalty = Math.max(0, darkness - 0.48) / 0.52;
+          const shadowFade = Math.min(1, Math.pow(shadowPenalty, 1.22) * 1.32);
           const char =
             detail > 0.6
               ? seed % 5 === 0
@@ -224,19 +230,19 @@ function TicketCanvas({
             contourY: info.contourY,
             darkness,
             detail,
-            flowScale: 0.35 + detail * 1.45,
+            flowScale: 0.42 + detail * 1.55,
             opacityBase:
-              0.038
-              + detail * (0.18 + (1 - shadowPenalty * 0.85) * 0.1)
-              + (seed % 4) * 0.01,
+              0.058
+              + detail * (0.24 + (1 - shadowFade) * 0.14)
+              + (seed % 4) * 0.012,
             phase: column * 0.37 + row * 0.21 + seed * 0.16,
             pixelSize,
             sprite: getSprite(char, pixelSize),
             threshold:
-              0.032
-              + (1 - detail) * 0.05
-              + luminance * 0.02
-              + shadowPenalty * 0.11,
+              0.022
+              + (1 - detail) * 0.04
+              + luminance * 0.014
+              + shadowFade * 0.16,
             x,
             y,
           });
@@ -282,8 +288,8 @@ function TicketCanvas({
       const breath = Math.sin(now * 0.2) * 0.5 + 0.5;
       ctx.clearRect(0, 0, rect.width, rect.height);
       ctx.fillStyle = isDarkRef.current
-        ? 'rgba(3, 3, 3, 0.18)'
-        : 'rgba(255, 255, 255, 0.1)';
+        ? 'rgba(3, 3, 3, 0.12)'
+        : 'rgba(255, 255, 255, 0.07)';
       ctx.fillRect(0, 0, rect.width, rect.height);
 
       for (const glyph of glyphs) {
@@ -303,24 +309,28 @@ function TicketCanvas({
             + glyph.phase
             + glyph.x * glyph.contourX * 0.02
             + glyph.y * glyph.contourY * 0.02
-          ) * 0.05
-          + glyph.detail * 0.035;
+          ) * 0.06
+          + glyph.detail * 0.05;
         const intensity = Math.max(
           0,
-          Math.min(1, glyph.opacityBase + shimmer * 0.09 + cluster + pulse + contourGlow)
+          Math.min(1, glyph.opacityBase + shimmer * 0.1 + cluster + pulse + contourGlow)
         );
         if (intensity < glyph.threshold) {
           continue;
         }
 
-        const shadowSuppression = Math.max(0, glyph.darkness - 0.54) / 0.46;
+        const shadowSuppression = Math.max(0, glyph.darkness - 0.48) / 0.52;
+        const shadowFade = Math.min(1, Math.pow(shadowSuppression, 1.24) * 1.34);
+        const shadowGain = 1 - shadowFade * 0.94;
         const opacity = isDarkRef.current
-          ? 0.038
+          ? 0.016 + shadowGain * 0.036
             + intensity
-              * (0.18 + glyph.detail * 0.12 + (1 - shadowSuppression * 0.7) * 0.1)
-          : 0.022
+              * shadowGain
+              * (0.24 + glyph.detail * 0.16 + (1 - shadowFade) * 0.14)
+          : 0.012 + shadowGain * 0.022
             + intensity
-              * (0.12 + glyph.detail * 0.08 + (1 - shadowSuppression * 0.72) * 0.06);
+              * shadowGain
+              * (0.16 + glyph.detail * 0.11 + (1 - shadowFade) * 0.09);
         const streamX =
           Math.sin(now * 0.26 + glyph.y * 0.018 + glyph.phase) * 1.12
           + Math.cos(now * 0.2 - glyph.x * 0.013 + glyph.phase) * 0.9;
@@ -377,12 +387,17 @@ function TicketCanvas({
 
         ctx.globalAlpha = opacity;
         ctx.drawImage(glyph.sprite, glyph.x + driftX, glyph.y + driftY);
-        ctx.globalAlpha = opacity * (0.3 + glyph.detail * 0.13);
+        ctx.globalAlpha = opacity * (0.4 + glyph.detail * 0.18);
         ctx.drawImage(glyph.sprite, glyph.x + driftX * 1.52, glyph.y + driftY * 1.52);
-        ctx.globalAlpha = opacity * 0.22;
+        ctx.globalAlpha = opacity * 0.3;
         ctx.drawImage(glyph.sprite, glyph.x - driftX * 0.82, glyph.y - driftY * 0.82);
       }
       ctx.globalAlpha = 1;
+
+      if (!meshReadySent && glyphs.length > 0) {
+        meshReadySent = true;
+        onMeshReadyRef.current?.();
+      }
 
       animFrameRef.current = requestAnimationFrame(render);
     }
@@ -459,12 +474,33 @@ export function HeroTicket({
 }: HeroTicketProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
+  const [isMeshReady, setIsMeshReady] = useState(false);
+  const [isImageVisible, setIsImageVisible] = useState(false);
 
   const dataGrid: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: '80px 20px 1fr',
     rowGap: '6px',
   };
+
+  useEffect(() => {
+    setIsMeshReady(false);
+    setIsImageVisible(false);
+  }, [backgroundImageSrc]);
+
+  useEffect(() => {
+    if (!isMeshReady) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setIsImageVisible(true);
+    }, 140);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [isMeshReady]);
 
   return (
     <div
@@ -473,13 +509,26 @@ export function HeroTicket({
     >
       <div
         className="relative min-h-[200px] w-full flex-[1_1_50%] overflow-hidden border-b border-border sm:min-h-0 sm:border-b-0 sm:border-r"
-        style={{
-          backgroundImage: `url('${backgroundImageSrc}')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
+        style={{ backgroundColor: isDark ? '#030303' : '#f4f1ea' }}
       >
-        <TicketCanvas backgroundImageSrc={backgroundImageSrc} isDark={isDark} />
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage: `url('${backgroundImageSrc}')`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            opacity: isImageVisible ? 1 : 0,
+            transition: 'opacity 420ms ease',
+            zIndex: 0,
+          }}
+        />
+        <TicketCanvas
+          backgroundImageSrc={backgroundImageSrc}
+          isDark={isDark}
+          onMeshReady={() => setIsMeshReady(true)}
+        />
       </div>
 
       <div
