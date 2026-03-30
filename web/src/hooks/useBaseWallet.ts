@@ -24,6 +24,11 @@ export function useBaseWallet() {
       if (miniAppConnector) return miniAppConnector;
     }
 
+    const coinbase = connectors.find((c) =>
+      c.name.toLowerCase().includes('coinbase')
+    );
+    if (coinbase) return coinbase;
+
     return (
       connectors.find((connector) =>
         connector.name.toLowerCase().includes('metamask')

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useSignMessage } from 'wagmi';
+import { useSignMessage, useConnectorClient } from 'wagmi';
 
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { useSolanaWallet } from '@/hooks/useSolanaWallet';
@@ -10,6 +10,7 @@ export function useAuth() {
   const baseWallet = useBaseWallet();
   const solanaWallet = useSolanaWallet();
   const { signMessageAsync } = useSignMessage();
+  const { data: connectorClient } = useConnectorClient();
 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -74,15 +75,41 @@ export function useAuth() {
 
         await baseWallet.ensureBaseChain();
 
-        const nonce = await api.getSiweNonce();
-        const issuedAt = new Date().toISOString();
-        const domain = process.env.NEXT_PUBLIC_SIWE_DOMAIN || window.location.host;
-        const uri = window.location.origin;
-        const chainId = baseWallet.chainId ?? BASE_CHAIN_ID;
-        const message = `${domain} wants you to sign in with your Ethereum account:\n${baseWallet.address}\n\nSign in to relay44\n\nURI: ${uri}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
+        const isCoinbaseSmartWallet =
+          connectorClient?.transport?.type === 'custom' &&
+          connectorClient?.account?.type === 'smart';
 
-        const signature = await signMessageAsync({ message });
-        await api.loginSiwe(baseWallet.address, signature, message);
+        if (isCoinbaseSmartWallet && connectorClient) {
+          const nonce = await api.getSiweNonce();
+          const chainIdHex = `0x${BASE_CHAIN_ID.toString(16)}`;
+          const result = await connectorClient.transport.request({
+            method: 'wallet_connect',
+            params: [
+              {
+                version: '1',
+                capabilities: {
+                  signInWithEthereum: { nonce, chainId: chainIdHex },
+                },
+              },
+            ],
+          });
+          const account = (result as any).accounts?.[0];
+          if (!account?.capabilities?.signInWithEthereum) {
+            throw new Error('Sign In With Base failed');
+          }
+          const { message, signature } = account.capabilities.signInWithEthereum;
+          await api.loginSiwe(account.address, signature, message);
+        } else {
+          const nonce = await api.getSiweNonce();
+          const issuedAt = new Date().toISOString();
+          const domain = process.env.NEXT_PUBLIC_SIWE_DOMAIN || window.location.host;
+          const uri = window.location.origin;
+          const chainId = baseWallet.chainId ?? BASE_CHAIN_ID;
+          const message = `${domain} wants you to sign in with your Ethereum account:\n${baseWallet.address}\n\nSign in to relay44\n\nURI: ${uri}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
+
+          const signature = await signMessageAsync({ message });
+          await api.loginSiwe(baseWallet.address, signature, message);
+        }
       } else if (activeFlow === 'solana') {
         if (!solanaWallet.isConnected || !solanaWallet.address) {
           throw new Error('Solana wallet not connected');

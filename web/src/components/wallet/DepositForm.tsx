@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import type { DepositAddress } from '@/types';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
+import { payWithBase, getBasePaymentStatus, isBasePayAvailable } from '@/lib/basePay';
+import { estimateDepositFees } from '@/lib/gasFees';
 
 interface DepositFormProps {
   onSuccess?: () => void;
@@ -22,6 +24,7 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [feeEstimate, setFeeEstimate] = useState<string | null>(null);
   const wallet = useBaseWallet();
   const config = useConfig();
   const { data: walletClient } = useWalletClient();
@@ -48,6 +51,12 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
     void fetchDepositAddress();
   }, [readOnly]);
 
+  useEffect(() => {
+    estimateDepositFees()
+      .then((fees) => setFeeEstimate(fees.totalFeeEth))
+      .catch(() => {});
+  }, []);
+
   if (readOnly) {
     return (
       <ReadOnlyNotice
@@ -56,6 +65,53 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
       />
     );
   }
+
+  const handleBasePay = async () => {
+    if (!amount || parseFloat(amount) < 1) {
+      setError('Minimum deposit is 1 USDC');
+      return;
+    }
+    if (!depositAddress) {
+      setError('Deposit address not loaded yet');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const result = await payWithBase(amount, depositAddress.address);
+
+      let attempts = 0;
+      while (attempts < 30) {
+        const status = await getBasePaymentStatus(result.id);
+        if (status.status === 'completed') {
+          const amountLamports = Math.floor(parseFloat(amount) * 1_000_000);
+          await api.deposit({
+            amount: amountLamports,
+            source: 'wallet',
+            mode: 'confirm',
+            txSignature: result.id,
+          });
+          setSuccess('Deposit confirmed via Base Pay.');
+          setAmount('');
+          onSuccess?.();
+          return;
+        }
+        if (status.status === 'failed') {
+          throw new Error('Base Pay transaction failed');
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+        attempts++;
+      }
+      throw new Error('Payment confirmation timed out');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Base Pay deposit failed');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDeposit = async () => {
     if (!amount || parseFloat(amount) < 1) {
@@ -184,6 +240,26 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
         <div className="p-3  bg-bid/10 border border-bid/20">
           <p className="text-sm text-bid">{success}</p>
         </div>
+      )}
+
+      {feeEstimate && (
+        <div className="flex items-center justify-between text-xs text-text-secondary px-1">
+          <span>Est. network fee</span>
+          <span className="font-mono">{parseFloat(feeEstimate).toFixed(6)} ETH</span>
+        </div>
+      )}
+
+      {isBasePayAvailable() && (
+        <Button
+          variant="secondary"
+          size="lg"
+          className="w-full"
+          onClick={() => void handleBasePay()}
+          loading={loading}
+          disabled={!amount || parseFloat(amount) < 1}
+        >
+          Quick Deposit with Base Pay
+        </Button>
       )}
 
       <Button
