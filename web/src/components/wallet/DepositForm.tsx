@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { waitForTransactionReceipt } from '@wagmi/core';
 import { useConfig, useWalletClient } from 'wagmi';
 import { useRuntimeMode } from '@/hooks';
 import { ReadOnlyNotice } from '@/components/runtime/ReadOnlyNotice';
 import { api } from '@/lib/api';
 import { BASE_CHAIN_ID } from '@/lib/constants';
+import { sendPreparedTransactions } from '@/lib/evmWallet';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import type { DepositAddress, PreparedWalletTransaction } from '@/types';
+import type { DepositAddress } from '@/types';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 
 interface DepositFormProps {
@@ -31,27 +31,6 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
     (wallet.chainId !== undefined &&
       wallet.chainId !== BASE_CHAIN_ID &&
       wallet.isSwitchingChain);
-
-  const sendPreparedTransactions = async (
-    txs: PreparedWalletTransaction[],
-    account: `0x${string}`
-  ): Promise<`0x${string}`> => {
-    let finalHash: `0x${string}` | null = null;
-    for (const tx of txs) {
-      const hash = await walletClient!.sendTransaction({
-        account,
-        to: tx.to as `0x${string}`,
-        data: tx.data,
-        value: BigInt(tx.value),
-      });
-      await waitForTransactionReceipt(config, { hash });
-      finalHash = hash;
-    }
-    if (!finalHash) {
-      throw new Error('No transactions were submitted');
-    }
-    return finalHash;
-  };
 
   useEffect(() => {
     if (readOnly) {
@@ -105,6 +84,8 @@ export function DepositForm({ onSuccess }: DepositFormProps) {
         throw new Error('Deposit preparation failed: missing intent or transactions');
       }
       const txHash = await sendPreparedTransactions(
+        walletClient,
+        config,
         prepared.preparedTransactions,
         wallet.address as `0x${string}`
       );

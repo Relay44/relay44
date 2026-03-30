@@ -64,6 +64,10 @@ services:
         sync: false
       - key: EXTERNAL_CREDENTIALS_KEY_ID
         value: v1
+      - key: PAPER_COHORT_PUBLIC_ENABLED
+        value: "true"
+      - key: PAPER_COHORT_PUBLIC_OWNER
+        sync: false
       - key: REGION_ROUTING_ENABLED
         value: "true"
       - key: REGION_ROUTING_MODE
@@ -281,6 +285,37 @@ services:
       name: xmtp-db
       mountPath: /var/data/xmtp
       sizeGB: 1
+
+  - type: cron
+    name: relay44-paper-cohort-seeder
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run paper-cohort:start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PAPER_COHORT_ENABLED
+        value: "true"
+      - key: PAPER_COHORT_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: PAPER_COHORT_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: PAPER_COHORT_SIWE_DOMAIN
+        value: relay44.com
+      - key: PAPER_COHORT_CHAIN_ID
+        value: "8453"
+      - key: PAPER_COHORT_AGENT_COUNT
+        value: "60"
+      - key: PAPER_RUNNER_COUNTRY_CODE
+        sync: false
+      - key: NODE_ENV
+        value: production
 
   - type: cron
     name: relay44-farcaster-bot

@@ -270,7 +270,10 @@ export interface ExternalAgentRecord {
   quantity: number;
   cadence_seconds: number;
   strategy: string;
+  strategy_label: string;
+  execution_mode: 'live' | 'paper';
   credential_id?: string | null;
+  source?: string | null;
   active: boolean;
   last_executed_at?: string | null;
   next_execution_at: string;
@@ -283,6 +286,51 @@ interface ExternalAgentsListResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface ExternalAgentPerformanceTotals {
+  agents: number;
+  activeAgents: number;
+  openPositions: number;
+  closedPositions: number;
+  fills: number;
+  volumeUsdc: number;
+  feesUsdc: number;
+  realizedPnlUsdc: number;
+  unrealizedPnlUsdc: number;
+  netPnlUsdc: number;
+}
+
+export interface ExternalAgentStrategyPerformance {
+  strategy: string;
+  agents: number;
+  activeAgents: number;
+  openPositions: number;
+  closedPositions: number;
+  fills: number;
+  volumeUsdc: number;
+  feesUsdc: number;
+  realizedPnlUsdc: number;
+  unrealizedPnlUsdc: number;
+  netPnlUsdc: number;
+  winRate: number;
+}
+
+export interface ExternalAgentPerformancePoint {
+  bucket: string;
+  volumeUsdc: number;
+  realizedPnlUsdc: number;
+  unrealizedPnlUsdc: number;
+  netPnlUsdc: number;
+}
+
+export interface ExternalAgentPerformanceResponse {
+  scope: string;
+  owner?: string | null;
+  totals: ExternalAgentPerformanceTotals;
+  strategies: ExternalAgentStrategyPerformance[];
+  timeline: ExternalAgentPerformancePoint[];
+  updatedAt: string;
 }
 
 interface DecisionCellsListResponse {
@@ -720,6 +768,107 @@ function normalizeExternalOrderRecord(raw: Record<string, unknown>): ExternalOrd
         : raw.errorMessage ?? raw.error_message
           ? String(raw.errorMessage ?? raw.error_message)
           : undefined,
+  };
+}
+
+function normalizeExternalAgentRecord(raw: Record<string, unknown>): ExternalAgentRecord {
+  return {
+    id: String(raw.id ?? ''),
+    owner: String(raw.owner ?? ''),
+    name: String(raw.name ?? ''),
+    provider: String(raw.provider ?? 'limitless') as ExternalAgentRecord['provider'],
+    market_id: String(raw.marketId ?? raw.market_id ?? ''),
+    outcome: String(raw.outcome ?? 'yes') as ExternalAgentRecord['outcome'],
+    side: String(raw.side ?? 'buy') as ExternalAgentRecord['side'],
+    price: toNumber(raw.price),
+    quantity: toNumber(raw.quantity),
+    cadence_seconds: toNumber(raw.cadenceSeconds ?? raw.cadence_seconds),
+    strategy: String(raw.strategy ?? ''),
+    strategy_label: String(raw.strategyLabel ?? raw.strategy_label ?? raw.strategy ?? ''),
+    execution_mode: String(raw.executionMode ?? raw.execution_mode ?? 'live') as ExternalAgentRecord['execution_mode'],
+    credential_id:
+      raw.credentialId === null || raw.credential_id === null
+        ? null
+        : raw.credentialId ?? raw.credential_id
+          ? String(raw.credentialId ?? raw.credential_id)
+          : undefined,
+    source:
+      raw.source === null
+        ? null
+        : raw.source
+          ? String(raw.source)
+          : undefined,
+    active: Boolean(raw.active),
+    last_executed_at:
+      raw.lastExecutedAt === null || raw.last_executed_at === null
+        ? null
+        : raw.lastExecutedAt ?? raw.last_executed_at
+          ? toIsoString(raw.lastExecutedAt ?? raw.last_executed_at)
+          : undefined,
+    next_execution_at: toIsoString(raw.nextExecutionAt ?? raw.next_execution_at),
+    created_at: toIsoString(raw.createdAt ?? raw.created_at),
+    updated_at: toIsoString(raw.updatedAt ?? raw.updated_at),
+  };
+}
+
+function normalizeExternalAgentPerformanceResponse(
+  raw: Record<string, unknown>,
+): ExternalAgentPerformanceResponse {
+  const totalsRaw =
+    raw.totals && typeof raw.totals === 'object' && !Array.isArray(raw.totals)
+      ? (raw.totals as Record<string, unknown>)
+      : {};
+  const strategiesRaw = Array.isArray(raw.strategies) ? raw.strategies : [];
+  const timelineRaw = Array.isArray(raw.timeline) ? raw.timeline : [];
+
+  return {
+    scope: String(raw.scope ?? ''),
+    owner:
+      raw.owner === null
+        ? null
+        : raw.owner
+          ? String(raw.owner)
+          : undefined,
+    totals: {
+      agents: toNumber(totalsRaw.agents),
+      activeAgents: toNumber(totalsRaw.activeAgents ?? totalsRaw.active_agents),
+      openPositions: toNumber(totalsRaw.openPositions ?? totalsRaw.open_positions),
+      closedPositions: toNumber(totalsRaw.closedPositions ?? totalsRaw.closed_positions),
+      fills: toNumber(totalsRaw.fills),
+      volumeUsdc: toNumber(totalsRaw.volumeUsdc ?? totalsRaw.volume_usdc),
+      feesUsdc: toNumber(totalsRaw.feesUsdc ?? totalsRaw.fees_usdc),
+      realizedPnlUsdc: toNumber(totalsRaw.realizedPnlUsdc ?? totalsRaw.realized_pnl_usdc),
+      unrealizedPnlUsdc: toNumber(totalsRaw.unrealizedPnlUsdc ?? totalsRaw.unrealized_pnl_usdc),
+      netPnlUsdc: toNumber(totalsRaw.netPnlUsdc ?? totalsRaw.net_pnl_usdc),
+    },
+    strategies: strategiesRaw.map((entry) => {
+      const strategy = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+      return {
+        strategy: String(strategy.strategy ?? ''),
+        agents: toNumber(strategy.agents),
+        activeAgents: toNumber(strategy.activeAgents ?? strategy.active_agents),
+        openPositions: toNumber(strategy.openPositions ?? strategy.open_positions),
+        closedPositions: toNumber(strategy.closedPositions ?? strategy.closed_positions),
+        fills: toNumber(strategy.fills),
+        volumeUsdc: toNumber(strategy.volumeUsdc ?? strategy.volume_usdc),
+        feesUsdc: toNumber(strategy.feesUsdc ?? strategy.fees_usdc),
+        realizedPnlUsdc: toNumber(strategy.realizedPnlUsdc ?? strategy.realized_pnl_usdc),
+        unrealizedPnlUsdc: toNumber(strategy.unrealizedPnlUsdc ?? strategy.unrealized_pnl_usdc),
+        netPnlUsdc: toNumber(strategy.netPnlUsdc ?? strategy.net_pnl_usdc),
+        winRate: toNumber(strategy.winRate ?? strategy.win_rate),
+      };
+    }),
+    timeline: timelineRaw.map((entry) => {
+      const point = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+      return {
+        bucket: toIsoString(point.bucket),
+        volumeUsdc: toNumber(point.volumeUsdc ?? point.volume_usdc),
+        realizedPnlUsdc: toNumber(point.realizedPnlUsdc ?? point.realized_pnl_usdc),
+        unrealizedPnlUsdc: toNumber(point.unrealizedPnlUsdc ?? point.unrealized_pnl_usdc),
+        netPnlUsdc: toNumber(point.netPnlUsdc ?? point.net_pnl_usdc),
+      };
+    }),
+    updatedAt: toIsoString(raw.updatedAt ?? raw.updated_at),
   };
 }
 
@@ -1485,7 +1634,40 @@ class ApiClient {
     offset?: number;
   }): Promise<ExternalAgentsListResponse> {
     const query = this.buildQuery(params || {});
-    return this.request(`/external/agents${query}`);
+    const response = await this.request<ExternalAgentsListResponse>(`/external/agents${query}`);
+    const agents = Array.isArray(response.agents) ? response.agents : [];
+    return {
+      agents: agents.map((entry) =>
+        normalizeExternalAgentRecord(entry as unknown as Record<string, unknown>)
+      ),
+      total: toNumber(response.total),
+      limit: toNumber(response.limit),
+      offset: toNumber(response.offset),
+    };
+  }
+
+  async listPublicExternalAgents(params?: {
+    provider?: 'limitless' | 'polymarket';
+    active?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<ExternalAgentsListResponse> {
+    const query = this.buildQuery(params || {});
+    const response = await this.request<ExternalAgentsListResponse>(`/external/agents/public${query}`);
+    const agents = Array.isArray(response.agents) ? response.agents : [];
+    return {
+      agents: agents.map((entry) =>
+        normalizeExternalAgentRecord(entry as unknown as Record<string, unknown>)
+      ),
+      total: toNumber(response.total),
+      limit: toNumber(response.limit),
+      offset: toNumber(response.offset),
+    };
+  }
+
+  async getPublicExternalAgentsPerformance(): Promise<ExternalAgentPerformanceResponse> {
+    const response = await this.request<Record<string, unknown>>('/external/agents/public/performance');
+    return normalizeExternalAgentPerformanceResponse(response);
   }
 
   async createExternalAgent(data: {
@@ -1499,9 +1681,10 @@ class ApiClient {
     cadenceSeconds: number;
     strategy: string;
     credentialId?: string;
+    executionMode?: 'live' | 'paper';
     active?: boolean;
   }): Promise<ExternalAgentRecord> {
-    return this.request('/external/agents', {
+    const response = await this.request<Record<string, unknown>>('/external/agents', {
       method: 'POST',
       body: JSON.stringify({
         name: data.name,
@@ -1514,9 +1697,11 @@ class ApiClient {
         cadenceSeconds: data.cadenceSeconds,
         strategy: data.strategy,
         credentialId: data.credentialId,
+        executionMode: data.executionMode,
         active: data.active,
       }),
     });
+    return normalizeExternalAgentRecord(response);
   }
 
   async updateExternalAgent(
@@ -1530,13 +1715,15 @@ class ApiClient {
       cadenceSeconds: number;
       strategy: string;
       credentialId: string;
+      executionMode: 'live' | 'paper';
       active: boolean;
     }>,
   ): Promise<ExternalAgentRecord> {
-    return this.request(`/external/agents/${agentId}`, {
+    const response = await this.request<Record<string, unknown>>(`/external/agents/${agentId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+    return normalizeExternalAgentRecord(response);
   }
 
   async executeExternalAgent(

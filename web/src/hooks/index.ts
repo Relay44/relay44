@@ -7,6 +7,8 @@ export {
   useCreateAgent,
   useExecuteAgent,
   useExternalAgents,
+  usePublicExternalAgents,
+  usePublicExternalAgentsPerformance,
   useCreateExternalAgent,
   useExecuteExternalAgent,
 } from './useAgents';
