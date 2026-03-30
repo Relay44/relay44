@@ -55,6 +55,7 @@ export interface Market {
   bootstrapActive?: boolean;
   bootstrapSeedUsdc?: number;
   bootstrapManager?: string;
+  bootstrapPreset?: 'tight' | 'balanced' | 'wide';
   bootstrapStrategy?: string;
   bootstrapLevels?: number;
   bootstrapInitialYesBps?: number;
@@ -62,6 +63,12 @@ export interface Market {
   bootstrapStepBps?: number;
   bootstrapCadenceSeconds?: number;
   bootstrapExpirySeconds?: number;
+  bootstrapPauseReason?: string;
+  bootstrapReservedUsdc?: number;
+  bootstrapAvailableUsdc?: number;
+  bootstrapActiveSlots?: number;
+  bootstrapOrganicDepthRatio?: number;
+  bootstrapConsecutiveFailures?: number;
   bootstrapGraduatedAt?: string;
   bootstrapLaunchTxHash?: string;
   bootstrapLastReconciledAt?: string;
@@ -159,6 +166,9 @@ export interface OrderBook {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
   lastUpdated: string;
+  includesBootstrap?: boolean;
+  bootstrapDepth?: number;
+  organicDepth?: number;
 }
 
 export interface User {

@@ -224,7 +224,7 @@ async function executeAction(runtime, action, accessToken) {
     });
     const success = receipt.status === "success";
 
-    await postReport(accessToken, {
+    const report = await postReport(accessToken, {
       marketId: action.marketId,
       kind: action.kind,
       txHash: hash,
@@ -240,11 +240,15 @@ async function executeAction(runtime, action, accessToken) {
       success,
       status: receipt.status,
       slots: Array.isArray(action.slots) ? action.slots.length : 0,
+      reportStatus: report?.status || null,
+      pauseReason: report?.pauseReason || null,
+      consecutiveFailures: report?.consecutiveFailures ?? null,
+      lastError: report?.lastError || null,
     };
   } catch (error) {
     if (hash) {
       try {
-        await postReport(accessToken, {
+        const report = await postReport(accessToken, {
           marketId: action.marketId,
           kind: action.kind,
           txHash: hash,
@@ -252,6 +256,7 @@ async function executeAction(runtime, action, accessToken) {
           slots: action.slots || [],
           error: error instanceof Error ? error.message : String(error),
         });
+        error.report = report;
       } catch (reportError) {
         throw new Error(
           `tx ${hash} failed for ${action.kind} and report failed: ${
@@ -338,6 +343,10 @@ async function main() {
         marketId: action.marketId,
         kind: action.kind,
         message: error instanceof Error ? error.message : String(error),
+        reportStatus: error?.report?.status || null,
+        pauseReason: error?.report?.pauseReason || null,
+        consecutiveFailures: error?.report?.consecutiveFailures ?? null,
+        lastError: error?.report?.lastError || null,
       });
     }
   }

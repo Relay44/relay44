@@ -171,6 +171,31 @@ ADMIN_WALLETS=0x... \
 npm run agents:operator
 ```
 
+### Bootstrap presets and health
+
+Creator-funded bootstrap markets use one of three presets in the normal create flow:
+
+- `tight`: 4 levels, 2c base spread, 45s cadence
+- `balanced`: 5 levels, 4c base spread, 60s cadence
+- `wide`: 6 levels, 6c base spread, 90s cadence
+
+`balanced` is the default. The adaptive planner keeps the same short-lived ladder model, but widens or shrinks spread and quote size from three inputs only:
+
+- inventory imbalance versus creator seed
+- one-sided fills over the last 60 minutes
+- organic resting depth near midpoint
+
+Market responses and order book responses now expose bootstrap health and provenance fields, including pause reason, reserved versus available seed, active slots, organic-depth ratio, and whether merged depth includes bootstrap quotes.
+
+### Backfill bootstrap health or presets
+
+Use the admin backfill script to recompute health fields for existing bootstrapped markets and optionally opt specific markets into `ladder_adaptive_v1` or a new preset without force-migrating the entire live set.
+
+```bash
+npm run bootstrap:backfill -- --dry-run
+npm run bootstrap:backfill -- --market-id=123 --strategy=ladder_adaptive_v1 --preset=balanced
+```
+
 ### Publish a sanitized public snapshot
 
 This command is intended for the private canonical repository. It validates repo boundaries, commit hygiene, and the open-source repo contract before force-publishing the sanitized mirror.

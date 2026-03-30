@@ -50,7 +50,7 @@ const PRIMARY_API_BASE =
 const FALLBACK_API_BASE =
   process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || "";
 const LOCAL_BASE_READ_API_BASE =
-  process.env.NEXT_PUBLIC_LOCAL_BASE_READ_API_URL?.trim() || "/v1";
+  process.env.NEXT_PUBLIC_LOCAL_BASE_READ_API_URL?.trim() || "";
 
 export interface BaseTokenState {
   chain_id: number;
@@ -101,6 +101,8 @@ export interface BaseMarketSnapshot {
   bootstrap_status?: string;
   bootstrap_active?: boolean;
   bootstrap_seed_usdc?: number;
+  bootstrap_manager?: string;
+  bootstrap_preset?: "tight" | "balanced" | "wide";
   bootstrap_strategy?: string;
   bootstrap_levels?: number;
   bootstrap_initial_yes_bps?: number;
@@ -108,7 +110,16 @@ export interface BaseMarketSnapshot {
   bootstrap_step_bps?: number;
   bootstrap_cadence_seconds?: number;
   bootstrap_expiry_seconds?: number;
+  bootstrap_pause_reason?: string;
+  bootstrap_reserved_usdc?: number;
+  bootstrap_available_usdc?: number;
+  bootstrap_active_slots?: number;
+  bootstrap_organic_depth_ratio?: number;
+  bootstrap_consecutive_failures?: number;
   bootstrap_graduated_at?: string;
+  bootstrap_launch_tx_hash?: string;
+  bootstrap_last_reconciled_at?: string;
+  bootstrap_last_error?: string;
 }
 
 export interface BaseMarketsResponse {
@@ -134,6 +145,9 @@ interface BaseOrderBookResponse {
   chain_id?: number;
   provider_market_ref?: string;
   is_synthetic?: boolean;
+  includes_bootstrap?: boolean;
+  bootstrap_depth?: number;
+  organic_depth?: number;
 }
 
 interface BaseTradeSnapshot {
@@ -707,6 +721,8 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
     bootstrapStatus: snapshot.bootstrap_status,
     bootstrapActive: snapshot.bootstrap_active,
     bootstrapSeedUsdc: toOptionalNumber(snapshot.bootstrap_seed_usdc),
+    bootstrapManager: snapshot.bootstrap_manager,
+    bootstrapPreset: snapshot.bootstrap_preset,
     bootstrapStrategy: snapshot.bootstrap_strategy,
     bootstrapLevels: toOptionalNumber(snapshot.bootstrap_levels),
     bootstrapInitialYesBps: toOptionalNumber(
@@ -720,9 +736,24 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
       snapshot.bootstrap_cadence_seconds,
     ),
     bootstrapExpirySeconds: toOptionalNumber(snapshot.bootstrap_expiry_seconds),
+    bootstrapPauseReason: snapshot.bootstrap_pause_reason,
+    bootstrapReservedUsdc: toOptionalNumber(snapshot.bootstrap_reserved_usdc),
+    bootstrapAvailableUsdc: toOptionalNumber(snapshot.bootstrap_available_usdc),
+    bootstrapActiveSlots: toOptionalNumber(snapshot.bootstrap_active_slots),
+    bootstrapOrganicDepthRatio: toOptionalNumber(
+      snapshot.bootstrap_organic_depth_ratio,
+    ),
+    bootstrapConsecutiveFailures: toOptionalNumber(
+      snapshot.bootstrap_consecutive_failures,
+    ),
     bootstrapGraduatedAt: snapshot.bootstrap_graduated_at
       ? toIsoString(snapshot.bootstrap_graduated_at)
       : undefined,
+    bootstrapLaunchTxHash: snapshot.bootstrap_launch_tx_hash || undefined,
+    bootstrapLastReconciledAt: snapshot.bootstrap_last_reconciled_at
+      ? toIsoString(snapshot.bootstrap_last_reconciled_at)
+      : undefined,
+    bootstrapLastError: snapshot.bootstrap_last_error || undefined,
   };
 }
 
@@ -1495,6 +1526,9 @@ class ApiClient {
       bids: response.bids ?? [],
       asks: response.asks ?? [],
       lastUpdated: toIsoString(response.last_updated),
+      includesBootstrap: Boolean(response.includes_bootstrap),
+      bootstrapDepth: toOptionalNumber(response.bootstrap_depth),
+      organicDepth: toOptionalNumber(response.organic_depth),
     };
   }
 
@@ -1545,12 +1579,7 @@ class ApiClient {
       seedUsdc: number;
       initialYesBps: number;
       manager?: string;
-      strategy: string;
-      levels: number;
-      baseSpreadBps: number;
-      stepBps: number;
-      cadenceSeconds: number;
-      expirySeconds: number;
+      preset?: "tight" | "balanced" | "wide";
     },
   ) {
     return this.request(
@@ -1566,8 +1595,46 @@ class ApiClient {
     owner: string,
   ): Promise<BootstrapOperatorStatus> {
     const query = this.buildQuery({ owner });
-    return this.requestBaseRead<BootstrapOperatorStatus>(
-      `/evm/bootstrap/operator${query}`,
+    return this.request<BootstrapOperatorStatus>(`/evm/bootstrap/operator${query}`);
+  }
+
+  async pauseBaseMarketBootstrap(marketId: string) {
+    return this.request(
+      `/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap/pause`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  async resumeBaseMarketBootstrap(marketId: string) {
+    return this.request(
+      `/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap/resume`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  async refreshBaseMarketBootstrap(marketId: string) {
+    return this.request(
+      `/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap/refresh`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  async graduateBaseMarketBootstrap(marketId: string) {
+    return this.request(
+      `/evm/internal/markets/${encodeURIComponent(marketId)}/bootstrap/graduate`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
     );
   }
 
