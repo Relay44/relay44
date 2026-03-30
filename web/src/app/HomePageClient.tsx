@@ -6,6 +6,7 @@ import { Header, BottomNav } from "@/components/layout";
 import { HeroTicket, type HeroTicketRow } from "@/components/home/HeroTicket";
 import { FeaturedSlider } from "@/components/market";
 import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
+import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
 import { cn } from "@/lib/utils";
 import type { HomeLiveFeed } from "@/lib/server/homeLive";
 import type { ExternalAgentRecord } from "@/lib/api";
@@ -192,6 +193,7 @@ function toPublicPaperFeedEntry(
   marketLookup: Map<string, Market>,
 ): LiveAgentFeedEntry {
   const market = marketLookup.get(agent.market_id);
+  const displayName = formatPublicPaperAgentName(agent);
   const scheduleLabel = agent.last_executed_at
     ? formatRelativeTimestamp(agent.last_executed_at)
     : formatRelativeTimestamp(agent.next_execution_at);
@@ -199,11 +201,11 @@ function toPublicPaperFeedEntry(
   return {
     id: `relay44-${agent.id}`,
     href: `/markets/${encodeURIComponent(agent.market_id)}`,
-    label: `${agent.strategy_label} loop`,
+    label: displayName,
     title: market?.question || agent.market_id,
     subtitle: `${agent.strategy_label} · ${agent.outcome.toUpperCase()} ${agent.side.toUpperCase()} @ ${formatPricePercent(agent.price)} · qty ${formatPaperQuantity(agent.quantity)}`,
     meta: `cadence ${agent.cadence_seconds}s · ${scheduleLabel}`,
-    summary: `RELAY44 ${agent.strategy_label.toUpperCase()}`,
+    summary: `RELAY44 ${displayName.toUpperCase()}`,
     scheduleLabel,
     statusLabel: agent.active ? "active" : "inactive",
     sourceLabel: "relay44",
