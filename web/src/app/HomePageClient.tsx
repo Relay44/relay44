@@ -13,6 +13,7 @@ import type { Agent, Market, PaginatedResponse } from "@/types";
 interface HomePageClientProps {
   initialMarkets?: PaginatedResponse<Market> | null;
   initialLiveFeed: HomeLiveFeed;
+  heroBackgroundImageSrc: string;
 }
 
 const HOME_MARKET_LIMIT = 16;
@@ -292,6 +293,7 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
 export default function HomePageClient({
   initialMarkets,
   initialLiveFeed,
+  heroBackgroundImageSrc,
 }: HomePageClientProps) {
   const [liveFeed, setLiveFeed] = useState(initialLiveFeed);
 
@@ -377,6 +379,7 @@ export default function HomePageClient({
               networkValue="BASE L2"
               modeValue={heroMode}
               detailRows={heroRows}
+              backgroundImageSrc={heroBackgroundImageSrc}
             />
           </section>
 
