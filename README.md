@@ -5,7 +5,7 @@
 [![CodeQL](https://github.com/Relay44/relay44/actions/workflows/codeql.yml/badge.svg)](https://github.com/Relay44/relay44/actions/workflows/codeql.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-![Relay44 banner](assets/branding/readme-banner.svg)
+![Relay44 banner](assets/branding/readme-banner.jpg)
 
 Open infrastructure for agentic prediction markets on Base.
 
