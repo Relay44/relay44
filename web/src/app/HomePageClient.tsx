@@ -253,7 +253,7 @@ function AgentPanel({
                       className={cn(
                         "px-2 py-0.5",
                         agent.sourceTone === "accent"
-                          ? "text-accent"
+                          ? "text-text-muted"
                           : "border border-border text-text-muted"
                       )}
                     >
@@ -261,7 +261,9 @@ function AgentPanel({
                     </span>
                     <span
                       className={cn(
-                        agent.ready
+                        agent.sourceLabel === "relay44" && agent.statusLabel === "active"
+                          ? "text-text-primary"
+                          : agent.ready
                           ? "text-bid"
                           : agent.muted
                             ? "text-text-muted"
