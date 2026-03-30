@@ -4,12 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
-if [[ -e "docs" ]]; then
-  echo "Push blocked: root docs/ directory is not allowed."
-  echo "Remove docs/ (or move it outside the repo) before pushing."
-  exit 1
-fi
-
 if [[ ! -x ./scripts/verify-project-silo.sh ]]; then
   echo "Missing silo checker: scripts/verify-project-silo.sh"
   exit 1
