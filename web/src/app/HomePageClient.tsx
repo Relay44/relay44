@@ -251,10 +251,10 @@ function AgentPanel({
                   <div className="flex items-center gap-2">
                     <span
                       className={cn(
-                        "border px-2 py-0.5",
+                        "px-2 py-0.5",
                         agent.sourceTone === "accent"
-                          ? "border-accent text-accent"
-                          : "border-border text-text-muted"
+                          ? "text-accent"
+                          : "border border-border text-text-muted"
                       )}
                     >
                       {agent.sourceLabel}
