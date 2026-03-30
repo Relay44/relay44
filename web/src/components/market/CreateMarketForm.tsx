@@ -11,8 +11,9 @@ import { ReadOnlyNotice } from "@/components/runtime/ReadOnlyNotice";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { MARKET_CREATED_EVENT_ABI } from "@/lib/contracts";
+import { sendPreparedTransactions } from "@/lib/evmWallet";
 import { cn } from "@/lib/utils";
 import type { MarketDraftOption, NewsSlide } from "@/lib/server/homeLive";
 import type { Market } from "@/types";
@@ -183,6 +184,16 @@ function marketCreateErrorMessage(error: unknown): string {
   return message;
 }
 
+function requiresWalletSession(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.status === 401 || error.status === 403)
+  );
+}
+
+async function wait(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function CreateMarketForm({
   onSuccess,
   draftSlide,
@@ -208,6 +219,7 @@ export function CreateMarketForm({
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submissionStage, setSubmissionStage] = useState<string | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState(
     initialDraftId || draftOptions[0]?.id || "",
   );
@@ -405,6 +417,7 @@ export function CreateMarketForm({
 
     setLoading(true);
     setError(null);
+    setSubmissionStage("Preparing market");
 
     try {
       await baseWallet.ensureBaseChain();
@@ -421,6 +434,107 @@ export function CreateMarketForm({
         throw new Error("Trading end date must be in the future");
       }
 
+      let bootstrapOperator: string | undefined;
+      if (liquidityMode === "bootstrap_hybrid") {
+        const seedUsdc = Number(initialLiquidity);
+        const requiredSeedMicrousdc = Math.floor(seedUsdc * 1_000_000);
+
+        setSubmissionStage("Checking bootstrap funding");
+        let walletBalance;
+        try {
+          walletBalance = await api.getWalletBalance();
+        } catch (balanceError) {
+          if (requiresWalletSession(balanceError)) {
+            throw new Error(
+              "Sign in before funding bootstrap markets from your vault.",
+            );
+          }
+          throw balanceError;
+        }
+
+        if (walletBalance.available < requiredSeedMicrousdc) {
+          const deficit = requiredSeedMicrousdc - walletBalance.available;
+          setSubmissionStage("Funding vault collateral");
+          let preparedDeposit;
+          try {
+            preparedDeposit = await api.deposit({
+              amount: deficit,
+              source: "wallet",
+              mode: "prepare",
+            });
+          } catch (depositError) {
+            if (requiresWalletSession(depositError)) {
+              throw new Error(
+                "Sign in before depositing funds for bootstrap liquidity.",
+              );
+            }
+            throw depositError;
+          }
+
+          if (
+            !preparedDeposit.intentId ||
+            !preparedDeposit.preparedTransactions?.length
+          ) {
+            throw new Error("Deposit preparation failed");
+          }
+
+          const depositTxHash = await sendPreparedTransactions(
+            walletClient,
+            config,
+            preparedDeposit.preparedTransactions,
+            baseWallet.address as `0x${string}`,
+          );
+          const depositConfirmation = await api.deposit({
+            amount: deficit,
+            source: "wallet",
+            mode: "confirm",
+            intentId: preparedDeposit.intentId,
+            txSignature: depositTxHash,
+          });
+          if (!["pending", "confirmed"].includes(depositConfirmation.status)) {
+            throw new Error("Vault funding did not confirm");
+          }
+
+          setSubmissionStage("Confirming vault balance");
+          let refreshedBalance = walletBalance;
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            refreshedBalance = await api.getWalletBalance();
+            if (refreshedBalance.available >= requiredSeedMicrousdc) {
+              break;
+            }
+            await wait(1_200);
+          }
+
+          if (refreshedBalance.available < requiredSeedMicrousdc) {
+            throw new Error(
+              "Vault balance is still below the bootstrap seed after deposit confirmation.",
+            );
+          }
+        }
+
+        setSubmissionStage("Checking operator authorization");
+        const operatorStatus = await api.getBootstrapOperatorStatus(
+          baseWallet.address,
+        );
+        bootstrapOperator = operatorStatus.operator;
+        if (!operatorStatus.approved) {
+          const preparedApproval = await api.prepareBaseSetManagerApproval({
+            from: baseWallet.address,
+            manager: operatorStatus.operator,
+            approved: true,
+          });
+          setSubmissionStage("Authorizing bootstrap operator");
+          const approvalHash = await walletClient.sendTransaction({
+            account: baseWallet.address as `0x${string}`,
+            to: preparedApproval.to as `0x${string}`,
+            data: preparedApproval.data,
+            value: BigInt(preparedApproval.value),
+          });
+          await waitForTransactionReceipt(config, { hash: approvalHash });
+        }
+      }
+
+      setSubmissionStage("Creating market");
       const resolver = baseWallet.address as `0x${string}`;
       const prepared = await api.prepareBaseCreateMarket({
         from: baseWallet.address,
@@ -454,14 +568,18 @@ export function CreateMarketForm({
       }
       let bootstrapWarning: string | null = null;
       try {
+        setSubmissionStage(
+          liquidityMode === "bootstrap_hybrid"
+            ? "Registering bootstrap launch"
+            : "Registering market liquidity mode",
+        );
         await api.registerBaseMarketBootstrap(marketId, {
           txHash,
           liquidityMode,
           seedUsdc:
-            liquidityMode === "bootstrap_hybrid"
-              ? Number(initialLiquidity)
-              : 0,
+            liquidityMode === "bootstrap_hybrid" ? Number(initialLiquidity) : 0,
           initialYesBps: Math.round(Number(initialYesPrice) * 100),
+          manager: bootstrapOperator,
           strategy: BOOTSTRAP_DEFAULTS.strategy,
           levels: BOOTSTRAP_DEFAULTS.levels,
           baseSpreadBps: BOOTSTRAP_DEFAULTS.baseSpreadBps,
@@ -500,6 +618,7 @@ export function CreateMarketForm({
     } catch (err) {
       setError(marketCreateErrorMessage(err));
     } finally {
+      setSubmissionStage(null);
       setLoading(false);
     }
   };
@@ -552,6 +671,15 @@ export function CreateMarketForm({
             for settling the final YES or NO outcome after trading closes.
           </p>
         </div>
+
+        {loading && submissionStage ? (
+          <div className="border border-accent/20 bg-accent/5 p-4">
+            <p className="text-xs uppercase tracking-[0.16em] text-text-muted">
+              Publish progress
+            </p>
+            <p className="mt-2 text-sm text-text-primary">{submissionStage}</p>
+          </div>
+        ) : null}
 
         {draftSlide && draftOptions.length > 0 ? (
           <div className="space-y-4 border border-accent/20 bg-accent/5 p-4">
@@ -1037,9 +1165,7 @@ export function CreateMarketForm({
 
             <div className="bg-bg-tertiary p-4">
               <p className="text-sm text-text-secondary">Creation Fee</p>
-              <p className="text-xl font-semibold text-text-primary">
-                0.5 R44
-              </p>
+              <p className="text-xl font-semibold text-text-primary">0.5 R44</p>
             </div>
           </div>
         )}

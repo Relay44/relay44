@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-03-29T17:06:00Z",
+  "generatedAt": "2026-03-30T13:25:02Z",
   "environments": {
     "production": {
       "name": "base-mainnet",
@@ -8,7 +8,7 @@
         "marketCore": "0x5A829E9c863ae0700ecA12429012fa7295EA5e2d",
         "orderBook": "0x1555b194A545f5D6D106BebBd569b9fEfF924BFc",
         "collateralVault": "0x913183891c10A049490c1b31b793b5bFB2CB4333",
-        "agentRuntime": "0xA5f90c329F541E175c12f79559961ccF15db1bBE",
+        "agentRuntime": "0x152Cb1D3A60a5D800f8193c51F4f193722a494ae",
         "collateralToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
       }
     },

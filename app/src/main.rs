@@ -381,8 +381,7 @@ async fn main() -> std::io::Result<()> {
                             )
                             .route(
                                 "/preferences",
-                                web::put()
-                                    .to(api::notifications::update_notification_preferences),
+                                web::put().to(api::notifications::update_notification_preferences),
                             )
                             .route(
                                 "/{notification_id}/read",
@@ -411,8 +410,14 @@ async fn main() -> std::io::Result<()> {
                             .route("/siwe/login", web::post().to(api::auth::siwe_login))
                             .route("/solana/nonce", web::get().to(api::auth::get_solana_nonce))
                             .route("/solana/login", web::post().to(api::auth::solana_login))
-                            .route("/farcaster/nonce", web::get().to(api::auth::get_farcaster_nonce))
-                            .route("/farcaster/login", web::post().to(api::auth::farcaster_login))
+                            .route(
+                                "/farcaster/nonce",
+                                web::get().to(api::auth::get_farcaster_nonce),
+                            )
+                            .route(
+                                "/farcaster/login",
+                                web::post().to(api::auth::farcaster_login),
+                            )
                             .route("/refresh", web::post().to(api::auth::refresh_token))
                             .route("/logout", web::post().to(api::auth::logout)),
                     )
@@ -504,9 +509,18 @@ async fn main() -> std::io::Result<()> {
                                 web::patch().to(api::evm::update_base_market_bootstrap_runtime),
                             )
                             .route(
-                                "/token/state",
-                                web::get().to(api::evm::get_r44_token_state),
+                                "/bootstrap/operator",
+                                web::get().to(api::evm::get_bootstrap_operator_status),
                             )
+                            .route(
+                                "/bootstrap/runner/tick",
+                                web::post().to(api::evm::bootstrap_runner_tick),
+                            )
+                            .route(
+                                "/bootstrap/runner/report",
+                                web::post().to(api::evm::bootstrap_runner_report),
+                            )
+                            .route("/token/state", web::get().to(api::evm::get_r44_token_state))
                             .service(
                                 web::scope("/write")
                                     .route(
@@ -544,6 +558,28 @@ async fn main() -> std::io::Result<()> {
                                     .route(
                                         "/agents/execute",
                                         web::post().to(api::evm::prepare_execute_agent_write),
+                                    )
+                                    .route(
+                                        "/agents/manager-approval",
+                                        web::post()
+                                            .to(api::evm::prepare_set_manager_approval_write),
+                                    )
+                                    .route(
+                                        "/agents/bootstrap-create",
+                                        web::post()
+                                            .to(api::evm::prepare_bootstrap_create_agents_write),
+                                    )
+                                    .route(
+                                        "/agents/update",
+                                        web::post().to(api::evm::prepare_update_agents_write),
+                                    )
+                                    .route(
+                                        "/agents/deactivate",
+                                        web::post().to(api::evm::prepare_deactivate_agents_write),
+                                    )
+                                    .route(
+                                        "/agents/manager",
+                                        web::post().to(api::evm::prepare_set_agent_manager_write),
                                     )
                                     .route(
                                         "/identity/register",
@@ -640,7 +676,8 @@ async fn main() -> std::io::Result<()> {
                             )
                             .route(
                                 "/agents/public/performance",
-                                web::get().to(api::external::get_public_external_agents_performance),
+                                web::get()
+                                    .to(api::external::get_public_external_agents_performance),
                             )
                             .route(
                                 "/agents/performance",
@@ -675,7 +712,10 @@ async fn main() -> std::io::Result<()> {
                                 "/runner/tick",
                                 web::post().to(api::decisions::run_decision_cells_tick),
                             )
-                            .route("/{cell_id}", web::get().to(api::decisions::get_decision_cell))
+                            .route(
+                                "/{cell_id}",
+                                web::get().to(api::decisions::get_decision_cell),
+                            )
                             .route(
                                 "/{cell_id}",
                                 web::patch().to(api::decisions::update_decision_cell),

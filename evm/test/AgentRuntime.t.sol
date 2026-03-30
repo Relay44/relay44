@@ -13,6 +13,7 @@ contract AgentRuntimeTest is Test {
     address internal admin = makeAddr("admin");
     address internal creator = makeAddr("creator");
     address internal resolver = makeAddr("resolver");
+    address internal operator = makeAddr("operator");
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
 
@@ -134,5 +135,116 @@ contract AgentRuntimeTest is Test {
         assertEq(identityId, 1);
         assertEq(agentRuntime.agentIdentityId(agentId), 1);
         assertEq(identityRegistry.ownerOf(identityId), alice);
+    }
+
+    function test_managerCanProvisionAndUpdateCreatorOwnedBootstrapAgents() external {
+        vm.prank(alice);
+        agentRuntime.setManagerApproval(operator, true);
+
+        AgentRuntime.AgentConfig[] memory configs = new AgentRuntime.AgentConfig[](2);
+        configs[0] = AgentRuntime.AgentConfig({
+            marketId: marketId, isYes: true, priceBps: 5_100, size: 10e6, cadence: 300, expiryWindow: 900
+        });
+        configs[1] = AgentRuntime.AgentConfig({
+            marketId: marketId, isYes: false, priceBps: 4_900, size: 12e6, cadence: 300, expiryWindow: 900
+        });
+
+        vm.prank(operator);
+        uint256[] memory agentIds = agentRuntime.createAgentsFor(alice, operator, configs, "ladder_v1");
+
+        assertEq(agentIds.length, 2);
+        (
+            address owner,
+            address manager,
+            uint256 storedMarketId,
+            bool isYes,
+            uint128 priceBps,
+            uint128 size,
+            uint64 cadence,
+            uint64 expiryWindow,
+            uint64 lastExecutedAt,
+            bool active,
+            string memory strategy
+        ) = agentRuntime.agents(agentIds[0]);
+
+        assertEq(owner, alice);
+        assertEq(manager, operator);
+        assertEq(storedMarketId, marketId);
+        assertTrue(isYes);
+        assertEq(priceBps, 5_100);
+        assertEq(size, 10e6);
+        assertEq(cadence, 300);
+        assertEq(expiryWindow, 900);
+        assertEq(lastExecutedAt, 0);
+        assertTrue(active);
+        assertEq(strategy, "ladder_v1");
+
+        AgentRuntime.AgentUpdateConfig[] memory updates = new AgentRuntime.AgentUpdateConfig[](1);
+        updates[0] = AgentRuntime.AgentUpdateConfig({
+            agentId: agentIds[0], isYes: false, priceBps: 4_700, size: 15e6, cadence: 180, expiryWindow: 1_200
+        });
+
+        vm.prank(operator);
+        agentRuntime.updateAgents(updates, "ladder_v1");
+
+        vm.prank(bob);
+        uint256 orderId = agentRuntime.executeAgent(agentIds[0]);
+        (, uint256 updatedMarketId, bool updatedIsYes, uint128 updatedPrice, uint128 updatedSize,,,) =
+            orderBook.orders(orderId);
+        assertEq(updatedMarketId, marketId);
+        assertFalse(updatedIsYes);
+        assertEq(updatedPrice, 4_700);
+        assertEq(updatedSize, 15e6);
+    }
+
+    function test_managerCanDeactivateBootstrapAgents() external {
+        vm.prank(alice);
+        agentRuntime.setManagerApproval(operator, true);
+
+        AgentRuntime.AgentConfig[] memory configs = new AgentRuntime.AgentConfig[](1);
+        configs[0] = AgentRuntime.AgentConfig({
+            marketId: marketId, isYes: true, priceBps: 5_000, size: 10e6, cadence: 300, expiryWindow: 900
+        });
+
+        vm.prank(operator);
+        uint256[] memory agentIds = agentRuntime.createAgentsFor(alice, operator, configs, "ladder_v1");
+
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = agentIds[0];
+
+        vm.prank(operator);
+        agentRuntime.deactivateAgents(ids);
+
+        vm.expectRevert(AgentRuntime.AgentInactive.selector);
+        agentRuntime.executeAgent(agentIds[0]);
+    }
+
+    function test_unapprovedManagerCannotProvisionOrUpdate() external {
+        AgentRuntime.AgentConfig[] memory configs = new AgentRuntime.AgentConfig[](1);
+        configs[0] = AgentRuntime.AgentConfig({
+            marketId: marketId, isYes: true, priceBps: 5_000, size: 10e6, cadence: 300, expiryWindow: 900
+        });
+
+        vm.prank(operator);
+        vm.expectRevert(AgentRuntime.ManagerNotApproved.selector);
+        agentRuntime.createAgentsFor(alice, operator, configs, "ladder_v1");
+
+        vm.prank(alice);
+        agentRuntime.setManagerApproval(operator, true);
+
+        vm.prank(operator);
+        uint256[] memory agentIds = agentRuntime.createAgentsFor(alice, operator, configs, "ladder_v1");
+
+        vm.prank(alice);
+        agentRuntime.setManagerApproval(operator, false);
+
+        AgentRuntime.AgentUpdateConfig[] memory updates = new AgentRuntime.AgentUpdateConfig[](1);
+        updates[0] = AgentRuntime.AgentUpdateConfig({
+            agentId: agentIds[0], isYes: false, priceBps: 4_900, size: 11e6, cadence: 120, expiryWindow: 600
+        });
+
+        vm.prank(operator);
+        vm.expectRevert(AgentRuntime.NotAuthorized.selector);
+        agentRuntime.updateAgents(updates, "ladder_v1");
     }
 }

@@ -1,98 +1,163 @@
 #!/usr/bin/env node
 
-import { createPublicClient, createWalletClient, fallback, formatEther, http } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { base } from 'viem/chains';
+import {
+  createPublicClient,
+  createWalletClient,
+  fallback,
+  formatEther,
+  http,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { base } from "viem/chains";
 
 const enabled = isEnabled(process.env.BASE_AGENT_OPERATOR_ENABLED, false);
-const apiBase = normalizeApiBase(process.env.BASE_AGENT_OPERATOR_API_URL || 'http://localhost:8080/v1');
+const apiBase = normalizeApiBase(
+  process.env.BASE_AGENT_OPERATOR_API_URL || "http://localhost:8080/v1",
+);
+const apiOrigin = apiBase.replace(/\/v1$/, "");
+const siweDomain = (
+  process.env.BASE_AGENT_OPERATOR_SIWE_DOMAIN ||
+  process.env.SIWE_DOMAIN ||
+  "localhost:3000"
+).trim();
 const chainId = Number(process.env.BASE_CHAIN_ID || 8453);
-const limit = Number(process.env.BASE_AGENT_OPERATOR_LIMIT || 100);
+const limit = Math.max(Number(process.env.BASE_AGENT_OPERATOR_LIMIT || 100), 1);
 const dryRun = isEnabled(process.env.BASE_AGENT_OPERATOR_DRY_RUN, false);
-const minBalanceEth = Number(process.env.BASE_AGENT_OPERATOR_MIN_BALANCE_ETH || 0.0002);
+const minBalanceEth = Number(
+  process.env.BASE_AGENT_OPERATOR_MIN_BALANCE_ETH || 0.0002,
+);
 
 function envOrThrow(key) {
-  const value = String(process.env[key] || '').trim();
+  const value = String(process.env[key] || "").trim();
   if (!value) {
     throw new Error(`${key} is required`);
   }
   return value;
 }
 
-function isEnabled(raw, fallback) {
-  if (raw == null || raw === '') {
-    return fallback;
+function isEnabled(raw, fallbackValue) {
+  if (raw == null || raw === "") {
+    return fallbackValue;
   }
-  return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
+  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
 }
 
 function normalizeApiBase(raw) {
-  const trimmed = String(raw || '').trim().replace(/\/$/, '');
+  const trimmed = String(raw || "")
+    .trim()
+    .replace(/\/$/, "");
   if (!trimmed) {
-    return 'http://localhost:8080/v1';
+    return "http://localhost:8080/v1";
   }
   const withScheme =
-    trimmed.startsWith('http://') || trimmed.startsWith('https://')
+    trimmed.startsWith("http://") || trimmed.startsWith("https://")
       ? trimmed
       : `http://${trimmed}`;
-  return withScheme.endsWith('/v1') ? withScheme : `${withScheme}/v1`;
+  return withScheme.endsWith("/v1") ? withScheme : `${withScheme}/v1`;
 }
 
 function createTransport() {
-  const primary = envOrThrow('BASE_RPC_URL');
-  const fallbacks = String(process.env.BASE_RPC_FALLBACK_URLS || '')
-    .split(',')
+  const primary = envOrThrow("BASE_RPC_URL");
+  const fallbacks = String(process.env.BASE_RPC_FALLBACK_URLS || "")
+    .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean)
     .filter((entry) => entry !== primary);
   const urls = [primary, ...fallbacks];
+
   if (urls.length === 1) {
     return http(urls[0], { timeout: 15_000 });
   }
-  return fallback(urls.map((url) => http(url, { timeout: 15_000 })), { rank: false, retryCount: 1 });
+
+  return fallback(
+    urls.map((url) => http(url, { timeout: 15_000 })),
+    {
+      rank: false,
+      retryCount: 1,
+    },
+  );
+}
+
+function buildHeaders(token) {
+  const headers = {
+    "content-type": "application/json",
+  };
+
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+
+  return headers;
 }
 
 async function fetchJson(url, init = {}) {
   const response = await fetch(url, init);
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || payload?.message || `${response.status} ${response.statusText}`);
+  let payload = null;
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { raw: text };
+    }
   }
+
+  if (!response.ok) {
+    const message =
+      payload?.error?.message ||
+      payload?.message ||
+      payload?.error ||
+      `${response.status} ${response.statusText}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
+
   return payload;
 }
 
-async function listAgents() {
-  const response = await fetchJson(`${apiBase}/evm/agents?limit=${Math.max(limit, 1)}&offset=0&active=true`);
-  return Array.isArray(response?.agents) ? response.agents : [];
-}
+async function loginAdmin(account) {
+  const noncePayload = await fetchJson(`${apiBase}/auth/siwe/nonce`);
+  const nonce = noncePayload?.nonce;
 
-async function prepareExecute(agentId, from) {
-  return fetchJson(`${apiBase}/evm/write/agents/execute`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ from, agentId }),
-  });
-}
-
-async function executeAgent(runtime, agent) {
-  const prepared = await prepareExecute(Number(agent.id), runtime.account.address);
-  if (dryRun) {
-    return { agentId: agent.id, txHash: 'dry-run', method: prepared.method };
+  if (!nonce) {
+    throw new Error("missing SIWE nonce");
   }
 
-  const hash = await runtime.walletClient.sendTransaction({
-    account: runtime.account,
-    to: prepared.to,
-    data: prepared.data,
-    value: BigInt(prepared.value),
+  const issuedAt = new Date().toISOString();
+  const message = `${siweDomain} wants you to sign in with your Ethereum account:\n${account.address}\n\nSign in to relay44 bootstrap operator\n\nURI: ${apiOrigin}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
+  const signature = await account.signMessage({ message });
+  const tokens = await fetchJson(`${apiBase}/auth/siwe/login`, {
+    method: "POST",
+    headers: buildHeaders(),
+    body: JSON.stringify({
+      wallet: account.address,
+      message,
+      signature,
+    }),
   });
-  const receipt = await runtime.publicClient.waitForTransactionReceipt({ hash });
-  return { agentId: agent.id, txHash: hash, status: receipt.status };
+
+  if (!tokens?.access_token) {
+    throw new Error("missing access token");
+  }
+
+  return tokens.access_token;
+}
+
+async function apiPost(pathname, token, body = {}) {
+  return fetchJson(`${apiBase}${pathname}`, {
+    method: "POST",
+    headers: buildHeaders(token),
+    body: JSON.stringify(body),
+  });
 }
 
 async function ensureOperatorBalance(runtime) {
-  const balance = await runtime.publicClient.getBalance({ address: runtime.account.address });
+  const balance = await runtime.publicClient.getBalance({
+    address: runtime.account.address,
+  });
   const balanceEth = formatEther(balance);
   const minBalanceWei = BigInt(Math.ceil(minBalanceEth * 1e18));
 
@@ -100,7 +165,7 @@ async function ensureOperatorBalance(runtime) {
     return {
       ok: false,
       skipped: true,
-      reason: 'operator wallet underfunded',
+      reason: "operator wallet underfunded",
       operator: runtime.account.address,
       balanceEth,
       minBalanceEth,
@@ -115,42 +180,165 @@ async function ensureOperatorBalance(runtime) {
   };
 }
 
+async function fetchTickPlan(token) {
+  return apiPost("/evm/bootstrap/runner/tick", token, { limit });
+}
+
+async function postReport(token, report) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await apiPost("/evm/bootstrap/runner/report", token, report);
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) {
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function executeAction(runtime, action, accessToken) {
+  const prepared = action.preparedWrite || {};
+  if (Number(prepared.chainId || 0) !== chainId) {
+    throw new Error(
+      `runner action chain mismatch for market ${action.marketId}`,
+    );
+  }
+
+  let hash = null;
+
+  try {
+    hash = await runtime.walletClient.sendTransaction({
+      account: runtime.account,
+      chain: runtime.chain,
+      to: prepared.to,
+      data: prepared.data,
+      value: BigInt(prepared.value),
+    });
+    const receipt = await runtime.publicClient.waitForTransactionReceipt({
+      hash,
+    });
+    const success = receipt.status === "success";
+
+    await postReport(accessToken, {
+      marketId: action.marketId,
+      kind: action.kind,
+      txHash: hash,
+      success,
+      slots: action.slots || [],
+      error: success ? null : `transaction reverted for ${action.kind}`,
+    });
+
+    return {
+      marketId: action.marketId,
+      kind: action.kind,
+      txHash: hash,
+      success,
+      status: receipt.status,
+      slots: Array.isArray(action.slots) ? action.slots.length : 0,
+    };
+  } catch (error) {
+    if (hash) {
+      try {
+        await postReport(accessToken, {
+          marketId: action.marketId,
+          kind: action.kind,
+          txHash: hash,
+          success: false,
+          slots: action.slots || [],
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } catch (reportError) {
+        throw new Error(
+          `tx ${hash} failed for ${action.kind} and report failed: ${
+            reportError instanceof Error
+              ? reportError.message
+              : String(reportError)
+          }`,
+        );
+      }
+    }
+
+    throw error;
+  }
+}
+
 async function main() {
   if (!enabled) {
-    console.log(JSON.stringify({ ok: true, skipped: true, reason: 'base agent operator disabled' }, null, 2));
+    console.log(
+      JSON.stringify(
+        { ok: true, skipped: true, reason: "base agent operator disabled" },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
-  const privateKey = envOrThrow('BASE_AGENT_OPERATOR_PRIVATE_KEY');
+  const privateKey = envOrThrow("BASE_AGENT_OPERATOR_PRIVATE_KEY");
   const account = privateKeyToAccount(privateKey);
   const transport = createTransport();
   const chain = { ...base, id: chainId };
   const runtime = {
     account,
+    chain,
     publicClient: createPublicClient({ chain, transport }),
     walletClient: createWalletClient({ account, chain, transport }),
   };
+
   const balanceCheck = await ensureOperatorBalance(runtime);
   if (!balanceCheck.ok) {
     console.log(JSON.stringify(balanceCheck, null, 2));
     return;
   }
+
+  const accessToken = await loginAdmin(account);
   const startedAt = new Date().toISOString();
-  const agents = await listAgents();
-  const eligible = agents.filter((agent) => agent.active && agent.can_execute).slice(0, limit);
-  const skipped = {
-    inactive: agents.filter((agent) => !agent.active).length,
-    not_due: agents.filter((agent) => agent.active && !agent.can_execute).length,
-  };
+  const plan = await fetchTickPlan(accessToken);
+  const actions = Array.isArray(plan?.actions) ? plan.actions : [];
+
+  if (dryRun) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          startedAt,
+          operator: account.address,
+          balanceEth: balanceCheck.balanceEth,
+          minBalanceEth,
+          scanned: plan?.scanned ?? 0,
+          dryRun: true,
+          actions: actions.map((action) => ({
+            marketId: action.marketId,
+            kind: action.kind,
+            status: action.configStatus,
+            method: action.preparedWrite?.method || null,
+            slots: Array.isArray(action.slots) ? action.slots.length : 0,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
 
   const executions = [];
   const failures = [];
 
-  for (const agent of eligible) {
+  for (const action of actions) {
     try {
-      executions.push(await executeAgent(runtime, agent));
+      executions.push(await executeAction(runtime, action, accessToken));
     } catch (error) {
-      failures.push({ agentId: agent.id, message: error instanceof Error ? error.message : String(error) });
+      failures.push({
+        marketId: action.marketId,
+        kind: action.kind,
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -162,11 +350,10 @@ async function main() {
         operator: account.address,
         balanceEth: balanceCheck.balanceEth,
         minBalanceEth,
-        dryRun,
-        agentsScanned: agents.length,
-        eligible: eligible.length,
+        dryRun: false,
+        scanned: plan?.scanned ?? 0,
+        planned: actions.length,
         executed: executions.length,
-        skipped,
         failures,
         executions,
       },
@@ -181,6 +368,17 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(JSON.stringify({ ok: false, message: error.message }, null, 2));
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        message: error.message,
+        status: error.status || null,
+        details: error.payload || null,
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(1);
 });
