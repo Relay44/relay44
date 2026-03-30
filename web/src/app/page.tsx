@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
-const HOME_MARKET_LIMIT = 16;
+const HOME_MARKET_LIMIT = 100;
 const HOME_HERO_IMAGE_SRCS = [
   '/home-hero-slides/643927642.jpg',
   '/home-hero-slides/65465146546.jpg',

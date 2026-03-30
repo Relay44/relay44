@@ -34,16 +34,16 @@ pub enum ExternalExecutionMode {
 }
 
 impl ExternalExecutionMode {
-    fn from_env(raw: Option<String>) -> Self {
-        match raw
-            .unwrap_or_else(|| "live".to_string())
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "paper" => Self::Paper,
-            _ => Self::Live,
+    pub fn from_str(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "live" => Some(Self::Live),
+            "paper" => Some(Self::Paper),
+            _ => None,
         }
+    }
+
+    fn from_env(raw: Option<String>) -> Self {
+        raw.as_deref().and_then(Self::from_str).unwrap_or(Self::Live)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -80,6 +80,7 @@ pub struct AppConfig {
     pub market_core_address: String,
     pub order_book_address: String,
     pub agent_runtime_address: String,
+    pub bootstrap_operator_address: String,
     pub jwt_secret: String,
     pub cors_origins: Vec<String>,
     pub is_development: bool,
@@ -129,6 +130,8 @@ pub struct AppConfig {
     pub polymarket_forwarder_shared_secret: String,
     pub external_credentials_master_key: String,
     pub external_credentials_key_id: String,
+    pub paper_cohort_public_enabled: bool,
+    pub paper_cohort_public_owner: String,
     pub limitless_api_base: String,
     pub polymarket_gamma_api_base: String,
     pub polymarket_clob_api_base: String,
@@ -346,6 +349,10 @@ impl AppConfig {
             env::var("EXTERNAL_CREDENTIALS_MASTER_KEY").unwrap_or_else(|_| String::new());
         let external_credentials_key_id =
             env::var("EXTERNAL_CREDENTIALS_KEY_ID").unwrap_or_else(|_| "v1".to_string());
+        let paper_cohort_public_owner = env::var("PAPER_COHORT_PUBLIC_OWNER")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
         if (external_trading_enabled || external_agents_enabled)
             && external_execution_mode == ExternalExecutionMode::Live
             && !is_development
@@ -371,6 +378,15 @@ impl AppConfig {
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let bootstrap_operator_address = env::var("BOOTSTRAP_OPERATOR_ADDRESS")
+            .unwrap_or_else(|_| "".to_string())
+            .trim()
+            .to_ascii_lowercase();
+        if !bootstrap_operator_address.is_empty()
+            && !is_valid_hex_address(bootstrap_operator_address.as_str())
+        {
+            panic!("SECURITY ERROR: BOOTSTRAP_OPERATOR_ADDRESS must be a valid 0x address");
+        }
 
         Self {
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
@@ -407,6 +423,7 @@ impl AppConfig {
             order_book_address: env::var("ORDER_BOOK_ADDRESS").unwrap_or_else(|_| "".to_string()),
             agent_runtime_address: env::var("AGENT_RUNTIME_ADDRESS")
                 .unwrap_or_else(|_| "".to_string()),
+            bootstrap_operator_address,
             jwt_secret,
             cors_origins,
             is_development,
@@ -501,6 +518,11 @@ impl AppConfig {
             polymarket_forwarder_shared_secret,
             external_credentials_master_key,
             external_credentials_key_id,
+            paper_cohort_public_enabled: env::var("PAPER_COHORT_PUBLIC_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_ascii_lowercase()
+                == "true",
+            paper_cohort_public_owner,
             limitless_api_base: env::var("LIMITLESS_API_BASE")
                 .unwrap_or_else(|_| "https://api.limitless.exchange".to_string()),
             polymarket_gamma_api_base: env::var("POLYMARKET_GAMMA_API_BASE")

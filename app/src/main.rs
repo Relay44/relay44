@@ -631,8 +631,16 @@ async fn main() -> std::io::Result<()> {
                                 web::get().to(api::external::list_external_agents),
                             )
                             .route(
+                                "/agents/public",
+                                web::get().to(api::external::list_public_external_agents),
+                            )
+                            .route(
                                 "/agents",
                                 web::post().to(api::external::create_external_agent),
+                            )
+                            .route(
+                                "/agents/public/performance",
+                                web::get().to(api::external::get_public_external_agents_performance),
                             )
                             .route(
                                 "/agents/performance",

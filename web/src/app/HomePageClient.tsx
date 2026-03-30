@@ -5,9 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Header, BottomNav } from "@/components/layout";
 import { HeroTicket, type HeroTicketRow } from "@/components/home/HeroTicket";
 import { FeaturedSlider } from "@/components/market";
-import { useAgents, useMarkets } from "@/hooks";
+import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { HomeLiveFeed } from "@/lib/server/homeLive";
+import type { ExternalAgentRecord } from "@/lib/api";
 import type { Agent, Market, PaginatedResponse } from "@/types";
 
 interface HomePageClientProps {
@@ -17,7 +18,26 @@ interface HomePageClientProps {
 }
 
 const HOME_MARKET_LIMIT = 16;
+const HOME_LOOKUP_LIMIT = 100;
 const FEATURED_MARKET_COUNT = 16;
+
+interface LiveAgentFeedEntry {
+  id: string;
+  href: string;
+  label: string;
+  title: string;
+  subtitle: string;
+  meta: string;
+  summary: string;
+  scheduleLabel: string;
+  statusLabel: string;
+  sourceLabel: "onchain" | "relay44";
+  sourceTone: "default" | "accent";
+  ready: boolean;
+  muted: boolean;
+  lastActivityAt?: number;
+  nextExecutionAt?: number;
+}
 
 function formatPriceForTape(value: number | null | undefined): string {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -42,6 +62,18 @@ function formatAgentSize(size: string): string {
   if (parsed >= 1000) return `${(parsed / 1000).toFixed(1)}k`;
   if (parsed >= 10) return parsed.toFixed(0);
   return parsed.toFixed(2);
+}
+
+function formatPaperQuantity(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  if (value >= 10) return value.toFixed(0);
+  return value.toFixed(2);
+}
+
+function formatPricePercent(value: number): string {
+  if (!Number.isFinite(value)) return "--";
+  return `${Math.round(value * 100)}%`;
 }
 
 function formatRelativeTimestamp(value: string): string {
@@ -84,7 +116,7 @@ function formatUtcTimestamp(value: string): string {
 }
 
 function buildHeroRows(
-  agents: Agent[],
+  agents: LiveAgentFeedEntry[],
   signal: HomeLiveFeed["signal"],
   isLoadingAgents: boolean,
   agentsError: Error | null
@@ -92,7 +124,7 @@ function buildHeroRows(
   if (agents.length > 0) {
     return agents.slice(0, 3).map((agent, index) => ({
       label: `AGENT ${String(index + 1).padStart(2, "0")}`,
-      value: `#${agent.id} ${agent.isYes ? "YES" : "NO"} ${agent.canExecute ? "READY" : agent.status.toUpperCase()}`,
+      value: agent.summary,
     }));
   }
 
@@ -112,17 +144,86 @@ function buildHeroRows(
   ];
 }
 
+function compareLiveAgents(a: LiveAgentFeedEntry, b: LiveAgentFeedEntry): number {
+  const aHasLast = Number.isFinite(a.lastActivityAt);
+  const bHasLast = Number.isFinite(b.lastActivityAt);
+
+  if (aHasLast && bHasLast) {
+    return (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0);
+  }
+  if (aHasLast) return -1;
+  if (bHasLast) return 1;
+
+  const aNext = a.nextExecutionAt ?? Number.POSITIVE_INFINITY;
+  const bNext = b.nextExecutionAt ?? Number.POSITIVE_INFINITY;
+  return aNext - bNext;
+}
+
+function toLiveFeedEntry(
+  agent: Agent,
+  marketLookup: Map<string, Market>,
+): LiveAgentFeedEntry {
+  const market = marketLookup.get(agent.marketId);
+  const scheduleLabel = agent.lastExecutedAt
+    ? formatRelativeTimestamp(agent.lastExecutedAt)
+    : formatRelativeTimestamp(agent.nextExecutionAt);
+
+  return {
+    id: `onchain-${agent.id}`,
+    href: `/markets/${encodeURIComponent(agent.marketId)}`,
+    label: `Agent #${agent.id}`,
+    title: market?.question || `Market #${agent.marketId}`,
+    subtitle: `${agent.isYes ? "YES" : "NO"} @ ${Math.round(agent.priceBps / 100)}% · ${formatAgentSize(agent.size)} USDC`,
+    meta: `cadence ${agent.cadence}s · ${scheduleLabel}`,
+    summary: `ONCHAIN ${agent.isYes ? "YES" : "NO"} ${agent.canExecute ? "READY" : agent.status.toUpperCase()}`,
+    scheduleLabel,
+    statusLabel: agent.canExecute ? "ready" : agent.status,
+    sourceLabel: "onchain",
+    sourceTone: "default",
+    ready: agent.canExecute,
+    muted: !agent.canExecute && agent.status !== "cooldown",
+    lastActivityAt: agent.lastExecutedAt ? new Date(agent.lastExecutedAt).getTime() : undefined,
+    nextExecutionAt: agent.nextExecutionAt ? new Date(agent.nextExecutionAt).getTime() : undefined,
+  };
+}
+
+function toPublicPaperFeedEntry(
+  agent: ExternalAgentRecord,
+  marketLookup: Map<string, Market>,
+): LiveAgentFeedEntry {
+  const market = marketLookup.get(agent.market_id);
+  const scheduleLabel = agent.last_executed_at
+    ? formatRelativeTimestamp(agent.last_executed_at)
+    : formatRelativeTimestamp(agent.next_execution_at);
+
+  return {
+    id: `relay44-${agent.id}`,
+    href: `/markets/${encodeURIComponent(agent.market_id)}`,
+    label: `${agent.strategy_label} loop`,
+    title: market?.question || agent.market_id,
+    subtitle: `${agent.strategy_label} · ${agent.outcome.toUpperCase()} ${agent.side.toUpperCase()} @ ${formatPricePercent(agent.price)} · qty ${formatPaperQuantity(agent.quantity)}`,
+    meta: `cadence ${agent.cadence_seconds}s · ${scheduleLabel}`,
+    summary: `RELAY44 ${agent.strategy_label.toUpperCase()}`,
+    scheduleLabel,
+    statusLabel: agent.active ? "active" : "inactive",
+    sourceLabel: "relay44",
+    sourceTone: "accent",
+    ready: agent.active,
+    muted: !agent.active,
+    lastActivityAt: agent.last_executed_at ? new Date(agent.last_executed_at).getTime() : undefined,
+    nextExecutionAt: agent.next_execution_at ? new Date(agent.next_execution_at).getTime() : undefined,
+  };
+}
+
 function AgentPanel({
   agents,
   isLoading,
   error,
-  marketLookup,
   signal,
 }: {
-  agents: Agent[];
+  agents: LiveAgentFeedEntry[];
   isLoading: boolean;
   error: Error | null;
-  marketLookup: Map<string, Market>;
   signal: HomeLiveFeed["signal"];
 }) {
   const liveAgents = agents.slice(0, 6);
@@ -131,48 +232,49 @@ function AgentPanel({
   return (
     <aside className="hidden lg:flex w-[375px] shrink-0 flex-col border-r border-border">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border font-mono text-[0.75rem]">
-        <span className="text-text-muted uppercase tracking-wider">
-          {liveAgents.length > 0 ? "Agent Runtime" : "Runtime Status"}
-        </span>
+        <span className="text-text-muted uppercase tracking-wider">Live Agents</span>
         <span className="text-text-primary uppercase">{headerState}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {liveAgents.length > 0 ? (
           liveAgents.map((agent) => {
-            const market = marketLookup.get(agent.marketId);
-            const scheduleLabel = agent.lastExecutedAt
-              ? formatRelativeTimestamp(agent.lastExecutedAt)
-              : formatRelativeTimestamp(agent.nextExecutionAt);
-
             return (
               <Link
                 key={agent.id}
-                href={`/markets/${encodeURIComponent(agent.marketId)}`}
+                href={agent.href}
                 className="block border border-border bg-bg-secondary/60 p-3 transition-colors hover:border-border-hover hover:bg-bg-hover"
               >
                 <div className="flex items-center justify-between gap-3 font-mono text-[0.68rem] uppercase tracking-[0.12em]">
-                  <span className="text-text-primary">Agent #{agent.id}</span>
-                  <span
-                    className={cn(
-                      agent.canExecute
-                        ? "text-bid"
-                        : agent.status === "cooldown"
-                          ? "text-text-secondary"
-                          : "text-text-muted"
-                    )}
-                  >
-                    {agent.canExecute ? "ready" : agent.status}
-                  </span>
+                  <span className="text-text-primary">{agent.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "border px-2 py-0.5",
+                        agent.sourceTone === "accent"
+                          ? "border-accent text-accent"
+                          : "border-border text-text-muted"
+                      )}
+                    >
+                      {agent.sourceLabel}
+                    </span>
+                    <span
+                      className={cn(
+                        agent.ready
+                          ? "text-bid"
+                          : agent.muted
+                            ? "text-text-muted"
+                            : "text-text-secondary"
+                      )}
+                    >
+                      {agent.statusLabel}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-2 text-sm text-text-primary line-clamp-2">
-                  {market?.question || `Market #${agent.marketId}`}
+                  {agent.title}
                 </div>
-                <div className="mt-2 text-[0.72rem] text-text-muted">
-                  {agent.isYes ? "YES" : "NO"} @ {Math.round(agent.priceBps / 100)}% · {formatAgentSize(agent.size)} USDC
-                </div>
-                <div className="text-[0.72rem] text-text-muted">
-                  cadence {agent.cadence}s · {scheduleLabel}
-                </div>
+                <div className="mt-2 text-[0.72rem] text-text-muted">{agent.subtitle}</div>
+                <div className="text-[0.72rem] text-text-muted">{agent.meta}</div>
               </Link>
             );
           })
@@ -183,10 +285,10 @@ function AgentPanel({
             </div>
             <p className="mt-3 text-sm text-text-secondary">
               {error
-                ? "The homepage could not reach the live agent runtime feed in this environment."
+                ? "The homepage could not reach the live agent feeds in this environment."
                 : isLoading
                   ? "Waiting for the current live agent set."
-                  : "No active onchain agents are currently returned by the runtime."}
+                  : "Relay44 paper agents are warming up and no active onchain agents are currently returned by the runtime."}
             </p>
             <div className="mt-4 space-y-2 font-mono text-[0.72rem] text-text-muted">
               <div>markets tracked: {signal.marketsTracked}</div>
@@ -350,7 +452,7 @@ export default function HomePageClient({
   const { data: marketsData, isLoading } = useMarkets(
     {
       sort: "volume",
-      limit: HOME_MARKET_LIMIT,
+      limit: HOME_LOOKUP_LIMIT,
     },
     {
       initialData: initialMarkets || undefined,
@@ -363,27 +465,45 @@ export default function HomePageClient({
     isLoading: isLoadingAgents,
     error: agentsQueryError,
   } = useAgents({ limit: 6, active: true });
-  const liveAgents = agentsData?.data ?? [];
+  const {
+    data: publicAgentsData,
+    isLoading: isLoadingPublicAgents,
+    error: publicAgentsQueryError,
+  } = usePublicExternalAgents({ limit: 6, active: true });
+  const onchainAgents = agentsData?.data ?? [];
+  const publicPaperAgents = publicAgentsData?.data ?? [];
   const agentsError = agentsQueryError instanceof Error ? agentsQueryError : null;
+  const publicAgentsError = publicAgentsQueryError instanceof Error ? publicAgentsQueryError : null;
   const marketLookup = useMemo(
     () => new Map(markets.map((market) => [market.id, market])),
     [markets]
   );
-  const heroRows = buildHeroRows(liveAgents, liveFeed.signal, isLoadingAgents, agentsError);
+  const liveAgents = useMemo(
+    () =>
+      [...onchainAgents.map((agent) => toLiveFeedEntry(agent, marketLookup)), ...publicPaperAgents.map((agent) => toPublicPaperFeedEntry(agent, marketLookup))]
+        .sort(compareLiveAgents)
+        .slice(0, 6),
+    [marketLookup, onchainAgents, publicPaperAgents]
+  );
+  const agentFeedError = liveAgents.length === 0 ? agentsError ?? publicAgentsError : null;
+  const isLoadingLiveAgents = isLoadingAgents || isLoadingPublicAgents;
+  const heroRows = buildHeroRows(liveAgents, liveFeed.signal, isLoadingLiveAgents, agentFeedError);
   const heroStatus = liveAgents.length > 0
     ? "LIVE"
-    : agentsError
+    : agentFeedError
       ? "DEGRADED"
       : liveFeed.signal.feedsLive > 0
         ? "LIVE"
         : "STANDBY";
   const heroMode = liveAgents.length > 0
     ? `${liveAgents.length} LIVE AGENTS`
-    : agentsError
+    : agentFeedError
       ? "AGENT FEED OFFLINE"
-      : isLoadingAgents
+      : isLoadingLiveAgents
         ? "LOADING AGENTS"
         : "MARKET MONITOR";
+  const displayMarkets = markets.slice(0, HOME_MARKET_LIMIT);
+  const featuredMarkets = markets.slice(0, FEATURED_MARKET_COUNT);
 
   useEffect(() => {
     setLiveFeed(initialLiveFeed);
@@ -415,9 +535,8 @@ export default function HomePageClient({
       <div className="pt-page flex flex-1 overflow-hidden">
         <AgentPanel
           agents={liveAgents}
-          isLoading={isLoadingAgents}
-          error={agentsError}
-          marketLookup={marketLookup}
+          isLoading={isLoadingLiveAgents}
+          error={agentFeedError}
           signal={liveFeed.signal}
         />
 
@@ -434,7 +553,7 @@ export default function HomePageClient({
           </section>
 
           <section className="py-5 border-b border-border">
-            <FeaturedSlider markets={markets.slice(0, FEATURED_MARKET_COUNT)} title="Signal Relay" />
+            <FeaturedSlider markets={featuredMarkets} title="Signal Relay" />
           </section>
 
           <section className="border-b border-border px-4 py-4 sm:px-6">
@@ -460,11 +579,11 @@ export default function HomePageClient({
             </div>
           </section>
 
-          <MarketTable markets={markets} isLoading={isLoading} />
+          <MarketTable markets={displayMarkets} isLoading={isLoading} />
         </main>
       </div>
 
-      <HomeMarketTape markets={markets} signal={liveFeed.signal} />
+      <HomeMarketTape markets={displayMarkets} signal={liveFeed.signal} />
       <BottomNav />
     </div>
   );
