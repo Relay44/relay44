@@ -11,6 +11,13 @@ fi
 
 SILO_CHECK_INCLUDE_DOCS=1 ./scripts/verify-project-silo.sh
 
+if [[ ! -x ./scripts/verify-public-repo-standards.sh ]]; then
+  echo "Missing public repo standards checker: scripts/verify-public-repo-standards.sh"
+  exit 1
+fi
+
+./scripts/verify-public-repo-standards.sh
+
 if [[ ! -x ./scripts/verify-open-core-boundary.mjs ]]; then
   echo "Missing open-core checker: scripts/verify-open-core-boundary.mjs"
   exit 1
