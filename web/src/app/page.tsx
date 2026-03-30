@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import type { Metadata } from 'next';
 import HomePageClient from './HomePageClient';
 import { StructuredData } from '@/components/seo/StructuredData';
@@ -17,8 +18,14 @@ export const metadata: Metadata = {
   alternates: { canonical: '/' },
 };
 
-export const revalidate = 5;
+export const dynamic = 'force-dynamic';
 const HOME_MARKET_LIMIT = 16;
+const HOME_HERO_IMAGE_SRCS = [
+  '/home-hero-slides/643927642.jpg',
+  '/home-hero-slides/65465146546.jpg',
+  '/home-hero-slides/68880184-283f-4bad-9f22-62194696309f.jpg',
+  '/home-hero-slides/b79d5c4f-4a29-4f88-87ab-8ad587370502.jpg',
+] as const;
 
 export default async function HomePage() {
   const [initialMarkets, initialLiveFeed] = await Promise.all([
@@ -33,6 +40,8 @@ export default async function HomePage() {
     name: market.question,
     url: absoluteUrl(`/markets/${encodeURIComponent(market.id)}`),
   }));
+  const heroBackgroundImageSrc =
+    HOME_HERO_IMAGE_SRCS[randomInt(0, HOME_HERO_IMAGE_SRCS.length)];
 
   return (
     <>
@@ -54,6 +63,7 @@ export default async function HomePage() {
       <HomePageClient
         initialMarkets={initialMarkets}
         initialLiveFeed={initialLiveFeed}
+        heroBackgroundImageSrc={heroBackgroundImageSrc}
       />
     </>
   );

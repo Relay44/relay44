@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTheme } from '@/components/ThemeProvider';
 
 const ZERO_BITMAP = [
@@ -24,13 +24,6 @@ const O_BITMAP = [
   [1, 0, 0, 1],
   [1, 0, 0, 1],
   [0, 1, 1, 0],
-] as const;
-
-const HERO_BACKGROUND_IMAGE_SRCS = [
-  '/home-hero-slides/643927642.jpg',
-  '/home-hero-slides/65465146546.jpg',
-  '/home-hero-slides/68880184-283f-4bad-9f22-62194696309f.jpg',
-  '/home-hero-slides/b79d5c4f-4a29-4f88-87ab-8ad587370502.jpg',
 ] as const;
 
 function getGlyphBitmap(char: '0' | '1' | 'o') {
@@ -447,6 +440,7 @@ interface HeroTicketProps {
   networkValue?: string;
   modeValue?: string;
   detailRows?: HeroTicketRow[];
+  backgroundImageSrc: string;
 }
 
 const DEFAULT_DETAIL_ROWS: HeroTicketRow[] = [
@@ -461,27 +455,10 @@ export function HeroTicket({
   networkValue = 'BASE L2',
   modeValue = 'MARKET MONITOR',
   detailRows = DEFAULT_DETAIL_ROWS,
+  backgroundImageSrc,
 }: HeroTicketProps) {
-  const [isDesktop, setIsDesktop] = useState(false);
-  const [backgroundImageSrc, setBackgroundImageSrc] = useState<string>(
-    HERO_BACKGROUND_IMAGE_SRCS[0]
-  );
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
-
-  useEffect(() => {
-    const check = () => setIsDesktop(window.innerWidth >= 600);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
-
-  useEffect(() => {
-    const nextIndex = Math.floor(Math.random() * HERO_BACKGROUND_IMAGE_SRCS.length);
-    setBackgroundImageSrc(HERO_BACKGROUND_IMAGE_SRCS[nextIndex]);
-  }, []);
-
-  const borderColor = isDark ? 'rgba(232, 228, 220, 0.1)' : 'rgba(0, 0, 0, 0.1)';
 
   const dataGrid: React.CSSProperties = {
     display: 'grid',
@@ -491,46 +468,26 @@ export function HeroTicket({
 
   return (
     <div
-      className="bg-bg-secondary text-text-primary"
-      style={{
-        position: 'relative',
-        display: 'flex',
-        flexDirection: isDesktop ? 'row' : 'column',
-        overflow: 'hidden',
-        width: '100%',
-        height: '100%',
-        fontFamily: "var(--font-mono)",
-      }}
+      className="relative flex h-full w-full flex-col overflow-hidden bg-bg-secondary text-text-primary sm:flex-row"
+      style={{ fontFamily: 'var(--font-mono)' }}
     >
-      {/* Canvas — left half */}
       <div
+        className="relative min-h-[200px] w-full flex-[1_1_50%] overflow-hidden border-b border-border sm:min-h-0 sm:border-b-0 sm:border-r"
         style={{
-          flex: '1 1 50%',
-          width: '100%',
-          position: 'relative',
-          overflow: 'hidden',
           backgroundImage: `url('${backgroundImageSrc}')`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          borderRight: isDesktop ? `1px solid ${borderColor}` : 'none',
-          borderBottom: isDesktop ? 'none' : `1px solid ${borderColor}`,
-          minHeight: isDesktop ? 'auto' : '200px',
         }}
       >
         <TicketCanvas backgroundImageSrc={backgroundImageSrc} isDark={isDark} />
       </div>
 
-      {/* Data — right half */}
       <div
-        className="bg-bg-secondary"
+        className="z-[2] flex flex-[1_1_50%] flex-col bg-bg-secondary"
         style={{
-          flex: '1 1 50%',
           padding: '2rem 1.5rem 1.5rem 1.5rem',
-          display: 'flex',
-          flexDirection: 'column',
           fontSize: '0.75rem',
           lineHeight: 1.2,
-          zIndex: 2,
         }}
       >
         <div style={dataGrid}>
