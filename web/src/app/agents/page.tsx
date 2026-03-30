@@ -22,6 +22,7 @@ import {
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { api, type ExternalCredential, type ExternalCredentialStatus } from '@/lib/api';
+import { formatPublicPaperAgentName } from '@/lib/publicPaperAgents';
 import { cn } from '@/lib/utils';
 
 function truncateAddress(address: string) {
@@ -528,6 +529,9 @@ export default function AgentsPage() {
                     className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
                   >
                     <div className="space-y-1">
+                      <p className="text-sm font-medium text-text-primary">
+                        {formatPublicPaperAgentName(agent)}
+                      </p>
                       <div className="flex items-center gap-2">
                         <span className="border border-accent px-2 py-1 text-[0.68rem] uppercase tracking-[0.12em] text-accent">
                           {agent.strategy_label}
