@@ -35,7 +35,7 @@ const navLinks = [
   { href: "/agents", label: "Agents", note: "Manage market agents" },
   { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
   { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
-  { href: "/docs/api", label: "API", note: "Developer endpoints" },
+  { href: "/docs", label: "Docs", note: "Guides, API reference, and developer resources" },
 ];
 
 const externalLinks = [
