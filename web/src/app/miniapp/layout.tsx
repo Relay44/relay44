@@ -1,4 +1,5 @@
 import { buildPageMetadata } from '@/lib/seo';
+import { MiniKitInit } from './MiniKitInit';
 
 export const metadata = buildPageMetadata({
   title: 'Miniapp',
@@ -8,5 +9,10 @@ export const metadata = buildPageMetadata({
 });
 
 export default function MiniappLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <>
+      <MiniKitInit />
+      {children}
+    </>
+  );
 }
