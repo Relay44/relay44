@@ -111,7 +111,7 @@ const nextConfig = {
       "font-src 'self' data: https:",
       "connect-src 'self' https: wss:",
       "frame-src 'self' https://*.tradingview.com https://*.tradingview-widget.com",
-      "frame-ancestors 'self' https://*.farcaster.xyz https://warpcast.com https://*.coinbase.com https://*.base.org https://base.dev https://www.base.dev",
+      "frame-ancestors 'self' https://farcaster.xyz https://*.farcaster.xyz https://warpcast.com https://*.warpcast.com https://*.coinbase.com https://*.base.org https://base.dev https://www.base.dev",
       "base-uri 'self'",
       "form-action 'self'",
     ].join('; ');
