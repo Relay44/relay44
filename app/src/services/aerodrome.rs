@@ -46,7 +46,14 @@ fn encode_address(address: &str) -> Result<String, ApiError> {
             "address must be a valid 0x EVM address",
         ));
     }
-    Ok(format!("{:0>64}", &clean[2..]))
+    let hex_part = &clean[2..];
+    if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request(
+            "INVALID_ADDRESS",
+            "address contains non-hex characters",
+        ));
+    }
+    Ok(format!("{:0>64}", hex_part))
 }
 
 /// Encode `exactInputSingle` calldata for Aerodrome Slipstream SwapRouter.
@@ -62,6 +69,30 @@ pub fn encode_swap_exact_input_single(
     amount_in: u128,
     amount_out_minimum: u128,
 ) -> Result<String, ApiError> {
+    if amount_in == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_SWAP_PARAMS",
+            "amount_in must be greater than zero",
+        ));
+    }
+    if amount_out_minimum == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_SWAP_PARAMS",
+            "amount_out_minimum must be > 0 to protect against sandwich attacks",
+        ));
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if deadline <= now {
+        return Err(ApiError::bad_request(
+            "INVALID_DEADLINE",
+            "deadline must be in the future",
+        ));
+    }
+
     Ok(format!(
         "{}{}{}{}{}{}{}{}{}",
         EXACT_INPUT_SINGLE_SELECTOR,
@@ -85,6 +116,12 @@ pub fn encode_quote_exact_input_single(
     amount_in: u128,
     tick_spacing: i32,
 ) -> Result<String, ApiError> {
+    if amount_in == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_QUOTE_PARAMS",
+            "amount_in must be greater than zero",
+        ));
+    }
     // QuoterV2 uses a struct param: QuoteExactInputSingleParams
     // (address tokenIn, address tokenOut, uint256 amountIn, int24 tickSpacing, uint160 sqrtPriceLimitX96)
     Ok(format!(
@@ -117,6 +154,27 @@ pub fn encode_nfpm_mint(
     recipient: &str,
     deadline: u64,
 ) -> Result<String, ApiError> {
+    if tick_lower >= tick_upper {
+        return Err(ApiError::bad_request(
+            "INVALID_TICK_RANGE",
+            &format!(
+                "tick_lower ({}) must be less than tick_upper ({})",
+                tick_lower, tick_upper
+            ),
+        ));
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if deadline <= now {
+        return Err(ApiError::bad_request(
+            "INVALID_DEADLINE",
+            "deadline must be in the future",
+        ));
+    }
+
     Ok(format!(
         "{}{}{}{}{}{}{}{}{}{}{}{}",
         NFPM_MINT_SELECTOR,
@@ -182,14 +240,29 @@ pub fn encode_nfpm_decrease_liquidity(
 
 /// Convert a price ratio to a Uniswap V3 / Slipstream tick.
 /// price = 1.0001^tick, so tick = log(price) / log(1.0001)
-pub fn price_to_tick(price: f64, tick_spacing: i32) -> i32 {
+pub fn price_to_tick(price: f64, tick_spacing: i32) -> Result<i32, ApiError> {
     if price <= 0.0 || !price.is_finite() {
-        return 0;
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE",
+            "price must be positive and finite",
+        ));
     }
-    let raw_tick = (price.ln() / 1.0001_f64.ln()).round() as i32;
+    if tick_spacing <= 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_TICK_SPACING",
+            "tick_spacing must be positive",
+        ));
+    }
+    let raw_tick = (price.ln() / 1.0001_f64.ln()).round();
+    if raw_tick > i32::MAX as f64 || raw_tick < i32::MIN as f64 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE",
+            "price results in out-of-range tick",
+        ));
+    }
+    let raw_tick_i32 = raw_tick as i32;
     // Snap to tick spacing
-    let spacing = tick_spacing.max(1);
-    (raw_tick / spacing) * spacing
+    Ok((raw_tick_i32 / tick_spacing) * tick_spacing)
 }
 
 /// Convert a Uniswap V3 / Slipstream tick to a price.
@@ -231,9 +304,19 @@ mod tests {
     #[test]
     fn price_to_tick_roundtrips() {
         let price = 0.62;
-        let tick = price_to_tick(price, 200);
+        let tick = price_to_tick(price, 200).unwrap();
         let recovered = tick_to_price(tick);
         assert!((recovered - price).abs() < 0.02);
+    }
+
+    #[test]
+    fn price_to_tick_rejects_invalid_inputs() {
+        assert!(price_to_tick(0.0, 200).is_err());
+        assert!(price_to_tick(-1.0, 200).is_err());
+        assert!(price_to_tick(f64::NAN, 200).is_err());
+        assert!(price_to_tick(f64::INFINITY, 200).is_err());
+        assert!(price_to_tick(0.5, 0).is_err());
+        assert!(price_to_tick(0.5, -1).is_err());
     }
 
     #[test]
@@ -244,13 +327,46 @@ mod tests {
     }
 
     #[test]
+    fn encode_address_rejects_non_hex() {
+        assert!(encode_address("0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ").is_err());
+    }
+
+    #[test]
+    fn encode_swap_rejects_zero_amount_out_minimum() {
+        let result = encode_swap_exact_input_single(
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "0x0000000000000000000000000000000000000001",
+            200,
+            "0x0000000000000000000000000000000000000002",
+            u64::MAX, // far future deadline
+            1_000_000,
+            0, // zero slippage protection
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn encode_swap_rejects_past_deadline() {
+        let result = encode_swap_exact_input_single(
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "0x0000000000000000000000000000000000000001",
+            200,
+            "0x0000000000000000000000000000000000000002",
+            1000, // way in the past
+            1_000_000,
+            900_000,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn encode_swap_produces_valid_calldata() {
         let calldata = encode_swap_exact_input_single(
             "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "0x0000000000000000000000000000000000000001",
             200,
             "0x0000000000000000000000000000000000000002",
-            1700000000,
+            u64::MAX,
             1_000_000, // 1 USDC (6 decimals)
             900_000,
         )
@@ -259,10 +375,27 @@ mod tests {
     }
 
     #[test]
+    fn encode_nfpm_mint_rejects_invalid_tick_range() {
+        let result = encode_nfpm_mint(
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "0x0000000000000000000000000000000000000001",
+            200,
+            100,  // tick_lower
+            100,  // tick_upper == tick_lower
+            1000,
+            1000,
+            0,
+            0,
+            "0x0000000000000000000000000000000000000002",
+            u64::MAX,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn negative_tick_encodes_as_twos_complement() {
         let encoded = encode_i256(-100);
         assert_eq!(encoded.len(), 64);
-        // Should be a large hex number (two's complement)
         assert!(encoded.starts_with("fffff"));
     }
 }
