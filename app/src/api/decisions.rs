@@ -1272,6 +1272,19 @@ fn resolved_probability(resolved: &ResolvedNodeMarket) -> Option<i32> {
     }
 }
 
+/// Reduce a node's effective weight when its data hasn't been refreshed recently.
+/// >24h stale → 25% weight, >6h → 50% weight, otherwise full weight.
+fn staleness_adjusted_weight(weight_bps: i32, updated_at: DateTime<Utc>, now: DateTime<Utc>) -> i32 {
+    let age_hours = (now - updated_at).num_hours();
+    if age_hours > 24 {
+        weight_bps / 4
+    } else if age_hours > 6 {
+        weight_bps / 2
+    } else {
+        weight_bps
+    }
+}
+
 fn build_recommendation(
     cell: &DecisionCellRecord,
     actions: &[DecisionActionRecord],
@@ -1300,9 +1313,10 @@ fn build_recommendation(
 
         if let Some(probability_bps) = current_probability_bps {
             live_nodes += 1;
-            active_weight_bps += node.weight_bps.max(0);
+            let effective_weight = staleness_adjusted_weight(node.weight_bps, node.updated_at, now);
+            active_weight_bps += effective_weight.max(0);
             let centered_signal = (probability_bps as f64 - 5_000.0) / 5_000.0;
-            let weighted_signal = centered_signal * node.weight_bps as f64;
+            let weighted_signal = centered_signal * effective_weight as f64;
 
             for (index, action) in actions.iter().enumerate() {
                 let contribution =
@@ -1401,7 +1415,8 @@ fn build_recommendation(
             continue;
         };
         let centered_signal = (probability_bps as f64 - 5_000.0) / 5_000.0;
-        let weighted_signal = centered_signal * node.weight_bps as f64;
+        let effective_weight = staleness_adjusted_weight(node.weight_bps, node.updated_at, now);
+        let weighted_signal = centered_signal * effective_weight as f64;
         let contribution =
             match action_effect_for_label(&node.action_effects, winning_label.as_str()) {
                 EFFECT_SUPPORT => weighted_signal,

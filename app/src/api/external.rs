@@ -337,6 +337,9 @@ pub struct ExternalAgentResponse {
     pub active: bool,
     pub last_executed_at: Option<String>,
     pub next_execution_at: String,
+    pub consecutive_failures: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error_code: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -478,6 +481,8 @@ pub(crate) struct ExternalAgentRecord {
     pub(crate) credential_id: Option<String>,
     pub(crate) active: bool,
     pub(crate) next_execution_at: chrono::DateTime<Utc>,
+    pub(crate) consecutive_failures: i32,
+    pub(crate) last_error_code: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1195,6 +1200,10 @@ fn parse_external_agent_record(
         next_execution_at: row
             .try_get("next_execution_at")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
+        consecutive_failures: row
+            .try_get::<i32, _>("consecutive_failures")
+            .unwrap_or(0),
+        last_error_code: row.try_get("last_error_code").ok(),
     })
 }
 
@@ -1228,7 +1237,8 @@ pub(crate) async fn load_external_agent_for_owner(
 ) -> Result<ExternalAgentRecord, ApiError> {
     let row = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at
+                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                consecutive_failures, last_error_code
          FROM external_agents
          WHERE id = $1 AND owner = $2",
     )
@@ -1248,7 +1258,8 @@ async fn load_due_external_agents(
 ) -> Result<Vec<ExternalAgentRecord>, ApiError> {
     let rows = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at
+                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                consecutive_failures, last_error_code
          FROM external_agents
          WHERE active = TRUE
          ORDER BY next_execution_at ASC, id ASC
@@ -1326,6 +1337,61 @@ async fn update_external_agent_schedule(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    Ok(())
+}
+
+fn failure_backoff_multiplier(consecutive_failures: i32) -> i64 {
+    match consecutive_failures {
+        0..=2 => 1,
+        3..=5 => 4,
+        6..=10 => 16,
+        _ => 64,
+    }
+}
+
+const MAX_CONSECUTIVE_FAILURES_BEFORE_DEACTIVATE: i32 = 20;
+
+async fn record_agent_failure(
+    state: &AppState,
+    agent_id: &str,
+    error_code: &str,
+    cadence_seconds: i64,
+    current_failures: i32,
+    now: chrono::DateTime<Utc>,
+) -> Result<(), ApiError> {
+    let next_failures = current_failures + 1;
+    let backoff = failure_backoff_multiplier(next_failures);
+    let next_execution_at = now + Duration::seconds(cadence_seconds.max(1) * backoff);
+    sqlx::query(
+        "UPDATE external_agents
+         SET consecutive_failures = $2,
+             last_error_code = $3,
+             last_executed_at = $4,
+             next_execution_at = $5,
+             updated_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(agent_id)
+    .bind(next_failures)
+    .bind(error_code)
+    .bind(now)
+    .bind(next_execution_at)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+    Ok(())
+}
+
+async fn reset_agent_failures(state: &AppState, agent_id: &str) -> Result<(), ApiError> {
+    sqlx::query(
+        "UPDATE external_agents
+         SET consecutive_failures = 0, last_error_code = NULL
+         WHERE id = $1 AND consecutive_failures > 0",
+    )
+    .bind(agent_id)
+    .execute(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
     Ok(())
 }
 
@@ -3436,6 +3502,8 @@ fn parse_external_agent(
             .map_err(|err| ApiError::internal(&err.to_string()))?,
         last_executed_at: last_executed_at.map(|entry| entry.to_rfc3339()),
         next_execution_at: next_execution_at.to_rfc3339(),
+        consecutive_failures: row.try_get::<i32, _>("consecutive_failures").unwrap_or(0),
+        last_error_code: row.try_get("last_error_code").ok(),
         created_at: created_at.to_rfc3339(),
         updated_at: updated_at.to_rfc3339(),
     })
@@ -3951,10 +4019,14 @@ async fn execute_paper_agent(
 ) -> Result<AgentExecutionOutcome, ApiError> {
     let now = Utc::now();
     let market_id = ExternalMarketId::parse(agent.market_id.as_str())?;
-    let market = external::fetch_market_by_id(&state.config, &market_id).await?;
+
+    let (market, position) = tokio::try_join!(
+        external::fetch_market_by_id(&state.config, &market_id),
+        async { load_open_paper_position(state, agent.id.as_str()).await }
+    )?;
     let market_closed = market_is_closed_for_paper_entry(&market, now);
 
-    if let Some(position) = load_open_paper_position(state, agent.id.as_str()).await? {
+    if let Some(position) = position {
         let orderbook = external::fetch_orderbook(
             &state.config,
             &state.redis,
@@ -5274,7 +5346,8 @@ pub async fn list_external_agents(
 
     let mut sql = QueryBuilder::<Postgres>::new(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
-                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at, created_at, updated_at
+                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                consecutive_failures, last_error_code, created_at, updated_at
          FROM external_agents
          WHERE TRUE",
     );
@@ -5378,7 +5451,8 @@ pub async fn list_public_external_agents(
 
     let mut sql = QueryBuilder::<Postgres>::new(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
-                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at, created_at, updated_at
+                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                consecutive_failures, last_error_code, created_at, updated_at
          FROM external_agents
          WHERE owner = ",
     );
@@ -5521,7 +5595,7 @@ pub async fn create_external_agent(
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW(),NOW())
         RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
                   cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
-                  next_execution_at, created_at, updated_at",
+                  next_execution_at, consecutive_failures, last_error_code, created_at, updated_at",
     )
     .bind(id.as_str())
     .bind(user.wallet_address.as_str())
@@ -5669,7 +5743,7 @@ pub async fn update_external_agent(
              WHERE id = $1
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
                        cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
-                       next_execution_at, created_at, updated_at",
+                       next_execution_at, consecutive_failures, last_error_code, created_at, updated_at",
         )
         .bind(agent_id.as_str())
         .bind(next_name)
@@ -5702,7 +5776,7 @@ pub async fn update_external_agent(
              WHERE id = $1 AND owner = $2
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
                        cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
-                       next_execution_at, created_at, updated_at",
+                       next_execution_at, consecutive_failures, last_error_code, created_at, updated_at",
         )
         .bind(agent_id.as_str())
         .bind(user.wallet_address.as_str())
@@ -5804,6 +5878,18 @@ pub async fn run_external_agents_tick(
             continue;
         }
 
+        if agent.consecutive_failures >= MAX_CONSECUTIVE_FAILURES_BEFORE_DEACTIVATE {
+            log::warn!(
+                "auto-deactivating agent {} after {} consecutive failures (last_error={})",
+                agent.id,
+                agent.consecutive_failures,
+                agent.last_error_code.as_deref().unwrap_or("unknown")
+            );
+            deactivate_external_agent(&state, agent.id.as_str(), now).await?;
+            increment_skip_reason(&mut skips_by_reason, "auto_deactivated");
+            continue;
+        }
+
         if let Err(err) =
             ensure_provider_action_allowed(&req, agent.provider, ProviderRailAction::TradeOpen)
         {
@@ -5836,6 +5922,9 @@ pub async fn run_external_agents_tick(
                     agents_executed += 1;
                 } else if let Some(reason) = outcome.skip_reason.as_deref() {
                     increment_skip_reason(&mut skips_by_reason, reason);
+                }
+                if agent.consecutive_failures > 0 {
+                    let _ = reset_agent_failures(&state, agent.id.as_str()).await;
                 }
             }
             Err(err) => {
@@ -5875,6 +5964,15 @@ pub async fn run_external_agents_tick(
                     }),
                 )
                 .await?;
+                let _ = record_agent_failure(
+                    &state,
+                    agent.id.as_str(),
+                    err.code.as_str(),
+                    agent.cadence_seconds,
+                    agent.consecutive_failures,
+                    now,
+                )
+                .await;
             }
         }
     }

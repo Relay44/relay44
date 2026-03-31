@@ -124,7 +124,11 @@ pub fn simulate_fill(
                 notional,
             )
         } else {
-            let average_price = quote;
+            // No orderbook depth available — apply a minimum slippage penalty
+            // to avoid overstating paper P&L. 15bps for small orders, scaling
+            // with quantity to model real-world market impact.
+            let impact_bps = 15.0 + (sanitized_quantity * 2.0).min(50.0);
+            let average_price = clamp_probability(quote * (1.0 + impact_bps / 10_000.0));
             let notional = sanitized_quantity * average_price;
             (average_price, sanitized_quantity, false, false, notional)
         };
