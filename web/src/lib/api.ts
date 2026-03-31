@@ -212,7 +212,7 @@ interface BaseAgentsResponse {
 
 export interface ExternalCredential {
   id: string;
-  provider: "limitless" | "polymarket";
+  provider: "limitless" | "polymarket" | "aerodrome";
   label: string;
   key_id: string;
   created_at: string;
@@ -227,7 +227,7 @@ export interface ExternalCredentialCheck {
 }
 
 export interface ExternalCredentialStatus {
-  provider: "limitless" | "polymarket";
+  provider: "limitless" | "polymarket" | "aerodrome";
   credential_id?: string | null;
   ready: boolean;
   base_wallet?: string | null;
@@ -242,7 +242,7 @@ interface ExternalCredentialsListResponse {
 
 export interface ExternalOrderIntent {
   id: string;
-  provider: "limitless" | "polymarket";
+  provider: "limitless" | "polymarket" | "aerodrome";
   market_id: string;
   preflight: Record<string, unknown>;
   typed_data?: Record<string, unknown>;
@@ -253,7 +253,7 @@ export interface ExternalOrderIntent {
 
 export interface ExternalOrderRecord {
   id: string;
-  provider: "limitless" | "polymarket";
+  provider: "limitless" | "polymarket" | "aerodrome";
   market_id: string;
   provider_order_id: string;
   status: string;
@@ -264,7 +264,7 @@ export interface ExternalOrderRecord {
 }
 
 export interface PreparedExternalProviderRequest {
-  provider: "limitless" | "polymarket";
+  provider: "limitless" | "polymarket" | "aerodrome";
   url: string;
   method: "POST" | "DELETE";
   headers: Record<string, string>;
@@ -282,7 +282,7 @@ export interface ExternalAgentRecord {
   id: string;
   owner: string;
   name: string;
-  provider: "limitless" | "polymarket";
+  provider: "limitless" | "polymarket" | "aerodrome";
   market_id: string;
   outcome: "yes" | "no";
   side: "buy" | "sell";
@@ -414,7 +414,7 @@ export interface UpdateDecisionAutomationRequest {
   maxAgentNotionalUsdc?: number;
   maxTriggersPerDay?: number;
   minTriggerIntervalSeconds?: number;
-  allowedProvider?: "limitless" | "polymarket";
+  allowedProvider?: "limitless" | "polymarket" | "aerodrome";
   requireConfidenceBps?: number;
   active?: boolean;
 }
@@ -1513,7 +1513,7 @@ class ApiClient {
   async getBaseMarkets(params?: {
     limit?: number;
     offset?: number;
-    source?: "all" | "internal" | "limitless" | "polymarket";
+    source?: "all" | "internal" | "limitless" | "polymarket" | "aerodrome";
     tradable?: "all" | "user" | "agent";
     includeLowLiquidity?: boolean;
   }): Promise<PaginatedResponse<Market>> {
@@ -1702,7 +1702,7 @@ class ApiClient {
   }
 
   async getExternalCredentials(
-    provider?: "limitless" | "polymarket",
+    provider?: "limitless" | "polymarket" | "aerodrome",
   ): Promise<ExternalCredential[]> {
     const query = this.buildQuery({ provider });
     const response = await this.request<ExternalCredentialsListResponse>(
@@ -1712,7 +1712,7 @@ class ApiClient {
   }
 
   async getExternalCredentialStatus(
-    provider: "limitless" | "polymarket",
+    provider: "limitless" | "polymarket" | "aerodrome",
     credentialId?: string,
   ): Promise<ExternalCredentialStatus> {
     const query = this.buildQuery({ provider, credentialId });
@@ -1720,7 +1720,7 @@ class ApiClient {
   }
 
   async upsertExternalCredential(data: {
-    provider: "limitless" | "polymarket";
+    provider: "limitless" | "polymarket" | "aerodrome";
     label?: string;
     credentials: Record<string, unknown>;
   }): Promise<ExternalCredential> {
@@ -1752,7 +1752,7 @@ class ApiClient {
   }
 
   async createExternalOrderIntent(data: {
-    provider: "limitless" | "polymarket";
+    provider: "limitless" | "polymarket" | "aerodrome";
     marketId: string;
     outcome: "yes" | "no";
     side: "buy" | "sell";
@@ -1813,7 +1813,7 @@ class ApiClient {
   }
 
   async cancelExternalOrder(data: {
-    provider: "limitless" | "polymarket";
+    provider: "limitless" | "polymarket" | "aerodrome";
     providerOrderId: string;
     credentialId?: string;
     payload?: Record<string, unknown>;
@@ -1834,7 +1834,7 @@ class ApiClient {
   }
 
   async prepareExternalOrderCancel(data: {
-    provider: "limitless" | "polymarket";
+    provider: "limitless" | "polymarket" | "aerodrome";
     providerOrderId: string;
     credentialId?: string;
     payload?: Record<string, unknown>;
@@ -1851,7 +1851,7 @@ class ApiClient {
   }
 
   async listExternalOrders(params?: {
-    provider?: "limitless" | "polymarket";
+    provider?: "limitless" | "polymarket" | "aerodrome";
     limit?: number;
     offset?: number;
   }): Promise<ExternalOrdersListResponse> {
@@ -1877,7 +1877,7 @@ class ApiClient {
   }
 
   async listExternalAgents(params?: {
-    provider?: "limitless" | "polymarket";
+    provider?: "limitless" | "polymarket" | "aerodrome";
     active?: boolean;
     limit?: number;
     offset?: number;
@@ -1900,7 +1900,7 @@ class ApiClient {
   }
 
   async listPublicExternalAgents(params?: {
-    provider?: "limitless" | "polymarket";
+    provider?: "limitless" | "polymarket" | "aerodrome";
     active?: boolean;
     limit?: number;
     offset?: number;
@@ -1931,7 +1931,7 @@ class ApiClient {
 
   async createExternalAgent(data: {
     name: string;
-    provider: "limitless" | "polymarket";
+    provider: "limitless" | "polymarket" | "aerodrome";
     marketId: string;
     outcome: "yes" | "no";
     side: "buy" | "sell";

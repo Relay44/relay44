@@ -1,3 +1,4 @@
+pub mod aerodrome;
 pub mod database;
 pub mod evm_indexer;
 pub mod evm_rpc;

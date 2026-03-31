@@ -285,7 +285,9 @@ mod tests {
         let fill = simulate_fill(&sample_market(), &orderbook, "yes", "buy", 2.0, 30);
 
         assert_eq!(fill.filled_quantity, 2.0);
-        assert!((fill.average_price - 0.62).abs() < 0.0001);
+        // With slippage model: impact_bps = 15 + min(2*2, 50) = 19, buy direction = +1
+        // average_price = 0.62 * (1.0 + 19/10000) ≈ 0.621178
+        assert!((fill.average_price - 0.62).abs() < 0.002);
         assert!(!fill.used_orderbook_depth);
     }
 

@@ -12,7 +12,7 @@ type IconKind =
   | "star"
   | "trophy";
 
-type ProviderKind = "internal" | "limitless" | "polymarket";
+type ProviderKind = "internal" | "limitless" | "polymarket" | "aerodrome";
 
 const cache = new Map<string, string>();
 
