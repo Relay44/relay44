@@ -7,6 +7,7 @@ withErrorHandler(() =>
   runTick({
     name: 'paper-cohort',
     envKey: 'PAPER_COHORT_ENABLED',
+    limitEnvKey: 'PAPER_RUNNER_TICK_LIMIT',
     defaultLimit: 200,
     endpoint: '/external/agents/runner/tick',
     lib,
