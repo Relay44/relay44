@@ -23,59 +23,85 @@ contract DeployProgramsScript is Script {
     error MissingCollateralToken();
     error ZeroAddress(string field);
 
+    struct RoleConfig {
+        address admin;
+        address bootstrapAdmin;
+        address pauser;
+        address resolver;
+        address marketCreator;
+        address operator;
+        address runtimeOperator;
+        address reputationOracle;
+        address erc8004Issuer;
+        address erc8004Attester;
+        address erc8004ValidationManager;
+        address erc8004Validator;
+        address collateralToken;
+    }
+
     function run() external {
-        address admin = _envAddressOr("BASE_ADMIN", address(0));
-        if (admin == address(0)) revert MissingAdmin();
-
-        address bootstrapAdmin = _envAddressOr("BOOTSTRAP_ADMIN", admin);
-        if (bootstrapAdmin == address(0)) revert ZeroAddress("BOOTSTRAP_ADMIN");
-
-        address pauser = _envAddressOr("BASE_PAUSER", admin);
-        address resolver = _envAddressOr("BASE_RESOLVER", admin);
-        address marketCreator = _envAddressOr("BASE_MARKET_CREATOR", admin);
-        address operator = _envAddressOr("BASE_OPERATOR", admin);
-        address runtimeOperator = _envAddressOr("BASE_AGENT_RUNTIME_OPERATOR", address(0));
-        address reputationOracle = _envAddressOr("BASE_REPUTATION_ORACLE", operator);
-        address erc8004Issuer = _envAddressOr("BASE_IDENTITY_ISSUER", admin);
-        address erc8004Attester = _envAddressOr("BASE_REPUTATION_ATTESTER", reputationOracle);
-        address erc8004ValidationManager = _envAddressOr("BASE_VALIDATION_MANAGER", admin);
-        address erc8004Validator = _envAddressOr("BASE_VALIDATION_VALIDATOR", erc8004Attester);
-
-        address collateralToken = _resolveCollateralToken();
-        if (collateralToken == address(0)) revert MissingCollateralToken();
+        RoleConfig memory cfg = _loadConfig();
 
         vm.startBroadcast();
-
-        MarketCore marketCore = new MarketCore(bootstrapAdmin);
-        CollateralVault collateralVault = new CollateralVault(bootstrapAdmin, collateralToken);
-        OrderBook orderBook = new OrderBook(bootstrapAdmin, address(marketCore), address(collateralVault));
-        AgentRuntime agentRuntime = new AgentRuntime(bootstrapAdmin, address(orderBook));
-        AgentIdentityRegistry identityRegistry = new AgentIdentityRegistry(bootstrapAdmin);
-        AgentReputationRegistry reputationRegistry =
-            new AgentReputationRegistry(bootstrapAdmin, address(identityRegistry));
-        ERC8004IdentityRegistry erc8004IdentityRegistry = new ERC8004IdentityRegistry(bootstrapAdmin);
-        ERC8004ReputationRegistry erc8004ReputationRegistry =
-            new ERC8004ReputationRegistry(bootstrapAdmin, address(erc8004IdentityRegistry));
-        ERC8004ValidationRegistry erc8004ValidationRegistry =
-            new ERC8004ValidationRegistry(bootstrapAdmin, address(erc8004IdentityRegistry));
-
-        _configureMarketCore(marketCore, bootstrapAdmin, admin, marketCreator, resolver, pauser);
-        _configureCollateralVault(collateralVault, bootstrapAdmin, admin, operator, pauser, address(orderBook));
-        _configureOrderBook(orderBook, bootstrapAdmin, admin, pauser, address(agentRuntime), runtimeOperator);
-        _configureIdentityRegistry(identityRegistry, bootstrapAdmin, admin, pauser, address(agentRuntime));
-        _configureReputationRegistry(reputationRegistry, bootstrapAdmin, admin, pauser, reputationOracle);
-        _configureErc8004IdentityRegistry(erc8004IdentityRegistry, bootstrapAdmin, admin, pauser, erc8004Issuer);
-        _configureErc8004ReputationRegistry(erc8004ReputationRegistry, bootstrapAdmin, admin, pauser, erc8004Attester);
-        _configureErc8004ValidationRegistry(
-            erc8004ValidationRegistry, bootstrapAdmin, admin, pauser, erc8004ValidationManager, erc8004Validator
-        );
-        _configureAgentRuntime(agentRuntime, bootstrapAdmin, admin, pauser, address(identityRegistry));
-
+        _deploy(cfg);
         vm.stopBroadcast();
+    }
+
+    function _loadConfig() internal view returns (RoleConfig memory cfg) {
+        cfg.admin = _envAddressOr("BASE_ADMIN", address(0));
+        if (cfg.admin == address(0)) revert MissingAdmin();
+
+        cfg.bootstrapAdmin = _envAddressOr("BOOTSTRAP_ADMIN", cfg.admin);
+        if (cfg.bootstrapAdmin == address(0)) revert ZeroAddress("BOOTSTRAP_ADMIN");
+
+        cfg.pauser = _envAddressOr("BASE_PAUSER", cfg.admin);
+        cfg.resolver = _envAddressOr("BASE_RESOLVER", cfg.admin);
+        cfg.marketCreator = _envAddressOr("BASE_MARKET_CREATOR", cfg.admin);
+        cfg.operator = _envAddressOr("BASE_OPERATOR", cfg.admin);
+        cfg.runtimeOperator = _envAddressOr("BASE_AGENT_RUNTIME_OPERATOR", address(0));
+        cfg.reputationOracle = _envAddressOr("BASE_REPUTATION_ORACLE", cfg.operator);
+        cfg.erc8004Issuer = _envAddressOr("BASE_IDENTITY_ISSUER", cfg.admin);
+        cfg.erc8004Attester = _envAddressOr("BASE_REPUTATION_ATTESTER", cfg.reputationOracle);
+        cfg.erc8004ValidationManager = _envAddressOr("BASE_VALIDATION_MANAGER", cfg.admin);
+        cfg.erc8004Validator = _envAddressOr("BASE_VALIDATION_VALIDATOR", cfg.erc8004Attester);
+        cfg.collateralToken = _resolveCollateralToken();
+        if (cfg.collateralToken == address(0)) revert MissingCollateralToken();
+    }
+
+    function _deploy(RoleConfig memory cfg) internal {
+        MarketCore marketCore = new MarketCore(cfg.bootstrapAdmin);
+        CollateralVault collateralVault = new CollateralVault(cfg.bootstrapAdmin, cfg.collateralToken);
+        OrderBook orderBook = new OrderBook(
+            cfg.bootstrapAdmin,
+            address(marketCore),
+            address(collateralVault),
+            vm.envOr("R44_TOKEN_ADDRESS", address(0))
+        );
+        AgentRuntime agentRuntime = new AgentRuntime(cfg.bootstrapAdmin, address(orderBook));
+        AgentIdentityRegistry identityRegistry = new AgentIdentityRegistry(cfg.bootstrapAdmin);
+        AgentReputationRegistry reputationRegistry =
+            new AgentReputationRegistry(cfg.bootstrapAdmin, address(identityRegistry));
+        ERC8004IdentityRegistry erc8004IdentityRegistry = new ERC8004IdentityRegistry(cfg.bootstrapAdmin);
+        ERC8004ReputationRegistry erc8004ReputationRegistry =
+            new ERC8004ReputationRegistry(cfg.bootstrapAdmin, address(erc8004IdentityRegistry));
+        ERC8004ValidationRegistry erc8004ValidationRegistry =
+            new ERC8004ValidationRegistry(cfg.bootstrapAdmin, address(erc8004IdentityRegistry));
+
+        _configureMarketCore(marketCore, cfg.bootstrapAdmin, cfg.admin, cfg.marketCreator, cfg.resolver, cfg.pauser);
+        _configureCollateralVault(collateralVault, cfg.bootstrapAdmin, cfg.admin, cfg.operator, cfg.pauser, address(orderBook));
+        _configureOrderBook(orderBook, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, address(agentRuntime), cfg.runtimeOperator);
+        _configureIdentityRegistry(identityRegistry, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, address(agentRuntime));
+        _configureReputationRegistry(reputationRegistry, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, cfg.reputationOracle);
+        _configureErc8004IdentityRegistry(erc8004IdentityRegistry, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, cfg.erc8004Issuer);
+        _configureErc8004ReputationRegistry(erc8004ReputationRegistry, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, cfg.erc8004Attester);
+        _configureErc8004ValidationRegistry(
+            erc8004ValidationRegistry, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, cfg.erc8004ValidationManager, cfg.erc8004Validator
+        );
+        _configureAgentRuntime(agentRuntime, cfg.bootstrapAdmin, cfg.admin, cfg.pauser, address(identityRegistry));
 
         console2.log("chainId:", block.chainid);
-        console2.log("admin:", admin);
-        console2.log("bootstrapAdmin:", bootstrapAdmin);
+        console2.log("admin:", cfg.admin);
+        console2.log("bootstrapAdmin:", cfg.bootstrapAdmin);
         console2.log("MarketCore:", address(marketCore));
         console2.log("CollateralVault:", address(collateralVault));
         console2.log("OrderBook:", address(orderBook));
@@ -85,17 +111,6 @@ contract DeployProgramsScript is Script {
         console2.log("ERC8004IdentityRegistry:", address(erc8004IdentityRegistry));
         console2.log("ERC8004ReputationRegistry:", address(erc8004ReputationRegistry));
         console2.log("ERC8004ValidationRegistry:", address(erc8004ValidationRegistry));
-        console2.log("collateralToken:", collateralToken);
-        console2.log("marketCreator:", marketCreator);
-        console2.log("resolver:", resolver);
-        console2.log("operator:", operator);
-        console2.log("pauser:", pauser);
-        console2.log("runtimeOperator:", runtimeOperator);
-        console2.log("reputationOracle:", reputationOracle);
-        console2.log("erc8004Issuer:", erc8004Issuer);
-        console2.log("erc8004Attester:", erc8004Attester);
-        console2.log("erc8004ValidationManager:", erc8004ValidationManager);
-        console2.log("erc8004Validator:", erc8004Validator);
     }
 
     function _configureMarketCore(

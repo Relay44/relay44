@@ -3,8 +3,12 @@ pragma solidity 0.8.24;
 
 import {AccessControl} from "openzeppelin-contracts/contracts/access/AccessControl.sol";
 import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
+import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract MarketCore is AccessControl, Pausable {
+    using SafeERC20 for IERC20;
+
     bytes32 public constant MARKET_CREATOR_ROLE = keccak256("MARKET_CREATOR_ROLE");
     bytes32 public constant RESOLVER_ROLE = keccak256("RESOLVER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
@@ -32,6 +36,11 @@ contract MarketCore is AccessControl, Pausable {
     mapping(uint256 => address) public marketCreators;
     mapping(uint256 => MarketMetadata) private marketMetadata;
 
+    IERC20 public r44Token;
+    uint256 public creationDeposit;    // R44 required to create a market
+    address public slashRecipient;     // Where slashed deposits go
+    mapping(uint256 => bool) public depositRefunded; // Track refund status
+
     error ZeroAddress();
     error InvalidCloseTime();
     error MarketNotFound();
@@ -42,12 +51,17 @@ contract MarketCore is AccessControl, Pausable {
     error UnauthorizedResolver();
     error EmptyQuestion();
     error TextTooLong();
+    error DepositAlreadyRefunded();
+    error MarketNotResolvedYet();
 
     event MarketCreated(uint256 indexed marketId, bytes32 indexed questionHash, uint64 closeTime, address resolver);
     event MarketResolved(uint256 indexed marketId, bool outcome, uint64 resolveTime, address resolver);
     event MarketMetadataSet(
         uint256 indexed marketId, string question, string description, string category, string resolutionSource
     );
+    event CreationDepositUpdated(uint256 deposit, address slashRecipient);
+    event DepositRefunded(uint256 indexed marketId, address indexed creator, uint256 amount);
+    event DepositSlashed(uint256 indexed marketId, address indexed creator, uint256 amount);
 
     constructor(address admin) {
         if (admin == address(0)) revert ZeroAddress();
@@ -56,6 +70,46 @@ contract MarketCore is AccessControl, Pausable {
         _grantRole(MARKET_CREATOR_ROLE, admin);
         _grantRole(RESOLVER_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
+    }
+
+    function setR44Token(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        r44Token = IERC20(token);
+    }
+
+    function setCreationDeposit(uint256 deposit, address _slashRecipient) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        creationDeposit = deposit;
+        slashRecipient = _slashRecipient;
+        emit CreationDepositUpdated(deposit, _slashRecipient);
+    }
+
+    /// @notice Refund deposit after clean resolution. Callable by market creator.
+    function refundDeposit(uint256 marketId) external whenNotPaused {
+        if (depositRefunded[marketId]) revert DepositAlreadyRefunded();
+        Market storage market = markets[marketId];
+        if (market.resolver == address(0)) revert MarketNotFound();
+        if (!market.resolved) revert MarketNotResolvedYet();
+
+        address creator = marketCreators[marketId];
+        if (msg.sender != creator && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) revert NotMarketCreator();
+
+        depositRefunded[marketId] = true;
+        if (creationDeposit > 0 && address(r44Token) != address(0)) {
+            r44Token.safeTransfer(creator, creationDeposit);
+        }
+        emit DepositRefunded(marketId, creator, creationDeposit);
+    }
+
+    /// @notice Slash deposit for invalid/spam market. Admin only.
+    function slashDeposit(uint256 marketId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (depositRefunded[marketId]) revert DepositAlreadyRefunded();
+        address creator = marketCreators[marketId];
+        if (creator == address(0)) revert MarketNotFound();
+
+        depositRefunded[marketId] = true;
+        if (creationDeposit > 0 && address(r44Token) != address(0) && slashRecipient != address(0)) {
+            r44Token.safeTransfer(slashRecipient, creationDeposit);
+        }
+        emit DepositSlashed(marketId, creator, creationDeposit);
     }
 
     function createMarket(bytes32 questionHash, uint64 closeTime, address resolver)
@@ -141,6 +195,11 @@ contract MarketCore is AccessControl, Pausable {
         if (resolver == address(0)) revert ZeroAddress();
         if (closeTime <= block.timestamp) revert InvalidCloseTime();
         if (!hasRole(DEFAULT_ADMIN_ROLE, creator) && resolver != creator) revert UnauthorizedResolver();
+
+        // Collect R44 deposit if configured
+        if (creationDeposit > 0 && address(r44Token) != address(0)) {
+            r44Token.safeTransferFrom(creator, address(this), creationDeposit);
+        }
 
         marketId = ++marketCount;
         marketCreators[marketId] = creator;

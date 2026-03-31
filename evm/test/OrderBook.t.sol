@@ -24,7 +24,7 @@ contract OrderBookTest is Test {
         marketCore = new MarketCore(admin);
         usdc = new MockERC20("USD Coin", "USDC");
         collateralVault = new CollateralVault(admin, address(usdc));
-        orderBook = new OrderBook(admin, address(marketCore), address(collateralVault));
+        orderBook = new OrderBook(admin, address(marketCore), address(collateralVault), address(0));
 
         vm.startPrank(admin);
         marketCore.grantRole(marketCore.MARKET_CREATOR_ROLE(), creator);
