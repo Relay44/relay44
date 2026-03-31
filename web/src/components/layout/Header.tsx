@@ -20,6 +20,7 @@ const primaryLinks = [
   { href: "/markets", label: "Markets" },
   { href: "/decisions", label: "Decisions" },
   { href: "/agents", label: "Swarm" },
+  { href: "/hackathon", label: "Hackathon" },
   { href: "/portfolio", label: "Portfolio" },
 ];
 

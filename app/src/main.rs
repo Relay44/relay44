@@ -778,6 +778,37 @@ async fn main() -> std::io::Result<()> {
                             ),
                     )
                     .service(
+                        web::scope("/hackathons")
+                            .route("", web::get().to(api::hackathon::list_hackathons))
+                            .route("", web::post().to(api::hackathon::create_hackathon))
+                            .route("/{id}", web::get().to(api::hackathon::get_hackathon))
+                            .route("/{id}", web::patch().to(api::hackathon::update_hackathon))
+                            .route(
+                                "/{id}/register",
+                                web::post().to(api::hackathon::register_for_hackathon),
+                            )
+                            .route(
+                                "/{id}/registrations",
+                                web::get().to(api::hackathon::list_registrations),
+                            )
+                            .route(
+                                "/{id}/agents",
+                                web::post().to(api::hackathon::link_agent_to_hackathon),
+                            )
+                            .route(
+                                "/{id}/leaderboard",
+                                web::get().to(api::hackathon::get_leaderboard),
+                            )
+                            .route(
+                                "/{id}/leaderboard/snapshots",
+                                web::get().to(api::hackathon::get_leaderboard_snapshots),
+                            )
+                            .route(
+                                "/{id}/snapshot",
+                                web::post().to(api::hackathon::trigger_snapshot),
+                            ),
+                    )
+                    .service(
                         web::scope("/compliance")
                             .route(
                                 "/policy",
