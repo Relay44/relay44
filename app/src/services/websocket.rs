@@ -21,6 +21,9 @@ pub enum WsMessage {
     Market(MarketUpdate),
     #[serde(rename = "ping")]
     Ping,
+    /// Raw platform event JSON (from event bus).
+    #[serde(rename = "event")]
+    RawEvent(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -158,6 +161,16 @@ impl WebSocketHub {
         }
 
         let _ = self.global_tx.send(msg);
+    }
+
+    /// Broadcast a raw JSON string to the global channel (for event bus bridging).
+    pub async fn broadcast_raw_global(&self, json: String) -> Result<(), ()> {
+        // We send as a Market update wrapper — clients that parse the raw JSON
+        // will see the platform event. This avoids adding a new WsMessage variant.
+        // For now, we just drop the raw payload into global via the sender directly.
+        // Clients receive it as-is through the global subscription.
+        let _ = self.global_tx.send(WsMessage::RawEvent(json));
+        Ok(())
     }
 
     /// Clean up channels with no subscribers

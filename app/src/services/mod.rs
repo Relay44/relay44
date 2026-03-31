@@ -1,5 +1,7 @@
 pub mod aerodrome;
+pub mod agent_scheduler;
 pub mod database;
+pub mod event_bus;
 pub mod evm_indexer;
 pub mod evm_signer;
 pub mod evm_rpc;
@@ -14,6 +16,7 @@ pub mod x402;
 pub mod xmtp_swarm;
 
 pub use database::DatabaseService;
+pub use event_bus::EventBus;
 pub use evm_indexer::EvmIndexerService;
 pub use evm_rpc::EvmRpcService;
 pub use metrics::{ComponentHealth, HealthChecks, HealthStatus, MetricsService, SystemHealth};
