@@ -142,7 +142,7 @@ export function useExecuteAgent() {
 }
 
 export function useExternalAgents(filters?: {
-  provider?: 'limitless' | 'polymarket';
+  provider?: 'limitless' | 'polymarket' | 'aerodrome';
   active?: boolean;
   limit?: number;
   offset?: number;
@@ -174,7 +174,7 @@ export function useExternalAgents(filters?: {
 }
 
 export function usePublicExternalAgents(filters?: {
-  provider?: 'limitless' | 'polymarket';
+  provider?: 'limitless' | 'polymarket' | 'aerodrome';
   active?: boolean;
   limit?: number;
   offset?: number;
