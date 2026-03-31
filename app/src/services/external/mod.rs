@@ -10,9 +10,10 @@ use tokio::sync::Semaphore;
 
 use crate::api::ApiError;
 use crate::config::AppConfig;
+use crate::services::evm_rpc::EvmRpcService;
 use crate::services::redis::RedisService;
 
-use self::providers::{limitless, polymarket};
+use self::providers::{aerodrome, limitless, polymarket};
 use self::types::{
     ExternalMarketId, ExternalMarketSnapshot, ExternalOrderBookSnapshot, ExternalProvider,
     ExternalTradesSnapshot,
@@ -31,6 +32,7 @@ pub enum ExternalMarketSource {
     Internal,
     Limitless,
     Polymarket,
+    Aerodrome,
 }
 
 impl ExternalMarketSource {
@@ -40,9 +42,10 @@ impl ExternalMarketSource {
             "internal" => Ok(Self::Internal),
             "limitless" => Ok(Self::Limitless),
             "polymarket" => Ok(Self::Polymarket),
+            "aerodrome" => Ok(Self::Aerodrome),
             _ => Err(ApiError::bad_request(
                 "INVALID_SOURCE",
-                "source must be one of: all, internal, limitless, polymarket",
+                "source must be one of: all, internal, limitless, polymarket, aerodrome",
             )),
         }
     }
@@ -349,6 +352,7 @@ pub async fn fetch_markets(
             ExternalMarketSource::Internal => "internal",
             ExternalMarketSource::Limitless => "limitless",
             ExternalMarketSource::Polymarket => "polymarket",
+            ExternalMarketSource::Aerodrome => "aerodrome",
         },
         match tradable_filter {
             TradableFilter::All => "all",
@@ -435,6 +439,14 @@ pub async fn fetch_market_by_id(
     config: &AppConfig,
     market_id: &ExternalMarketId,
 ) -> Result<ExternalMarketSnapshot, ApiError> {
+    fetch_market_by_id_with_rpc(config, market_id, None).await
+}
+
+pub async fn fetch_market_by_id_with_rpc(
+    config: &AppConfig,
+    market_id: &ExternalMarketId,
+    evm_rpc: Option<&EvmRpcService>,
+) -> Result<ExternalMarketSnapshot, ApiError> {
     if !config.external_markets_enabled {
         return Err(ApiError::bad_request(
             "EXTERNAL_MARKETS_DISABLED",
@@ -476,6 +488,20 @@ pub async fn fetch_market_by_id(
             })
             .await
         }
+        ExternalProvider::Aerodrome => {
+            if !config.aerodrome_enabled {
+                return Err(ApiError::bad_request(
+                    "AERODROME_DISABLED",
+                    "Aerodrome integration is disabled",
+                ));
+            }
+            let rpc = evm_rpc.ok_or_else(|| {
+                ApiError::internal("aerodrome requires evm_rpc service")
+            })?;
+            let pool_state =
+                aerodrome::fetch_pool_state(rpc, market_id.value.as_str()).await?;
+            Ok(aerodrome::pool_to_market_snapshot(&pool_state, market_id.value.as_str()))
+        }
     }
 }
 
@@ -485,6 +511,17 @@ pub async fn fetch_orderbook(
     market_id: &ExternalMarketId,
     outcome: &str,
     depth: u64,
+) -> Result<ExternalOrderBookSnapshot, ApiError> {
+    fetch_orderbook_with_rpc(config, redis, market_id, outcome, depth, None).await
+}
+
+pub async fn fetch_orderbook_with_rpc(
+    config: &AppConfig,
+    redis: &RedisService,
+    market_id: &ExternalMarketId,
+    outcome: &str,
+    depth: u64,
+    evm_rpc: Option<&EvmRpcService>,
 ) -> Result<ExternalOrderBookSnapshot, ApiError> {
     if !config.external_markets_enabled {
         return Err(ApiError::bad_request(
@@ -529,6 +566,15 @@ pub async fn fetch_orderbook(
                 )
             })
             .await?
+        }
+        ExternalProvider::Aerodrome => {
+            let rpc = evm_rpc.ok_or_else(|| {
+                ApiError::internal("aerodrome requires evm_rpc service")
+            })?;
+            let pool_state =
+                aerodrome::fetch_pool_state(rpc, market_id.value.as_str()).await?;
+            let mid_price = pool_state.price().clamp(0.01, 0.99);
+            aerodrome::synthesize_orderbook(&pool_state, market_id.value.as_str(), mid_price)
         }
     };
 
@@ -593,6 +639,22 @@ pub async fn fetch_trades(
                 )
             })
             .await?
+        }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome trades would come from on-chain swap events.
+            // Return empty for now — trade history requires indexer integration.
+            ExternalTradesSnapshot {
+                trades: Vec::new(),
+                total: 0,
+                limit,
+                offset,
+                has_more: false,
+                source: "external_aerodrome".to_string(),
+                provider: "aerodrome".to_string(),
+                chain_id: 8453,
+                provider_market_ref: market_id.value.clone(),
+                is_synthetic: true,
+            }
         }
     };
 

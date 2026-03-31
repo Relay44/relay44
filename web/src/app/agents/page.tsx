@@ -116,7 +116,7 @@ export default function AgentsPage() {
 
   const [filterMarketId, setFilterMarketId] = useState('');
   const [filterActiveOnly, setFilterActiveOnly] = useState(true);
-  const [filterExternalProvider, setFilterExternalProvider] = useState<'limitless' | 'polymarket' | ''>('');
+  const [filterExternalProvider, setFilterExternalProvider] = useState<'limitless' | 'polymarket' | 'aerodrome' | ''>('');
 
   const [marketId, setMarketId] = useState('');
   const [isYes, setIsYes] = useState(true);
@@ -126,7 +126,7 @@ export default function AgentsPage() {
   const [expiryWindow, setExpiryWindow] = useState('1800');
   const [strategy, setStrategy] = useState('web4-research-signal-v1');
   const [externalName, setExternalName] = useState('external-agent');
-  const [externalProvider, setExternalProvider] = useState<'limitless' | 'polymarket'>('limitless');
+  const [externalProvider, setExternalProvider] = useState<'limitless' | 'polymarket' | 'aerodrome'>('limitless');
   const [externalMarketId, setExternalMarketId] = useState('');
   const [externalOutcome, setExternalOutcome] = useState<'yes' | 'no'>('yes');
   const [externalSide, setExternalSide] = useState<'buy' | 'sell'>('buy');
@@ -164,6 +164,7 @@ export default function AgentsPage() {
     () => [
       { value: 'limitless', label: 'limitless' },
       { value: 'polymarket', label: 'polymarket' },
+      { value: 'aerodrome', label: 'aerodrome' },
     ],
     []
   );
@@ -195,6 +196,7 @@ export default function AgentsPage() {
     () => [
       { value: 'limitless', label: 'limitless' },
       { value: 'polymarket', label: 'polymarket' },
+      { value: 'aerodrome', label: 'aerodrome' },
     ],
     []
   );
@@ -902,7 +904,7 @@ export default function AgentsPage() {
                     />
                     <Select
                       value={externalProvider}
-                      onChange={(event) => setExternalProvider(event.target.value as 'limitless' | 'polymarket')}
+                      onChange={(event) => setExternalProvider(event.target.value as 'limitless' | 'polymarket' | 'aerodrome')}
                       options={providerOptions}
                     />
                   </div>
@@ -1019,6 +1021,13 @@ export default function AgentsPage() {
                     </div>
                   ) : null}
 
+                  {externalProvider === 'aerodrome' ? (
+                    <div className="border border-border p-3 text-xs text-text-secondary">
+                      Aerodrome agents execute on-chain swaps via Aerodrome Slipstream on Base.
+                      Requires a funded Base wallet with USDC and token approvals for the swap router.
+                    </div>
+                  ) : null}
+
                   <Input
                     label="Strategy"
                     value={externalStrategy}
@@ -1060,7 +1069,7 @@ export default function AgentsPage() {
                 <Select
                   value={filterExternalProvider || undefined}
                   onChange={(event) =>
-                    setFilterExternalProvider(event.target.value as 'limitless' | 'polymarket' | '')
+                    setFilterExternalProvider(event.target.value as 'limitless' | 'polymarket' | 'aerodrome' | '')
                   }
                   options={externalProviderFilterOptions}
                   placeholder="All providers"

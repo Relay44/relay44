@@ -103,6 +103,7 @@ const BOOTSTRAP_STRATEGY_LADDER_V1: &str = "ladder_v1";
 const BOOTSTRAP_STRATEGY_LADDER_ADAPTIVE_V1: &str = "ladder_adaptive_v1";
 const BOOTSTRAP_STRATEGY_LMSR_EXPERIMENTAL: &str = "ls_lmsr_v1";
 const BOOTSTRAP_STRATEGY_PMM_EXPERIMENTAL: &str = "pmm_experimental";
+const BOOTSTRAP_STRATEGY_AERODROME_CL_V1: &str = "aerodrome_cl_v1";
 const BOOTSTRAP_PRESET_TIGHT: &str = "tight";
 const BOOTSTRAP_PRESET_BALANCED: &str = "balanced";
 const BOOTSTRAP_PRESET_WIDE: &str = "wide";
@@ -1091,6 +1092,7 @@ fn source_label(source: ExternalMarketSource) -> &'static str {
         ExternalMarketSource::Internal => "internal",
         ExternalMarketSource::Limitless => "limitless",
         ExternalMarketSource::Polymarket => "polymarket",
+        ExternalMarketSource::Aerodrome => "aerodrome",
     }
 }
 
@@ -1098,6 +1100,7 @@ fn to_rail_provider(provider: external::types::ExternalProvider) -> RailProvider
     match provider {
         external::types::ExternalProvider::Limitless => RailProvider::Limitless,
         external::types::ExternalProvider::Polymarket => RailProvider::Polymarket,
+        external::types::ExternalProvider::Aerodrome => RailProvider::Limitless, // Same Base chain rails
     }
 }
 
@@ -1553,7 +1556,53 @@ fn bootstrap_desired_agents(
         );
     }
 
+    if config.strategy == BOOTSTRAP_STRATEGY_AERODROME_CL_V1 {
+        return bootstrap_aerodrome_cl_agents(config);
+    }
+
     bootstrap_base_desired_agents(config)
+}
+
+/// For `aerodrome_cl_v1`, generate a single LP position slot on each side
+/// representing the concentrated liquidity range around the current price.
+fn bootstrap_aerodrome_cl_agents(
+    config: &BaseMarketBootstrapConfigRecord,
+) -> Vec<BootstrapDesiredAgent> {
+    let yes_bps = bootstrap_reference_yes_bps(config);
+    let spread_bps = config.base_spread_bps.max(50);
+    let seed = config.seed_usdc.max(0.0);
+    let cadence = config.cadence_seconds.max(60);
+    let expiry = config.expiry_seconds.max(cadence * 2);
+
+    // Single YES LP slot: provides liquidity below the current price (bid side)
+    let yes_price_bps = yes_bps.saturating_sub(spread_bps / 2).max(100);
+    let yes_size = (seed * 0.5 / (yes_price_bps as f64 / 10_000.0)).round() as u64;
+
+    // Single NO LP slot: provides liquidity on the other side
+    let no_bps = PAR_PRICE_BPS.saturating_sub(yes_bps);
+    let no_price_bps = no_bps.saturating_sub(spread_bps / 2).max(100);
+    let no_size = (seed * 0.5 / (no_price_bps as f64 / 10_000.0)).round() as u64;
+
+    vec![
+        BootstrapDesiredAgent {
+            side: "yes",
+            level_index: 0,
+            is_yes: true,
+            price_bps: yes_price_bps,
+            size: yes_size.max(1),
+            cadence,
+            expiry_window: expiry,
+        },
+        BootstrapDesiredAgent {
+            side: "no",
+            level_index: 0,
+            is_yes: false,
+            price_bps: no_price_bps,
+            size: no_size.max(1),
+            cadence,
+            expiry_window: expiry,
+        },
+    ]
 }
 
 fn synthetic_book_from_agents(desired: &[BootstrapDesiredAgent]) -> BootstrapSyntheticBook {
