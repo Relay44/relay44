@@ -10,6 +10,7 @@ import {ERC20Permit} from "openzeppelin-contracts/contracts/token/ERC20/extensio
 contract R44Token is ERC20, ERC20Capped, ERC20Pausable, ERC20Permit, AccessControl {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+    bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
 
     error ZeroAddress();
     error InitialSupplyExceedsCap();
@@ -34,6 +35,15 @@ contract R44Token is ERC20, ERC20Capped, ERC20Pausable, ERC20Permit, AccessContr
 
     function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
         _mint(to, amount);
+    }
+
+    function burn(uint256 amount) external {
+        _burn(msg.sender, amount);
+    }
+
+    function burnFrom(address account, uint256 amount) external onlyRole(BURNER_ROLE) {
+        _spendAllowance(account, msg.sender, amount);
+        _burn(account, amount);
     }
 
     function pause() external onlyRole(PAUSER_ROLE) {

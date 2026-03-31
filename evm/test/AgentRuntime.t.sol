@@ -29,7 +29,7 @@ contract AgentRuntimeTest is Test {
         marketCore = new MarketCore(admin);
         usdc = new MockERC20("USD Coin", "USDC");
         collateralVault = new CollateralVault(admin, address(usdc));
-        orderBook = new OrderBook(admin, address(marketCore), address(collateralVault));
+        orderBook = new OrderBook(admin, address(marketCore), address(collateralVault), address(0));
         agentRuntime = new AgentRuntime(admin, address(orderBook));
         identityRegistry = new AgentIdentityRegistry(admin);
 
