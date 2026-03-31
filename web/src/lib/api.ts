@@ -297,6 +297,8 @@ export interface ExternalAgentRecord {
   active: boolean;
   last_executed_at?: string | null;
   next_execution_at: string;
+  consecutive_failures: number;
+  last_error_code?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -905,6 +907,15 @@ function normalizeExternalAgentRecord(
     next_execution_at: toIsoString(
       raw.nextExecutionAt ?? raw.next_execution_at,
     ),
+    consecutive_failures: toNumber(
+      raw.consecutiveFailures ?? raw.consecutive_failures,
+    ),
+    last_error_code:
+      raw.lastErrorCode === null || raw.last_error_code === null
+        ? null
+        : (raw.lastErrorCode ?? raw.last_error_code)
+          ? String(raw.lastErrorCode ?? raw.last_error_code)
+          : undefined,
     created_at: toIsoString(raw.createdAt ?? raw.created_at),
     updated_at: toIsoString(raw.updatedAt ?? raw.updated_at),
   };

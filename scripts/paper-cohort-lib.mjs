@@ -47,8 +47,14 @@ export function buildHeaders(token) {
   return headers;
 }
 
+const FETCH_TIMEOUT_MS = 60_000;
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+
 export async function fetchJson(url, init = {}) {
-  const response = await fetch(url, init);
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    ...init,
+  });
   const text = await response.text();
   let payload = null;
 
@@ -72,6 +78,19 @@ export async function fetchJson(url, init = {}) {
   }
 
   return payload;
+}
+
+export async function fetchWithRetry(url, init = {}, { maxRetries = 3, baseDelay = 1000 } = {}) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fetchJson(url, init);
+    } catch (err) {
+      const retryable = RETRYABLE_STATUSES.has(err.status);
+      if (!retryable || attempt === maxRetries) throw err;
+      const delay = baseDelay * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
 }
 
 export async function loginAdmin() {
@@ -108,14 +127,14 @@ export async function loginAdmin() {
 }
 
 export async function apiGet(pathname, token) {
-  return fetchJson(`${apiBase}${pathname}`, {
+  return fetchWithRetry(`${apiBase}${pathname}`, {
     method: "GET",
     headers: buildHeaders(token),
   });
 }
 
 export async function apiPost(pathname, token, body = {}) {
-  return fetchJson(`${apiBase}${pathname}`, {
+  return fetchWithRetry(`${apiBase}${pathname}`, {
     method: "POST",
     headers: buildHeaders(token),
     body: JSON.stringify(body),
@@ -123,7 +142,7 @@ export async function apiPost(pathname, token, body = {}) {
 }
 
 export async function apiPatch(pathname, token, body = {}) {
-  return fetchJson(`${apiBase}${pathname}`, {
+  return fetchWithRetry(`${apiBase}${pathname}`, {
     method: "PATCH",
     headers: buildHeaders(token),
     body: JSON.stringify(body),

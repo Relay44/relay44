@@ -1096,7 +1096,14 @@ export default function AgentsPage() {
                       <p className="text-xs text-text-muted">
                         {agent.outcome.toUpperCase()} {agent.side.toUpperCase()} · price {agent.price} · qty {agent.quantity}
                       </p>
-                      <p className="text-xs text-text-muted">Cadence {agent.cadence_seconds}s · Strategy {agent.strategy}</p>
+                      <p className="text-xs text-text-muted">
+                        Cadence {agent.cadence_seconds}s · Strategy {agent.strategy}
+                        {agent.consecutive_failures > 0 && (
+                          <span className="ml-2 text-[0.65rem] text-red-400" title={agent.last_error_code ?? undefined}>
+                            {agent.consecutive_failures} failure{agent.consecutive_failures > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </p>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <Link href={`/markets/${encodeURIComponent(agent.market_id)}`} className="flex h-9 items-center justify-center border border-border px-3 text-sm sm:w-auto">
