@@ -36,11 +36,14 @@ export function useBaseWallet() {
     );
   }, [connectors]);
 
-  // Auto-connect in miniapp context
+  // Auto-connect in miniapp context (once only — stop if user dismisses)
+  const triedAutoConnect = useMemo(() => ({ current: false }), []);
   useEffect(() => {
     if (!isMiniApp() || account.isConnected || connectPending || !preferredConnector) return;
+    if (triedAutoConnect.current) return;
+    triedAutoConnect.current = true;
     connectAsync({ connector: preferredConnector }).catch(() => {});
-  }, [account.isConnected, connectPending, preferredConnector, connectAsync]);
+  }, [account.isConnected, connectPending, preferredConnector, connectAsync, triedAutoConnect]);
 
   const connect = async () => {
     const connector = preferredConnector;

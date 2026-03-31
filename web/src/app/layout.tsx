@@ -147,7 +147,7 @@ export default function RootLayout({
           name="fc:miniapp"
           content={JSON.stringify({
             version: '1',
-            imageUrl: `${SITE_URL}/og-miniapp-relay44.svg`,
+            imageUrl: `${SITE_URL}/relay44-sharing.jpg`,
             button: {
               title: 'Open app',
               action: {
