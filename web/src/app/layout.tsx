@@ -141,7 +141,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="mask-icon" href="/relay44-logo-w.svg" color="#ffffff" />
         <meta name="msapplication-config" content="/browserconfig.xml" />
-        <meta name="base:app_id" content="69b6fceed6271e8cedf2ada0" />
+        <meta name="base:app_id" content="69cc47e497b57b22030486af" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta
           name="fc:miniapp"
