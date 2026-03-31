@@ -1,6 +1,7 @@
 pub mod credentials;
 pub mod paper;
 pub mod providers;
+pub mod strategy;
 pub mod types;
 
 use futures::stream::{FuturesUnordered, StreamExt};

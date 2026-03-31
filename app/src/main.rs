@@ -6,6 +6,7 @@ use log::{info, warn};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 mod api;
 mod config;
@@ -16,7 +17,7 @@ mod services;
 use api::JwtService;
 use config::AppConfig;
 use services::{
-    DatabaseService, EvmIndexerService, EvmRpcService, MetricsService, OrderBookService,
+    DatabaseService, EventBus, EvmIndexerService, EvmRpcService, MetricsService, OrderBookService,
     RedisService, WebSocketHub,
 };
 
@@ -30,6 +31,7 @@ pub struct AppState {
     pub jwt: JwtService,
     pub metrics: MetricsService,
     pub ws_hub: WebSocketHub,
+    pub event_bus: EventBus,
     pub is_shutting_down: Arc<AtomicBool>,
 }
 
@@ -119,6 +121,7 @@ async fn main() -> std::io::Result<()> {
     let jwt = JwtService::new(&config.jwt_secret);
     let metrics = MetricsService::new();
     let ws_hub = WebSocketHub::new();
+    let event_bus = EventBus::new();
 
     let app_state = Arc::new(AppState {
         config: config.clone(),
@@ -130,6 +133,7 @@ async fn main() -> std::io::Result<()> {
         jwt,
         metrics,
         ws_hub,
+        event_bus,
         is_shutting_down: Arc::new(AtomicBool::new(false)),
     });
 
@@ -246,6 +250,63 @@ async fn main() -> std::io::Result<()> {
     } else {
         info!("EVM indexer disabled by config toggles");
     }
+
+    // Bridge: EventBus → WebSocketHub (real-time push to connected clients)
+    {
+        let ws_state = app_state.clone();
+        let mut event_rx = app_state.event_bus.subscribe();
+        tokio::spawn(async move {
+            use crate::services::websocket::{TradeUpdate, MarketUpdate};
+            loop {
+                match event_rx.recv().await {
+                    Ok(event) => {
+                        let now = chrono::Utc::now().timestamp();
+                        match &event {
+                            crate::services::event_bus::PlatformEvent::AgentExecuted(e) => {
+                                ws_state
+                                    .ws_hub
+                                    .broadcast_trade(TradeUpdate {
+                                        market_id: e.market_id.clone(),
+                                        outcome: e.outcome.clone(),
+                                        price: e.price,
+                                        quantity: 0,
+                                        buyer: e.owner.clone(),
+                                        seller: String::new(),
+                                        timestamp: now,
+                                    })
+                                    .await;
+                            }
+                            crate::services::event_bus::PlatformEvent::PositionOpened(e)
+                            | crate::services::event_bus::PlatformEvent::PositionClosed(e) => {
+                                ws_state
+                                    .ws_hub
+                                    .broadcast_market(MarketUpdate {
+                                        market_id: e.market_id.clone(),
+                                        yes_price: e.entry_price,
+                                        no_price: 1.0 - e.entry_price,
+                                        status: "active".to_string(),
+                                        timestamp: now,
+                                    })
+                                    .await;
+                            }
+                            _ => {}
+                        }
+                        // Also push raw event JSON to global WS channel
+                        if let Ok(json_str) = serde_json::to_string(&event) {
+                            let _ = ws_state.ws_hub.broadcast_raw_global(json_str).await;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("EventBus→WS bridge lagged by {} events", n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    // Internal agent scheduler (replaces external-tick-only dependency)
+    services::agent_scheduler::spawn_agent_scheduler(app_state.clone());
 
     let shutdown_state = app_state.clone();
     tokio::spawn(async move {
