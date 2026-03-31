@@ -106,7 +106,7 @@ export default function AdminDashboard() {
           <Badge variant="accent">Admin Mode</Badge>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
           <StatCard label="Total Markets" value={stats.totalMarkets} />
           <StatCard label="Active Markets" value={stats.activeMarkets} />
           <StatCard label="Resolved Markets" value={stats.resolvedMarkets} />
@@ -131,8 +131,8 @@ export default function AdminDashboard() {
                     key={market.id}
                     className="flex items-center justify-between bg-bg-secondary px-4 py-3"
                   >
-                    <div>
-                      <p className="text-text-primary font-medium">{market.question}</p>
+                    <div className="min-w-0">
+                      <p className="text-text-primary font-medium truncate">{market.question}</p>
                       <p className="text-xs text-text-secondary mt-1">
                         {market.category} • closes {new Date(market.tradingEnd).toLocaleString()}
                       </p>

@@ -75,7 +75,7 @@ export default function HowItWorksPage() {
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 sm:gap-4 md:grid-cols-2 lg:grid-cols-3">
           {sections.map((section) => (
             <Card key={section.title} className="space-y-3 p-6">
               <h2 className="text-lg font-semibold text-text-primary">{section.title}</h2>

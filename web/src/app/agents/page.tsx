@@ -449,7 +449,7 @@ export default function AgentsPage() {
             </div>
 
             {isLoadingPublicPerformance ? (
-              <div className="grid gap-3 md:grid-cols-5">
+              <div className="grid gap-2 sm:gap-3 md:grid-cols-5">
                 {Array.from({ length: 5 }).map((_, index) => (
                   <div key={index} className="border border-border p-4 animate-pulse">
                     <div className="h-3 w-20 bg-bg-secondary" />
@@ -458,7 +458,7 @@ export default function AgentsPage() {
                 ))}
               </div>
             ) : (
-              <div className="grid gap-3 md:grid-cols-5">
+              <div className="grid gap-2 sm:gap-3 md:grid-cols-5">
                 <div className="border border-border p-4">
                   <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
                     Active agents
@@ -649,7 +649,7 @@ export default function AgentsPage() {
 
         {mode === 'onchain' ? (
           <>
-            <section className="grid lg:grid-cols-2 gap-6 mb-8">
+            <section className="grid lg:grid-cols-2 gap-4 sm:gap-6 mb-8">
             {readOnly ? (
               <ReadOnlyNotice
                 title="Onchain agent launch is currently unavailable"
@@ -873,7 +873,7 @@ export default function AgentsPage() {
           </>
         ) : (
           <>
-            <section className="grid lg:grid-cols-2 gap-6 mb-8">
+            <section className="grid lg:grid-cols-2 gap-4 sm:gap-6 mb-8">
             {readOnly ? (
               <ReadOnlyNotice
                 title="External agent launch is currently unavailable"

@@ -89,7 +89,7 @@ export function NotificationBell() {
 
       {isOpen && (
         <div
-          className="absolute right-0 top-full mt-2 w-80 md:w-96 z-50"
+          className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] md:w-96 z-50"
           role="dialog"
           aria-label="Notifications"
         >
