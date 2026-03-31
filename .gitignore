@@ -5,12 +5,6 @@ target/
 # Project-specific
 CLAUDE.md
 docs/
-!docs/
-docs/*
-!docs/audit/
-!docs/audit/**
-!docs/launch/
-!docs/launch/**
 !web/src/app/docs/
 !web/src/app/docs/**
 
