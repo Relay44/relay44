@@ -2699,6 +2699,7 @@ dependencies = [
  "actix-web-actors",
  "aes-gcm",
  "anyhow",
+ "async-trait",
  "base64",
  "bs58",
  "chrono",
