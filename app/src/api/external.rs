@@ -1359,9 +1359,9 @@ async fn record_agent_failure(
     current_failures: i32,
     now: chrono::DateTime<Utc>,
 ) -> Result<(), ApiError> {
-    let next_failures = current_failures + 1;
+    let next_failures = current_failures.saturating_add(1);
     let backoff = failure_backoff_multiplier(next_failures);
-    let next_execution_at = now + Duration::seconds(cadence_seconds.max(1) * backoff);
+    let next_execution_at = now + Duration::seconds(cadence_seconds.max(1).saturating_mul(backoff));
     sqlx::query(
         "UPDATE external_agents
          SET consecutive_failures = $2,
@@ -5739,6 +5739,8 @@ pub async fn update_external_agent(
                  execution_mode = $9,
                  credential_id = $10,
                  active = $11,
+                 consecutive_failures = CASE WHEN $11 = TRUE THEN 0 ELSE consecutive_failures END,
+                 last_error_code = CASE WHEN $11 = TRUE THEN NULL ELSE last_error_code END,
                  updated_at = NOW()
              WHERE id = $1
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
@@ -5772,6 +5774,8 @@ pub async fn update_external_agent(
                  execution_mode = $10,
                  credential_id = $11,
                  active = $12,
+                 consecutive_failures = CASE WHEN $12 = TRUE THEN 0 ELSE consecutive_failures END,
+                 last_error_code = CASE WHEN $12 = TRUE THEN NULL ELSE last_error_code END,
                  updated_at = NOW()
              WHERE id = $1 AND owner = $2
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
@@ -5834,6 +5838,10 @@ pub async fn execute_external_agent(
 
     ensure_provider_action_allowed(&req, agent.provider, ProviderRailAction::TradeOpen)?;
     let outcome = execute_agent_record(&state, &agent, body.signed_order.clone()).await?;
+
+    if agent.consecutive_failures > 0 {
+        let _ = reset_agent_failures(&state, agent.id.as_str()).await;
+    }
 
     Ok(HttpResponse::Ok().json(json!({
         "ok": outcome.executed,
@@ -5924,7 +5932,13 @@ pub async fn run_external_agents_tick(
                     increment_skip_reason(&mut skips_by_reason, reason);
                 }
                 if agent.consecutive_failures > 0 {
-                    let _ = reset_agent_failures(&state, agent.id.as_str()).await;
+                    if let Err(reset_err) = reset_agent_failures(&state, agent.id.as_str()).await {
+                        log::warn!(
+                            "failed to reset failure counter for agent {}: {}",
+                            agent.id,
+                            reset_err.message
+                        );
+                    }
                 }
             }
             Err(err) => {
@@ -5964,7 +5978,7 @@ pub async fn run_external_agents_tick(
                     }),
                 )
                 .await?;
-                let _ = record_agent_failure(
+                if let Err(backoff_err) = record_agent_failure(
                     &state,
                     agent.id.as_str(),
                     err.code.as_str(),
@@ -5972,7 +5986,14 @@ pub async fn run_external_agents_tick(
                     agent.consecutive_failures,
                     now,
                 )
-                .await;
+                .await
+                {
+                    log::error!(
+                        "failed to record agent failure backoff agent_id={}: {}",
+                        agent.id,
+                        backoff_err.message
+                    );
+                }
             }
         }
     }

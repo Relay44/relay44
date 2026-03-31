@@ -80,7 +80,8 @@ async function fetchWithRetry(url, init = {}, { maxRetries = 3, baseDelay = 1000
     try {
       return await fetchJson(url, init);
     } catch (err) {
-      const retryable = RETRYABLE_STATUSES.has(err.status);
+      const isTimeout = err.name === 'TimeoutError' || err.name === 'AbortError';
+      const retryable = isTimeout || RETRYABLE_STATUSES.has(err.status);
       if (!retryable || attempt === maxRetries) throw err;
       const delay = baseDelay * Math.pow(2, attempt);
       await new Promise((r) => setTimeout(r, delay));
@@ -91,7 +92,7 @@ async function fetchWithRetry(url, init = {}, { maxRetries = 3, baseDelay = 1000
 export async function loginAdmin() {
   const privateKey = envOrThrow('DECISION_RUNNER_ADMIN_PRIVATE_KEY');
   const account = privateKeyToAccount(privateKey);
-  const noncePayload = await fetchJson(`${apiBase}/auth/siwe/nonce`);
+  const noncePayload = await fetchWithRetry(`${apiBase}/auth/siwe/nonce`);
   const nonce = noncePayload?.nonce;
 
   if (!nonce) {
@@ -101,7 +102,7 @@ export async function loginAdmin() {
   const issuedAt = new Date().toISOString();
   const message = `${siweDomain} wants you to sign in with your Ethereum account:\n${account.address}\n\nSign in to relay44 decision runner\n\nURI: ${apiOrigin}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
   const signature = await account.signMessage({ message });
-  const tokens = await fetchJson(`${apiBase}/auth/siwe/login`, {
+  const tokens = await fetchWithRetry(`${apiBase}/auth/siwe/login`, {
     method: 'POST',
     headers: buildHeaders(),
     body: JSON.stringify({

@@ -7,6 +7,7 @@ withErrorHandler(() =>
   runTick({
     name: 'external-runner',
     envKey: 'EXTERNAL_RUNNER_ENABLED',
+    limitEnvKey: 'EXTERNAL_RUNNER_LIMIT',
     defaultLimit: 200,
     endpoint: '/external/agents/runner/tick',
     lib,

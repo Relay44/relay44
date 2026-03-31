@@ -127,8 +127,10 @@ pub fn simulate_fill(
             // No orderbook depth available — apply a minimum slippage penalty
             // to avoid overstating paper P&L. 15bps for small orders, scaling
             // with quantity to model real-world market impact.
+            // Buy side: price goes up (pay more). Sell side: price goes down (receive less).
             let impact_bps = 15.0 + (sanitized_quantity * 2.0).min(50.0);
-            let average_price = clamp_probability(quote * (1.0 + impact_bps / 10_000.0));
+            let direction = if side.trim().eq_ignore_ascii_case("sell") { -1.0 } else { 1.0 };
+            let average_price = clamp_probability(quote * (1.0 + direction * impact_bps / 10_000.0));
             let notional = sanitized_quantity * average_price;
             (average_price, sanitized_quantity, false, false, notional)
         };

@@ -12,7 +12,7 @@ export function isEnabled(raw, fallback = true) {
   return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
 }
 
-export async function runTick({ name, envKey, defaultLimit, endpoint, lib }) {
+export async function runTick({ name, envKey, limitEnvKey, defaultLimit, endpoint, lib }) {
   const startMs = Date.now();
 
   if (!isEnabled(process.env[envKey], true)) {
@@ -23,7 +23,6 @@ export async function runTick({ name, envKey, defaultLimit, endpoint, lib }) {
   }
 
   const { accessToken } = await lib.loginAdmin();
-  const limitEnvKey = `${envKey}_LIMIT`;
   const limit = Number(process.env[limitEnvKey] || defaultLimit);
   const payload = await lib.apiPost(endpoint, accessToken, { limit });
   const durationMs = Date.now() - startMs;
