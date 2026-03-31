@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { sdk } from '@farcaster/miniapp-sdk';
+import sdk from '@farcaster/miniapp-sdk';
 import { useFarcaster } from '@/components/farcaster';
 
 export function MiniKitInit() {
@@ -9,24 +9,29 @@ export function MiniKitInit() {
   const { setUser, setIsReady } = useFarcaster();
 
   useEffect(() => {
-    if (isSDKLoaded) return;
-    setIsSDKLoaded(true);
+    if (sdk && !isSDKLoaded) {
+      setIsSDKLoaded(true);
 
-    sdk.actions.ready({});
+      const load = async () => {
+        const context = await sdk.context;
+        if (context?.user) {
+          setUser({
+            fid: context.user.fid,
+            username: context.user.username,
+            displayName: context.user.displayName ?? undefined,
+            pfpUrl: context.user.pfpUrl ?? undefined,
+          });
+        }
 
-    sdk.context.then((ctx) => {
-      if (ctx?.user) {
-        setUser({
-          fid: ctx.user.fid,
-          username: ctx.user.username,
-          displayName: ctx.user.displayName ?? undefined,
-          pfpUrl: ctx.user.pfpUrl ?? undefined,
-        });
-      }
-      setIsReady(true);
-    }).catch(() => {
-      setIsReady(true);
-    });
+        sdk.actions.ready({});
+        setIsReady(true);
+      };
+
+      load().catch(() => {
+        sdk.actions.ready({});
+        setIsReady(true);
+      });
+    }
   }, [isSDKLoaded, setUser, setIsReady]);
 
   return null;
