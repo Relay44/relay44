@@ -483,6 +483,10 @@ pub(crate) struct ExternalAgentRecord {
     pub(crate) next_execution_at: chrono::DateTime<Utc>,
     pub(crate) consecutive_failures: i32,
     pub(crate) last_error_code: Option<String>,
+    // Execution guardrails
+    pub(crate) max_notional_per_execution: Option<f64>,
+    pub(crate) max_daily_spend_usdc: Option<f64>,
+    pub(crate) max_slippage_bps: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -1205,6 +1209,9 @@ fn parse_external_agent_record(
             .try_get::<i32, _>("consecutive_failures")
             .unwrap_or(0),
         last_error_code: row.try_get("last_error_code").ok(),
+        max_notional_per_execution: row.try_get("max_notional_per_execution").ok().flatten(),
+        max_daily_spend_usdc: row.try_get("max_daily_spend_usdc").ok().flatten(),
+        max_slippage_bps: row.try_get("max_slippage_bps").ok().flatten(),
     })
 }
 
@@ -1239,7 +1246,8 @@ pub(crate) async fn load_external_agent_for_owner(
     let row = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
                 cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
-                consecutive_failures, last_error_code
+                consecutive_failures, last_error_code,
+                max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
          FROM external_agents
          WHERE id = $1 AND owner = $2",
     )
@@ -1260,7 +1268,8 @@ async fn load_due_external_agents(
     let rows = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
                 cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
-                consecutive_failures, last_error_code
+                consecutive_failures, last_error_code,
+                max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
          FROM external_agents
          WHERE active = TRUE
          ORDER BY next_execution_at ASC, id ASC
@@ -4072,12 +4081,75 @@ async fn open_paper_position(
     market: &external::types::ExternalMarketSnapshot,
     orderbook: &external::types::ExternalOrderBookSnapshot,
 ) -> Result<AgentExecutionOutcome, ApiError> {
+    // Evaluate strategy to decide whether to execute and at what params.
+    let best_bid = orderbook.bids.first().map(|l| l.price);
+    let best_ask = orderbook.asks.first().map(|l| l.price);
+    let mid = best_bid
+        .zip(best_ask)
+        .map(|(b, a)| (b + a) / 2.0)
+        .or(best_bid)
+        .or(best_ask)
+        .unwrap_or(market.yes_price);
+
+    let market_state = crate::services::external::strategy::MarketState {
+        yes_price: market.yes_price,
+        no_price: market.no_price,
+        best_bid,
+        best_ask,
+        mid_price: mid,
+        agent_price: agent.price,
+        agent_side: agent.side.clone(),
+        agent_outcome: agent.outcome.clone(),
+        agent_quantity: agent.quantity,
+    };
+    let signal = crate::services::external::strategy::evaluate_strategy(
+        agent.strategy.as_str(),
+        &market_state,
+    );
+
+    if !signal.execute {
+        let run_id = Uuid::new_v4().to_string();
+        let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+        update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at).await?;
+        insert_external_agent_run(
+            state,
+            run_id.as_str(),
+            agent,
+            "paper_skipped",
+            None,
+            Some("strategy_skip"),
+            &json!({
+                "mode": "paper",
+                "reason": "strategy_skip",
+                "strategy": agent.strategy,
+                "signal": signal.reason,
+                "midPrice": mid
+            }),
+        )
+        .await?;
+
+        return Ok(AgentExecutionOutcome {
+            executed: false,
+            skip_reason: Some("strategy_skip".to_string()),
+            run_status: "paper_skipped".to_string(),
+            run_id,
+            external_order_id: None,
+            provider_order_id: None,
+            next_execution_at,
+            response: json!({
+                "mode": "paper",
+                "status": "strategy_skip",
+                "signal": signal.reason
+            }),
+        });
+    }
+
     let fill = simulate_fill(
         market,
         orderbook,
         agent.outcome.as_str(),
         agent.side.as_str(),
-        agent.quantity,
+        signal.quantity,
         state.config.paper_fee_bps,
     );
 
@@ -4294,6 +4366,7 @@ async fn execute_paper_agent(
     state: &AppState,
     agent: &ExternalAgentRecord,
 ) -> Result<AgentExecutionOutcome, ApiError> {
+    check_execution_guardrails(state, agent).await?;
     let now = Utc::now();
     let market_id = ExternalMarketId::parse(agent.market_id.as_str())?;
 
@@ -4529,12 +4602,66 @@ async fn execute_paper_agent(
     open_paper_position(state, agent, now, &market, &orderbook).await
 }
 
+/// Check per-agent execution guardrails. Returns Err if a limit is breached.
+async fn check_execution_guardrails(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+) -> Result<(), ApiError> {
+    let notional = agent.price * agent.quantity;
+
+    // Check per-execution notional limit.
+    if let Some(max) = agent.max_notional_per_execution {
+        if max > 0.0 && notional > max {
+            return Err(ApiError::bad_request(
+                "GUARDRAIL_MAX_NOTIONAL",
+                &format!(
+                    "execution notional {:.2} USDC exceeds agent limit {:.2}",
+                    notional, max
+                ),
+            ));
+        }
+    }
+
+    // Check 24h rolling spend limit.
+    if let Some(max_daily) = agent.max_daily_spend_usdc {
+        if max_daily > 0.0 {
+            let since = Utc::now() - Duration::hours(24);
+            let spent: f64 = sqlx::query_scalar(
+                "SELECT COALESCE(SUM(
+                    COALESCE((metadata->>'notionalUsdc')::double precision, 0)
+                ), 0)
+                 FROM external_agent_runs
+                 WHERE agent_id = $1 AND status IN ('submitted', 'paper_opened')
+                   AND created_at >= $2",
+            )
+            .bind(agent.id.as_str())
+            .bind(since)
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or(0.0);
+
+            if spent + notional > max_daily {
+                return Err(ApiError::bad_request(
+                    "GUARDRAIL_MAX_DAILY_SPEND",
+                    &format!(
+                        "24h spend {:.2} + {:.2} exceeds daily limit {:.2} USDC",
+                        spent, notional, max_daily
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn execute_live_agent(
     state: &AppState,
     agent: &ExternalAgentRecord,
     signed_order_override: Option<Value>,
 ) -> Result<AgentExecutionOutcome, ApiError> {
     ensure_live_write_mode(state)?;
+    check_execution_guardrails(state, agent).await?;
 
     let credential = load_credential(
         state,
@@ -4633,6 +4760,89 @@ pub(crate) async fn execute_agent_record(
         ExternalExecutionMode::Paper => execute_paper_agent(state, agent).await,
         ExternalExecutionMode::Live => {
             execute_live_agent(state, agent, signed_order_override).await
+        }
+    }
+}
+
+/// Load and execute a single agent by ID. Used by the internal scheduler.
+/// Returns Ok(true) if executed, Ok(false) if skipped, Err on error.
+pub(crate) async fn execute_agent_record_by_id(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<bool, String> {
+    let row = sqlx::query(
+        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
+                cadence_seconds, strategy, execution_mode, credential_id, active,
+                last_executed_at, next_execution_at, consecutive_failures, last_error_code,
+                max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
+         FROM external_agents
+         WHERE id = $1 AND active = TRUE",
+    )
+    .bind(agent_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let row = match row {
+        Some(r) => r,
+        None => return Ok(false),
+    };
+
+    let agent = parse_external_agent_record(row).map_err(|e| e.message)?;
+
+    match execute_agent_record(state, &agent, None).await {
+        Ok(outcome) => {
+            if outcome.executed {
+                state.event_bus.emit(
+                    crate::services::event_bus::PlatformEvent::AgentExecuted(
+                        crate::services::event_bus::AgentExecutedEvent {
+                            agent_id: agent.id.clone(),
+                            owner: agent.owner.clone(),
+                            provider: agent.provider.as_str().to_string(),
+                            market_id: agent.market_id.clone(),
+                            strategy: agent.strategy.clone(),
+                            execution_mode: agent.execution_mode.as_str().to_string(),
+                            run_id: outcome.run_id.clone(),
+                            run_status: outcome.run_status.clone(),
+                            side: agent.side.clone(),
+                            outcome: agent.outcome.clone(),
+                            price: agent.price,
+                            metadata: outcome.response,
+                            timestamp: chrono::Utc::now(),
+                        },
+                    ),
+                );
+            }
+            if agent.consecutive_failures > 0 {
+                let _ = reset_agent_failures(state, agent.id.as_str()).await;
+            }
+            Ok(outcome.executed)
+        }
+        Err(err) => {
+            state.event_bus.emit(
+                crate::services::event_bus::PlatformEvent::AgentFailed(
+                    crate::services::event_bus::AgentFailedEvent {
+                        agent_id: agent.id.clone(),
+                        owner: agent.owner.clone(),
+                        provider: agent.provider.as_str().to_string(),
+                        market_id: agent.market_id.clone(),
+                        error_code: err.code.clone(),
+                        error_message: err.message.clone(),
+                        consecutive_failures: agent.consecutive_failures + 1,
+                        timestamp: chrono::Utc::now(),
+                    },
+                ),
+            );
+            let _ = record_agent_failure(
+                state,
+                agent.id.as_str(),
+                err.code.as_str(),
+                agent.cadence_seconds,
+                agent.consecutive_failures,
+                chrono::Utc::now(),
+            )
+            .await;
+            Err(format!("{}: {}", err.code, err.message))
         }
     }
 }
@@ -6224,6 +6434,19 @@ pub async fn run_external_agents_tick(
                 agent.last_error_code.as_deref().unwrap_or("unknown")
             );
             deactivate_external_agent(&state, agent.id.as_str(), now).await?;
+            state.event_bus.emit(
+                crate::services::event_bus::PlatformEvent::AgentDeactivated(
+                    crate::services::event_bus::AgentLifecycleEvent {
+                        agent_id: agent.id.clone(),
+                        owner: agent.owner.clone(),
+                        reason: format!(
+                            "auto_deactivated after {} consecutive failures",
+                            agent.consecutive_failures
+                        ),
+                        timestamp: now,
+                    },
+                ),
+            );
             increment_skip_reason(&mut skips_by_reason, "auto_deactivated");
             continue;
         }
@@ -6258,6 +6481,25 @@ pub async fn run_external_agents_tick(
             Ok(outcome) => {
                 if outcome.executed {
                     agents_executed += 1;
+                    state.event_bus.emit(
+                        crate::services::event_bus::PlatformEvent::AgentExecuted(
+                            crate::services::event_bus::AgentExecutedEvent {
+                                agent_id: agent.id.clone(),
+                                owner: agent.owner.clone(),
+                                provider: agent.provider.as_str().to_string(),
+                                market_id: agent.market_id.clone(),
+                                strategy: agent.strategy.clone(),
+                                execution_mode: agent.execution_mode.as_str().to_string(),
+                                run_id: outcome.run_id.clone(),
+                                run_status: outcome.run_status.clone(),
+                                side: agent.side.clone(),
+                                outcome: agent.outcome.clone(),
+                                price: agent.price,
+                                metadata: outcome.response.clone(),
+                                timestamp: now,
+                            },
+                        ),
+                    );
                 } else if let Some(reason) = outcome.skip_reason.as_deref() {
                     increment_skip_reason(&mut skips_by_reason, reason);
                 }
@@ -6288,6 +6530,20 @@ pub async fn run_external_agents_tick(
                         .as_ref()
                         .map(Value::to_string)
                         .unwrap_or_else(|| "null".to_string()),
+                );
+                state.event_bus.emit(
+                    crate::services::event_bus::PlatformEvent::AgentFailed(
+                        crate::services::event_bus::AgentFailedEvent {
+                            agent_id: agent.id.clone(),
+                            owner: agent.owner.clone(),
+                            provider: agent.provider.as_str().to_string(),
+                            market_id: agent.market_id.clone(),
+                            error_code: err.code.clone(),
+                            error_message: err.message.clone(),
+                            consecutive_failures: agent.consecutive_failures + 1,
+                            timestamp: now,
+                        },
+                    ),
                 );
                 increment_skip_reason(&mut skips_by_reason, reason.as_str());
                 let run_id = Uuid::new_v4().to_string();
