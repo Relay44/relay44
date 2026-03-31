@@ -500,7 +500,11 @@ pub async fn fetch_market_by_id_with_rpc(
             })?;
             let pool_state =
                 aerodrome::fetch_pool_state(rpc, market_id.value.as_str()).await?;
-            Ok(aerodrome::pool_to_market_snapshot(&pool_state, market_id.value.as_str()))
+            aerodrome::pool_to_market_snapshot(&pool_state, market_id.value.as_str())
+                .ok_or_else(|| ApiError::bad_request(
+                    "INVALID_POOL_STATE",
+                    "pool state produced invalid price — cannot generate market snapshot",
+                ))
         }
     }
 }
@@ -573,7 +577,9 @@ pub async fn fetch_orderbook_with_rpc(
             })?;
             let pool_state =
                 aerodrome::fetch_pool_state(rpc, market_id.value.as_str()).await?;
-            let mid_price = pool_state.price().clamp(0.01, 0.99);
+            let mid_price = pool_state.price()
+                .map(|p| p.clamp(0.01, 0.99))
+                .unwrap_or(0.5);
             aerodrome::synthesize_orderbook(&pool_state, market_id.value.as_str(), mid_price)
         }
     };
