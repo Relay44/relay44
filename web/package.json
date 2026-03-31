@@ -50,6 +50,7 @@
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
     "viem": "^2.47.1",
+    "@wagmi/core": "^3.4.1",
     "wagmi": "^3.5.0",
     "zustand": "^5.0.11"
   },
