@@ -350,14 +350,14 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
   }
 
   return (
-    <div className="p-4 sm:p-6 md:p-8">
+    <div className="p-4 sm:p-6 md:p-8 overflow-x-auto">
       <table className="w-full font-mono border-collapse">
         <thead>
           <tr>
-            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase">Active Markets</th>
-            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase hidden md:table-cell">Volume</th>
-            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase hidden md:table-cell">Ends</th>
-            <th className="text-left py-4 px-4 border-b border-border text-[0.7rem] text-text-muted uppercase">Pricing</th>
+            <th className="text-left py-4 px-3 sm:px-4 border-b border-border text-[0.7rem] text-text-muted uppercase">Active Markets</th>
+            <th className="text-left py-4 px-3 sm:px-4 border-b border-border text-[0.7rem] text-text-muted uppercase hidden md:table-cell">Volume</th>
+            <th className="text-left py-4 px-3 sm:px-4 border-b border-border text-[0.7rem] text-text-muted uppercase hidden md:table-cell">Ends</th>
+            <th className="text-left py-4 px-3 sm:px-4 border-b border-border text-[0.7rem] text-text-muted uppercase">Pricing</th>
           </tr>
         </thead>
         <tbody>
@@ -374,30 +374,30 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
                 key={market.id}
                 className="border-b border-border transition-colors hover:bg-bg-hover group"
               >
-                <td className="px-4 py-5 font-display text-sm font-bold">
+                <td className="px-3 py-4 sm:px-4 sm:py-5 font-display text-sm font-bold">
                   <Link href={`/markets/${market.id}`} className="flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
                     <span className="group-hover:underline">{market.question}</span>
                   </Link>
                 </td>
-                <td className="py-5 px-4 text-[0.85rem] hidden md:table-cell">
+                <td className="py-4 px-3 sm:py-5 sm:px-4 text-[0.85rem] hidden md:table-cell">
                   {volume > 0
                     ? `$${volume / 1_000_000 >= 1 ? `${(volume / 1_000_000).toFixed(1)}M` : `${(volume / 1_000).toFixed(0)}K`}`
                     : '—'}
                 </td>
-                <td className="py-5 px-4 text-[0.85rem] hidden md:table-cell">{endDate}</td>
-                <td className="py-5 px-4">
+                <td className="py-4 px-3 sm:py-5 sm:px-4 text-[0.85rem] hidden md:table-cell">{endDate}</td>
+                <td className="py-4 px-3 sm:py-5 sm:px-4">
                   <div className="flex gap-2">
                     <Link
                       href={`/markets/${market.id}`}
-                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-[0.7rem] font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                      className="flex h-10 w-20 sm:w-24 items-center justify-between gap-2 border border-border px-3 text-[0.7rem] font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
                     >
                       <span>YES</span>
                       <span>{yesPrice}</span>
                     </Link>
                     <Link
                       href={`/markets/${market.id}`}
-                      className="flex h-10 w-24 items-center justify-between gap-2 border border-border px-3 text-[0.7rem] font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
+                      className="flex h-10 w-20 sm:w-24 items-center justify-between gap-2 border border-border px-3 text-[0.7rem] font-semibold transition-colors hover:bg-text-primary hover:text-text-inverse"
                     >
                       <span>NO</span>
                       <span>{noPrice}</span>

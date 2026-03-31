@@ -123,13 +123,13 @@ export function FeaturedSlider({ markets, title }: FeaturedSliderProps) {
           <div className="flex gap-1">
             <button
               onClick={() => scroll('left')}
-              className="p-1.5 border border-border text-text-muted hover:text-text-primary hover:border-text-muted transition-colors cursor-pointer"
+              className="p-2.5 sm:p-1.5 border border-border text-text-muted hover:text-text-primary hover:border-text-muted transition-colors cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <button
               onClick={() => scroll('right')}
-              className="p-1.5 border border-border text-text-muted hover:text-text-primary hover:border-text-muted transition-colors cursor-pointer"
+              className="p-2.5 sm:p-1.5 border border-border text-text-muted hover:text-text-primary hover:border-text-muted transition-colors cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
