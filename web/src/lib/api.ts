@@ -35,6 +35,10 @@ import type {
   LeaderboardMetric,
   PublicProfile,
   ProfileActivity,
+  Hackathon,
+  HackathonRegistration,
+  HackathonLeaderboard,
+  HackathonSnapshot,
 } from "@/types";
 import { CURATED_MARKETS_BY_ID } from "@/lib/curatedMarkets";
 import {
@@ -2655,6 +2659,102 @@ class ApiClient {
     wallet: string,
   ): Promise<PaginatedResponse<Position>> {
     return this.request(`/profiles/${wallet}/positions`);
+  }
+
+  // Hackathons
+  async getHackathons(params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ hackathons: Hackathon[]; total: number; limit: number; offset: number }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/hackathons${query}`);
+  }
+
+  async getHackathon(id: string): Promise<Hackathon> {
+    return this.request(`/hackathons/${id}`);
+  }
+
+  async createHackathon(data: {
+    name: string;
+    description: string;
+    prizePoolUsdc: number;
+    startTime: string;
+    endTime: string;
+    scoringMethod?: string;
+    rulesJson?: Record<string, unknown>;
+  }): Promise<Hackathon> {
+    return this.request("/hackathons", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateHackathon(
+    id: string,
+    data: Partial<{
+      name: string;
+      description: string;
+      status: string;
+      prizePoolUsdc: number;
+      startTime: string;
+      endTime: string;
+      rulesJson: Record<string, unknown>;
+    }>,
+  ): Promise<Hackathon> {
+    return this.request(`/hackathons/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async registerForHackathon(
+    id: string,
+    data?: { identityId?: string },
+  ): Promise<void> {
+    return this.request(`/hackathons/${id}/register`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async getHackathonRegistrations(id: string): Promise<{
+    registrations: HackathonRegistration[];
+    total: number;
+  }> {
+    return this.request(`/hackathons/${id}/registrations`);
+  }
+
+  async linkAgentToHackathon(
+    hackathonId: string,
+    agentId: string,
+  ): Promise<void> {
+    return this.request(`/hackathons/${hackathonId}/agents`, {
+      method: "POST",
+      body: JSON.stringify({ agentId }),
+    });
+  }
+
+  async getHackathonLeaderboard(
+    id: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<HackathonLeaderboard> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/hackathons/${id}/leaderboard${query}`);
+  }
+
+  async getHackathonSnapshots(
+    id: string,
+    params?: { walletAddress?: string; limit?: number },
+  ): Promise<{ snapshots: HackathonSnapshot[] }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/hackathons/${id}/leaderboard/snapshots${query}`);
+  }
+
+  async triggerHackathonSnapshot(
+    id: string,
+  ): Promise<{ snapshotCount: number }> {
+    return this.request(`/hackathons/${id}/snapshot`, { method: "POST" });
   }
 }
 
