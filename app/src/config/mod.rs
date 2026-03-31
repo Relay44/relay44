@@ -121,6 +121,12 @@ pub struct AppConfig {
     pub external_execution_mode: ExternalExecutionMode,
     pub limitless_enabled: bool,
     pub polymarket_enabled: bool,
+    pub aerodrome_enabled: bool,
+    pub aerodrome_router_address: String,
+    pub aerodrome_swap_router_address: String,
+    pub aerodrome_quoter_address: String,
+    pub aerodrome_factory_address: String,
+    pub aerodrome_nfpm_address: String,
     pub limitless_api_key: String,
     pub polymarket_api_key: String,
     pub polymarket_api_secret: String,
@@ -310,6 +316,10 @@ impl AppConfig {
             == "true";
         let polymarket_enabled = env::var("POLYMARKET_ENABLED")
             .unwrap_or_else(|_| "true".to_string())
+            .to_lowercase()
+            == "true";
+        let aerodrome_enabled = env::var("AERODROME_ENABLED")
+            .unwrap_or_else(|_| "false".to_string())
             .to_lowercase()
             == "true";
         let limitless_api_key = env::var("LIMITLESS_API_KEY")
@@ -509,6 +519,27 @@ impl AppConfig {
             external_execution_mode,
             limitless_enabled,
             polymarket_enabled,
+            aerodrome_enabled,
+            aerodrome_router_address: env::var("AERODROME_ROUTER_ADDRESS")
+                .unwrap_or_else(|_| "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43".to_string())
+                .trim()
+                .to_string(),
+            aerodrome_swap_router_address: env::var("AERODROME_SWAP_ROUTER_ADDRESS")
+                .unwrap_or_else(|_| "0xBE6D8f0d05cC4be24d5167a3eF062215bE6D18a5".to_string())
+                .trim()
+                .to_string(),
+            aerodrome_quoter_address: env::var("AERODROME_QUOTER_ADDRESS")
+                .unwrap_or_else(|_| "0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0".to_string())
+                .trim()
+                .to_string(),
+            aerodrome_factory_address: env::var("AERODROME_FACTORY_ADDRESS")
+                .unwrap_or_else(|_| "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A".to_string())
+                .trim()
+                .to_string(),
+            aerodrome_nfpm_address: env::var("AERODROME_NFPM_ADDRESS")
+                .unwrap_or_else(|_| "0x827922686190790b37229fd06084350E74485b72".to_string())
+                .trim()
+                .to_string(),
             limitless_api_key,
             polymarket_api_key,
             polymarket_api_secret,

@@ -7,6 +7,7 @@ use crate::api::ApiError;
 pub enum ExternalProvider {
     Limitless,
     Polymarket,
+    Aerodrome,
 }
 
 impl ExternalProvider {
@@ -14,6 +15,7 @@ impl ExternalProvider {
         match self {
             Self::Limitless => "limitless",
             Self::Polymarket => "polymarket",
+            Self::Aerodrome => "aerodrome",
         }
     }
 
@@ -21,6 +23,7 @@ impl ExternalProvider {
         match value.trim().to_ascii_lowercase().as_str() {
             "limitless" => Some(Self::Limitless),
             "polymarket" => Some(Self::Polymarket),
+            "aerodrome" => Some(Self::Aerodrome),
             _ => None,
         }
     }
@@ -38,14 +41,14 @@ impl ExternalMarketId {
         let (provider_raw, value) = trimmed.split_once(':').ok_or_else(|| {
             ApiError::bad_request(
                 "INVALID_MARKET_ID",
-                "external market id must be namespaced like limitless:<slug> or polymarket:<id>",
+                "external market id must be namespaced like limitless:<slug>, polymarket:<id>, or aerodrome:<pool>",
             )
         })?;
 
         let provider = ExternalProvider::from_str(provider_raw).ok_or_else(|| {
             ApiError::bad_request(
                 "INVALID_MARKET_SOURCE",
-                "market source must be one of: limitless, polymarket",
+                "market source must be one of: limitless, polymarket, aerodrome",
             )
         })?;
 

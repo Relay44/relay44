@@ -433,7 +433,7 @@ interface AutomationEditorProps {
     maxAgentNotionalUsdc: number;
     maxTriggersPerDay: number;
     minTriggerIntervalSeconds: number;
-    allowedProvider?: "limitless" | "polymarket";
+    allowedProvider?: "limitless" | "polymarket" | "aerodrome";
     requireConfidenceBps: number;
     active: boolean;
   }) => Promise<void>;
@@ -577,7 +577,7 @@ function AutomationEditor({ policy, onSave, saving }: AutomationEditorProps) {
             allowedProvider:
               allowedProvider === "all"
                 ? undefined
-                : (allowedProvider as "limitless" | "polymarket"),
+                : (allowedProvider as "limitless" | "polymarket" | "aerodrome"),
             requireConfidenceBps: parsePercent(
               requireConfidenceBps,
               policy.requireConfidenceBps,
@@ -731,7 +731,7 @@ export default function DecisionCellPageClient({ cellId }: { cellId: string }) {
     maxAgentNotionalUsdc: number;
     maxTriggersPerDay: number;
     minTriggerIntervalSeconds: number;
-    allowedProvider?: "limitless" | "polymarket";
+    allowedProvider?: "limitless" | "polymarket" | "aerodrome";
     requireConfidenceBps: number;
     active: boolean;
   }) => {

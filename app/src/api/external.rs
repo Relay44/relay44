@@ -572,6 +572,7 @@ fn to_rail_provider(provider: ExternalProvider) -> RailProvider {
     match provider {
         ExternalProvider::Limitless => RailProvider::Limitless,
         ExternalProvider::Polymarket => RailProvider::Polymarket,
+        ExternalProvider::Aerodrome => RailProvider::Limitless, // Aerodrome uses same Base chain rails
     }
 }
 
@@ -2099,6 +2100,12 @@ async fn build_provider_submit_payload(
             };
             build_polymarket_submit_payload(credential, typed_data, signed_order)
         }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome uses on-chain swap execution, not off-chain order submission.
+            // The signed_order should contain swap parameters (tokenIn, tokenOut, amountIn, etc.)
+            // Return as-is — the swap calldata is built at execution time.
+            Ok(signed_order.clone())
+        }
     }
 }
 
@@ -2778,6 +2785,38 @@ async fn build_external_credential_status(
                 },
             });
         }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome only needs a Base wallet for on-chain swaps
+            let wallet_raw = payload_string(&credential.payload, &["baseWallet", "base_wallet"]);
+            match wallet_raw {
+                Some(raw) => match normalize_evm_wallet(raw.as_str()) {
+                    Ok(normalized) => {
+                        base_wallet = Some(normalized);
+                        checks.push(ExternalCredentialCheck {
+                            code: "base_wallet".to_string(),
+                            ok: true,
+                            message: "Base wallet is bound for Aerodrome swaps.".to_string(),
+                        });
+                    }
+                    Err(_) => {
+                        ready = false;
+                        checks.push(ExternalCredentialCheck {
+                            code: "base_wallet".to_string(),
+                            ok: false,
+                            message: "Stored baseWallet is invalid.".to_string(),
+                        });
+                    }
+                },
+                None => {
+                    ready = false;
+                    checks.push(ExternalCredentialCheck {
+                        code: "base_wallet".to_string(),
+                        ok: false,
+                        message: "Aerodrome credential must include baseWallet.".to_string(),
+                    });
+                }
+            }
+        }
     }
 
     Ok(ExternalCredentialStatusResponse {
@@ -2858,6 +2897,26 @@ fn build_preflight(provider: ExternalProvider, market: &Value) -> Value {
                     "token": "USDC",
                     "required": true,
                     "message": "Set required CLOB allowance(s) before trading"
+                }
+            ]
+        }),
+        ExternalProvider::Aerodrome => json!({
+            "chainId": 8453,
+            "mode": "swap",
+            "checks": [
+                {
+                    "type": "funding",
+                    "token": "USDC",
+                    "chainId": 8453,
+                    "required": true,
+                    "message": "Fund Base wallet with USDC for Aerodrome swap"
+                },
+                {
+                    "type": "approval",
+                    "token": "USDC",
+                    "spender": "aerodrome_swap_router",
+                    "required": true,
+                    "message": "Approve Aerodrome SwapRouter to spend USDC"
                 }
             ]
         }),
@@ -3093,6 +3152,10 @@ fn build_typed_data(
         ExternalProvider::Polymarket => Err(ApiError::internal(
             "polymarket typed data must be built through the provider-specific path",
         )),
+        ExternalProvider::Aerodrome => Err(ApiError::bad_request(
+            "AERODROME_NO_TYPED_DATA",
+            "aerodrome uses on-chain swaps, not signed typed data",
+        )),
     }
 }
 
@@ -3324,6 +3387,17 @@ async fn submit_to_provider(
         ExternalProvider::Polymarket => {
             submit_polymarket_order(state, credential, signed_order).await
         }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome swaps are executed on-chain via prepared transactions.
+            // Return the swap parameters as a "submitted" response.
+            // The actual on-chain execution is handled by the runner/signer.
+            Ok(json!({
+                "ok": true,
+                "provider": "aerodrome",
+                "mode": "prepared_tx",
+                "swap": signed_order,
+            }))
+        }
     }
 }
 
@@ -3399,6 +3473,14 @@ async fn cancel_on_provider(
                 "polymarket cancel failed",
             )
             .await
+        }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome swaps are atomic on-chain transactions — no cancel possible.
+            Ok(json!({
+                "ok": true,
+                "provider": "aerodrome",
+                "message": "aerodrome swaps are atomic and cannot be cancelled"
+            }))
         }
     }
 }
@@ -4607,6 +4689,16 @@ pub async fn upsert_external_credentials(
             normalize_evm_wallet(funder.as_str())?;
             polymarket_signature_type_from_payload(&body.credentials)?;
         }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome doesn't require API credentials — it uses on-chain swaps.
+            // The credential stores the wallet address for execution.
+            if payload_string(&body.credentials, &["baseWallet", "base_wallet"]).is_none() {
+                return Err(ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "aerodrome credential must include baseWallet",
+                ));
+            }
+        }
     }
 
     let encrypted_payload = encrypt_json(
@@ -4778,6 +4870,18 @@ pub async fn create_external_order_intent(
                 Err(_) => json!({}),
             }
         }
+        ExternalProvider::Aerodrome => {
+            // Fetch pool state from on-chain
+            match crate::services::external::providers::aerodrome::fetch_pool_state(
+                &state.evm_rpc,
+                parsed_market_id.value.as_str(),
+            )
+            .await
+            {
+                Ok(pool) => serde_json::to_value(&pool).unwrap_or_else(|_| json!({})),
+                Err(_) => json!({}),
+            }
+        }
     };
 
     let mut preflight = build_preflight(provider, &provider_market_payload);
@@ -4827,6 +4931,7 @@ pub async fn create_external_order_intent(
             Some(profile.rank.map(|rank| rank.fee_rate_bps).unwrap_or(300))
         }
         ExternalProvider::Polymarket => None,
+        ExternalProvider::Aerodrome => None,
     };
     let typed_data = match provider {
         ExternalProvider::Limitless => build_typed_data(
@@ -4846,6 +4951,20 @@ pub async fn create_external_order_intent(
                 &provider_market_payload,
             )
             .await?
+        }
+        ExternalProvider::Aerodrome => {
+            // Aerodrome doesn't use EIP-712 signed orders.
+            // Return swap parameters that will be used to build calldata.
+            json!({
+                "provider": "aerodrome",
+                "mode": "swap",
+                "chainId": 8453,
+                "pool": parsed_market_id.value,
+                "outcome": intent_for_signing.outcome,
+                "side": intent_for_signing.side,
+                "price": intent_for_signing.price,
+                "quantity": intent_for_signing.quantity,
+            })
         }
     };
 
