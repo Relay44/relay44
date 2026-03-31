@@ -299,6 +299,7 @@
 @media (pointer: coarse) {
   .btn,
   button,
+  [role="tab"],
   a {
     min-height: 44px;
     min-width: 44px;

@@ -144,7 +144,7 @@ export default function MarketDetailPage() {
     <PageShell>
       <Link
         href="/markets"
-        className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary mb-4"
+        className="inline-flex items-center gap-2 p-1 -ml-1 text-text-secondary hover:text-text-primary mb-4"
       >
         <ChevronLeftIcon className="w-5 h-5" />
         Back to Markets
@@ -322,7 +322,7 @@ export default function MarketDetailPage() {
         </div>
       ) : null}
 
-      <div className="grid lg:grid-cols-2 gap-6 mb-6">
+      <div className="grid lg:grid-cols-2 gap-4 sm:gap-6 mb-6">
         {market.status === "active" ? (
           readOnly ? (
             <ReadOnlyNotice
