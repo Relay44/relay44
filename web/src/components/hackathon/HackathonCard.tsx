@@ -4,14 +4,8 @@ import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { HackathonCountdown } from './HackathonCountdown';
+import { STATUS_VARIANT } from '@/lib/hackathon';
 import type { Hackathon } from '@/types';
-
-const STATUS_VARIANT: Record<string, 'bid' | 'accent' | 'default' | 'ask'> = {
-  upcoming: 'accent',
-  active: 'bid',
-  completed: 'default',
-  cancelled: 'ask',
-};
 
 interface HackathonCardProps {
   hackathon: Hackathon;
@@ -29,7 +23,9 @@ export function HackathonCard({ hackathon }: HackathonCardProps) {
       <Card hover className="h-full transition-all duration-fast hover:border-accent hover:shadow-md hover:-translate-y-0.5">
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-lg truncate">{hackathon.name}</CardTitle>
+            <CardTitle className="text-lg truncate" title={hackathon.name}>
+              {hackathon.name}
+            </CardTitle>
             <Badge variant={STATUS_VARIANT[hackathon.status] || 'default'}>
               {hackathon.status}
             </Badge>

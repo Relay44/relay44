@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { useHackathonLeaderboard } from '@/hooks/useHackathons';
@@ -19,34 +20,21 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-function RankBadge({ rank }: { rank: number }) {
-  if (rank === 1) {
-    return (
-      <div className="w-8 h-8 bg-yellow-500/20 flex items-center justify-center">
-        <span className="text-yellow-500 font-bold">1</span>
-      </div>
-    );
-  }
-  if (rank === 2) {
-    return (
-      <div className="w-8 h-8 bg-gray-400/20 flex items-center justify-center">
-        <span className="text-gray-400 font-bold">2</span>
-      </div>
-    );
-  }
-  if (rank === 3) {
-    return (
-      <div className="w-8 h-8 bg-amber-700/20 flex items-center justify-center">
-        <span className="text-amber-700 font-bold">3</span>
-      </div>
-    );
-  }
+const RankBadge = React.memo(function RankBadge({ rank }: { rank: number }) {
+  const styles: Record<number, string> = {
+    1: 'bg-yellow-500/20 text-yellow-500',
+    2: 'bg-gray-400/20 text-gray-400',
+    3: 'bg-amber-700/20 text-amber-700',
+  };
+
+  const style = styles[rank];
+
   return (
-    <div className="w-8 h-8 flex items-center justify-center">
-      <span className="text-text-secondary">{rank}</span>
+    <div className={cn('w-8 h-8 flex items-center justify-center', style)}>
+      <span className={cn('font-bold', !style && 'text-text-secondary')}>{rank}</span>
     </div>
   );
-}
+});
 
 interface HackathonLeaderboardProps {
   hackathonId: string;
@@ -88,61 +76,63 @@ export function HackathonLeaderboard({ hackathonId }: HackathonLeaderboardProps)
             No leaderboard data yet. Snapshots are taken periodically once the hackathon is active.
           </div>
         ) : (
-          <div className="space-y-1">
-            {/* Header */}
-            <div className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2 border-b border-border py-2 text-xs text-text-secondary">
-              <span>Rank</span>
-              <span>Trader</span>
-              <span className="text-right">P&L</span>
-              <span className="text-right hidden sm:block">Volume</span>
-              <span className="text-right hidden sm:block">Win Rate</span>
-            </div>
+          <table className="w-full" aria-label="Hackathon leaderboard">
+            <thead>
+              <tr className="border-b border-border text-xs text-text-secondary">
+                <th className="py-2 text-left font-normal w-10">Rank</th>
+                <th className="py-2 text-left font-normal">Trader</th>
+                <th className="py-2 text-right font-normal">P&L</th>
+                <th className="py-2 text-right font-normal hidden sm:table-cell">Volume</th>
+                <th className="py-2 text-right font-normal hidden sm:table-cell">Win Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((entry: HackathonLeaderboardEntry) => {
+                const isCurrentUser = currentWallet === entry.walletAddress.toLowerCase();
+                const isPositive = entry.netPnlUsdc >= 0;
 
-            {entries.map((entry: HackathonLeaderboardEntry) => {
-              const isCurrentUser = currentWallet === entry.walletAddress.toLowerCase();
-              const isPositive = entry.netPnlUsdc >= 0;
-
-              return (
-                <Link
-                  key={entry.walletAddress}
-                  href={`/profile/${entry.walletAddress}`}
-                  className={cn(
-                    'grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2 py-2 hover:bg-bg-secondary transition-colors duration-fast cursor-pointer',
-                    isCurrentUser && 'bg-accent/5 border border-accent/20',
-                  )}
-                >
-                  <RankBadge rank={entry.rank} />
-
-                  <div className="min-w-0">
-                    <span className="block truncate font-medium text-text-primary">
-                      {truncateAddress(entry.walletAddress)}
-                      {isCurrentUser && (
-                        <span className="ml-2 text-xs text-accent">(you)</span>
-                      )}
-                    </span>
-                  </div>
-
-                  <div className="text-right">
-                    <span className={cn('font-medium', isPositive ? 'text-bid' : 'text-ask')}>
-                      {isPositive ? '+' : ''}${formatNumber(entry.netPnlUsdc)}
-                    </span>
-                  </div>
-
-                  <div className="text-right hidden sm:block">
-                    <span className="text-text-secondary text-sm">
-                      ${formatNumber(entry.totalVolumeUsdc)}
-                    </span>
-                  </div>
-
-                  <div className="text-right hidden sm:block">
-                    <span className="text-text-secondary text-sm">
-                      {(entry.winRateBps / 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
+                return (
+                  <tr
+                    key={entry.walletAddress}
+                    className={cn(
+                      'hover:bg-bg-secondary transition-colors duration-fast',
+                      isCurrentUser && 'bg-accent/5',
+                    )}
+                  >
+                    <td className="py-2">
+                      <RankBadge rank={entry.rank} />
+                    </td>
+                    <td className="py-2 min-w-0">
+                      <Link
+                        href={`/profile/${entry.walletAddress}`}
+                        className="block truncate font-medium text-text-primary hover:text-accent transition-colors"
+                      >
+                        {truncateAddress(entry.walletAddress)}
+                        {isCurrentUser && (
+                          <span className="ml-2 text-xs text-accent">(you)</span>
+                        )}
+                      </Link>
+                    </td>
+                    <td className="py-2 text-right">
+                      <span className={cn('font-medium', isPositive ? 'text-bid' : 'text-ask')}>
+                        {isPositive ? '+' : ''}${formatNumber(entry.netPnlUsdc)}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right hidden sm:table-cell">
+                      <span className="text-text-secondary text-sm">
+                        ${formatNumber(entry.totalVolumeUsdc)}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right hidden sm:table-cell">
+                      <span className="text-text-secondary text-sm">
+                        {(entry.winRateBps / 100).toFixed(1)}%
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </CardContent>
     </Card>

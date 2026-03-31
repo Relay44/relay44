@@ -2,12 +2,15 @@
 
 import { apiBase, buildHeaders, fetchJson, loginAdmin } from './external-runner-lib.mjs';
 
+const FETCH_TIMEOUT_MS = 60_000;
+
 async function main() {
   const { accessToken } = await loginAdmin();
 
   // Fetch active hackathons
   const hackathonsRes = await fetchJson(`${apiBase}/hackathons?status=active`, {
     headers: buildHeaders(accessToken),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   const hackathons = hackathonsRes?.hackathons || [];
@@ -17,6 +20,8 @@ async function main() {
     return;
   }
 
+  let failures = 0;
+
   for (const h of hackathons) {
     console.log(`Snapshotting hackathon ${h.id} (${h.name})...`);
     try {
@@ -24,9 +29,11 @@ async function main() {
         method: 'POST',
         headers: buildHeaders(accessToken),
         body: JSON.stringify({}),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       console.log(JSON.stringify({ ok: true, hackathonId: h.id, ...result }, null, 2));
     } catch (err) {
+      failures++;
       console.error(
         JSON.stringify(
           { ok: false, hackathonId: h.id, message: err.message, status: err.status || null },
@@ -35,6 +42,11 @@ async function main() {
         ),
       );
     }
+  }
+
+  if (failures > 0) {
+    console.error(`${failures}/${hackathons.length} snapshot(s) failed`);
+    process.exit(1);
   }
 }
 

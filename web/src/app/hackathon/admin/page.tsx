@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { PageShell } from '@/components/layout';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -12,6 +12,12 @@ import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import type { Hackathon } from '@/types';
 
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return 'An unexpected error occurred';
+}
+
 export default function HackathonAdminPage() {
   const { address } = useBaseWallet();
   const isAdmin = useMemo(() => isAdminWallet(address), [address]);
@@ -19,6 +25,7 @@ export default function HackathonAdminPage() {
   const { addToast } = useToast();
 
   const [creating, setCreating] = useState(false);
+  const [snapshotLoading, setSnapshotLoading] = useState<Record<string, boolean>>({});
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -56,45 +63,71 @@ export default function HackathonAdminPage() {
   }
 
   const handleCreate = async () => {
-    if (!form.name || !form.startTime || !form.endTime) {
-      addToast('Fill in all required fields', 'error');
+    const name = form.name.trim();
+    if (!name) {
+      addToast('Name is required', 'error');
       return;
     }
+    if (!form.startTime || !form.endTime) {
+      addToast('Start and end times are required', 'error');
+      return;
+    }
+
+    const startDate = new Date(form.startTime);
+    const endDate = new Date(form.endTime);
+    if (endDate <= startDate) {
+      addToast('End time must be after start time', 'error');
+      return;
+    }
+
+    const prize = parseFloat(form.prizePoolUsdc);
+    if (isNaN(prize) || prize < 0) {
+      addToast('Prize must be a non-negative number', 'error');
+      return;
+    }
+
     try {
       setCreating(true);
       await api.createHackathon({
-        name: form.name,
-        description: form.description,
-        prizePoolUsdc: parseFloat(form.prizePoolUsdc) || 0,
-        startTime: new Date(form.startTime).toISOString(),
-        endTime: new Date(form.endTime).toISOString(),
+        name,
+        description: form.description.trim(),
+        prizePoolUsdc: prize,
+        startTime: startDate.toISOString(),
+        endTime: endDate.toISOString(),
       });
       addToast('Hackathon created', 'success');
       setForm({ name: '', description: '', prizePoolUsdc: '1000', startTime: '', endTime: '' });
       refetch();
     } catch (err: unknown) {
-      addToast((err as Error).message || 'Failed to create', 'error');
+      addToast(extractErrorMessage(err), 'error');
     } finally {
       setCreating(false);
     }
   };
 
   const handleStatusChange = async (id: string, status: string) => {
+    const destructive = status === 'completed' || status === 'cancelled';
+    if (destructive && !window.confirm(`Are you sure you want to set this hackathon to "${status}"? This cannot be undone.`)) {
+      return;
+    }
     try {
       await api.updateHackathon(id, { status });
       addToast(`Status updated to ${status}`, 'success');
       refetch();
     } catch (err: unknown) {
-      addToast((err as Error).message || 'Failed to update', 'error');
+      addToast(extractErrorMessage(err), 'error');
     }
   };
 
   const handleSnapshot = async (id: string) => {
     try {
+      setSnapshotLoading((prev) => ({ ...prev, [id]: true }));
       const result = await api.triggerHackathonSnapshot(id);
       addToast(`Snapshot taken: ${result.snapshotCount} entries`, 'success');
     } catch (err: unknown) {
-      addToast((err as Error).message || 'Snapshot failed', 'error');
+      addToast(extractErrorMessage(err), 'error');
+    } finally {
+      setSnapshotLoading((prev) => ({ ...prev, [id]: false }));
     }
   };
 
@@ -114,33 +147,44 @@ export default function HackathonAdminPage() {
             <CardTitle>Create Hackathon</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="Hackathon name"
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none"
-            />
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="Description"
-              rows={3}
-              className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none resize-none"
-            />
+            <div>
+              <label htmlFor="hack-name" className="text-xs text-text-muted block mb-1">Name *</label>
+              <input
+                id="hack-name"
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Hackathon name"
+                className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="hack-desc" className="text-xs text-text-muted block mb-1">Description</label>
+              <textarea
+                id="hack-desc"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Description"
+                rows={3}
+                className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none resize-none"
+              />
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="text-xs text-text-muted block mb-1">Prize (USDC)</label>
+                <label htmlFor="hack-prize" className="text-xs text-text-muted block mb-1">Prize (USDC)</label>
                 <input
+                  id="hack-prize"
                   type="number"
+                  min="0"
                   value={form.prizePoolUsdc}
                   onChange={(e) => setForm({ ...form, prizePoolUsdc: e.target.value })}
                   className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none"
                 />
               </div>
               <div>
-                <label className="text-xs text-text-muted block mb-1">Start</label>
+                <label htmlFor="hack-start" className="text-xs text-text-muted block mb-1">Start *</label>
                 <input
+                  id="hack-start"
                   type="datetime-local"
                   value={form.startTime}
                   onChange={(e) => setForm({ ...form, startTime: e.target.value })}
@@ -148,8 +192,9 @@ export default function HackathonAdminPage() {
                 />
               </div>
               <div>
-                <label className="text-xs text-text-muted block mb-1">End</label>
+                <label htmlFor="hack-end" className="text-xs text-text-muted block mb-1">End *</label>
                 <input
+                  id="hack-end"
                   type="datetime-local"
                   value={form.endTime}
                   onChange={(e) => setForm({ ...form, endTime: e.target.value })}
@@ -212,8 +257,9 @@ export default function HackathonAdminPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => handleSnapshot(h.id)}
+                          disabled={snapshotLoading[h.id]}
                         >
-                          Take Snapshot
+                          {snapshotLoading[h.id] ? 'Taking Snapshot...' : 'Take Snapshot'}
                         </Button>
                       </>
                     )}

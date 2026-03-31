@@ -10,13 +10,7 @@ import {
   HackathonPnlChart,
 } from '@/components/hackathon';
 import { useHackathon } from '@/hooks/useHackathons';
-
-const STATUS_VARIANT: Record<string, 'bid' | 'accent' | 'default' | 'ask'> = {
-  upcoming: 'accent',
-  active: 'bid',
-  completed: 'default',
-  cancelled: 'ask',
-};
+import { STATUS_VARIANT } from '@/lib/hackathon';
 
 export default function HackathonDetailPage() {
   const { id } = useParams<{ id: string }>();
