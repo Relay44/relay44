@@ -31,6 +31,7 @@ const HOME_HERO_IMAGE_SRCS = [
   '/home-hero-slides/44445611654.jpg',
   '/home-hero-slides/92716739691.jpg',
   '/home-hero-slides/102731870.jpg',
+  '/home-hero-slides/307812740812.jpg',
 ] as const;
 
 export default async function HomePage() {
