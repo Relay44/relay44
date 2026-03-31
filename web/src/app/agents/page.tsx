@@ -353,15 +353,32 @@ export default function AgentsPage() {
     }
 
     try {
+      const price = Number(externalPrice);
+      const quantity = Number(externalQuantity);
+      const cadence = Number(externalCadence);
+
+      if (!Number.isFinite(price) || price < 0.01 || price > 0.99) {
+        addToast('Price must be between 0.01 and 0.99', 'error');
+        return;
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        addToast('Quantity must be greater than 0', 'error');
+        return;
+      }
+      if (!Number.isFinite(cadence) || cadence < 1) {
+        addToast('Cadence must be at least 1 second', 'error');
+        return;
+      }
+
       await createExternalAgent.mutateAsync({
         name: externalName.trim() || 'external-agent',
         provider: externalProvider,
         marketId: externalMarketId,
         outcome: externalOutcome,
         side: externalSide,
-        price: Number(externalPrice),
-        quantity: Number(externalQuantity),
-        cadenceSeconds: Number(externalCadence),
+        price,
+        quantity,
+        cadenceSeconds: cadence,
         strategy: externalStrategy.trim() || 'external',
         credentialId: externalCredentialId,
         active: true,
