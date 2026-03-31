@@ -169,7 +169,7 @@ export default function HackathonAdminPage() {
                 className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none resize-none"
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
               <div>
                 <label htmlFor="hack-prize" className="text-xs text-text-muted block mb-1">Prize (USDC)</label>
                 <input

@@ -69,17 +69,17 @@ export default function PortfolioPage() {
     <PageShell>
       <h1 className="text-2xl font-bold mb-6">Portfolio</h1>
 
-      <div className="grid grid-cols-2 gap-4 mb-6 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 mb-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
         <Card>
           <div className="text-text-secondary text-sm mb-1">Total Value</div>
-          <div className="text-2xl font-semibold">
+          <div className="text-xl sm:text-2xl font-semibold">
             {formatCurrency(totalValue)}
           </div>
         </Card>
         <Card>
           <div className="text-text-secondary text-sm mb-1">Unrealized P&L</div>
           <div
-            className={`text-2xl font-semibold ${
+            className={`text-xl sm:text-2xl font-semibold ${
               totalPnl >= 0 ? "text-accent" : "text-text-secondary"
             }`}
           >
@@ -89,7 +89,7 @@ export default function PortfolioPage() {
         <Card>
           <div className="text-text-secondary text-sm mb-1">Realized P&L</div>
           <div
-            className={`text-2xl font-semibold ${
+            className={`text-xl sm:text-2xl font-semibold ${
               realizedPnl >= 0 ? "text-accent" : "text-text-secondary"
             }`}
           >
@@ -98,11 +98,11 @@ export default function PortfolioPage() {
         </Card>
         <Card>
           <div className="text-text-secondary text-sm mb-1">Positions</div>
-          <div className="text-2xl font-semibold">{positions.length}</div>
+          <div className="text-xl sm:text-2xl font-semibold">{positions.length}</div>
         </Card>
         <Card>
           <div className="text-text-secondary text-sm mb-1">Claimable</div>
-          <div className="text-2xl font-semibold">{formatCurrency(totalClaimable)}</div>
+          <div className="text-xl sm:text-2xl font-semibold">{formatCurrency(totalClaimable)}</div>
         </Card>
       </div>
 
