@@ -9,7 +9,7 @@ import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { useAuth, useRuntimeMode, useSessionState } from '@/hooks';
 import { api, type ExternalCredential, type ExternalCredentialStatus } from '@/lib/api';
 
-type Provider = 'limitless' | 'polymarket';
+type Provider = 'limitless' | 'polymarket' | 'aerodrome';
 
 interface DraftState {
   provider: Provider;

@@ -47,6 +47,7 @@ const PROVIDER_OPTIONS = [
   { value: "all", label: "Any provider" },
   { value: "limitless", label: "Limitless" },
   { value: "polymarket", label: "Polymarket" },
+  { value: "aerodrome", label: "Aerodrome" },
 ] as const;
 
 const DIRECTION_OPTIONS = [

@@ -23,6 +23,7 @@ const strategyRoles: Record<string, { title: string; roles: string[] }> = {
 const providerOffsets: Record<ExternalAgentRecord['provider'], number> = {
   limitless: 1,
   polymarket: 3,
+  aerodrome: 5,
 };
 
 function hashValue(input: string): number {
