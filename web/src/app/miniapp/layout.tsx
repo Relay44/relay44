@@ -11,6 +11,12 @@ export const metadata = buildPageMetadata({
 export default function MiniappLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
+      <script
+        type="module"
+        dangerouslySetInnerHTML={{
+          __html: `import{sdk}from"https://esm.sh/@farcaster/miniapp-sdk";sdk.actions.ready();`,
+        }}
+      />
       <MiniKitInit />
       {children}
     </>
