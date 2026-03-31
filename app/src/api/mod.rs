@@ -4,6 +4,7 @@ pub mod decisions;
 pub mod error;
 pub mod evm;
 pub mod external;
+pub mod hackathon;
 pub mod health;
 pub mod jwt;
 pub mod markets;

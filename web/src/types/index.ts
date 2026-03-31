@@ -582,3 +582,59 @@ export interface ProfileActivity {
   pnl?: number;
   createdAt: string;
 }
+
+// Hackathon types
+
+export type HackathonStatus = 'upcoming' | 'active' | 'completed' | 'cancelled';
+
+export interface Hackathon {
+  id: string;
+  name: string;
+  description: string;
+  prizePoolUsdc: number;
+  startTime: string;
+  endTime: string;
+  status: HackathonStatus;
+  scoringMethod: string;
+  createdBy: string;
+  rulesJson: Record<string, unknown>;
+  participantCount: number;
+  agentCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HackathonRegistration {
+  hackathonId: string;
+  walletAddress: string;
+  identityId?: string;
+  registeredAt: string;
+  status: string;
+  agentCount: number;
+}
+
+export interface HackathonLeaderboardEntry {
+  rank: number;
+  walletAddress: string;
+  netPnlUsdc: number;
+  totalVolumeUsdc: number;
+  winRateBps: number;
+  positionCount: number;
+  tradeCount: number;
+  snapshotTime: string;
+}
+
+export interface HackathonLeaderboard {
+  hackathonId: string;
+  entries: HackathonLeaderboardEntry[];
+  updatedAt: string | null;
+  total: number;
+}
+
+export interface HackathonSnapshot {
+  walletAddress: string;
+  netPnlUsdc: number;
+  totalVolumeUsdc: number;
+  rank: number;
+  snapshotTime: string;
+}
