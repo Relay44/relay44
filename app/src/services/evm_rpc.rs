@@ -180,6 +180,64 @@ impl EvmRpcService {
         Ok(Some(receipt))
     }
 
+
+    pub async fn eth_get_transaction_count(&self, address: &str, block: &str) -> Result<u64> {
+        let params = serde_json::json!([address, block]);
+        let value = self.rpc_value_call("eth_getTransactionCount", params).await?;
+        let raw = value
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid eth_getTransactionCount response"))?;
+        parse_u64_hex(raw)
+    }
+
+    pub async fn eth_gas_price(&self) -> Result<u128> {
+        let value = self
+            .rpc_value_call("eth_gasPrice", serde_json::json!([]))
+            .await?;
+        let raw = value
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid eth_gasPrice response"))?;
+        parse_u128_hex(raw)
+    }
+
+    pub async fn eth_max_priority_fee_per_gas(&self) -> Result<u128> {
+        let value = self
+            .rpc_value_call("eth_maxPriorityFeePerGas", serde_json::json!([]))
+            .await?;
+        let raw = value
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid eth_maxPriorityFeePerGas response"))?;
+        parse_u128_hex(raw)
+    }
+
+    pub async fn eth_estimate_gas(
+        &self,
+        from: &str,
+        to: &str,
+        data: &str,
+        value: &str,
+    ) -> Result<u64> {
+        let params = serde_json::json!([{
+            "from": from,
+            "to": to,
+            "data": data,
+            "value": value
+        }]);
+        let resp = self.rpc_value_call("eth_estimateGas", params).await?;
+        let raw = resp
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid eth_estimateGas response"))?;
+        parse_u64_hex(raw)
+    }
+
+    pub async fn eth_get_balance(&self, address: &str, block: &str) -> Result<u128> {
+        let params = serde_json::json!([address, block]);
+        let value = self.rpc_value_call("eth_getBalance", params).await?;
+        let raw = value
+            .as_str()
+            .ok_or_else(|| anyhow!("Invalid eth_getBalance response"))?;
+        parse_u128_hex(raw)
+    }
     async fn rpc_value_call(
         &self,
         method: &str,
@@ -302,6 +360,23 @@ pub fn parse_u64_hex(value: &str) -> Result<u64> {
     u64::from_str_radix(normalized, 16).map_err(|_| anyhow!("Invalid RPC hex value"))
 }
 
+
+pub fn parse_u128_hex(value: &str) -> Result<u128> {
+    let trimmed = value.trim_start_matches("0x");
+    if trimmed.is_empty() {
+        return Err(anyhow!("Invalid RPC hex value"));
+    }
+
+    let normalized = trimmed.trim_start_matches('0');
+    if normalized.is_empty() {
+        return Ok(0);
+    }
+    if normalized.len() > 32 {
+        return Err(anyhow!("RPC value out of range for u128"));
+    }
+
+    u128::from_str_radix(normalized, 16).map_err(|_| anyhow!("Invalid RPC hex value"))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
