@@ -7,6 +7,9 @@ CLAUDE.md
 docs/
 !web/src/app/docs/
 !web/src/app/docs/**
+!web/src/components/docs/
+!web/src/components/docs/**
+!web/src/lib/docs-nav.ts
 
 # Local ledgers
 test-ledger/
