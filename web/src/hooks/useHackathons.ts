@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type {
-  Hackathon,
   HackathonLeaderboard,
   HackathonRegistration,
   HackathonSnapshot,
@@ -9,9 +8,11 @@ import type {
 
 export function useHackathons(params?: { status?: string }) {
   return useQuery({
-    queryKey: ['hackathons', params],
+    queryKey: ['hackathons', params?.status],
     queryFn: () => api.getHackathons(params),
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    staleTime: 10_000,
   });
 }
 
@@ -21,6 +22,8 @@ export function useHackathon(id: string | undefined) {
     enabled: !!id,
     queryFn: () => api.getHackathon(id!),
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    staleTime: 10_000,
   });
 }
 
@@ -30,6 +33,8 @@ export function useHackathonLeaderboard(id: string | undefined) {
     enabled: !!id,
     queryFn: () => api.getHackathonLeaderboard(id!, { limit: 100 }),
     refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    staleTime: 10_000,
   });
 }
 
@@ -41,6 +46,9 @@ export function useHackathonSnapshots(
     queryKey: ['hackathon-snapshots', id, walletAddress],
     enabled: !!id,
     queryFn: () => api.getHackathonSnapshots(id!, { walletAddress, limit: 200 }),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    staleTime: 10_000,
   });
 }
 
@@ -49,6 +57,9 @@ export function useHackathonRegistrations(id: string | undefined) {
     queryKey: ['hackathon-registrations', id],
     enabled: !!id,
     queryFn: () => api.getHackathonRegistrations(id!),
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    staleTime: 10_000,
   });
 }
 

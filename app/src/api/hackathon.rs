@@ -1,17 +1,27 @@
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api::auth::{extract_authenticated_user, extract_jwt_user};
 use crate::api::jwt::{check_role, UserRole};
+use crate::api::validation::{sanitize_string, validate_pagination};
 use crate::api::ApiError;
 use crate::AppState;
 
-const MAX_PAGE_SIZE: i64 = 100;
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const ALLOWED_STATUSES: &[&str] = &["upcoming", "active", "completed", "cancelled"];
+const ALLOWED_SCORING_METHODS: &[&str] = &["net_pnl"];
+const MAX_RULES_JSON_BYTES: usize = 65_536; // 64 KB
+const MAX_AGENTS_PER_WALLET: i64 = 3;
+const SNAPSHOT_LOCK_TTL_SECS: u64 = 600;
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -75,6 +85,70 @@ pub struct SnapshotsQuery {
     pub limit: Option<i64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistrationsQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers
+// ---------------------------------------------------------------------------
+
+fn validate_status_param(status: &str) -> Result<(), ApiError> {
+    if !ALLOWED_STATUSES.contains(&status) {
+        return Err(ApiError::bad_request(
+            "INVALID_STATUS",
+            &format!(
+                "Status must be one of: {}",
+                ALLOWED_STATUSES.join(", ")
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_prize(prize: f64) -> Result<(), ApiError> {
+    if prize.is_nan() || prize.is_infinite() || prize < 0.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRIZE",
+            "Prize pool must be a non-negative number",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_rules_json(rules: &Value) -> Result<(), ApiError> {
+    let serialized = serde_json::to_string(rules).unwrap_or_default();
+    if serialized.len() > MAX_RULES_JSON_BYTES {
+        return Err(ApiError::bad_request(
+            "RULES_TOO_LARGE",
+            "Rules JSON exceeds 64KB limit",
+        ));
+    }
+    Ok(())
+}
+
+/// Validate status transition state machine.
+/// Allowed: upcoming→active, active→completed, any→cancelled
+fn validate_status_transition(current: &str, next: &str) -> Result<(), ApiError> {
+    validate_status_param(next)?;
+    let valid = match (current, next) {
+        (_, "cancelled") => true,
+        ("upcoming", "active") => true,
+        ("active", "completed") => true,
+        _ => false,
+    };
+    if !valid {
+        return Err(ApiError::bad_request(
+            "INVALID_TRANSITION",
+            &format!("Cannot transition from '{}' to '{}'", current, next),
+        ));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Serialization helpers
 // ---------------------------------------------------------------------------
@@ -98,6 +172,15 @@ fn hackathon_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
     })
 }
 
+fn hackathon_with_counts_sql() -> &'static str {
+    "SELECT h.*,
+        (SELECT COUNT(*) FROM hackathon_registrations r
+         WHERE r.hackathon_id = h.id AND r.status = 'active') AS participant_count,
+        (SELECT COUNT(*) FROM hackathon_agents a
+         WHERE a.hackathon_id = h.id) AS agent_count
+     FROM hackathons h"
+}
+
 // ---------------------------------------------------------------------------
 // GET /v1/hackathons
 // ---------------------------------------------------------------------------
@@ -106,38 +189,28 @@ pub async fn list_hackathons(
     state: web::Data<Arc<AppState>>,
     query: web::Query<ListHackathonsQuery>,
 ) -> Result<impl Responder, ApiError> {
-    let limit = query.limit.unwrap_or(20).min(MAX_PAGE_SIZE);
-    let offset = query.offset.unwrap_or(0).max(0);
+    let (limit, offset) = validate_pagination(query.limit, query.offset)?;
     let pool = state.db.pool();
 
+    if let Some(ref status) = query.status {
+        validate_status_param(status)?;
+    }
+
     let rows = if let Some(ref status) = query.status {
-        sqlx::query(
-            "SELECT h.*,
-                (SELECT COUNT(*) FROM hackathon_registrations r
-                 WHERE r.hackathon_id = h.id AND r.status = 'active') AS participant_count,
-                (SELECT COUNT(*) FROM hackathon_agents a
-                 WHERE a.hackathon_id = h.id) AS agent_count
-             FROM hackathons h
-             WHERE h.status = $1
-             ORDER BY h.start_time DESC
-             LIMIT $2 OFFSET $3",
-        )
+        sqlx::query(&format!(
+            "{} WHERE h.status = $1 ORDER BY h.start_time DESC LIMIT $2 OFFSET $3",
+            hackathon_with_counts_sql()
+        ))
         .bind(status)
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)
         .await?
     } else {
-        sqlx::query(
-            "SELECT h.*,
-                (SELECT COUNT(*) FROM hackathon_registrations r
-                 WHERE r.hackathon_id = h.id AND r.status = 'active') AS participant_count,
-                (SELECT COUNT(*) FROM hackathon_agents a
-                 WHERE a.hackathon_id = h.id) AS agent_count
-             FROM hackathons h
-             ORDER BY h.start_time DESC
-             LIMIT $1 OFFSET $2",
-        )
+        sqlx::query(&format!(
+            "{} ORDER BY h.start_time DESC LIMIT $1 OFFSET $2",
+            hackathon_with_counts_sql()
+        ))
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)
@@ -177,15 +250,10 @@ pub async fn get_hackathon(
     let hackathon_id = path.into_inner();
     let pool = state.db.pool();
 
-    let row = sqlx::query(
-        "SELECT h.*,
-            (SELECT COUNT(*) FROM hackathon_registrations r
-             WHERE r.hackathon_id = h.id AND r.status = 'active') AS participant_count,
-            (SELECT COUNT(*) FROM hackathon_agents a
-             WHERE a.hackathon_id = h.id) AS agent_count
-         FROM hackathons h
-         WHERE h.id = $1",
-    )
+    let row = sqlx::query(&format!(
+        "{} WHERE h.id = $1",
+        hackathon_with_counts_sql()
+    ))
     .bind(&hackathon_id)
     .fetch_optional(pool)
     .await?
@@ -206,11 +274,30 @@ pub async fn create_hackathon(
     let user = extract_jwt_user(&req, &state)?;
     check_role(user.role, UserRole::Admin)?;
 
-    let name = body.name.trim();
-    if name.is_empty() || name.len() > 256 {
+    let name = sanitize_string(&body.name, 256);
+    if name.is_empty() {
         return Err(ApiError::bad_request(
             "INVALID_NAME",
             "Name must be 1-256 characters",
+        ));
+    }
+
+    let description = sanitize_string(
+        body.description.as_deref().unwrap_or(""),
+        4000,
+    );
+
+    let prize_pool = body.prize_pool_usdc.unwrap_or(0.0);
+    validate_prize(prize_pool)?;
+
+    let scoring_method = body.scoring_method.as_deref().unwrap_or("net_pnl");
+    if !ALLOWED_SCORING_METHODS.contains(&scoring_method) {
+        return Err(ApiError::bad_request(
+            "INVALID_SCORING_METHOD",
+            &format!(
+                "Scoring method must be one of: {}",
+                ALLOWED_SCORING_METHODS.join(", ")
+            ),
         ));
     }
 
@@ -229,11 +316,10 @@ pub async fn create_hackathon(
         ));
     }
 
-    let hackathon_id = format!("hack_{}", Uuid::new_v4().simple());
-    let description = body.description.as_deref().unwrap_or("");
-    let prize_pool = body.prize_pool_usdc.unwrap_or(0.0);
-    let scoring_method = body.scoring_method.as_deref().unwrap_or("net_pnl");
     let rules = body.rules_json.clone().unwrap_or_else(|| json!({}));
+    validate_rules_json(&rules)?;
+
+    let hackathon_id = format!("hack_{}", Uuid::new_v4().simple());
     let pool = state.db.pool();
 
     sqlx::query(
@@ -242,8 +328,8 @@ pub async fn create_hackathon(
          VALUES ($1, $2, $3, $4, $5, $6, 'upcoming', $7, $8, $9)",
     )
     .bind(&hackathon_id)
-    .bind(name)
-    .bind(description)
+    .bind(&name)
+    .bind(&description)
     .bind(prize_pool)
     .bind(start_time)
     .bind(end_time)
@@ -252,6 +338,11 @@ pub async fn create_hackathon(
     .bind(&rules)
     .execute(pool)
     .await?;
+
+    log::info!(
+        "Hackathon created: id={}, name={}, by={}",
+        hackathon_id, name, user.wallet_address
+    );
 
     let row = sqlx::query(
         "SELECT h.*, 0::bigint AS participant_count, 0::bigint AS agent_count
@@ -280,12 +371,44 @@ pub async fn update_hackathon(
     let hackathon_id = path.into_inner();
     let pool = state.db.pool();
 
-    // Verify exists
-    let _existing = sqlx::query("SELECT id FROM hackathons WHERE id = $1")
+    let existing = sqlx::query("SELECT id, status FROM hackathons WHERE id = $1")
         .bind(&hackathon_id)
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| ApiError::not_found("Hackathon"))?;
+
+    let current_status: String = existing.get("status");
+
+    // Validate status transition if status is being changed
+    if let Some(ref new_status) = body.status {
+        validate_status_transition(&current_status, new_status)?;
+    }
+
+    // Validate prize if provided
+    if let Some(prize) = body.prize_pool_usdc {
+        validate_prize(prize)?;
+    }
+
+    // Validate rules JSON size if provided
+    if let Some(ref rules) = body.rules_json {
+        validate_rules_json(rules)?;
+    }
+
+    // Validate date ordering if either date is being changed
+    if body.start_time.is_some() || body.end_time.is_some() {
+        if let (Some(ref st), Some(ref et)) = (&body.start_time, &body.end_time) {
+            let s = chrono::DateTime::parse_from_rfc3339(st)
+                .map_err(|_| ApiError::bad_request("INVALID_DATE", "Invalid start_time format"))?;
+            let e = chrono::DateTime::parse_from_rfc3339(et)
+                .map_err(|_| ApiError::bad_request("INVALID_DATE", "Invalid end_time format"))?;
+            if e <= s {
+                return Err(ApiError::bad_request(
+                    "INVALID_DATE",
+                    "end_time must be after start_time",
+                ));
+            }
+        }
+    }
 
     let mut sets: Vec<String> = Vec::new();
     let mut idx: usize = 1;
@@ -301,8 +424,23 @@ pub async fn update_hackathon(
         };
     }
 
-    push_field!(body.name, "name");
-    push_field!(body.description, "description");
+    if let Some(ref name) = body.name {
+        let sanitized = sanitize_string(name, 256);
+        if sanitized.is_empty() {
+            return Err(ApiError::bad_request("INVALID_NAME", "Name cannot be empty"));
+        }
+        idx += 1;
+        sets.push(format!("name = ${}", idx));
+        binds.push(sanitized);
+    }
+
+    if let Some(ref desc) = body.description {
+        let sanitized = sanitize_string(desc, 4000);
+        idx += 1;
+        sets.push(format!("description = ${}", idx));
+        binds.push(sanitized);
+    }
+
     push_field!(body.status, "status");
     push_field!(body.start_time, "start_time");
     push_field!(body.end_time, "end_time");
@@ -336,16 +474,19 @@ pub async fn update_hackathon(
     }
     query.execute(pool).await?;
 
-    // Re-fetch
-    let row = sqlx::query(
-        "SELECT h.*,
-            (SELECT COUNT(*) FROM hackathon_registrations r
-             WHERE r.hackathon_id = h.id AND r.status = 'active') AS participant_count,
-            (SELECT COUNT(*) FROM hackathon_agents a
-             WHERE a.hackathon_id = h.id) AS agent_count
-         FROM hackathons h
-         WHERE h.id = $1",
-    )
+    log::info!(
+        "Hackathon updated: id={}, fields={:?}, by={}",
+        hackathon_id,
+        sets.iter()
+            .filter(|s| !s.starts_with("updated_at"))
+            .collect::<Vec<_>>(),
+        user.wallet_address
+    );
+
+    let row = sqlx::query(&format!(
+        "{} WHERE h.id = $1",
+        hackathon_with_counts_sql()
+    ))
     .bind(&hackathon_id)
     .fetch_one(pool)
     .await?;
@@ -382,37 +523,41 @@ pub async fn register_for_hackathon(
         ));
     }
 
-    // Check not already registered
-    let existing = sqlx::query(
-        "SELECT wallet_address FROM hackathon_registrations
-         WHERE hackathon_id = $1 AND wallet_address = $2",
+    // Sanitize optional identity_id
+    let identity_id = body
+        .identity_id
+        .as_deref()
+        .map(|id| sanitize_string(id, 256))
+        .filter(|id| !id.is_empty());
+
+    // Atomic insert — ON CONFLICT eliminates TOCTOU race
+    let result = sqlx::query(
+        "INSERT INTO hackathon_registrations (hackathon_id, wallet_address, identity_id, status)
+         VALUES ($1, $2, $3, 'active')
+         ON CONFLICT (hackathon_id, wallet_address) DO NOTHING",
     )
     .bind(&hackathon_id)
     .bind(&user.wallet_address)
-    .fetch_optional(pool)
+    .bind(&identity_id)
+    .execute(pool)
     .await?;
 
-    if existing.is_some() {
+    if result.rows_affected() == 0 {
         return Err(ApiError::conflict(
             "ALREADY_REGISTERED",
             "You are already registered for this hackathon",
         ));
     }
 
-    sqlx::query(
-        "INSERT INTO hackathon_registrations (hackathon_id, wallet_address, identity_id, status)
-         VALUES ($1, $2, $3, 'active')",
-    )
-    .bind(&hackathon_id)
-    .bind(&user.wallet_address)
-    .bind(&body.identity_id)
-    .execute(pool)
-    .await?;
+    log::info!(
+        "Hackathon registration: hackathon={}, wallet={}",
+        hackathon_id, user.wallet_address
+    );
 
     Ok(HttpResponse::Created().json(json!({
         "hackathonId": hackathon_id,
         "walletAddress": user.wallet_address,
-        "identityId": body.identity_id,
+        "identityId": identity_id,
         "status": "active",
     })))
 }
@@ -424,8 +569,10 @@ pub async fn register_for_hackathon(
 pub async fn list_registrations(
     state: web::Data<Arc<AppState>>,
     path: web::Path<String>,
+    query: web::Query<RegistrationsQuery>,
 ) -> Result<impl Responder, ApiError> {
     let hackathon_id = path.into_inner();
+    let (limit, offset) = validate_pagination(query.limit, query.offset)?;
     let pool = state.db.pool();
 
     let rows = sqlx::query(
@@ -434,9 +581,12 @@ pub async fn list_registrations(
              WHERE a.hackathon_id = r.hackathon_id AND a.wallet_address = r.wallet_address) AS agent_count
          FROM hackathon_registrations r
          WHERE r.hackathon_id = $1
-         ORDER BY r.registered_at ASC",
+         ORDER BY r.registered_at ASC
+         LIMIT $2 OFFSET $3",
     )
     .bind(&hackathon_id)
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
 
@@ -454,9 +604,18 @@ pub async fn list_registrations(
         })
         .collect();
 
+    let total_row = sqlx::query(
+        "SELECT COUNT(*) AS cnt FROM hackathon_registrations WHERE hackathon_id = $1",
+    )
+    .bind(&hackathon_id)
+    .fetch_one(pool)
+    .await?;
+
     Ok(HttpResponse::Ok().json(json!({
         "registrations": registrations,
-        "total": registrations.len(),
+        "total": total_row.get::<i64, _>("cnt"),
+        "limit": limit,
+        "offset": offset,
     })))
 }
 
@@ -474,7 +633,15 @@ pub async fn link_agent_to_hackathon(
     let hackathon_id = path.into_inner();
     let pool = state.db.pool();
 
-    // Verify user is registered
+    let agent_id = sanitize_string(&body.agent_id, 128);
+    if agent_id.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_AGENT_ID",
+            "Agent ID must be 1-128 characters",
+        ));
+    }
+
+    // Verify user is registered and not disqualified
     let registration = sqlx::query(
         "SELECT wallet_address, status FROM hackathon_registrations
          WHERE hackathon_id = $1 AND wallet_address = $2",
@@ -497,36 +664,50 @@ pub async fn link_agent_to_hackathon(
         ));
     }
 
-    // Check agent not already linked
-    let existing = sqlx::query(
-        "SELECT agent_id FROM hackathon_agents
-         WHERE hackathon_id = $1 AND agent_id = $2",
+    // Enforce max agents per wallet
+    let agent_count = sqlx::query(
+        "SELECT COUNT(*) AS cnt FROM hackathon_agents
+         WHERE hackathon_id = $1 AND wallet_address = $2",
     )
     .bind(&hackathon_id)
-    .bind(&body.agent_id)
-    .fetch_optional(pool)
+    .bind(&user.wallet_address)
+    .fetch_one(pool)
     .await?;
 
-    if existing.is_some() {
+    if agent_count.get::<i64, _>("cnt") >= MAX_AGENTS_PER_WALLET {
+        return Err(ApiError::bad_request(
+            "MAX_AGENTS_REACHED",
+            &format!("Maximum {} agents per wallet", MAX_AGENTS_PER_WALLET),
+        ));
+    }
+
+    // Atomic insert — ON CONFLICT eliminates TOCTOU race
+    let result = sqlx::query(
+        "INSERT INTO hackathon_agents (hackathon_id, agent_id, wallet_address)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (hackathon_id, agent_id) DO NOTHING",
+    )
+    .bind(&hackathon_id)
+    .bind(&agent_id)
+    .bind(&user.wallet_address)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
         return Err(ApiError::conflict(
             "AGENT_ALREADY_LINKED",
             "This agent is already linked to this hackathon",
         ));
     }
 
-    sqlx::query(
-        "INSERT INTO hackathon_agents (hackathon_id, agent_id, wallet_address)
-         VALUES ($1, $2, $3)",
-    )
-    .bind(&hackathon_id)
-    .bind(&body.agent_id)
-    .bind(&user.wallet_address)
-    .execute(pool)
-    .await?;
+    log::info!(
+        "Agent linked: hackathon={}, agent={}, wallet={}",
+        hackathon_id, agent_id, user.wallet_address
+    );
 
     Ok(HttpResponse::Created().json(json!({
         "hackathonId": hackathon_id,
-        "agentId": body.agent_id,
+        "agentId": agent_id,
         "walletAddress": user.wallet_address,
     })))
 }
@@ -541,11 +722,10 @@ pub async fn get_leaderboard(
     query: web::Query<LeaderboardQuery>,
 ) -> Result<impl Responder, ApiError> {
     let hackathon_id = path.into_inner();
-    let limit = query.limit.unwrap_or(50).min(MAX_PAGE_SIZE);
-    let offset = query.offset.unwrap_or(0).max(0);
+    let (limit, offset) = validate_pagination(query.limit, query.offset)?;
     let pool = state.db.pool();
 
-    // Get the latest snapshot timestamp for this hackathon
+    // Get the latest snapshot timestamp
     let latest_ts = sqlx::query(
         "SELECT MAX(snapshot_time) AS latest FROM hackathon_snapshots WHERE hackathon_id = $1",
     )
@@ -624,10 +804,11 @@ pub async fn get_leaderboard_snapshots(
     query: web::Query<SnapshotsQuery>,
 ) -> Result<impl Responder, ApiError> {
     let hackathon_id = path.into_inner();
-    let limit = query.limit.unwrap_or(200).min(500);
+    let limit = query.limit.unwrap_or(200).min(500).max(1);
     let pool = state.db.pool();
 
     let rows = if let Some(ref wallet) = query.wallet_address {
+        let wallet = sanitize_string(wallet, 256);
         sqlx::query(
             "SELECT wallet_address, net_pnl_usdc, total_volume_usdc, rank, snapshot_time
              FROM hackathon_snapshots
@@ -636,12 +817,11 @@ pub async fn get_leaderboard_snapshots(
              LIMIT $3",
         )
         .bind(&hackathon_id)
-        .bind(wallet)
+        .bind(&wallet)
         .bind(limit)
         .fetch_all(pool)
         .await?
     } else {
-        // Return latest snapshot for each wallet (for overview chart)
         sqlx::query(
             "SELECT DISTINCT ON (wallet_address)
                 wallet_address, net_pnl_usdc, total_volume_usdc, rank, snapshot_time
@@ -702,13 +882,16 @@ pub async fn trigger_snapshot(
         ));
     }
 
-    // Redis lock to prevent concurrent snapshots
+    // Redis lock — fail explicitly if Redis is down
     let lock_key = format!("hackathon_snapshot_{}", hackathon_id);
     let locked = state
         .redis
-        .check_and_record_nonce(&lock_key, 300)
+        .check_and_record_nonce(&lock_key, SNAPSHOT_LOCK_TTL_SECS)
         .await
-        .unwrap_or(false);
+        .map_err(|e| {
+            log::error!("Redis lock failed for hackathon snapshot {}: {}", hackathon_id, e);
+            ApiError::internal("Failed to acquire snapshot lock")
+        })?;
 
     if !locked {
         return Err(ApiError::conflict(
@@ -717,80 +900,70 @@ pub async fn trigger_snapshot(
         ));
     }
 
+    // Run snapshot computation, ensuring lock is released on all paths
+    let result = compute_snapshot(pool, &state, &hackathon_id, &hackathon).await;
+
+    // Always release lock
+    if let Err(e) = state.redis.delete(&lock_key).await {
+        log::warn!("Failed to release snapshot lock for {}: {}", hackathon_id, e);
+    }
+
+    result
+}
+
+async fn compute_snapshot(
+    pool: &sqlx::PgPool,
+    _state: &AppState,
+    hackathon_id: &str,
+    hackathon: &sqlx::postgres::PgRow,
+) -> Result<HttpResponse, ApiError> {
     let start_time: chrono::DateTime<Utc> = hackathon.get("start_time");
     let end_time: chrono::DateTime<Utc> = hackathon.get("end_time");
     let effective_end = end_time.min(Utc::now());
     let snapshot_time = Utc::now();
+    let started_at = std::time::Instant::now();
 
-    // Get all registered wallets with their agents
+    // Get all registered wallets
     let wallet_rows = sqlx::query(
         "SELECT DISTINCT r.wallet_address
          FROM hackathon_registrations r
          WHERE r.hackathon_id = $1 AND r.status = 'active'",
     )
-    .bind(&hackathon_id)
+    .bind(hackathon_id)
     .fetch_all(pool)
     .await?;
 
     if wallet_rows.is_empty() {
-        // Release lock
-        let _ = state.redis.delete(&lock_key).await;
-        return Ok(HttpResponse::Ok().json(json!({ "snapshotCount": 0 })));
+        return Ok(HttpResponse::Accepted().json(json!({ "snapshotCount": 0 })));
     }
 
-    // For each wallet, compute PnL from trades linked to their hackathon agents
-    // This queries the indexed on-chain trade data
+    // Batch fetch all agents for the hackathon (eliminates N+1)
+    let agent_rows = sqlx::query(
+        "SELECT wallet_address, agent_id FROM hackathon_agents WHERE hackathon_id = $1",
+    )
+    .bind(hackathon_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut agents_by_wallet: HashMap<String, Vec<String>> = HashMap::new();
+    for row in &agent_rows {
+        let wallet: String = row.get("wallet_address");
+        let agent_id: String = row.get("agent_id");
+        agents_by_wallet
+            .entry(wallet)
+            .or_default()
+            .push(agent_id);
+    }
+
+    // Compute PnL for each wallet
     let mut entries: Vec<(String, f64, f64, i32, i32, i32)> = Vec::new();
 
     for wallet_row in &wallet_rows {
         let wallet: String = wallet_row.get("wallet_address");
 
-        // Get agent IDs for this wallet in this hackathon
-        let agent_rows = sqlx::query(
-            "SELECT agent_id FROM hackathon_agents
-             WHERE hackathon_id = $1 AND wallet_address = $2",
-        )
-        .bind(&hackathon_id)
-        .bind(&wallet)
-        .fetch_all(pool)
-        .await?;
+        let _agent_ids = agents_by_wallet.get(&wallet);
 
-        let agent_ids: Vec<String> = agent_rows
-            .iter()
-            .map(|r| r.get::<String, _>("agent_id"))
-            .collect();
-
-        if agent_ids.is_empty() {
-            entries.push((wallet, 0.0, 0.0, 0, 0, 0));
-            continue;
-        }
-
-        // Build placeholders for IN clause
-        let placeholders: Vec<String> = agent_ids
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("${}", i + 3))
-            .collect();
-        let in_clause = placeholders.join(", ");
-
-        // Query trades for these agents within the hackathon period
-        // The trades table stores on-chain indexed fills
-        let trade_sql = format!(
-            "SELECT
-                COALESCE(SUM(CASE WHEN t.buyer = ANY(ARRAY[{}]) THEN -t.price * t.quantity / 10000.0
-                                  WHEN t.seller = ANY(ARRAY[{}]) THEN t.price * t.quantity / 10000.0
-                                  ELSE 0 END), 0) AS realized_pnl,
-                COALESCE(SUM(t.price * t.quantity / 10000.0), 0) AS volume,
-                COUNT(*) AS trade_count
-             FROM trades t
-             WHERE (t.buyer = ANY(ARRAY[{}]) OR t.seller = ANY(ARRAY[{}]))
-               AND t.created_at >= $1
-               AND t.created_at <= $2",
-            in_clause, in_clause, in_clause, in_clause
-        );
-
-        // For now, use a simplified PnL approach based on positions
-        // Query positions for the wallet on markets active during hackathon
+        // Query positions for PnL computation
         let pnl_row = sqlx::query(
             "SELECT
                 COALESCE(SUM(p.realized_pnl), 0) AS realized_pnl,
@@ -830,7 +1003,8 @@ pub async fn trigger_snapshot(
                     trade_count as i32,
                 ));
             }
-            Err(_) => {
+            Err(e) => {
+                log::warn!("PnL query failed for wallet {} in hackathon {}: {}", wallet, hackathon_id, e);
                 entries.push((wallet, 0.0, 0.0, 0, 0, 0));
             }
         }
@@ -839,16 +1013,28 @@ pub async fn trigger_snapshot(
     // Sort by PnL descending for ranking
     entries.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Batch insert snapshots
+    // Insert all snapshots in a transaction (all-or-nothing)
+    let mut tx = pool.begin().await.map_err(|e| {
+        log::error!("Failed to begin snapshot transaction: {}", e);
+        ApiError::internal("Failed to begin transaction")
+    })?;
+
     let mut snapshot_count = 0;
     for (rank, (wallet, pnl, volume, win_rate, positions, trades)) in entries.iter().enumerate() {
         sqlx::query(
             "INSERT INTO hackathon_snapshots
                 (hackathon_id, wallet_address, snapshot_time, net_pnl_usdc,
                  total_volume_usdc, win_rate_bps, position_count, trade_count, rank)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (hackathon_id, wallet_address, snapshot_time) DO UPDATE SET
+                net_pnl_usdc = EXCLUDED.net_pnl_usdc,
+                total_volume_usdc = EXCLUDED.total_volume_usdc,
+                win_rate_bps = EXCLUDED.win_rate_bps,
+                position_count = EXCLUDED.position_count,
+                trade_count = EXCLUDED.trade_count,
+                rank = EXCLUDED.rank",
         )
-        .bind(&hackathon_id)
+        .bind(hackathon_id)
         .bind(wallet)
         .bind(snapshot_time)
         .bind(pnl)
@@ -857,15 +1043,27 @@ pub async fn trigger_snapshot(
         .bind(positions)
         .bind(trades)
         .bind((rank + 1) as i32)
-        .execute(pool)
-        .await?;
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            log::error!("Failed to insert snapshot for wallet {}: {}", wallet, e);
+            ApiError::internal("Failed to insert snapshot")
+        })?;
         snapshot_count += 1;
     }
 
-    // Release lock
-    let _ = state.redis.delete(&lock_key).await;
+    tx.commit().await.map_err(|e| {
+        log::error!("Failed to commit snapshot transaction: {}", e);
+        ApiError::internal("Failed to commit snapshot")
+    })?;
 
-    Ok(HttpResponse::Ok().json(json!({
+    let elapsed = started_at.elapsed();
+    log::info!(
+        "Snapshot complete: hackathon={}, entries={}, elapsed={:?}",
+        hackathon_id, snapshot_count, elapsed
+    );
+
+    Ok(HttpResponse::Accepted().json(json!({
         "snapshotCount": snapshot_count,
         "snapshotTime": snapshot_time.to_rfc3339(),
     })))
