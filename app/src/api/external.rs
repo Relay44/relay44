@@ -2101,10 +2101,100 @@ async fn build_provider_submit_payload(
             build_polymarket_submit_payload(credential, typed_data, signed_order)
         }
         ExternalProvider::Aerodrome => {
-            // Aerodrome uses on-chain swap execution, not off-chain order submission.
-            // The signed_order should contain swap parameters (tokenIn, tokenOut, amountIn, etc.)
-            // Return as-is — the swap calldata is built at execution time.
-            Ok(signed_order.clone())
+            // Parse pool address from market_id (format: "aerodrome:0x...")
+            let pool_address = if market_id.contains(':') {
+                market_id.split_once(':').map(|(_, v)| v).unwrap_or(market_id)
+            } else if !provider_market_ref.is_empty() {
+                provider_market_ref
+            } else {
+                market_id
+            };
+
+            // Fetch current pool state
+            let pool = crate::services::external::providers::aerodrome::fetch_pool_state(
+                &state.evm_rpc,
+                pool_address,
+            )
+            .await?;
+
+            // Determine token_in/token_out based on side from signed_order or agent context
+            let side = signed_order
+                .get("side")
+                .and_then(|v| v.as_str())
+                .unwrap_or("buy");
+            let (token_in, token_out, decimals_in) = if side == "buy" {
+                // Buying outcome token: spend token1 (collateral) → receive token0
+                (&pool.token1, &pool.token0, pool.token1_decimals)
+            } else {
+                // Selling outcome token: spend token0 → receive token1 (collateral)
+                (&pool.token0, &pool.token1, pool.token0_decimals)
+            };
+
+            // Compute amount_in from quantity (in human-readable units)
+            let quantity = signed_order
+                .get("quantity")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            if quantity <= 0.0 {
+                return Err(ApiError::bad_request(
+                    "INVALID_SWAP_PARAMS",
+                    "quantity must be greater than zero",
+                ));
+            }
+            let amount_in = (quantity * 10.0_f64.powi(decimals_in as i32)) as u128;
+
+            // Get base wallet from credential
+            let base_wallet = payload_string(&credential.payload, &["baseWallet", "base_wallet"])
+                .ok_or_else(|| {
+                    ApiError::bad_request(
+                        "INVALID_CREDENTIALS",
+                        "aerodrome credential must include baseWallet",
+                    )
+                })?;
+
+            // Quote the swap to get expected output
+            let quote = crate::services::external::providers::aerodrome::quote_swap(
+                &state.evm_rpc,
+                state.config.aerodrome_quoter_address.as_str(),
+                token_in,
+                token_out,
+                amount_in,
+                pool.tick_spacing,
+            )
+            .await?;
+
+            // Apply 1% slippage tolerance
+            let amount_out_minimum = quote.amount_out * 99 / 100;
+            let deadline = (Utc::now().timestamp() as u64) + 300; // 5 minutes
+
+            // Encode swap calldata
+            let calldata = crate::services::aerodrome::encode_swap_exact_input_single(
+                token_in,
+                token_out,
+                pool.tick_spacing,
+                &base_wallet,
+                deadline,
+                amount_in,
+                amount_out_minimum,
+            )?;
+
+            Ok(json!({
+                "mode": "aerodrome_swap",
+                "chainId": 8453,
+                "pool": pool_address,
+                "tokenIn": token_in,
+                "tokenOut": token_out,
+                "amountIn": amount_in.to_string(),
+                "amountOutMinimum": amount_out_minimum.to_string(),
+                "quotedAmountOut": quote.amount_out.to_string(),
+                "gasEstimate": quote.gas_estimate,
+                "priceImpactBps": quote.price_impact_bps,
+                "deadline": deadline,
+                "calldata": calldata,
+                "to": state.config.aerodrome_swap_router_address,
+                "recipient": base_wallet,
+                "side": side,
+            }))
         }
     }
 }
@@ -2786,9 +2876,8 @@ async fn build_external_credential_status(
             });
         }
         ExternalProvider::Aerodrome => {
-            // Aerodrome only needs a Base wallet for on-chain swaps
             let wallet_raw = payload_string(&credential.payload, &["baseWallet", "base_wallet"]);
-            match wallet_raw {
+            let wallet_ok = match wallet_raw {
                 Some(raw) => match normalize_evm_wallet(raw.as_str()) {
                     Ok(normalized) => {
                         base_wallet = Some(normalized);
@@ -2797,25 +2886,38 @@ async fn build_external_credential_status(
                             ok: true,
                             message: "Base wallet is bound for Aerodrome swaps.".to_string(),
                         });
+                        true
                     }
                     Err(_) => {
-                        ready = false;
                         checks.push(ExternalCredentialCheck {
                             code: "base_wallet".to_string(),
                             ok: false,
                             message: "Stored baseWallet is invalid.".to_string(),
                         });
+                        false
                     }
                 },
                 None => {
-                    ready = false;
                     checks.push(ExternalCredentialCheck {
                         code: "base_wallet".to_string(),
                         ok: false,
                         message: "Aerodrome credential must include baseWallet.".to_string(),
                     });
+                    false
                 }
-            }
+            };
+            let has_private_key =
+                payload_string(&credential.payload, &["privateKey", "private_key"]).is_some();
+            checks.push(ExternalCredentialCheck {
+                code: "private_key".to_string(),
+                ok: has_private_key,
+                message: if has_private_key {
+                    "Private key is stored for autonomous execution.".to_string()
+                } else {
+                    "privateKey is required for autonomous Aerodrome swap execution.".to_string()
+                },
+            });
+            ready = wallet_ok && has_private_key;
         }
     }
 
@@ -3388,14 +3490,107 @@ async fn submit_to_provider(
             submit_polymarket_order(state, credential, signed_order).await
         }
         ExternalProvider::Aerodrome => {
-            // Aerodrome swaps are executed on-chain via prepared transactions.
-            // Return the swap parameters as a "submitted" response.
-            // The actual on-chain execution is handled by the runner/signer.
+            // Extract private key from credential (encrypted at rest)
+            let private_key = payload_string(&credential.payload, &["privateKey", "private_key"])
+                .ok_or_else(|| {
+                    ApiError::bad_request(
+                        "INVALID_CREDENTIALS",
+                        "aerodrome credential must include privateKey for autonomous execution",
+                    )
+                })?;
+
+            // Validate derived address matches stored baseWallet
+            let derived_address =
+                crate::services::evm_signer::address_from_private_key(&private_key)?;
+            let stored_wallet =
+                payload_string(&credential.payload, &["baseWallet", "base_wallet"])
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+            if derived_address.to_ascii_lowercase() != stored_wallet {
+                return Err(ApiError::bad_request(
+                    "CREDENTIAL_MISMATCH",
+                    "derived address from privateKey does not match stored baseWallet",
+                ));
+            }
+
+            // Extract swap parameters from the prepared payload
+            let calldata = signed_order
+                .get("calldata")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ApiError::bad_request("INVALID_SWAP_PAYLOAD", "missing calldata in swap payload")
+                })?;
+            let to = signed_order
+                .get("to")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ApiError::bad_request(
+                        "INVALID_SWAP_PAYLOAD",
+                        "missing target address in swap payload",
+                    )
+                })?;
+
+            // Fetch nonce
+            let nonce = state
+                .evm_rpc
+                .eth_get_transaction_count(&derived_address, "pending")
+                .await
+                .map_err(|e| ApiError::internal(&format!("failed to fetch nonce: {}", e)))?;
+
+            // Fetch gas prices
+            let base_fee = state
+                .evm_rpc
+                .eth_gas_price()
+                .await
+                .map_err(|e| ApiError::internal(&format!("failed to fetch gas price: {}", e)))?;
+            let priority_fee = state
+                .evm_rpc
+                .eth_max_priority_fee_per_gas()
+                .await
+                .map_err(|e| {
+                    ApiError::internal(&format!("failed to fetch priority fee: {}", e))
+                })?;
+            let max_fee = base_fee + priority_fee;
+
+            // Estimate gas (with 20% buffer)
+            let gas_estimate = signed_order
+                .get("gasEstimate")
+                .and_then(|v| v.as_u64())
+                .filter(|g| *g > 0)
+                .unwrap_or(300_000);
+            let gas_limit = gas_estimate + gas_estimate / 5; // +20% buffer
+
+            // Sign EIP-1559 transaction
+            let tx_params = crate::services::evm_signer::Eip1559TxParams {
+                chain_id: 8453, // Base
+                nonce,
+                max_priority_fee_per_gas: priority_fee,
+                max_fee_per_gas: max_fee,
+                gas_limit,
+                to: to.to_string(),
+                value: 0, // ERC-20 swap, no ETH value
+                data: calldata.to_string(),
+                private_key: private_key.clone(),
+            };
+            let raw_tx = crate::services::evm_signer::sign_eip1559_transaction(&tx_params)?;
+
+            // Broadcast transaction
+            let tx_hash = state
+                .evm_rpc
+                .eth_send_raw_transaction(&raw_tx)
+                .await
+                .map_err(|e| {
+                    ApiError::internal(&format!("failed to broadcast transaction: {}", e))
+                })?;
+
             Ok(json!({
                 "ok": true,
                 "provider": "aerodrome",
-                "mode": "prepared_tx",
-                "swap": signed_order,
+                "mode": "submitted",
+                "txHash": tx_hash,
+                "from": derived_address,
+                "nonce": nonce,
+                "gasLimit": gas_limit,
             }))
         }
     }
@@ -4690,13 +4885,29 @@ pub async fn upsert_external_credentials(
             polymarket_signature_type_from_payload(&body.credentials)?;
         }
         ExternalProvider::Aerodrome => {
-            // Aerodrome doesn't require API credentials — it uses on-chain swaps.
-            // The credential stores the wallet address for execution.
-            if payload_string(&body.credentials, &["baseWallet", "base_wallet"]).is_none() {
-                return Err(ApiError::bad_request(
-                    "INVALID_CREDENTIALS",
-                    "aerodrome credential must include baseWallet",
-                ));
+            let base_wallet =
+                payload_string(&body.credentials, &["baseWallet", "base_wallet"]).ok_or_else(
+                    || {
+                        ApiError::bad_request(
+                            "INVALID_CREDENTIALS",
+                            "aerodrome credential must include baseWallet",
+                        )
+                    },
+                )?;
+            normalize_evm_wallet(base_wallet.as_str())?;
+
+            // Validate privateKey if provided (required for autonomous execution)
+            if let Some(pk) = payload_string(&body.credentials, &["privateKey", "private_key"]) {
+                let derived = crate::services::evm_signer::address_from_private_key(&pk)?;
+                if derived.to_ascii_lowercase()
+                    != normalize_evm_wallet(base_wallet.as_str())?
+                        .to_ascii_lowercase()
+                {
+                    return Err(ApiError::bad_request(
+                        "CREDENTIAL_MISMATCH",
+                        "privateKey does not derive to the provided baseWallet address",
+                    ));
+                }
             }
         }
     }

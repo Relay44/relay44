@@ -18,6 +18,7 @@ interface DraftState {
   apiSecret: string;
   apiPassphrase: string;
   baseWallet: string;
+  privateKey: string;
   funder: string;
   signatureType: string;
   defaultSignedOrder: string;
@@ -30,6 +31,7 @@ const EMPTY_DRAFT: DraftState = {
   apiSecret: '',
   apiPassphrase: '',
   baseWallet: '',
+  privateKey: '',
   funder: '',
   signatureType: '0',
   defaultSignedOrder: '',
@@ -44,19 +46,26 @@ function parseSignedOrder(raw: string) {
 }
 
 function buildPayload(draft: DraftState) {
-  const payload: Record<string, unknown> = {
-    apiKey: draft.apiKey.trim(),
-  };
+  const payload: Record<string, unknown> = {};
 
-  if (draft.provider === 'polymarket') {
-    payload.apiSecret = draft.apiSecret.trim();
-    payload.apiPassphrase = draft.apiPassphrase.trim();
-    payload.funder = draft.funder.trim();
-    payload.signatureType = Number(draft.signatureType || '0');
-  }
-
-  if (draft.provider === 'limitless' && draft.baseWallet.trim()) {
+  if (draft.provider === 'aerodrome') {
     payload.baseWallet = draft.baseWallet.trim();
+    if (draft.privateKey.trim()) {
+      payload.privateKey = draft.privateKey.trim();
+    }
+  } else {
+    payload.apiKey = draft.apiKey.trim();
+
+    if (draft.provider === 'polymarket') {
+      payload.apiSecret = draft.apiSecret.trim();
+      payload.apiPassphrase = draft.apiPassphrase.trim();
+      payload.funder = draft.funder.trim();
+      payload.signatureType = Number(draft.signatureType || '0');
+    }
+
+    if (draft.provider === 'limitless' && draft.baseWallet.trim()) {
+      payload.baseWallet = draft.baseWallet.trim();
+    }
   }
 
   const defaultSignedOrder = parseSignedOrder(draft.defaultSignedOrder);
@@ -99,12 +108,13 @@ export default function ExternalCredentialsPage() {
     async function load() {
       setLoading(true);
       try {
-        const [limitless, polymarket] = await Promise.all([
+        const [limitless, polymarket, aerodrome] = await Promise.all([
           api.getExternalCredentials('limitless'),
           api.getExternalCredentials('polymarket'),
+          api.getExternalCredentials('aerodrome'),
         ]);
         if (cancelled) return;
-        const merged = [...limitless, ...polymarket];
+        const merged = [...limitless, ...polymarket, ...aerodrome];
         setCredentials(merged);
       } catch (error) {
         if (!cancelled) {
@@ -125,11 +135,12 @@ export default function ExternalCredentialsPage() {
   }, [addToast, canManage, readOnly]);
 
   async function refreshCredentials() {
-    const [limitless, polymarket] = await Promise.all([
+    const [limitless, polymarket, aerodrome] = await Promise.all([
       api.getExternalCredentials('limitless'),
       api.getExternalCredentials('polymarket'),
+      api.getExternalCredentials('aerodrome'),
     ]);
-    setCredentials([...limitless, ...polymarket]);
+    setCredentials([...limitless, ...polymarket, ...aerodrome]);
   }
 
   useEffect(() => {
@@ -185,17 +196,24 @@ export default function ExternalCredentialsPage() {
       addToast('Authenticate before saving credentials', 'error');
       return;
     }
-    if (!draft.apiKey.trim()) {
-      addToast('API key is required', 'error');
-      return;
-    }
-    if (draft.provider === 'polymarket' && (!draft.apiSecret.trim() || !draft.apiPassphrase.trim())) {
-      addToast('Polymarket requires apiSecret and apiPassphrase', 'error');
-      return;
-    }
-    if (draft.provider === 'polymarket' && !draft.funder.trim()) {
-      addToast('Polymarket requires a funder wallet', 'error');
-      return;
+    if (draft.provider === 'aerodrome') {
+      if (!draft.baseWallet.trim()) {
+        addToast('Aerodrome requires a Base wallet address', 'error');
+        return;
+      }
+    } else {
+      if (!draft.apiKey.trim()) {
+        addToast('API key is required', 'error');
+        return;
+      }
+      if (draft.provider === 'polymarket' && (!draft.apiSecret.trim() || !draft.apiPassphrase.trim())) {
+        addToast('Polymarket requires apiSecret and apiPassphrase', 'error');
+        return;
+      }
+      if (draft.provider === 'polymarket' && !draft.funder.trim()) {
+        addToast('Polymarket requires a funder wallet', 'error');
+        return;
+      }
     }
 
     setSaving(true);
@@ -273,6 +291,7 @@ export default function ExternalCredentialsPage() {
       apiSecret: '',
       apiPassphrase: '',
       baseWallet: String(entry.credentials.baseWallet ?? entry.credentials.base_wallet ?? ''),
+      privateKey: '',
       funder: String(entry.credentials.funder ?? ''),
       signatureType: String(entry.credentials.signatureType ?? entry.credentials.signature_type ?? '0'),
       defaultSignedOrder: entry.credentials.defaultSignedOrder
@@ -344,8 +363,8 @@ export default function ExternalCredentialsPage() {
                     Keep one or more credentials per venue. External agents can reuse a stored <code>defaultSignedOrder</code>, and Limitless credentials also need a bound Base trading wallet.
                   </p>
                 </div>
-                <div className="grid w-full shrink-0 grid-cols-2 overflow-hidden border border-border sm:w-auto">
-                  {(['limitless', 'polymarket'] as Provider[]).map((provider) => (
+                <div className="grid w-full shrink-0 grid-cols-3 overflow-hidden border border-border sm:w-auto">
+                  {(['limitless', 'polymarket', 'aerodrome'] as Provider[]).map((provider) => (
                     <button
                       key={provider}
                       type="button"
@@ -377,8 +396,11 @@ export default function ExternalCredentialsPage() {
                             <div>ID: {entry.id}</div>
                             <div>Updated: {new Date(entry.updated_at).toLocaleString()}</div>
                             <div>Fields: {Object.keys(entry.credentials).join(', ') || 'none'}</div>
-                            {entry.provider === 'limitless' && (entry.credentials.baseWallet || entry.credentials.base_wallet) ? (
+                            {(entry.provider === 'limitless' || entry.provider === 'aerodrome') && (entry.credentials.baseWallet || entry.credentials.base_wallet) ? (
                               <div>Base wallet: {String(entry.credentials.baseWallet ?? entry.credentials.base_wallet)}</div>
+                            ) : null}
+                            {entry.provider === 'aerodrome' && entry.credentials.privateKey ? (
+                              <div>Private key: ••••••</div>
                             ) : null}
                             {entry.provider === 'polymarket' && entry.credentials.funder ? (
                               <div>Funder: {String(entry.credentials.funder)}</div>
@@ -490,8 +512,8 @@ export default function ExternalCredentialsPage() {
               <h2 className="text-lg font-semibold text-text-primary">Save credential</h2>
               <p className="mt-2 text-sm text-text-secondary">
                 Limitless requires an <code>apiKey</code> and a bound Base wallet. Polymarket
-                credentials require the CLOB key set, funder wallet, and signature type. Browser
-                wallet Polymarket accounts should use signature type <code>2</code>.
+                credentials require the CLOB key set, funder wallet, and signature type. Aerodrome
+                requires a Base wallet and optionally a private key for autonomous execution.
               </p>
 
               <form onSubmit={handleSave} className="mt-5 space-y-4">
@@ -501,22 +523,50 @@ export default function ExternalCredentialsPage() {
                   onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))}
                   placeholder={`${draft.provider}-credential`}
                 />
-                <Input
-                  label="API key"
-                  value={draft.apiKey}
-                  onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
-                  placeholder="Required"
-                />
-                {draft.provider === 'limitless' ? (
-                  <Input
-                    label="Base trading wallet"
-                    value={draft.baseWallet}
-                    onChange={(event) =>
-                      setDraft((current) => ({ ...current, baseWallet: event.target.value }))
-                    }
-                    placeholder="0x..."
-                  />
-                ) : null}
+                {draft.provider === 'aerodrome' ? (
+                  <>
+                    <div className="border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-text-secondary">
+                      Aerodrome executes on-chain swaps on Base. The private key is encrypted at rest
+                      and used only for autonomous agent execution. You can omit it for manual/paper
+                      trading.
+                    </div>
+                    <Input
+                      label="Base wallet address"
+                      value={draft.baseWallet}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, baseWallet: event.target.value }))
+                      }
+                      placeholder="0x..."
+                    />
+                    <Input
+                      label="Private key (for autonomous execution)"
+                      value={draft.privateKey}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, privateKey: event.target.value }))
+                      }
+                      placeholder="0x... (optional, encrypted at rest)"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      label="API key"
+                      value={draft.apiKey}
+                      onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
+                      placeholder="Required"
+                    />
+                    {draft.provider === 'limitless' ? (
+                      <Input
+                        label="Base trading wallet"
+                        value={draft.baseWallet}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, baseWallet: event.target.value }))
+                        }
+                        placeholder="0x..."
+                      />
+                    ) : null}
+                  </>
+                )}
                 {draft.provider === 'polymarket' ? (
                   <>
                     <div className="border border-border p-3 text-sm text-text-secondary">
