@@ -12,7 +12,9 @@ export default function MiniappLayout({ children }: { children: React.ReactNode 
   return (
     <>
       <MiniKitInit />
-      {children}
+      <div className="px-4 pt-3 pb-6 max-w-lg mx-auto">
+        {children}
+      </div>
     </>
   );
 }
