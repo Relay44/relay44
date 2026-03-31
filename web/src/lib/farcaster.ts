@@ -1,4 +1,4 @@
-import { sdk } from '@farcaster/miniapp-sdk';
+import sdk from '@farcaster/miniapp-sdk';
 import type { Context } from '@farcaster/miniapp-sdk';
 
 export function isMiniApp(): boolean {
