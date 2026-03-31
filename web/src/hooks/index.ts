@@ -27,6 +27,15 @@ export {
   useUpdateDecisionAutomation,
   useUpsertDecisionAlert,
 } from './useDecisions';
+export {
+  useHackathons,
+  useHackathon,
+  useHackathonLeaderboard,
+  useHackathonSnapshots,
+  useHackathonRegistrations,
+  useRegisterForHackathon,
+  useLinkAgentToHackathon,
+} from './useHackathons';
 export { useRuntimeMode } from './useRuntimeMode';
 export { useSessionState } from './useSessionState';
 export {

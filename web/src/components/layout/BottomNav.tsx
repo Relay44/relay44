@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, TrendingUp, Briefcase, Bot, GitBranch } from 'lucide-react';
+import { Home, TrendingUp, Briefcase, Bot, GitBranch, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -10,7 +10,7 @@ const navItems = [
   { href: '/markets', label: 'Markets', icon: TrendingUp },
   { href: '/decisions', label: 'Decisions', icon: GitBranch },
   { href: '/agents', label: 'Agents', icon: Bot },
-  { href: '/portfolio', label: 'Portfolio', icon: Briefcase },
+  { href: '/hackathon', label: 'Hackathon', icon: Trophy },
 ];
 
 export function BottomNav() {
