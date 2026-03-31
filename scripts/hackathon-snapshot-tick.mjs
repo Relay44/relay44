@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 
 import { apiBase, buildHeaders, fetchJson, loginAdmin } from './external-runner-lib.mjs';
+import { withErrorHandler } from './runner-framework.mjs';
 
 const FETCH_TIMEOUT_MS = 60_000;
 
 async function main() {
+  const startMs = Date.now();
   const { accessToken } = await loginAdmin();
 
-  // Fetch active hackathons
   const hackathonsRes = await fetchJson(`${apiBase}/hackathons?status=active`, {
     headers: buildHeaders(accessToken),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -44,24 +45,13 @@ async function main() {
     }
   }
 
+  const durationMs = Date.now() - startMs;
+  console.log(JSON.stringify({ durationMs, hackathons: hackathons.length, failures }, null, 2));
+
   if (failures > 0) {
     console.error(`${failures}/${hackathons.length} snapshot(s) failed`);
     process.exit(1);
   }
 }
 
-main().catch((error) => {
-  console.error(
-    JSON.stringify(
-      {
-        ok: false,
-        message: error.message,
-        status: error.status || null,
-        details: error.payload || null,
-      },
-      null,
-      2,
-    ),
-  );
-  process.exit(1);
-});
+withErrorHandler(main);
