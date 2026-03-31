@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { PageShell } from '@/components/layout';
 import { StructuredData } from '@/components/seo/StructuredData';
-import { Card } from '@/components/ui';
+import { EndpointGroup, type Endpoint } from '@/components/docs';
 import {
   buildBreadcrumbStructuredData,
   buildPageMetadata,
@@ -9,130 +8,107 @@ import {
 } from '@/lib/seo';
 
 export const metadata = buildPageMetadata({
-  title: 'API',
+  title: 'API Reference',
   description:
-    'Reference for Relay44 capability, market, health, and integration endpoints exposed by the public web stack.',
+    'Complete API reference for Relay44 — 147 endpoints across markets, orders, agents, decisions, authentication, and on-chain operations.',
   path: '/docs/api',
-  keywords: ['api', 'developer docs', 'market endpoints', 'web4 capabilities'],
+  keywords: ['api', 'developer docs', 'market endpoints', 'web4 capabilities', 'rest api'],
 });
 
-const endpointGroups = [
+const groups: Array<{ title: string; description: string; endpoints: Endpoint[] }> = [
   {
     title: 'Health and runtime',
-    description: 'Use these routes to confirm the deployment is live and inspect the current runtime mode.',
+    description: 'Confirm the deployment is live and inspect current runtime mode.',
     endpoints: [
-      { method: 'GET', path: '/health', note: 'basic web-service health check' },
-      { method: 'GET', path: '/health/detailed', note: 'runtime checks and provider status' },
-      { method: 'GET', path: '/v1/web4/capabilities', note: 'wallet, read/write, and launch flags' },
+      { method: 'GET', path: '/health', description: 'Basic web-service health check' },
+      { method: 'GET', path: '/health/detailed', description: 'Runtime checks and provider status' },
+      { method: 'GET', path: '/metrics', description: 'Internal metrics' },
+      { method: 'GET', path: '/metrics/prometheus', description: 'Prometheus-format metrics' },
     ],
   },
   {
-    title: 'Markets',
-    description: 'Read market listings, market detail, order books, and recent trades from the unified market feed.',
+    title: 'Markets (read)',
+    description: 'Read market listings, order books, and recent trades from the unified feed.',
     endpoints: [
-      { method: 'GET', path: '/v1/evm/markets?limit=50&offset=0&source=all', note: 'market directory with internal and external sources' },
-      { method: 'GET', path: '/v1/evm/markets/{marketId}', note: 'single market snapshot' },
-      { method: 'GET', path: '/v1/evm/markets/{marketId}/orderbook?outcome=yes&depth=20', note: 'best bid and ask levels for one outcome' },
-      { method: 'GET', path: '/v1/evm/markets/{marketId}/trades?limit=50', note: 'recent fills and trades' },
+      { method: 'GET', path: '/v1/markets', description: 'List markets with pagination and filters' },
+      { method: 'GET', path: '/v1/markets/{market_id}', description: 'Single market snapshot' },
+      { method: 'GET', path: '/v1/markets/{market_id}/orderbook', description: 'Best bid/ask levels for one outcome' },
+      { method: 'GET', path: '/v1/markets/{market_id}/trades', description: 'Recent fills and trades' },
+      { method: 'GET', path: '/v1/evm/markets', description: 'Unified feed including external sources' },
+      { method: 'GET', path: '/v1/evm/markets/{market_id}', description: 'Single market with EVM data' },
+      { method: 'GET', path: '/v1/evm/markets/{market_id}/orderbook', description: 'Order book with on-chain depth' },
+      { method: 'GET', path: '/v1/evm/markets/{market_id}/trades', description: 'Trade history' },
     ],
   },
   {
-    title: 'Agents',
-    description: 'Agent endpoints expose the current runtime set when a backend is present and otherwise return a factual empty state.',
+    title: 'Orders',
+    description: 'Place, list, and cancel orders.',
     endpoints: [
-      { method: 'GET', path: '/v1/evm/agents?limit=20&offset=0', note: 'agent directory and activity summary' },
-      { method: 'GET', path: '/v1/evm/agents/{agentId}', note: 'single agent detail when available' },
+      { method: 'GET', path: '/v1/orders', description: 'List your open orders', auth: true },
+      { method: 'POST', path: '/v1/orders', description: 'Place a new order', auth: true },
+      { method: 'GET', path: '/v1/orders/{order_id}', description: 'Get order details', auth: true },
+      { method: 'DELETE', path: '/v1/orders/{order_id}', description: 'Cancel an order', auth: true },
     ],
   },
   {
-    title: 'Auth and integration',
-    description: 'These routes support wallet sign-in, Farcaster actions, and machine-facing integrations.',
+    title: 'Positions',
+    description: 'Track and claim outcome positions.',
     endpoints: [
-      { method: 'GET', path: '/v1/auth/siwe/nonce', note: 'nonce for SIWE login' },
-      { method: 'GET', path: '/v1/web4/mcp', note: 'machine-facing capability entrypoint' },
-      { method: 'GET', path: '/v1/web4/agent-card', note: 'agent card payload for embeds' },
+      { method: 'GET', path: '/v1/positions', description: 'List your positions', auth: true },
+      { method: 'GET', path: '/v1/positions/{market_id}', description: 'Position in a specific market', auth: true },
+      { method: 'POST', path: '/v1/positions/{market_id}/claim', description: 'Claim winnings from a resolved market', auth: true },
     ],
   },
 ];
 
 export default function ApiDocsPage() {
   return (
-    <PageShell>
+    <>
       <StructuredData
         data={[
           buildWebPageStructuredData({
             path: '/docs/api',
-            name: 'Relay44 API',
+            name: 'Relay44 API Reference',
             description:
-              'Reference for Relay44 capability, market, health, and integration endpoints exposed by the public web stack.',
+              'Complete API reference for Relay44 — 147 endpoints across markets, orders, agents, decisions, authentication, and on-chain operations.',
           }),
           buildBreadcrumbStructuredData([
             { name: 'Home', url: '/' },
-            { name: 'API', url: '/docs/api' },
+            { name: 'Docs', url: '/docs' },
+            { name: 'API Reference', url: '/docs/api' },
           ]),
         ]}
       />
 
-      <div className="mx-auto max-w-5xl py-2 sm:py-4">
-        <div className="max-w-3xl">
-          <h1 className="text-3xl font-semibold text-text-primary sm:text-4xl">API</h1>
-          <p className="mt-4 text-base leading-7 text-text-secondary">
-            The public web deployment exposes a small set of read routes directly. When a full
-            backend is configured, the same pages can also use the upstream API through the proxy.
-            In web-only mode, unsupported write routes stay disabled instead of returning fake data.
-          </p>
-        </div>
+      <h1 className="text-3xl font-semibold text-text-primary sm:text-4xl">API Reference</h1>
+      <p className="mt-4 text-base leading-7 text-text-secondary">
+        Relay44 exposes 147 endpoints across 16 API scopes. This overview covers the core read
+        and write routes. See the sub-pages for detailed endpoint documentation per domain.
+      </p>
 
-        <div className="mt-8 grid gap-4">
-          {endpointGroups.map((group) => (
-            <Card key={group.title} className="p-6">
-              <h2 className="text-lg font-semibold text-text-primary">{group.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-text-secondary">{group.description}</p>
-              <div className="mt-4 overflow-hidden border border-border">
-                {group.endpoints.map((endpoint) => (
-                  <div
-                    key={endpoint.path}
-                    className="grid gap-2 border-b border-border px-4 py-3 last:border-b-0 md:grid-cols-[5.5rem_minmax(0,1fr)]"
-                  >
-                    <span className="inline-flex h-8 w-fit items-center border border-border px-3 text-[0.75rem] font-medium uppercase tracking-[0.14em] text-text-primary">
-                      {endpoint.method}
-                    </span>
-                    <div className="min-w-0">
-                      <code className="block overflow-x-auto text-sm text-text-primary">
-                        {endpoint.path}
-                      </code>
-                      <p className="mt-1 text-xs uppercase tracking-[0.12em] text-text-muted">
-                        {endpoint.note}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link
-            href="/v1/web4/capabilities"
-            className="inline-flex h-10 items-center border border-border px-4 text-sm text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
-          >
-            Open capabilities
-          </Link>
-          <Link
-            href="/v1/evm/markets?limit=5&offset=0&source=all"
-            className="inline-flex h-10 items-center border border-border px-4 text-sm text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
-          >
-            Open market feed
-          </Link>
-          <Link
-            href="/health/detailed"
-            className="inline-flex h-10 items-center border border-border px-4 text-sm text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
-          >
-            Open health report
-          </Link>
-        </div>
+      <div className="mt-8 grid gap-4">
+        {groups.map((g) => (
+          <EndpointGroup key={g.title} title={g.title} description={g.description} endpoints={g.endpoints} />
+        ))}
       </div>
-    </PageShell>
+
+      <div className="mt-8 grid gap-3 sm:grid-cols-2">
+        {[
+          { label: 'Auth endpoints', href: '/docs/api/auth' },
+          { label: 'Agent endpoints', href: '/docs/api/agents' },
+          { label: 'Decision endpoints', href: '/docs/api/decisions' },
+          { label: 'EVM / On-chain', href: '/docs/api/evm' },
+          { label: 'WebSocket events', href: '/docs/api/websocket' },
+        ].map((link) => (
+          <Link
+            key={link.href}
+            href={link.href}
+            className="inline-flex h-10 items-center border border-border px-4 text-sm text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+          >
+            {link.label} &rarr;
+          </Link>
+        ))}
+      </div>
+    </>
   );
 }
