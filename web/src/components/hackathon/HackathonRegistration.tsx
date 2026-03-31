@@ -15,6 +15,12 @@ import { useAgents } from '@/hooks';
 import { useToast } from '@/components/ui/Toast';
 import type { Hackathon } from '@/types';
 
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return 'An unexpected error occurred';
+}
+
 interface HackathonRegistrationProps {
   hackathon: Hackathon;
 }
@@ -43,7 +49,7 @@ export function HackathonRegistration({ hackathon }: HackathonRegistrationProps)
       await registerMutation.mutateAsync({ hackathonId: hackathon.id });
       addToast('Registered for hackathon', 'success');
     } catch (err: unknown) {
-      addToast((err as Error).message || 'Registration failed', 'error');
+      addToast(extractErrorMessage(err), 'error');
     }
   };
 
@@ -57,7 +63,7 @@ export function HackathonRegistration({ hackathon }: HackathonRegistrationProps)
       addToast('Agent linked to hackathon', 'success');
       setAgentId('');
     } catch (err: unknown) {
-      addToast((err as Error).message || 'Failed to link agent', 'error');
+      addToast(extractErrorMessage(err), 'error');
     }
   };
 
@@ -115,13 +121,20 @@ export function HackathonRegistration({ hackathon }: HackathonRegistrationProps)
             </div>
 
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-                placeholder="Agent ID (on-chain)"
-                className="flex-1 px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none transition-colors"
-              />
+              <div className="flex-1">
+                <label htmlFor="hackathon-agent-id" className="sr-only">
+                  Agent ID
+                </label>
+                <input
+                  id="hackathon-agent-id"
+                  type="text"
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  placeholder="Agent ID (on-chain)"
+                  aria-label="On-chain agent ID to link"
+                  className="w-full px-3 py-2 text-sm bg-bg-secondary border border-border focus:border-accent focus:outline-none transition-colors"
+                />
+              </div>
               <Button
                 onClick={handleLinkAgent}
                 disabled={linkAgentMutation.isPending || !agentId.trim()}
@@ -134,7 +147,7 @@ export function HackathonRegistration({ hackathon }: HackathonRegistrationProps)
               Create agents via{' '}
               <code className="px-1 py-0.5 bg-bg-tertiary">r44 agent create</code>{' '}
               or the <a href="/agents" className="text-accent hover:underline">Agents</a> page,
-              then paste the on-chain agent ID here.
+              then paste the on-chain agent ID here. Max 3 agents per wallet.
             </p>
           </div>
         )}
