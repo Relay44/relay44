@@ -7,6 +7,7 @@ pub mod external;
 pub mod hackathon;
 pub mod health;
 pub mod jwt;
+pub mod leaderboard;
 pub mod markets;
 pub mod notifications;
 pub mod orders;

@@ -809,6 +809,18 @@ async fn main() -> std::io::Result<()> {
                             ),
                     )
                     .service(
+                        web::scope("/leaderboard")
+                            .route("", web::get().to(api::leaderboard::get_leaderboard))
+                            .route(
+                                "/rank/{wallet}",
+                                web::get().to(api::leaderboard::get_user_rank),
+                            )
+                            .route(
+                                "/compute",
+                                web::post().to(api::leaderboard::compute_leaderboard),
+                            ),
+                    )
+                    .service(
                         web::scope("/compliance")
                             .route(
                                 "/policy",
