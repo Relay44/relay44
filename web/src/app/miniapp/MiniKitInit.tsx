@@ -12,13 +12,9 @@ export function MiniKitInit() {
     if (called.current) return;
     called.current = true;
 
-    (async () => {
-      try {
-        await sdk.actions.ready({ disableNativeGestures: false });
-      } catch {
-        // ignore
-      }
+    sdk.actions.ready().catch(() => {});
 
+    (async () => {
       try {
         const ctx = await sdk.context;
         if (ctx?.user) {
@@ -30,7 +26,7 @@ export function MiniKitInit() {
           });
         }
       } catch {
-        // ignore
+        // context not available outside miniapp
       }
 
       setIsReady(true);
