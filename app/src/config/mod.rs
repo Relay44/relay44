@@ -155,6 +155,8 @@ pub struct AppConfig {
     pub matcher_rate_limit_per_market: u64,
     pub indexer_lookback_blocks: u64,
     pub indexer_confirmations: u64,
+    pub oracle_resolver_address: String,
+    pub oracle_keeper_enabled: bool,
 }
 
 impl AppConfig {
@@ -609,6 +611,14 @@ impl AppConfig {
                 .unwrap_or_else(|_| "8".to_string())
                 .parse()
                 .expect("INDEXER_CONFIRMATIONS must be a number"),
+            oracle_resolver_address: env::var("ORACLE_RESOLVER_ADDRESS")
+                .unwrap_or_else(|_| "".to_string())
+                .trim()
+                .to_string(),
+            oracle_keeper_enabled: env::var("ORACLE_KEEPER_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
         }
     }
 }

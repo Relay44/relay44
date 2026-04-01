@@ -2822,6 +2822,238 @@ class ApiClient {
       body: JSON.stringify({ swarm_id: swarmId, content }),
     });
   }
+
+  // Oracle resolver
+
+  async getOracleMarketConfig(marketId: number | string): Promise<import("@/types").OracleMarketConfig | null> {
+    return this.request(`/evm/oracle/markets/${marketId}/config`);
+  }
+
+  async registerOracleMarketConfig(
+    marketId: number | string,
+    data: {
+      feedType: string;
+      feedAddress?: string;
+      comparison: string;
+      targetValue: string;
+      targetCurrency?: string;
+      category?: string;
+      resolutionHint?: string;
+      keeperEnabled?: boolean;
+    },
+  ): Promise<import("@/types").OracleMarketConfig> {
+    return this.request(`/evm/oracle/markets/${marketId}/config`, {
+      method: "POST",
+      body: JSON.stringify({ marketId: Number(marketId), ...data }),
+    });
+  }
+
+  async prepareConfigureOracle(data: {
+    from?: string;
+    marketId: number;
+    feedType: number;
+    feedAddress: string;
+    comparison: number;
+    targetValue: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/oracle/configure", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareOracleResolve(data: {
+    from?: string;
+    marketId: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/oracle/resolve", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // KYC verification
+
+  async verifyKyc(data: {
+    merkle_root: string;
+    nullifier_hash: string;
+    proof: string;
+    action_id: string;
+    signal: string;
+  }): Promise<{ tier: number; tierLabel: string }> {
+    return this.request("/kyc/verify", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getKycStatus(): Promise<import("@/types").KycStatus> {
+    return this.request("/kyc/status");
+  }
+
+  // Social: follows
+
+  async followTrader(wallet: string): Promise<{ ok: boolean }> {
+    return this.request(`/social/follow/${wallet}`, { method: "POST" });
+  }
+
+  async unfollowTrader(wallet: string): Promise<{ ok: boolean }> {
+    return this.request(`/social/follow/${wallet}`, { method: "DELETE" });
+  }
+
+  async getFollowing(params?: { limit?: number; offset?: number }): Promise<{
+    data: Array<{ wallet: string; username?: string; followedAt: string }>;
+    total: number;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/social/following${query}`);
+  }
+
+  async getFollowers(params?: { limit?: number; offset?: number }): Promise<{
+    data: Array<{ wallet: string; username?: string; followedAt: string }>;
+    total: number;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/social/followers${query}`);
+  }
+
+  async getFollowerCounts(wallet: string): Promise<import("@/types").FollowerCounts> {
+    return this.request(`/profiles/${wallet}/followers-count`);
+  }
+
+  async getFollowStatus(wallet: string): Promise<{ following: boolean }> {
+    return this.request(`/social/follow/${wallet}/status`);
+  }
+
+  async getSocialFeed(params?: { limit?: number; offset?: number }): Promise<{
+    data: import("@/types").ProfileActivity[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/social/feed${query}`);
+  }
+
+  // Social: profile edit
+
+  async updateProfile(data: {
+    username?: string;
+    bio?: string;
+    avatarUrl?: string;
+    websiteUrl?: string;
+    twitterHandle?: string;
+  }): Promise<{ ok: boolean }> {
+    return this.request("/profiles/me", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Social: market comments
+
+  async getMarketComments(
+    marketId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<{
+    data: import("@/types").MarketComment[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/social/markets/${marketId}/comments${query}`);
+  }
+
+  async postMarketComment(
+    marketId: string,
+    data: { text: string; parentId?: string },
+  ): Promise<import("@/types").MarketComment> {
+    return this.request(`/social/markets/${marketId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Social: copy trading
+
+  async startCopyTrading(
+    targetWallet: string,
+    data: { allocationUsdc?: number; maxPositionUsdc?: number },
+  ): Promise<import("@/types").CopyTradingSubscription> {
+    return this.request(`/social/copy/${targetWallet}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async stopCopyTrading(targetWallet: string): Promise<{ ok: boolean }> {
+    return this.request(`/social/copy/${targetWallet}`, { method: "DELETE" });
+  }
+
+  async getCopySubscriptions(): Promise<{
+    data: import("@/types").CopyTradingSubscription[];
+  }> {
+    return this.request("/social/copy");
+  }
+
+  async getCopyStats(wallet: string): Promise<{
+    copySubscriberCount: number;
+    totalCopyAumUsdc: number;
+  }> {
+    return this.request(`/profiles/${wallet}/copy-stats`);
+  }
+
+  // Social: signals
+
+  async publishSignal(data: {
+    marketId: string;
+    direction: import("@/types").SignalDirection;
+    confidenceBps: number;
+    rationale?: string;
+    validUntilHours?: number;
+  }): Promise<import("@/types").TradingSignal> {
+    return this.request("/signals", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getSignals(params?: {
+    marketId?: string;
+    publisher?: string;
+    active?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    data: import("@/types").TradingSignal[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/signals${query}`);
+  }
+
+  async getMarketSignals(marketId: string): Promise<{
+    data: import("@/types").TradingSignal[];
+  }> {
+    return this.request(`/markets/${marketId}/signals`);
+  }
+
+  async subscribeToSignals(publisher: string): Promise<{ ok: boolean }> {
+    return this.request(`/signals/subscribe/${publisher}`, { method: "POST" });
+  }
+
+  async unsubscribeFromSignals(publisher: string): Promise<{ ok: boolean }> {
+    return this.request(`/signals/subscribe/${publisher}`, { method: "DELETE" });
+  }
+
+  async getSignalFeed(params?: { limit?: number; offset?: number }): Promise<{
+    data: import("@/types").TradingSignal[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/signals/feed${query}`);
+  }
 }
 
 export const api = new ApiClient();

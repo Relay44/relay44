@@ -268,7 +268,79 @@ pub struct ComplianceDecisionEntry<'a> {
     pub metadata: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OracleMarketConfigRecord {
+    pub market_id: u64,
+    pub feed_type: String,
+    pub feed_address: Option<String>,
+    pub comparison: String,
+    pub target_value: String,
+    pub target_currency: String,
+    pub category: Option<String>,
+    pub resolution_hint: Option<String>,
+    pub configure_tx: Option<String>,
+    pub keeper_enabled: bool,
+    pub last_checked_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub resolve_tx: Option<String>,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowerCounts {
+    pub followers: u64,
+    pub following: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketCommentRecord {
+    pub id: String,
+    pub market_id: String,
+    pub wallet: String,
+    pub text: String,
+    pub parent_id: Option<String>,
+    pub farcaster_hash: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KycVerificationRecord {
+    pub id: i32,
+    pub wallet: String,
+    pub provider: String,
+    pub nullifier_hash: String,
+    pub tier_granted: u8,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub confirmed_at: Option<DateTime<Utc>>,
+}
+
 impl DatabaseService {
+    fn map_oracle_market_config_row(row: &PgRow) -> OracleMarketConfigRecord {
+        OracleMarketConfigRecord {
+            market_id: row.get::<i64, _>("market_id") as u64,
+            feed_type: row.get("feed_type"),
+            feed_address: row.try_get("feed_address").ok(),
+            comparison: row.get("comparison"),
+            target_value: format!("{}", row.get::<f64, _>("target_value")),
+            target_currency: row.get("target_currency"),
+            category: row.try_get("category").ok(),
+            resolution_hint: row.try_get("resolution_hint").ok(),
+            configure_tx: row.try_get("configure_tx").ok(),
+            keeper_enabled: row.get("keeper_enabled"),
+            last_checked_at: row.try_get("last_checked_at").ok().flatten(),
+            last_error: row.try_get("last_error").ok(),
+            resolve_tx: row.try_get("resolve_tx").ok(),
+            resolved_at: row.try_get("resolved_at").ok().flatten(),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+
     fn map_base_market_bootstrap_row(row: &PgRow) -> BaseMarketBootstrapConfigRecord {
         BaseMarketBootstrapConfigRecord {
             market_id: row.get::<i64, _>("market_id") as u64,
@@ -1766,6 +1838,392 @@ impl DatabaseService {
         .await?;
 
         Ok(Self::map_base_market_bootstrap_agent_row(&row))
+    }
+
+    // ── Oracle market configs ──────────────────────────────────────────
+
+    pub async fn get_oracle_market_config(
+        &self,
+        market_id: u64,
+    ) -> Result<Option<OracleMarketConfigRecord>> {
+        let row = sqlx::query("SELECT * FROM oracle_market_configs WHERE market_id = $1")
+            .bind(market_id as i64)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.as_ref().map(Self::map_oracle_market_config_row))
+    }
+
+    pub async fn list_oracle_keeper_pending(&self) -> Result<Vec<OracleMarketConfigRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM oracle_market_configs WHERE keeper_enabled AND resolved_at IS NULL ORDER BY market_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(Self::map_oracle_market_config_row).collect())
+    }
+
+    pub async fn upsert_oracle_market_config(
+        &self,
+        market_id: u64,
+        feed_type: &str,
+        feed_address: Option<&str>,
+        comparison: &str,
+        target_value: &str,
+        target_currency: &str,
+        category: Option<&str>,
+        resolution_hint: Option<&str>,
+        keeper_enabled: bool,
+    ) -> Result<OracleMarketConfigRecord> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO oracle_market_configs
+                (market_id, feed_type, feed_address, comparison, target_value,
+                 target_currency, category, resolution_hint, keeper_enabled)
+            VALUES ($1, $2, $3, $4, $5::NUMERIC, $6, $7, $8, $9)
+            ON CONFLICT (market_id) DO UPDATE SET
+                feed_type = EXCLUDED.feed_type,
+                feed_address = EXCLUDED.feed_address,
+                comparison = EXCLUDED.comparison,
+                target_value = EXCLUDED.target_value,
+                target_currency = EXCLUDED.target_currency,
+                category = EXCLUDED.category,
+                resolution_hint = EXCLUDED.resolution_hint,
+                keeper_enabled = EXCLUDED.keeper_enabled
+            RETURNING *
+            "#,
+        )
+        .bind(market_id as i64)
+        .bind(feed_type)
+        .bind(feed_address)
+        .bind(comparison)
+        .bind(target_value)
+        .bind(target_currency)
+        .bind(category)
+        .bind(resolution_hint)
+        .bind(keeper_enabled)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Self::map_oracle_market_config_row(&row))
+    }
+
+    pub async fn update_oracle_config_tx(
+        &self,
+        market_id: u64,
+        configure_tx: &str,
+    ) -> Result<Option<OracleMarketConfigRecord>> {
+        let row = sqlx::query(
+            "UPDATE oracle_market_configs SET configure_tx = $2 WHERE market_id = $1 RETURNING *",
+        )
+        .bind(market_id as i64)
+        .bind(configure_tx)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(Self::map_oracle_market_config_row))
+    }
+
+    pub async fn update_oracle_keeper_check(
+        &self,
+        market_id: u64,
+        error: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE oracle_market_configs SET last_checked_at = NOW(), last_error = $2 WHERE market_id = $1",
+        )
+        .bind(market_id as i64)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_oracle_resolved(
+        &self,
+        market_id: u64,
+        resolve_tx: &str,
+    ) -> Result<Option<OracleMarketConfigRecord>> {
+        let row = sqlx::query(
+            "UPDATE oracle_market_configs SET resolve_tx = $2, resolved_at = NOW(), last_checked_at = NOW(), last_error = NULL WHERE market_id = $1 RETURNING *",
+        )
+        .bind(market_id as i64)
+        .bind(resolve_tx)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.as_ref().map(Self::map_oracle_market_config_row))
+    }
+
+    // ── KYC verification ──────────────────────────────────────────────
+
+    pub async fn get_user_kyc_tier(&self, wallet: &str) -> Result<u8> {
+        let row = sqlx::query("SELECT kyc_tier FROM users WHERE LOWER(wallet) = LOWER($1)")
+            .bind(wallet)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.map(|r| r.get::<i16, _>("kyc_tier") as u8).unwrap_or(0))
+    }
+
+    pub async fn update_user_kyc_tier(
+        &self,
+        wallet: &str,
+        tier: u8,
+        provider: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE users SET kyc_tier = $2, kyc_provider = $3, kyc_verified_at = NOW() WHERE LOWER(wallet) = LOWER($1)",
+        )
+        .bind(wallet)
+        .bind(tier as i16)
+        .bind(provider)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn insert_kyc_verification(
+        &self,
+        wallet: &str,
+        provider: &str,
+        nullifier_hash: &str,
+        proof_hash: &str,
+        merkle_root: Option<&str>,
+        action_id: Option<&str>,
+        signal: Option<&str>,
+        tier_granted: u8,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO kyc_verifications
+                (wallet, provider, nullifier_hash, proof_hash, merkle_root, action_id, signal, tier_granted, status, confirmed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'confirmed', NOW())
+            "#,
+        )
+        .bind(wallet)
+        .bind(provider)
+        .bind(nullifier_hash)
+        .bind(proof_hash)
+        .bind(merkle_root)
+        .bind(action_id)
+        .bind(signal)
+        .bind(tier_granted as i16)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_latest_kyc_verification(
+        &self,
+        wallet: &str,
+    ) -> Result<Option<KycVerificationRecord>> {
+        let row = sqlx::query(
+            "SELECT * FROM kyc_verifications WHERE LOWER(wallet) = LOWER($1) ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(wallet)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| KycVerificationRecord {
+            id: r.get("id"),
+            wallet: r.get("wallet"),
+            provider: r.get("provider"),
+            nullifier_hash: r.get("nullifier_hash"),
+            tier_granted: r.get::<i16, _>("tier_granted") as u8,
+            status: r.get("status"),
+            created_at: r.get("created_at"),
+            confirmed_at: r.try_get("confirmed_at").ok().flatten(),
+        }))
+    }
+
+    // ── Social: follows ───────────────────────────────────────────────
+
+    pub async fn insert_follow(&self, follower: &str, following: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO trader_follows (follower, following) VALUES (LOWER($1), LOWER($2)) ON CONFLICT DO NOTHING",
+        )
+        .bind(follower)
+        .bind(following)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_follow(&self, follower: &str, following: &str) -> Result<()> {
+        sqlx::query(
+            "DELETE FROM trader_follows WHERE follower = LOWER($1) AND following = LOWER($2)",
+        )
+        .bind(follower)
+        .bind(following)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn check_follow(&self, follower: &str, following: &str) -> Result<bool> {
+        let row = sqlx::query(
+            "SELECT 1 FROM trader_follows WHERE follower = LOWER($1) AND following = LOWER($2)",
+        )
+        .bind(follower)
+        .bind(following)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
+    pub async fn list_following(
+        &self,
+        wallet: &str,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT following FROM trader_follows WHERE follower = LOWER($1) ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        )
+        .bind(wallet)
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(|r| r.get::<String, _>("following")).collect())
+    }
+
+    pub async fn list_followers(
+        &self,
+        wallet: &str,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT follower FROM trader_follows WHERE following = LOWER($1) ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+        )
+        .bind(wallet)
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(|r| r.get::<String, _>("follower")).collect())
+    }
+
+    pub async fn get_follower_counts(&self, wallet: &str) -> Result<FollowerCounts> {
+        let followers_row = sqlx::query(
+            "SELECT COUNT(*) as cnt FROM trader_follows WHERE following = LOWER($1)",
+        )
+        .bind(wallet)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let following_row = sqlx::query(
+            "SELECT COUNT(*) as cnt FROM trader_follows WHERE follower = LOWER($1)",
+        )
+        .bind(wallet)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(FollowerCounts {
+            followers: followers_row.get::<i64, _>("cnt") as u64,
+            following: following_row.get::<i64, _>("cnt") as u64,
+        })
+    }
+
+    // ── Social: profile update ────────────────────────────────────────
+
+    pub async fn update_user_profile(
+        &self,
+        wallet: &str,
+        bio: Option<&str>,
+        avatar_url: Option<&str>,
+        website_url: Option<&str>,
+        twitter_handle: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE users SET
+                bio = COALESCE($2, bio),
+                avatar_url = COALESCE($3, avatar_url),
+                website_url = COALESCE($4, website_url),
+                twitter_handle = COALESCE($5, twitter_handle),
+                updated_at = NOW()
+            WHERE LOWER(wallet) = LOWER($1)
+            "#,
+        )
+        .bind(wallet)
+        .bind(bio)
+        .bind(avatar_url)
+        .bind(website_url)
+        .bind(twitter_handle)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    // ── Social: market comments ───────────────────────────────────────
+
+    pub async fn list_market_comments(
+        &self,
+        market_id: &str,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<MarketCommentRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM market_comments WHERE market_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3",
+        )
+        .bind(market_id)
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| MarketCommentRecord {
+                id: r.get("id"),
+                market_id: r.get("market_id"),
+                wallet: r.get("wallet"),
+                text: r.get("text"),
+                parent_id: r.try_get("parent_id").ok(),
+                farcaster_hash: r.try_get("farcaster_hash").ok(),
+                created_at: r.get("created_at"),
+            })
+            .collect())
+    }
+
+    pub async fn insert_market_comment(
+        &self,
+        id: &str,
+        market_id: &str,
+        wallet: &str,
+        text: &str,
+        parent_id: Option<&str>,
+    ) -> Result<MarketCommentRecord> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO market_comments (id, market_id, wallet, text, parent_id)
+            VALUES ($1, $2, LOWER($3), $4, $5)
+            RETURNING *
+            "#,
+        )
+        .bind(id)
+        .bind(market_id)
+        .bind(wallet)
+        .bind(text)
+        .bind(parent_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(MarketCommentRecord {
+            id: row.get("id"),
+            market_id: row.get("market_id"),
+            wallet: row.get("wallet"),
+            text: row.get("text"),
+            parent_id: row.try_get("parent_id").ok(),
+            farcaster_hash: row.try_get("farcaster_hash").ok(),
+            created_at: row.get("created_at"),
+        })
     }
 }
 
