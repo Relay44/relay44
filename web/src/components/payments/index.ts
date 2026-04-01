@@ -1,0 +1,1 @@
+export { PaymentGate } from './PaymentGate';
