@@ -17,6 +17,7 @@ import { sendPreparedTransactions } from "@/lib/evmWallet";
 import { cn } from "@/lib/utils";
 import type { MarketDraftOption, NewsSlide } from "@/lib/server/homeLive";
 import type { Market } from "@/types";
+import { OracleConfigPanel, type OracleConfigValue } from "./OracleConfigPanel";
 
 interface CreateMarketFormProps {
   onSuccess?: (marketId: string) => void;
@@ -263,6 +264,7 @@ export function CreateMarketForm({
   const [confirmedQuestion, setConfirmedQuestion] = useState(false);
   const [confirmedSource, setConfirmedSource] = useState(false);
   const [confirmedDeadline, setConfirmedDeadline] = useState(false);
+  const [oracleConfig, setOracleConfig] = useState<OracleConfigValue | null>(null);
 
   const activeDraft = useMemo(() => {
     if (!draftOptions.length) {
@@ -615,6 +617,28 @@ export function CreateMarketForm({
               )}`;
       }
 
+      if (resolutionSource === "oracle" && oracleConfig) {
+        try {
+          setSubmissionStage("Registering oracle configuration");
+          await api.registerOracleMarketConfig(marketId, {
+            feedType: oracleConfig.feedType,
+            feedAddress: oracleConfig.feedAddress || undefined,
+            comparison: oracleConfig.comparison,
+            targetValue: oracleConfig.targetValue,
+            targetCurrency: oracleConfig.targetCurrency,
+            category,
+            keeperEnabled: oracleConfig.feedType === "chainlink",
+          });
+        } catch (oracleError) {
+          bootstrapWarning = [
+            bootstrapWarning,
+            `Oracle config registration failed: ${marketCreateErrorMessage(oracleError)}`,
+          ]
+            .filter(Boolean)
+            .join(". ");
+        }
+      }
+
       onSuccess?.(marketId);
 
       setQuestion("");
@@ -631,6 +655,7 @@ export function CreateMarketForm({
       setConfirmedQuestion(false);
       setConfirmedSource(false);
       setConfirmedDeadline(false);
+      setOracleConfig(null);
       setStep(1);
       setError(bootstrapWarning);
     } catch (err) {
@@ -953,6 +978,16 @@ export function CreateMarketForm({
                   placeholder="Specify the resolution source URL or description"
                   className="mt-3"
                 />
+              ) : null}
+
+              {resolutionSource === "oracle" ? (
+                <div className="mt-3">
+                  <OracleConfigPanel
+                    category={category || "default"}
+                    value={oracleConfig}
+                    onChange={setOracleConfig}
+                  />
+                </div>
               ) : null}
             </div>
 

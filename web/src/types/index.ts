@@ -73,6 +73,18 @@ export interface Market {
   bootstrapLaunchTxHash?: string;
   bootstrapLastReconciledAt?: string;
   bootstrapLastError?: string;
+  // Oracle resolver fields
+  oracleFeedType?: 'chainlink' | 'manual';
+  oracleFeedAddress?: string;
+  oracleComparison?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq';
+  oracleTargetValue?: number;
+  oracleTargetCurrency?: string;
+  oracleKeeperEnabled?: boolean;
+  oracleResolvedAt?: string;
+  oracleConfigureTx?: string;
+  oracleResolveTx?: string;
+  // KYC tier requirement
+  requiredKycTier?: number;
 }
 
 export interface Order {
@@ -637,4 +649,95 @@ export interface HackathonSnapshot {
   totalVolumeUsdc: number;
   rank: number;
   snapshotTime: string;
+}
+
+// KYC types
+
+export type KycTier = 0 | 2 | 3;
+export type KycProvider = 'world_id' | 'persona' | null;
+
+export interface KycStatus {
+  tier: KycTier;
+  tierLabel: 'Unverified' | 'Verified' | 'Institutional';
+  provider: KycProvider;
+  verifiedAt: string | null;
+}
+
+// Oracle config types
+
+export type OracleFeedType = 'chainlink' | 'manual';
+export type OracleComparison = 'gt' | 'gte' | 'lt' | 'lte' | 'eq';
+
+export interface OracleConfig {
+  feedType: OracleFeedType;
+  feedAddress: string;
+  comparison: OracleComparison;
+  targetValue: number;
+  targetCurrency: string;
+  category?: string;
+  resolutionHint?: string;
+  keeperEnabled: boolean;
+}
+
+export interface OracleMarketConfig extends OracleConfig {
+  marketId: number;
+  configureTx?: string;
+  resolveTx?: string;
+  resolvedAt?: string;
+  lastCheckedAt?: string;
+  lastError?: string;
+}
+
+// Social types
+
+export interface TraderFollow {
+  follower: string;
+  following: string;
+  createdAt: string;
+}
+
+export interface FollowerCounts {
+  followersCount: number;
+  followingCount: number;
+}
+
+export interface MarketComment {
+  id: string;
+  marketId: string;
+  wallet: string;
+  text: string;
+  parentId?: string;
+  farcasterHash?: string;
+  username?: string;
+  avatarUrl?: string;
+  createdAt: string;
+}
+
+export interface CopyTradingSubscription {
+  id: string;
+  subscriber: string;
+  targetWallet: string;
+  agentId?: string;
+  allocationUsdc: number;
+  maxPositionUsdc: number;
+  active: boolean;
+  createdAt: string;
+}
+
+export type SignalDirection = 'yes' | 'no' | 'neutral';
+
+export interface TradingSignal {
+  id: string;
+  publisher: string;
+  marketId: string;
+  direction: SignalDirection;
+  confidenceBps: number;
+  rationale?: string;
+  validUntil: string;
+  isAgent: boolean;
+  agentId?: string;
+  subscriberCount: number;
+  createdAt: string;
+  resolvedAt?: string;
+  outcomeCorrect?: boolean;
 }

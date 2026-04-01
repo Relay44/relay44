@@ -32,6 +32,7 @@ pub struct AppState {
     pub metrics: MetricsService,
     pub ws_hub: WebSocketHub,
     pub event_bus: EventBus,
+    pub kyc: services::kyc::KycService,
     pub is_shutting_down: Arc<AtomicBool>,
 }
 
@@ -123,6 +124,8 @@ async fn main() -> std::io::Result<()> {
     let ws_hub = WebSocketHub::new();
     let event_bus = EventBus::new();
 
+    let kyc = services::kyc::KycService::new(services::kyc::KycConfig::from_env());
+
     let app_state = Arc::new(AppState {
         config: config.clone(),
         db,
@@ -134,6 +137,7 @@ async fn main() -> std::io::Result<()> {
         metrics,
         ws_hub,
         event_bus,
+        kyc,
         is_shutting_down: Arc::new(AtomicBool::new(false)),
     });
 
@@ -601,6 +605,22 @@ async fn main() -> std::io::Result<()> {
                                 "/bootstrap/runner/report",
                                 web::post().to(api::evm::bootstrap_runner_report),
                             )
+                            .route(
+                                "/oracle/markets/{market_id}/config",
+                                web::get().to(api::evm::get_oracle_market_config),
+                            )
+                            .route(
+                                "/oracle/markets/{market_id}/config",
+                                web::post().to(api::evm::register_oracle_market_config),
+                            )
+                            .route(
+                                "/oracle/keeper/tick",
+                                web::post().to(api::evm::oracle_keeper_tick),
+                            )
+                            .route(
+                                "/oracle/keeper/report",
+                                web::post().to(api::evm::oracle_keeper_report),
+                            )
                             .route("/token/state", web::get().to(api::evm::get_r44_token_state))
                             .service(
                                 web::scope("/write")
@@ -681,6 +701,16 @@ async fn main() -> std::io::Result<()> {
                                             .to(api::evm::prepare_erc8004_submit_outcome_write),
                                     )
                                     .route(
+                                        "/oracle/configure",
+                                        web::post()
+                                            .to(api::evm::prepare_configure_oracle_write),
+                                    )
+                                    .route(
+                                        "/oracle/resolve",
+                                        web::post()
+                                            .to(api::evm::prepare_oracle_resolve_write),
+                                    )
+                                    .route(
                                         "/validation/request",
                                         web::post()
                                             .to(api::evm::prepare_erc8004_validation_request_write),
@@ -695,6 +725,44 @@ async fn main() -> std::io::Result<()> {
                                         "/relay",
                                         web::post().to(api::evm::relay_raw_transaction),
                                     ),
+                            ),
+                    )
+                    .service(
+                        web::scope("/kyc")
+                            .route("/verify", web::post().to(api::kyc::verify_kyc))
+                            .route("/status", web::get().to(api::kyc::get_kyc_status)),
+                    )
+                    .service(
+                        web::scope("/social")
+                            .route(
+                                "/follow/{wallet}",
+                                web::post().to(api::social::follow_trader),
+                            )
+                            .route(
+                                "/follow/{wallet}",
+                                web::delete().to(api::social::unfollow_trader),
+                            )
+                            .route(
+                                "/follow/{wallet}/status",
+                                web::get().to(api::social::get_follow_status),
+                            )
+                            .route("/following", web::get().to(api::social::get_following))
+                            .route("/followers", web::get().to(api::social::get_followers))
+                            .route(
+                                "/markets/{market_id}/comments",
+                                web::get().to(api::social::get_market_comments),
+                            )
+                            .route(
+                                "/markets/{market_id}/comments",
+                                web::post().to(api::social::post_market_comment),
+                            ),
+                    )
+                    .service(
+                        web::scope("/profiles")
+                            .route("/me", web::patch().to(api::social::update_profile))
+                            .route(
+                                "/{wallet}/followers-count",
+                                web::get().to(api::social::get_follower_counts),
                             ),
                     )
                     .service(

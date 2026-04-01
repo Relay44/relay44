@@ -2,6 +2,7 @@ pub mod aerodrome;
 pub mod agent_scheduler;
 pub mod database;
 pub mod event_bus;
+pub mod kyc;
 pub mod evm_indexer;
 pub mod evm_signer;
 pub mod evm_rpc;
