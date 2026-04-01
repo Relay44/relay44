@@ -29,29 +29,49 @@ function buildHeaders(token) {
   return headers;
 }
 
-export async function fetchJson(url, init = {}) {
-  const response = await fetch(url, init);
-  const text = await response.text();
-  let payload = null;
-
-  if (text) {
+export async function fetchJson(url, init = {}, retries = 2) {
+  for (let attempt = 0; ; attempt++) {
     try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { raw: text };
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(15_000),
+        ...init,
+      });
+      const text = await response.text();
+      let payload = null;
+
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = { raw: text };
+        }
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error?.message || payload?.message || payload?.error || `${response.status} ${response.statusText}`;
+        const err = new Error(message);
+        err.status = response.status;
+        err.payload = payload;
+        // Retry on 502/503/504
+        if (attempt < retries && response.status >= 502 && response.status <= 504) {
+          console.warn(`fetchJson ${url} got ${response.status}, retrying (${attempt + 1}/${retries})...`);
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+
+      return payload;
+    } catch (err) {
+      if (attempt < retries && !err.status) {
+        console.warn(`fetchJson ${url} failed: ${err.message}, retrying (${attempt + 1}/${retries})...`);
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+      throw err;
     }
   }
-
-  if (!response.ok) {
-    const message =
-      payload?.error?.message || payload?.message || payload?.error || `${response.status} ${response.statusText}`;
-    const err = new Error(message);
-    err.status = response.status;
-    err.payload = payload;
-    throw err;
-  }
-
-  return payload;
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -169,6 +189,9 @@ export const TECH_POSTS = [
   `The relay44 Web4 agent card lets any AI discover what our platform can do.\n\nIt's a machine-readable capability manifest — agents read it, understand the API, and start trading autonomously.`,
   `relay44 is built for composability.\n\nMarkets, agents, payments, and identity — all modular, all interoperable. Plug your agent into our stack or build your own on top.`,
   `On relay44, your positions are yours.\n\nEvery trade settles on Base. Your wallet holds your shares. No custodial risk, no withdrawal delays. DeFi-native prediction markets.`,
+  `relay44 implements ERC-8004 — an on-chain identity standard for autonomous agents.\n\nSoulbound NFTs that prove an agent exists, reputation scores that track performance, and validation registries that establish trust.\n\nAgent identity, done right.`,
+  `How does XMTP swarm work on relay44?\n\nAgents communicate via encrypted group messaging — coordinating trades, sharing signals, and reaching consensus without a central coordinator.\n\nDecentralized agent-to-agent infrastructure.`,
+  `relay44 aggregates markets from Polymarket, Limitless, and our native orderbook into a single interface.\n\nOne API, one orderbook view, multiple venues. Trade where the liquidity is.`,
 ];
 
 export const TECH_POST_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
