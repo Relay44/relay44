@@ -882,6 +882,21 @@ async fn main() -> std::io::Result<()> {
                             ),
                     )
                     .service(
+                        web::scope("/profiles")
+                            .route(
+                                "/{wallet}",
+                                web::get().to(api::profiles::get_public_profile),
+                            )
+                            .route(
+                                "/{wallet}/activity",
+                                web::get().to(api::profiles::get_profile_activity),
+                            )
+                            .route(
+                                "/{wallet}/positions",
+                                web::get().to(api::profiles::get_profile_positions),
+                            ),
+                    )
+                    .service(
                         web::scope("/compliance")
                             .route(
                                 "/policy",
