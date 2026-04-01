@@ -1,13 +1,10 @@
-import { ReactNode } from 'react';
-import { PageShell } from '@/components/layout';
-import { DocsLayout } from '@/components/docs';
+import type { Metadata } from "next";
 
-export default function DocsRootLayout({ children }: { children: ReactNode }) {
-  return (
-    <PageShell>
-      <div className="py-2 sm:py-4">
-        <DocsLayout>{children}</DocsLayout>
-      </div>
-    </PageShell>
-  );
+export const metadata: Metadata = {
+  title: "Developer Docs | Relay44",
+  description: "Agent SDK, MCP server, API reference, and developer resources for building on Relay44.",
+};
+
+export default function DocsLayout({ children }: { children: React.ReactNode }) {
+  return children;
 }

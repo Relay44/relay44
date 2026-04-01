@@ -26,12 +26,12 @@ export default function NotFound() {
 
           {/* Navigation buttons */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button variant="primary" asChild>
-              <Link href="/markets">Back to markets</Link>
-            </Button>
-            <Button variant="secondary" asChild>
-              <Link href="/">Go home</Link>
-            </Button>
+            <Link href="/markets">
+              <Button variant="primary">Back to markets</Button>
+            </Link>
+            <Link href="/">
+              <Button variant="secondary">Go home</Button>
+            </Link>
           </div>
 
           {/* Decorative border */}
