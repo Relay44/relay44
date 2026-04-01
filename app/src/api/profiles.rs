@@ -43,13 +43,17 @@ pub async fn get_public_profile(
         "SELECT
             COALESCE(COUNT(*), 0)::BIGINT AS total_trades,
             COALESCE(SUM(ABS(CAST(price AS DOUBLE PRECISION) * CAST(quantity AS DOUBLE PRECISION))), 0) AS total_volume,
-            COALESCE(SUM(CAST(price AS DOUBLE PRECISION) * CAST(quantity AS DOUBLE PRECISION)), 0) AS pnl_all_time,
+            COALESCE(SUM(pnl), 0) AS pnl_all_time,
             COALESCE(COUNT(DISTINCT market_id), 0)::BIGINT AS markets_traded,
             MIN(created_at) AS first_trade
          FROM (
-            SELECT market_id, price, quantity, created_at FROM trades WHERE LOWER(buyer) = $1
+            SELECT market_id, price, quantity, created_at,
+                   -1.0 * CAST(price AS DOUBLE PRECISION) * CAST(quantity AS DOUBLE PRECISION) AS pnl
+            FROM trades WHERE LOWER(buyer) = $1
             UNION ALL
-            SELECT market_id, price, quantity, created_at FROM trades WHERE LOWER(seller) = $1
+            SELECT market_id, price, quantity, created_at,
+                   CAST(price AS DOUBLE PRECISION) * CAST(quantity AS DOUBLE PRECISION) AS pnl
+            FROM trades WHERE LOWER(seller) = $1
          ) sub"
     )
     .bind(&wallet)

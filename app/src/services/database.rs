@@ -784,7 +784,7 @@ impl DatabaseService {
 
     // Positions
     pub async fn get_positions(&self, owner: &str) -> Result<Vec<Position>> {
-        let rows = sqlx::query("SELECT * FROM positions WHERE owner = $1 ORDER BY created_at DESC")
+        let rows = sqlx::query("SELECT * FROM positions WHERE LOWER(owner) = $1 ORDER BY created_at DESC")
             .bind(owner)
             .fetch_all(&self.pool)
             .await?;
