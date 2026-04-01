@@ -13,6 +13,7 @@ pub mod notifications;
 pub mod orders;
 pub mod payments;
 pub mod positions;
+pub mod profiles;
 pub mod rate_limit;
 pub mod solana;
 pub mod user;
