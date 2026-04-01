@@ -11,6 +11,10 @@ import { base } from 'viem/chains';
 const HOST = process.env.X402_FACILITATOR_HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || process.env.X402_FACILITATOR_PORT || 8091);
 const SHARED_SECRET = String(process.env.X402_FACILITATOR_SHARED_SECRET || '').trim();
+if (!SHARED_SECRET) {
+  console.error('FATAL: X402_FACILITATOR_SHARED_SECRET is required — refusing to start without auth');
+  process.exit(1);
+}
 const CHAIN_ID = Number(process.env.BASE_CHAIN_ID || base.id);
 const PRIMARY_RPC = envOrThrow('BASE_RPC_URL');
 const FALLBACK_RPCS = String(process.env.BASE_RPC_FALLBACK_URLS || '')
@@ -57,11 +61,6 @@ function normalizeError(error) {
 }
 
 function requireSharedSecret(req, res, next) {
-  if (!SHARED_SECRET) {
-    next();
-    return;
-  }
-
   const header = String(req.headers.authorization || '');
   if (header === `Bearer ${SHARED_SECRET}`) {
     next();
@@ -92,6 +91,8 @@ registerExactEvmScheme(facilitator, {
   signer,
   networks: NETWORK,
 });
+
+const settledPayments = new Set();
 
 const app = express();
 app.use(express.json({ limit: '512kb' }));
@@ -141,7 +142,15 @@ app.post('/verify', requireSharedSecret, async (req, res) => {
 app.post('/settle', requireSharedSecret, async (req, res) => {
   try {
     const { paymentPayload, paymentRequirements } = req.body || {};
+    const paymentHash = paymentPayload?.payload?.authorization;
+    if (paymentHash && settledPayments.has(paymentHash)) {
+      res.status(200).json({ success: true, already_settled: true });
+      return;
+    }
     const result = await facilitator.settle(paymentPayload, paymentRequirements);
+    if (result.success && paymentHash) {
+      settledPayments.add(paymentHash);
+    }
     res.status(result.success ? 200 : 402).json(jsonSafe(result));
   } catch (error) {
     res.status(400).json({
@@ -152,6 +161,15 @@ app.post('/settle', requireSharedSecret, async (req, res) => {
       network: NETWORK,
     });
   }
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('unhandled rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('uncaught exception:', error);
+  process.exit(1);
 });
 
 app.listen(PORT, HOST, () => {
