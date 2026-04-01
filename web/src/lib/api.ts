@@ -2768,6 +2768,33 @@ class ApiClient {
     return this.request(`/hackathons/${id}/snapshot`, { method: "POST" });
   }
 
+  // Identity (ERC-8004)
+  async getIdentity(wallet: string): Promise<{
+    wallet: string;
+    tier: number;
+    active: boolean;
+    token_id?: number;
+  }> {
+    return this.request(`/evm/identity/${encodeURIComponent(wallet)}`);
+  }
+
+  // x402 payments
+  async getPaymentQuote(resource: string): Promise<{
+    amount: string;
+    recipient: string;
+    token: string;
+    description: string;
+  }> {
+    return this.request(`/payments/x402/quote?resource=${encodeURIComponent(resource)}`);
+  }
+
+  async verifyPayment(resource: string, txHash: string): Promise<{ verified: boolean }> {
+    return this.request('/payments/x402/verify', {
+      method: 'POST',
+      body: JSON.stringify({ resource, txHash }),
+    });
+  }
+
   // Swarm messaging (XMTP bridge)
   async getSwarmMessages(
     swarmId: string,

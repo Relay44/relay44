@@ -74,9 +74,7 @@ export function PaymentGate({
     setErrorMessage(null);
 
     try {
-      const data = await (api as any).request(
-        '/payments/x402/quote?resource=' + encodeURIComponent(resourcePath)
-      );
+      const data = await api.getPaymentQuote(resourcePath);
       setQuote(data);
       setState('quoted');
     } catch (err) {
@@ -130,10 +128,7 @@ export function PaymentGate({
     setState('verifying');
 
     try {
-      await (api as any).request('/payments/x402/verify', {
-        method: 'POST',
-        body: JSON.stringify({ resource: resourcePath, txHash }),
-      });
+      await api.verifyPayment(resourcePath, txHash);
 
       setState('unlocked');
       addToast('Access unlocked successfully', 'success');
