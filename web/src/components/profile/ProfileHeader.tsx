@@ -24,7 +24,7 @@ function formatDate(dateString: string): string {
   });
 }
 
-const WALLET_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const WALLET_REGEX = /^0x[0-9a-fA-F]{40}$/;
 
 export function ProfileHeader({ wallet }: ProfileHeaderProps) {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
