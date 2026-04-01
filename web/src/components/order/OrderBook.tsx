@@ -3,6 +3,7 @@
 import { Card, Tabs, LoadingScreen } from '@/components/ui';
 import { useOrderBook } from '@/hooks';
 import { FeatureNotice } from '@/components/runtime/FeatureNotice';
+import { PaymentGate } from '@/components/payments';
 import { ApiError } from '@/lib/api';
 import { formatPrice } from '@/lib/utils';
 import type { Outcome, OrderBookLevel } from '@/types';
@@ -14,13 +15,15 @@ export interface OrderBookProps {
 
 export function OrderBookDisplay({ marketId }: OrderBookProps) {
   const [outcome, setOutcome] = useState<Outcome>('yes');
-  const { data: orderBook, isLoading, error } = useOrderBook(marketId, outcome);
+  const { data: orderBook, isLoading, error, refetch } = useOrderBook(marketId, outcome);
 
   if (error instanceof ApiError && error.status === 402) {
     return (
-      <FeatureNotice
+      <PaymentGate
         title="Premium order book"
-        body="Full depth is payment-gated on the public API. Browse the market, then unlock premium order book access through the machine interface if you need live depth."
+        body="Full depth is payment-gated. Unlock premium order book access to see live depth for this market."
+        resourcePath={`/evm/markets/${marketId}/orderbook`}
+        onUnlocked={() => refetch()}
       />
     );
   }
