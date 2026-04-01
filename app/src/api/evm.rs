@@ -5910,6 +5910,436 @@ pub async fn relay_raw_transaction(
     }))
 }
 
+// ── Oracle endpoints ──────────────────────────────────────────────────
+
+const ORACLE_CONFIGURE_SELECTOR: &str = "0xdb7c00cc";
+const ORACLE_RESOLVE_SELECTOR: &str = "0x4f896d4f";
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterOracleMarketConfigRequest {
+    pub market_id: u64,
+    pub feed_type: String,
+    pub feed_address: Option<String>,
+    pub comparison: String,
+    pub target_value: String,
+    pub target_currency: Option<String>,
+    pub category: Option<String>,
+    pub resolution_hint: Option<String>,
+    pub keeper_enabled: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareConfigureOracleWriteRequest {
+    pub market_id: u64,
+    pub feed_type: u8,
+    pub feed_address: String,
+    pub comparison: u8,
+    pub target_value: String,
+    pub from: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareOracleResolveWriteRequest {
+    pub market_id: u64,
+    pub from: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OracleKeeperTickRequest {
+    pub limit: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OracleKeeperAction {
+    pub kind: String,
+    pub market_id: u64,
+    pub feed_type: String,
+    pub prepared_write: PreparedEvmWriteResponse,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OracleKeeperTickResponse {
+    pub scanned: u64,
+    pub actions: Vec<OracleKeeperAction>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OracleKeeperReportRequest {
+    pub market_id: u64,
+    pub tx_hash: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OracleKeeperReportResponse {
+    pub market_id: u64,
+    pub resolved: bool,
+    pub resolve_tx: Option<String>,
+    pub last_error: Option<String>,
+}
+
+pub async fn get_oracle_market_config(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<u64>,
+) -> Result<impl Responder, ApiError> {
+    let market_id = path.into_inner();
+    let config = state
+        .db
+        .get_oracle_market_config(market_id)
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    match config {
+        Some(cfg) => Ok(HttpResponse::Ok().json(cfg)),
+        None => Err(ApiError::not_found("Oracle market config")),
+    }
+}
+
+pub async fn register_oracle_market_config(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<RegisterOracleMarketConfigRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let feed_type = body.feed_type.trim().to_ascii_lowercase();
+    if feed_type != "chainlink" && feed_type != "manual" {
+        return Err(ApiError::bad_request(
+            "INVALID_FEED_TYPE",
+            "feedType must be 'chainlink' or 'manual'",
+        ));
+    }
+
+    let comparison = body.comparison.trim().to_ascii_lowercase();
+    if !["gt", "gte", "lt", "lte", "eq"].contains(&comparison.as_str()) {
+        return Err(ApiError::bad_request(
+            "INVALID_COMPARISON",
+            "comparison must be one of gt, gte, lt, lte, eq",
+        ));
+    }
+
+    let feed_address = body.feed_address.as_deref().map(|a| a.trim());
+    if feed_type == "chainlink" {
+        if let Some(addr) = feed_address {
+            if !is_valid_evm_address(addr) {
+                return Err(ApiError::bad_request(
+                    "INVALID_FEED_ADDRESS",
+                    "feedAddress must be a valid 0x EVM address",
+                ));
+            }
+        } else {
+            return Err(ApiError::bad_request(
+                "MISSING_FEED_ADDRESS",
+                "feedAddress is required for chainlink feeds",
+            ));
+        }
+    }
+
+    let config = state
+        .db
+        .upsert_oracle_market_config(
+            body.market_id,
+            &feed_type,
+            feed_address,
+            &comparison,
+            body.target_value.trim(),
+            body.target_currency.as_deref().unwrap_or("USD").trim(),
+            body.category.as_deref().map(|s| s.trim()),
+            body.resolution_hint.as_deref().map(|s| s.trim()),
+            body.keeper_enabled.unwrap_or(true),
+        )
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(config))
+}
+
+pub async fn prepare_configure_oracle_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareConfigureOracleWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let oracle_resolver = configured_address(
+        &state.config.oracle_resolver_address,
+        "ORACLE_RESOLVER_ADDRESS_NOT_CONFIGURED",
+        "ORACLE_RESOLVER_ADDRESS must be configured for oracle operations",
+    )?;
+
+    let feed_address = normalize_required_address(
+        body.feed_address.as_str(),
+        "INVALID_FEED_ADDRESS",
+        "feedAddress must be a valid 0x EVM address",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    if body.feed_type > 1 {
+        return Err(ApiError::bad_request(
+            "INVALID_FEED_TYPE",
+            "feedType must be 0 (MANUAL) or 1 (CHAINLINK)",
+        ));
+    }
+    if body.comparison > 4 {
+        return Err(ApiError::bad_request(
+            "INVALID_COMPARISON",
+            "comparison must be 0-4 (GT, GTE, LT, LTE, EQ)",
+        ));
+    }
+
+    let target_value_i256 = body
+        .target_value
+        .trim()
+        .parse::<i128>()
+        .map_err(|_| ApiError::bad_request("INVALID_TARGET_VALUE", "targetValue must be a valid integer"))?;
+
+    let data = encode_configure_oracle_calldata(
+        body.market_id,
+        body.feed_type,
+        &feed_address,
+        body.comparison,
+        target_value_i256,
+    )?;
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        oracle_resolver,
+        data,
+        "configureOracle",
+    )))
+}
+
+pub async fn prepare_oracle_resolve_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareOracleResolveWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let oracle_resolver = configured_address(
+        &state.config.oracle_resolver_address,
+        "ORACLE_RESOLVER_ADDRESS_NOT_CONFIGURED",
+        "ORACLE_RESOLVER_ADDRESS must be configured for oracle operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+
+    let data = format!(
+        "{}{}",
+        ORACLE_RESOLVE_SELECTOR.trim_start_matches("0x"),
+        format!("{:064x}", body.market_id),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        oracle_resolver,
+        data,
+        "resolve",
+    )))
+}
+
+pub async fn oracle_keeper_tick(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<OracleKeeperTickRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    if !state.config.evm_enabled
+        || !state.config.evm_reads_enabled
+        || !state.config.evm_writes_enabled
+    {
+        return Err(ApiError::bad_request(
+            "EVM_DISABLED",
+            "EVM reads and writes must be enabled for oracle keeper",
+        ));
+    }
+
+    if !state.config.oracle_keeper_enabled {
+        return Err(ApiError::bad_request(
+            "ORACLE_KEEPER_DISABLED",
+            "Oracle keeper is not enabled",
+        ));
+    }
+
+    let oracle_resolver = configured_address(
+        &state.config.oracle_resolver_address,
+        "ORACLE_RESOLVER_ADDRESS_NOT_CONFIGURED",
+        "ORACLE_RESOLVER_ADDRESS must be configured for oracle keeper",
+    )?;
+
+    let limit = body.limit.unwrap_or(50).clamp(1, 200) as usize;
+    let configs = state
+        .db
+        .list_oracle_keeper_pending()
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let now = now_seconds()?;
+    let mut actions = Vec::new();
+    let mut scanned = 0_u64;
+
+    for config in configs {
+        if actions.len() >= limit {
+            break;
+        }
+        scanned = scanned.saturating_add(1);
+
+        if config.feed_type != "chainlink" {
+            continue;
+        }
+
+        // Check if market is past close time by reading on-chain state
+        let market_slot = state
+            .evm_rpc
+            .eth_call(
+                &state.config.market_core_address,
+                &format!(
+                    "{}{}",
+                    MARKET_CORE_MARKETS_SELECTOR.trim_start_matches("0x"),
+                    format!("{:064x}", config.market_id)
+                ),
+            )
+            .await
+            .map_err(map_evm_rpc_error)?;
+
+        // markets() returns (bytes32 questionHash, uint64 closeTime, uint64 resolveTime, address resolver, bool resolved, bool outcome)
+        // closeTime is at word index 1 (second 32-byte slot)
+        let close_time = parse_u64_hex(&format!("0x{}", word_at(&market_slot, 1)?))?;
+        let resolved = parse_u64_hex(&format!("0x{}", word_at(&market_slot, 4)?))? != 0;
+
+        if resolved {
+            // Already resolved on-chain, update DB
+            let _ = state
+                .db
+                .update_oracle_keeper_check(config.market_id, None)
+                .await;
+            continue;
+        }
+
+        if now < close_time {
+            // Market not yet closed, skip
+            continue;
+        }
+
+        // Market is past close time and not resolved — generate resolve action
+        let data = format!(
+            "{}{}",
+            ORACLE_RESOLVE_SELECTOR.trim_start_matches("0x"),
+            format!("{:064x}", config.market_id),
+        );
+
+        actions.push(OracleKeeperAction {
+            kind: "resolve".to_string(),
+            market_id: config.market_id,
+            feed_type: config.feed_type.clone(),
+            prepared_write: prepared_write_response(
+                state.config.base_chain_id,
+                None,
+                oracle_resolver.clone(),
+                data,
+                "resolve",
+            ),
+        });
+
+        let _ = state
+            .db
+            .update_oracle_keeper_check(config.market_id, None)
+            .await;
+    }
+
+    Ok(HttpResponse::Ok().json(OracleKeeperTickResponse { scanned, actions }))
+}
+
+pub async fn oracle_keeper_report(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<OracleKeeperReportRequest>,
+) -> Result<impl Responder, ApiError> {
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let tx_hash = normalize_required_bytes32(
+        body.tx_hash.as_str(),
+        "INVALID_TX_HASH",
+        "txHash must be a valid 0x-prefixed transaction hash",
+    )?;
+
+    if body.success {
+        let updated = state
+            .db
+            .update_oracle_resolved(body.market_id, &tx_hash)
+            .await
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+        Ok(HttpResponse::Ok().json(OracleKeeperReportResponse {
+            market_id: body.market_id,
+            resolved: true,
+            resolve_tx: updated.as_ref().and_then(|u| u.resolve_tx.clone()),
+            last_error: None,
+        }))
+    } else {
+        let error_msg = body
+            .error
+            .as_deref()
+            .unwrap_or("oracle keeper transaction failed");
+        let _ = state
+            .db
+            .update_oracle_keeper_check(body.market_id, Some(error_msg))
+            .await;
+
+        Ok(HttpResponse::Ok().json(OracleKeeperReportResponse {
+            market_id: body.market_id,
+            resolved: false,
+            resolve_tx: None,
+            last_error: Some(error_msg.to_string()),
+        }))
+    }
+}
+
+fn encode_configure_oracle_calldata(
+    market_id: u64,
+    feed_type: u8,
+    feed_address: &str,
+    comparison: u8,
+    target_value: i128,
+) -> Result<String, ApiError> {
+    let addr = feed_address
+        .trim_start_matches("0x")
+        .to_ascii_lowercase();
+
+    // int256 encoding: positive values zero-padded, negative values sign-extended
+    let target_hex = if target_value >= 0 {
+        format!("{:064x}", target_value)
+    } else {
+        // Two's complement for negative i128 → 256-bit
+        let bytes = target_value.to_be_bytes();
+        let mut buf = [0xffu8; 32];
+        buf[16..].copy_from_slice(&bytes);
+        buf.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    };
+
+    Ok(format!(
+        "{}{}{}{}{}{}",
+        ORACLE_CONFIGURE_SELECTOR.trim_start_matches("0x"),
+        format!("{:064x}", market_id),
+        format!("{:064x}", feed_type),
+        format!("{:>064}", addr),
+        format!("{:064x}", comparison),
+        target_hex,
+    ))
+}
+
 async fn matcher_runtime_state(state: &AppState) -> Result<MatcherRuntimeState, ApiError> {
     match state
         .redis
