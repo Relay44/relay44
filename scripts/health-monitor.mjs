@@ -15,7 +15,7 @@ async function sendAlert(message) {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          api_key: NEYNAR_API_KEY,
+          'x-api-key': NEYNAR_API_KEY,
         },
         body: JSON.stringify({
           signer_uuid: NEYNAR_SIGNER_UUID,
