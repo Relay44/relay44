@@ -2767,6 +2767,34 @@ class ApiClient {
   ): Promise<{ snapshotCount: number }> {
     return this.request(`/hackathons/${id}/snapshot`, { method: "POST" });
   }
+
+  // Swarm messaging (XMTP bridge)
+  async getSwarmMessages(
+    swarmId: string,
+    params?: { limit?: number; cursor?: string },
+  ): Promise<{
+    data: Array<{
+      id: string;
+      sender: string;
+      content: string;
+      sentAt: string;
+    }>;
+    cursor?: string;
+    has_more: boolean;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/swarm/${encodeURIComponent(swarmId)}/messages${query}`);
+  }
+
+  async sendSwarmMessage(
+    swarmId: string,
+    content: string,
+  ): Promise<{ id: string; sentAt: string }> {
+    return this.request("/swarm/send", {
+      method: "POST",
+      body: JSON.stringify({ swarm_id: swarmId, content }),
+    });
+  }
 }
 
 export const api = new ApiClient();
