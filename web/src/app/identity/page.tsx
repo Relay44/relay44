@@ -49,7 +49,7 @@ export default function IdentityPage() {
     }
     setLoading(true);
     try {
-      const data = await api.request('/evm/identity/' + address);
+      const data = await api.getIdentity(address);
       setIdentity(data as IdentityInfo);
     } catch (err: unknown) {
       const status = (err as { status?: number })?.status;
