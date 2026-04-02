@@ -14,9 +14,9 @@ static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 #[derive(Parser)]
 #[command(
     name = "r44",
-    about = "Relay44 CLI — prediction markets from the terminal",
-    long_about = "Relay44 CLI — browse markets, place orders, manage agents, and trade \
-                  prediction markets across Polymarket, Limitless, and relay44's native venue.\n\n\
+    about = "relay44 — prediction markets and agent execution",
+    long_about = "relay44 CLI — trade prediction markets, manage agents, and access \
+                  market data across Polymarket, Limitless, and relay44's native venue.\n\n\
                   Get started:\n  \
                   r44 setup\n  \
                   r44 markets list\n  \
