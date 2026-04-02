@@ -40,6 +40,10 @@ function parseJson(text) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function shouldRunScheduledSmoke(now, env = process.env) {
   if (!isEnabled(env.X402_SMOKE_ENABLED, false)) {
     return false;
@@ -195,13 +199,31 @@ export async function runX402Smoke(env = process.env) {
   if (settlement.payer && settlement.payer.toLowerCase() !== account.address.toLowerCase()) {
     throw new Error(`unexpected x402 payer in settlement: ${settlement.payer}`);
   }
+  if (settlement.transaction) {
+    await publicClient.waitForTransactionReceipt({
+      hash: settlement.transaction,
+      timeout: timeoutMs,
+    });
+  }
 
-  const balanceAfter = await readUsdcBalance(
+  let balanceAfter = await readUsdcBalance(
     publicClient,
     parseAbi,
     usdcAddress,
     account.address,
   );
+  if (balanceAfter >= balanceBefore) {
+    const balanceDeadline = Date.now() + Math.min(timeoutMs, 10_000);
+    while (Date.now() < balanceDeadline && balanceAfter >= balanceBefore) {
+      await sleep(1_000);
+      balanceAfter = await readUsdcBalance(
+        publicClient,
+        parseAbi,
+        usdcAddress,
+        account.address,
+      );
+    }
+  }
 
   return {
     ok: true,
