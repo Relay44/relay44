@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Spinner } from '@/components/ui';
-import { useToast } from '@/components/ui/Toast';
-import { useBaseWallet } from '@/hooks/useBaseWallet';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { Button, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -20,7 +19,9 @@ interface SwarmPanelProps {
 }
 
 function truncateAddress(address: string): string {
-  if (address.length <= 10) return address;
+  if (address.length <= 10) {
+    return address;
+  }
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
@@ -41,17 +42,11 @@ function relativeTime(iso: string): string {
 }
 
 export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
-  const { address } = useBaseWallet();
-  const { addToast } = useToast();
-
   const [messages, setMessages] = useState<SwarmMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
@@ -60,34 +55,32 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
 
   const fetchMessages = useCallback(async () => {
     try {
-      const res = await api.getSwarmMessages(swarmId, { limit: 50 });
-      setMessages(res.data);
+      const response = await api.getSwarmMessages(swarmId, { limit: 50 });
+      setMessages(response.data);
       setError(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to load messages';
+      const message =
+        err instanceof Error ? err.message : 'Failed to load messages';
       if (loading) {
-        setError(msg);
+        setError(message);
       }
     } finally {
       setLoading(false);
     }
-  }, [swarmId, loading]);
+  }, [loading, swarmId]);
 
-  // Initial fetch
   useEffect(() => {
     setLoading(true);
     setError(null);
     setMessages([]);
     fetchMessages();
-  }, [swarmId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchMessages, swarmId]);
 
-  // Poll every 5 seconds
   useEffect(() => {
     const interval = setInterval(fetchMessages, 5000);
     return () => clearInterval(interval);
   }, [fetchMessages]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     if (messages.length > prevMessageCountRef.current) {
       scrollToBottom();
@@ -95,36 +88,14 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
     prevMessageCountRef.current = messages.length;
   }, [messages.length, scrollToBottom]);
 
-  const handleSend = async () => {
-    const trimmed = input.trim();
-    if (!trimmed || sending) return;
-
-    setSending(true);
-    try {
-      await api.sendSwarmMessage(swarmId, trimmed);
-      setInput('');
-      // Immediately refresh to show the new message
-      await fetchMessages();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to send message';
-      addToast(msg, 'error');
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const connectedAddress = address?.toLowerCase();
-
   if (loading) {
     return (
-      <div className={cn('flex flex-col h-full items-center justify-center', className)}>
+      <div
+        className={cn(
+          'flex h-full flex-col items-center justify-center',
+          className,
+        )}
+      >
         <Spinner />
         <p className="mt-3 text-sm text-text-secondary">Loading messages...</p>
       </div>
@@ -133,7 +104,12 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
 
   if (error) {
     return (
-      <div className={cn('flex flex-col h-full items-center justify-center', className)}>
+      <div
+        className={cn(
+          'flex h-full flex-col items-center justify-center',
+          className,
+        )}
+      >
         <p className="text-sm text-text-secondary">{error}</p>
         <Button
           variant="secondary"
@@ -152,84 +128,51 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
   }
 
   return (
-    <div className={cn('flex flex-col h-full', className)}>
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <h2 className="text-sm font-medium text-text-primary truncate">
+    <div className={cn('flex h-full flex-col', className)}>
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="truncate text-sm font-medium text-text-primary">
             Swarm
           </h2>
-          <span className="text-xs font-mono text-text-secondary truncate">
+          <span className="truncate font-mono text-xs text-text-secondary">
             {truncateAddress(swarmId)}
           </span>
         </div>
-        <span className="text-xs text-text-secondary shrink-0">
+        <span className="shrink-0 text-xs text-text-secondary">
           {messages.length} message{messages.length !== 1 ? 's' : ''}
         </span>
       </div>
 
-      {/* Messages */}
-      <div
-        ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto px-4 py-3 space-y-3"
-      >
+      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-text-secondary">
-              No messages yet. Start the conversation.
-            </p>
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-text-secondary">No messages yet.</p>
           </div>
         ) : (
-          messages.map((msg) => {
-            const isOwn = connectedAddress
-              ? msg.sender.toLowerCase() === connectedAddress
-              : false;
-
-            return (
-              <div
-                key={msg.id}
-                className={cn(
-                  'px-3 py-2 rounded',
-                  isOwn ? 'bg-accent/10 ml-8' : 'bg-bg-secondary mr-8',
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-mono text-text-secondary">
-                    {isOwn ? 'You' : truncateAddress(msg.sender)}
-                  </span>
-                  <span className="text-xs text-text-secondary shrink-0">
-                    {relativeTime(msg.sentAt)}
-                  </span>
-                </div>
-                <p className="text-sm text-text-primary mt-1 whitespace-pre-wrap break-words">
-                  {msg.content}
-                </p>
+          messages.map((message) => (
+            <div key={message.id} className="mr-8 rounded bg-bg-secondary px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-xs text-text-secondary">
+                  {truncateAddress(message.sender)}
+                </span>
+                <span className="shrink-0 text-xs text-text-secondary">
+                  {relativeTime(message.sentAt)}
+                </span>
               </div>
-            );
-          })
+              <p className="mt-1 break-words whitespace-pre-wrap text-sm text-text-primary">
+                {message.content}
+              </p>
+            </div>
+          ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="px-4 py-3 border-t border-border flex gap-2">
-        <Input
-          className="flex-1"
-          placeholder="Type a message..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={sending}
-        />
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={handleSend}
-          disabled={!input.trim() || sending}
-          loading={sending}
-        >
-          Send
-        </Button>
+      <div className="border-t border-border px-4 py-3">
+        <p className="text-sm text-text-secondary">
+          Browser sending is disabled. Swarm posting still depends on a
+          server-side signing key, so this page is read-only for now.
+        </p>
       </div>
     </div>
   );
