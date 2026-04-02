@@ -8,9 +8,8 @@ use crate::output;
 
 pub async fn run(config: Arc<Mutex<Config>>, api_url: &str) -> Result<()> {
     println!();
-    println!("╭─────────────────────────────────────╮");
-    println!("│     r44 — first-time setup           │");
-    println!("╰─────────────────────────────────────╯");
+    output::banner();
+    output::dimmed("  first-time setup");
     println!();
 
     // Step 1: API connection
@@ -103,16 +102,12 @@ pub async fn run(config: Arc<Mutex<Config>>, api_url: &str) -> Result<()> {
     }
     println!();
 
-    // Done
-    println!("╭─────────────────────────────────────╮");
-    println!("│     Setup complete!                  │");
-    println!("╰─────────────────────────────────────╯");
+    output::success("setup complete");
     println!();
-    println!("  Get started:");
-    println!("    r44 markets list          Browse markets");
-    println!("    r44 agents public         See community agents");
-    println!("    r44 shell                 Interactive mode");
-    println!("    r44 --help                Full command list");
+    output::dimmed("  r44 markets list          browse markets");
+    output::dimmed("  r44 agents public         community agents");
+    output::dimmed("  r44 shell                 interactive mode");
+    output::dimmed("  r44 --help                full command list");
     println!();
 
     Ok(())
