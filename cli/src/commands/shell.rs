@@ -9,8 +9,10 @@ use crate::config::Config;
 use crate::output::{self, Format};
 
 pub async fn run(api: &Client, config: Arc<Mutex<Config>>, api_url: &str, fmt: Format) -> Result<()> {
-    println!("r44 interactive shell — type commands without the 'r44' prefix");
-    println!("type 'help' for commands, 'exit' to quit\n");
+    output::banner();
+    output::dimmed("  interactive shell — type commands without the 'r44' prefix");
+    output::dimmed("  type 'help' for commands, 'exit' to quit");
+    println!();
 
     let mut rl = DefaultEditor::new()?;
 
