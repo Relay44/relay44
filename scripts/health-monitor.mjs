@@ -1,47 +1,11 @@
 #!/usr/bin/env node
 
+import { sendAlert } from './ops-alerts.mjs';
+import { runX402Smoke, shouldRunScheduledSmoke } from './x402-smoke.mjs';
+
 const API_URL = process.env.API_URL || 'https://relay44-api.onrender.com/v1';
-const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY || '';
-const NEYNAR_SIGNER_UUID = process.env.NEYNAR_SIGNER_UUID || '';
-const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || '';
 
 const healthUrl = API_URL.replace(/\/v1$/, '/health/detailed');
-
-async function sendAlert(message) {
-  // Farcaster DM via Neynar (posts as the bot)
-  if (NEYNAR_API_KEY && NEYNAR_SIGNER_UUID) {
-    try {
-      await fetch('https://api.neynar.com/v2/farcaster/cast', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': NEYNAR_API_KEY,
-        },
-        body: JSON.stringify({
-          signer_uuid: NEYNAR_SIGNER_UUID,
-          text: message,
-        }),
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (err) {
-      console.error('Failed to send Farcaster alert:', err.message);
-    }
-  }
-
-  // Generic webhook (Slack, Discord, etc.)
-  if (ALERT_WEBHOOK_URL) {
-    try {
-      await fetch(ALERT_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: message, content: message }),
-        signal: AbortSignal.timeout(10_000),
-      });
-    } catch (err) {
-      console.error('Failed to send webhook alert:', err.message);
-    }
-  }
-}
 
 let data;
 try {
@@ -69,11 +33,24 @@ for (const [name, check] of Object.entries(checks)) {
   }
 }
 
+let x402Result = null;
+if (shouldRunScheduledSmoke(new Date(), process.env)) {
+  try {
+    x402Result = await runX402Smoke(process.env);
+  } catch (err) {
+    failures.push(`x402_smoke: failed (${err.message})`);
+  }
+}
+
 if (failures.length > 0) {
   const msg = `[relay44 ALERT] Health check failed:\n${failures.join('\n')}`;
   console.error(msg);
-  await sendAlert(msg);
+  await sendAlert(msg, process.env);
   process.exit(1);
+}
+
+if (x402Result) {
+  console.log(JSON.stringify({ x402Smoke: x402Result }, null, 2));
 }
 
 console.log('All checks passed.');
