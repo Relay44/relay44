@@ -291,7 +291,7 @@ services:
   - type: cron
     name: relay44-health-monitor
     runtime: node
-    region: oregon
+    region: frankfurt
     plan: starter
     schedule: "*/5 * * * *"
     buildCommand: npm ci
@@ -305,6 +305,10 @@ services:
           property: connectionString
       - key: API_URL
         value: https://relay44-api.onrender.com/v1
+      - key: OPS_STATE_CONNECT_ATTEMPTS
+        value: "4"
+      - key: OPS_STATE_CONNECT_RETRY_MS
+        value: "750"
       - key: NEYNAR_API_KEY
         sync: false
       - key: NEYNAR_SIGNER_UUID
