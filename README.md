@@ -171,6 +171,19 @@ ADMIN_WALLETS=0x... \
 npm run agents:operator
 ```
 
+### Run the x402 production smoke locally
+
+The x402 smoke uses a dedicated low-balance payer, waits for the protected route to return `402`, pays it, and then asserts the paid response includes `PAYMENT-RESPONSE`.
+
+```bash
+X402_SMOKE_ENABLED=true \
+X402_SMOKE_PAYER_PRIVATE_KEY=0x... \
+X402_SMOKE_API_URL=https://relay44-api.onrender.com/v1 \
+X402_SMOKE_PATH=/evm/markets/12/orderbook?outcome=yes&depth=5 \
+X402_SMOKE_MIN_USDC=1 \
+npm run x402:smoke
+```
+
 ### Bootstrap presets and health
 
 Creator-funded bootstrap markets use one of three presets in the normal create flow:
