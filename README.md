@@ -173,14 +173,15 @@ npm run agents:operator
 
 ### Run the x402 production smoke locally
 
-The x402 smoke uses a dedicated low-balance payer, waits for the protected route to return `402`, pays it, and then asserts the paid response includes `PAYMENT-RESPONSE`.
+The x402 smoke uses a dedicated low-balance payer, waits for protected routes to return `402`, pays them, and then asserts the paid responses include `PAYMENT-RESPONSE`. The health monitor persists the last smoke result in Postgres so it can alert when the smoke goes overdue or the payer balance drops below the configured threshold.
 
 ```bash
 X402_SMOKE_ENABLED=true \
 X402_SMOKE_PAYER_PRIVATE_KEY=0x... \
 X402_SMOKE_API_URL=https://relay44-api.onrender.com/v1 \
-X402_SMOKE_PATH=/evm/markets/12/orderbook?outcome=yes&depth=5 \
+X402_SMOKE_TARGETS=/evm/markets/12/orderbook?outcome=yes&depth=5,/evm/markets/12/trades?outcome=yes&limit=5 \
 X402_SMOKE_MIN_USDC=1 \
+X402_SMOKE_LOW_BALANCE_USDC=2 \
 npm run x402:smoke
 ```
 
