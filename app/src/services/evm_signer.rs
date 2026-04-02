@@ -172,6 +172,80 @@ fn trim_leading_zeros(bytes: &[u8]) -> &[u8] {
     }
 }
 
+/// Sign an EIP-712 typed-data hash with a raw private key.
+/// Returns a 65-byte signature hex string: `0x{r}{s}{v}` where v ∈ {27, 28}.
+pub fn sign_eip712_hash(hash: &[u8; 32], private_key_hex: &str) -> Result<String, ApiError> {
+    let key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
+        .map_err(|e| ApiError::bad_request("INVALID_KEY", &format!("Invalid hex: {}", e)))?;
+    if key_bytes.len() != 32 {
+        return Err(ApiError::bad_request("INVALID_KEY", "Private key must be 32 bytes"));
+    }
+    let signing_key = SigningKey::from_bytes(key_bytes.as_slice().into())
+        .map_err(|e| ApiError::bad_request("INVALID_KEY", &format!("Invalid private key: {}", e)))?;
+
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
+    let (signature, recovery_id): (Signature, RecoveryId) = signing_key
+        .sign_prehash_recoverable(hash)
+        .map_err(|e| ApiError::internal(&format!("EIP-712 signing failed: {}", e)))?;
+
+    let sig_bytes = signature.to_bytes();
+    let r = &sig_bytes[..32];
+    let s = &sig_bytes[32..];
+    let v = recovery_id.to_byte() + 27;
+    Ok(format!("0x{}{}{:02x}", hex::encode(r), hex::encode(s), v))
+}
+
+/// Compute the EIP-712 struct hash for a given primary type and values.
+/// `encode_data` should already be the ABI-encoded struct fields (no selector).
+pub fn eip712_struct_hash(type_hash: &[u8; 32], encode_data: &[u8]) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(32 + encode_data.len());
+    buf.extend_from_slice(type_hash);
+    buf.extend_from_slice(encode_data);
+    Keccak256::digest(&buf).into()
+}
+
+/// Compute the EIP-712 domain separator hash.
+pub fn eip712_domain_separator(
+    name: &str,
+    version: &str,
+    chain_id: u64,
+    verifying_contract: &str,
+) -> [u8; 32] {
+    let type_hash = Keccak256::digest(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    );
+    let name_hash = Keccak256::digest(name.as_bytes());
+    let version_hash = Keccak256::digest(version.as_bytes());
+
+    let contract_bytes = hex::decode(verifying_contract.trim_start_matches("0x"))
+        .unwrap_or_default();
+    let mut contract_word = [0u8; 32];
+    if contract_bytes.len() == 20 {
+        contract_word[12..].copy_from_slice(&contract_bytes);
+    }
+
+    let mut chain_word = [0u8; 32];
+    chain_word[24..].copy_from_slice(&chain_id.to_be_bytes());
+
+    let mut buf = Vec::with_capacity(5 * 32);
+    buf.extend_from_slice(&type_hash);
+    buf.extend_from_slice(&name_hash);
+    buf.extend_from_slice(&version_hash);
+    buf.extend_from_slice(&chain_word);
+    buf.extend_from_slice(&contract_word);
+    Keccak256::digest(&buf).into()
+}
+
+/// Final EIP-712 hash: `keccak256("\x19\x01" || domainSeparator || structHash)`.
+pub fn eip712_signing_hash(domain_separator: &[u8; 32], struct_hash: &[u8; 32]) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(2 + 32 + 32);
+    buf.push(0x19);
+    buf.push(0x01);
+    buf.extend_from_slice(domain_separator);
+    buf.extend_from_slice(struct_hash);
+    Keccak256::digest(&buf).into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

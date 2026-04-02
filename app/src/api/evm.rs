@@ -18,6 +18,7 @@ use crate::services::external::types::ExternalMarketId;
 use crate::services::external::{
     self, ExternalMarketSource, ExternalMarketsRequest, TradableFilter,
 };
+use crate::services::liquidity_mirror;
 use crate::services::provider_rails::{evaluate_provider_access, ProviderRailAction, RailProvider};
 use crate::services::x402::{self, X402Resource};
 use crate::AppState;
@@ -378,8 +379,10 @@ pub struct BaseOrderBookResponse {
     pub provider_market_ref: String,
     pub is_synthetic: bool,
     pub includes_bootstrap: bool,
+    pub includes_mirror: bool,
     pub bootstrap_depth: f64,
     pub organic_depth: f64,
+    pub mirror_depth: f64,
 }
 
 #[derive(Serialize)]
@@ -4582,8 +4585,10 @@ pub async fn get_base_orderbook(
             provider_market_ref: snapshot.provider_market_ref,
             is_synthetic: snapshot.is_synthetic,
             includes_bootstrap: false,
+            includes_mirror: false,
             bootstrap_depth: 0.0,
             organic_depth: 0.0,
+            mirror_depth: 0.0,
         }));
     }
 
@@ -4697,6 +4702,31 @@ pub async fn get_base_orderbook(
         }
     }
 
+    // Merge mirror quotes from external venues (Limitless, Polymarket, Aerodrome).
+    let mut mirror_depth: u64 = 0;
+    let mut includes_mirror = false;
+    if let Some(snapshot) = liquidity_mirror::load_mirror_snapshot(&state, market_id).await {
+        let yes_mirror = liquidity_mirror::mirror_to_level_map(&snapshot.yes_bids);
+        let no_mirror = liquidity_mirror::mirror_to_level_map(&snapshot.no_bids);
+        let yes_mirror_agg: BTreeMap<u64, LevelAggregate> = yes_mirror
+            .into_iter()
+            .map(|(p, q)| (p, LevelAggregate { quantity: q, orders: 1 }))
+            .collect();
+        let no_mirror_agg: BTreeMap<u64, LevelAggregate> = no_mirror
+            .into_iter()
+            .map(|(p, q)| (p, LevelAggregate { quantity: q, orders: 1 }))
+            .collect();
+        for level in yes_mirror_agg.values() {
+            mirror_depth = mirror_depth.saturating_add(level.quantity);
+        }
+        for level in no_mirror_agg.values() {
+            mirror_depth = mirror_depth.saturating_add(level.quantity);
+        }
+        merge_level_maps(&mut yes_bid_levels, &yes_mirror_agg);
+        merge_level_maps(&mut no_bid_levels, &no_mirror_agg);
+        includes_mirror = mirror_depth > 0;
+    }
+
     let (bids, asks) = if outcome_is_yes {
         (
             book_side_from_levels(&yes_bid_levels, depth),
@@ -4724,8 +4754,10 @@ pub async fn get_base_orderbook(
         provider_market_ref: market_id.to_string(),
         is_synthetic,
         includes_bootstrap,
+        includes_mirror,
         bootstrap_depth: bootstrap_depth as f64 / 1_000_000.0,
         organic_depth: organic_depth as f64 / 1_000_000.0,
+        mirror_depth: mirror_depth as f64 / 1_000_000.0,
     }))
 }
 
@@ -6362,6 +6394,235 @@ async fn matcher_runtime_stats(state: &AppState) -> Result<MatcherRuntimeStats, 
         Ok(None) => Ok(MatcherRuntimeStats::default()),
         Err(err) => Err(ApiError::internal(&err.to_string())),
     }
+}
+
+// ---- Liquidity Mirror Admin Endpoints ----
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateMirrorLinkRequest {
+    pub internal_market_id: i64,
+    pub external_market_id: String,
+    pub external_provider: String,
+    #[serde(default = "default_spread_bps")]
+    pub spread_premium_bps: i32,
+    #[serde(default = "default_max_depth")]
+    pub max_depth_usdc: f64,
+    #[serde(default = "default_hedge_mode")]
+    pub hedge_mode: String,
+    pub hedge_credential_id: Option<String>,
+}
+
+fn default_spread_bps() -> i32 { 50 }
+fn default_max_depth() -> f64 { 5000.0 }
+fn default_hedge_mode() -> String { "auto".to_string() }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateMirrorLinkRequest {
+    pub spread_premium_bps: Option<i32>,
+    pub max_depth_usdc: Option<f64>,
+    pub hedge_mode: Option<String>,
+    pub hedge_credential_id: Option<String>,
+    pub active: Option<bool>,
+}
+
+pub async fn create_mirror_link(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateMirrorLinkRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let provider = body.external_provider.trim().to_ascii_lowercase();
+    if !["limitless", "polymarket", "aerodrome"].contains(&provider.as_str()) {
+        return Err(ApiError::bad_request(
+            "INVALID_PROVIDER",
+            "externalProvider must be limitless, polymarket, or aerodrome",
+        ));
+    }
+
+    let row = sqlx::query_as::<_, (i32,)>(
+        "INSERT INTO mirror_market_links (internal_market_id, external_market_id, external_provider, \
+         spread_premium_bps, max_depth_usdc, hedge_mode, hedge_credential_id) \
+         VALUES ($1, $2, $3, $4, $5::NUMERIC, $6, $7) \
+         RETURNING id",
+    )
+    .bind(body.internal_market_id)
+    .bind(body.external_market_id.trim())
+    .bind(&provider)
+    .bind(body.spread_premium_bps)
+    .bind(format!("{}", body.max_depth_usdc))
+    .bind(body.hedge_mode.trim())
+    .bind(body.hedge_credential_id.as_deref())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&format!("Failed to create mirror link: {}", e)))?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "id": row.0,
+        "internalMarketId": body.internal_market_id,
+        "externalMarketId": body.external_market_id.trim(),
+        "externalProvider": provider,
+        "spreadPremiumBps": body.spread_premium_bps,
+        "maxDepthUsdc": body.max_depth_usdc,
+        "hedgeMode": body.hedge_mode.trim(),
+        "active": true,
+    })))
+}
+
+pub async fn list_mirror_links(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let rows = sqlx::query(
+        "SELECT id, internal_market_id, external_market_id, external_provider, \
+         spread_premium_bps, max_depth_usdc::text as max_depth_text, \
+         hedge_mode, hedge_credential_id, active, \
+         last_mirror_at, last_hedge_at, mirror_error, hedge_error, \
+         total_mirrored_usdc::text as total_mirrored_text, \
+         total_hedged_usdc::text as total_hedged_text, \
+         net_exposure_usdc::text as net_exposure_text \
+         FROM mirror_market_links ORDER BY id",
+    )
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&format!("Failed to list mirror links: {}", e)))?;
+
+    let links: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            use sqlx::Row;
+            json!({
+                "id": r.get::<i32, _>("id"),
+                "internalMarketId": r.get::<i64, _>("internal_market_id"),
+                "externalMarketId": r.get::<String, _>("external_market_id"),
+                "externalProvider": r.get::<String, _>("external_provider"),
+                "spreadPremiumBps": r.get::<i32, _>("spread_premium_bps"),
+                "maxDepthUsdc": r.get::<String, _>("max_depth_text").parse::<f64>().unwrap_or(0.0),
+                "hedgeMode": r.get::<String, _>("hedge_mode"),
+                "hedgeCredentialId": r.get::<Option<String>, _>("hedge_credential_id"),
+                "active": r.get::<bool, _>("active"),
+                "lastMirrorAt": r.get::<Option<chrono::DateTime<Utc>>, _>("last_mirror_at"),
+                "lastHedgeAt": r.get::<Option<chrono::DateTime<Utc>>, _>("last_hedge_at"),
+                "mirrorError": r.get::<Option<String>, _>("mirror_error"),
+                "hedgeError": r.get::<Option<String>, _>("hedge_error"),
+                "totalMirroredUsdc": r.get::<String, _>("total_mirrored_text").parse::<f64>().unwrap_or(0.0),
+                "totalHedgedUsdc": r.get::<String, _>("total_hedged_text").parse::<f64>().unwrap_or(0.0),
+                "netExposureUsdc": r.get::<String, _>("net_exposure_text").parse::<f64>().unwrap_or(0.0),
+            })
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(json!({ "links": links })))
+}
+
+pub async fn update_mirror_link(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<i32>,
+    body: web::Json<UpdateMirrorLinkRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let link_id = path.into_inner();
+    let mut updates: Vec<String> = Vec::new();
+    if let Some(spread) = body.spread_premium_bps {
+        sqlx::query("UPDATE mirror_market_links SET spread_premium_bps = $1, updated_at = NOW() WHERE id = $2")
+            .bind(spread)
+            .bind(link_id)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
+        updates.push("spreadPremiumBps".to_string());
+    }
+    if let Some(depth) = body.max_depth_usdc {
+        sqlx::query("UPDATE mirror_market_links SET max_depth_usdc = $1::NUMERIC, updated_at = NOW() WHERE id = $2")
+            .bind(format!("{}", depth))
+            .bind(link_id)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
+        updates.push("maxDepthUsdc".to_string());
+    }
+    if let Some(ref mode) = body.hedge_mode {
+        sqlx::query("UPDATE mirror_market_links SET hedge_mode = $1, updated_at = NOW() WHERE id = $2")
+            .bind(mode.trim())
+            .bind(link_id)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
+        updates.push("hedgeMode".to_string());
+    }
+    if let Some(ref cred) = body.hedge_credential_id {
+        sqlx::query("UPDATE mirror_market_links SET hedge_credential_id = $1, updated_at = NOW() WHERE id = $2")
+            .bind(cred.trim())
+            .bind(link_id)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
+        updates.push("hedgeCredentialId".to_string());
+    }
+    if let Some(active) = body.active {
+        sqlx::query("UPDATE mirror_market_links SET active = $1, updated_at = NOW() WHERE id = $2")
+            .bind(active)
+            .bind(link_id)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
+        updates.push("active".to_string());
+    }
+
+    if updates.is_empty() {
+        return Err(ApiError::bad_request("NO_UPDATES", "No fields to update"));
+    }
+
+    Ok(HttpResponse::Ok().json(json!({
+        "id": link_id,
+        "updated": updates,
+    })))
+}
+
+pub async fn get_mirror_status(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let row = sqlx::query(
+        "SELECT \
+         COUNT(*)::bigint as total, \
+         COUNT(*) FILTER (WHERE active)::bigint as active_count, \
+         COALESCE(SUM(total_mirrored_usdc), 0)::text as total_mirrored_text, \
+         COALESCE(SUM(total_hedged_usdc), 0)::text as total_hedged_text, \
+         COALESCE(SUM(net_exposure_usdc), 0)::text as net_exposure_text, \
+         COUNT(*) FILTER (WHERE mirror_error IS NOT NULL)::bigint as error_count \
+         FROM mirror_market_links",
+    )
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&format!("Mirror status query failed: {}", e)))?;
+
+    let hedge_row = sqlx::query(
+        "SELECT COUNT(*)::bigint as cnt FROM mirror_hedge_log WHERE hedge_status = 'pending'",
+    )
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&format!("Hedge count query failed: {}", e)))?;
+
+    use sqlx::Row;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "totalLinks": row.get::<i64, _>("total"),
+        "activeLinks": row.get::<i64, _>("active_count"),
+        "totalMirroredUsdc": row.get::<String, _>("total_mirrored_text").parse::<f64>().unwrap_or(0.0),
+        "totalHedgedUsdc": row.get::<String, _>("total_hedged_text").parse::<f64>().unwrap_or(0.0),
+        "netExposureUsdc": row.get::<String, _>("net_exposure_text").parse::<f64>().unwrap_or(0.0),
+        "linksWithErrors": row.get::<i64, _>("error_count"),
+        "pendingHedges": hedge_row.get::<i64, _>("cnt"),
+    })))
 }
 
 fn ensure_admin_control(req: &HttpRequest, state: &AppState) -> Result<(), ApiError> {
