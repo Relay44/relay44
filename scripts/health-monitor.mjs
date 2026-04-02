@@ -97,6 +97,24 @@ try {
   console.warn(`ops_state unavailable: ${error.message}`);
 }
 
+async function withOpsState(action) {
+  if (!opsState) {
+    return null;
+  }
+
+  try {
+    return await action();
+  } catch (error) {
+    if (!opsStateError) {
+      opsStateError = error;
+      console.warn(`ops_state unavailable: ${error.message}`);
+    }
+    await closeOpsState(opsState);
+    opsState = null;
+    return null;
+  }
+}
+
 if (data.status !== "healthy") {
   failures.push(`status: ${data.status}`);
 }
@@ -123,14 +141,18 @@ if (smokeEnabled) {
 
   if (shouldRunScheduledSmoke(now, process.env)) {
     try {
-      await reportRunnerStarted(opsState, X402_RUNNER_NAME, {
-        scheduledAt: now.toISOString(),
-      });
+      await withOpsState(() =>
+        reportRunnerStarted(opsState, X402_RUNNER_NAME, {
+          scheduledAt: now.toISOString(),
+        }),
+      );
       x402Result = await runX402Smoke(process.env);
-      await reportRunnerSuccess(
-        opsState,
-        X402_RUNNER_NAME,
-        buildSuccessMetadata(x402Result),
+      await withOpsState(() =>
+        reportRunnerSuccess(
+          opsState,
+          X402_RUNNER_NAME,
+          buildSuccessMetadata(x402Result),
+        ),
       );
 
       if (x402Result.lowBalanceTriggered) {
@@ -139,17 +161,21 @@ if (smokeEnabled) {
         );
       }
     } catch (error) {
-      await reportRunnerFailure(
-        opsState,
-        X402_RUNNER_NAME,
-        error.code || "smoke_failed",
-        error.message,
-        buildFailureMetadata(error),
+      await withOpsState(() =>
+        reportRunnerFailure(
+          opsState,
+          X402_RUNNER_NAME,
+          error.code || "smoke_failed",
+          error.message,
+          buildFailureMetadata(error),
+        ),
       );
       failures.push(`${formatFailureStage(error)}: failed (${error.message})`);
     }
   } else if (opsState) {
-    const state = await getRunnerState(opsState, X402_RUNNER_NAME);
+    const state = await withOpsState(() =>
+      getRunnerState(opsState, X402_RUNNER_NAME),
+    );
     const lastSucceededAt = state?.last_succeeded_at
       ? new Date(state.last_succeeded_at)
       : null;
