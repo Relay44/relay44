@@ -60,8 +60,8 @@ export function ProfilePositions({ wallet }: ProfilePositionsProps) {
               const hasYes = position.yesBalance > 0;
               const hasNo = position.noBalance > 0;
               const totalValue =
-                position.yesBalance * (position.currentYesPrice / 100) +
-                position.noBalance * (position.currentNoPrice / 100);
+                position.yesBalance * position.currentYesPrice +
+                position.noBalance * position.currentNoPrice;
 
               return (
                 <Link
@@ -82,7 +82,7 @@ export function ProfilePositions({ wallet }: ProfilePositionsProps) {
                             {position.yesBalance}
                           </span>
                           <span className="text-xs text-text-secondary">
-                            @ {position.currentYesPrice.toFixed(0)}%
+                            @ {(position.currentYesPrice * 100).toFixed(0)}%
                           </span>
                         </div>
                       )}
@@ -93,7 +93,7 @@ export function ProfilePositions({ wallet }: ProfilePositionsProps) {
                             {position.noBalance}
                           </span>
                           <span className="text-xs text-text-secondary">
-                            @ {position.currentNoPrice.toFixed(0)}%
+                            @ {(position.currentNoPrice * 100).toFixed(0)}%
                           </span>
                         </div>
                       )}

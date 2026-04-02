@@ -25,6 +25,14 @@ fn validate_wallet(wallet: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn profile_outcome_label(value: i16) -> Option<&'static str> {
+    match value {
+        0 => Some("yes"),
+        1 => Some("no"),
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GET /v1/profiles/{wallet}
 // ---------------------------------------------------------------------------
@@ -191,7 +199,10 @@ pub async fn get_profile_activity(
             "type": if is_buyer { "trade" } else { "trade" },
             "marketId": row.get::<String, _>("market_id"),
             "marketQuestion": row.try_get::<String, _>("market_question").unwrap_or_default(),
-            "outcome": row.try_get::<i16, _>("outcome").unwrap_or(0),
+            "outcome": row
+                .try_get::<i16, _>("outcome")
+                .ok()
+                .and_then(profile_outcome_label),
             "amount": amount,
             "pnl": if is_buyer { -amount } else { amount },
             "createdAt": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
@@ -251,4 +262,16 @@ pub async fn get_profile_positions(
         "offset": 0,
         "hasMore": false,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::profile_outcome_label;
+
+    #[test]
+    fn profile_outcome_label_maps_known_outcomes() {
+        assert_eq!(profile_outcome_label(0), Some("yes"));
+        assert_eq!(profile_outcome_label(1), Some("no"));
+        assert_eq!(profile_outcome_label(2), None);
+    }
 }
