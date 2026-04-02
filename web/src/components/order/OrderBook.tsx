@@ -1,29 +1,116 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+
 import { Card, Tabs, LoadingScreen } from '@/components/ui';
 import { useOrderBook } from '@/hooks';
 import { FeatureNotice } from '@/components/runtime/FeatureNotice';
 import { PaymentGate } from '@/components/payments';
-import { ApiError } from '@/lib/api';
+import {
+  ApiError,
+  type BaseOrderBookResponse,
+  normalizeBaseOrderBookResponse,
+} from '@/lib/api';
 import { formatPrice } from '@/lib/utils';
-import type { Outcome, OrderBookLevel } from '@/types';
-import { useState } from 'react';
+import type { OrderBook, OrderBookLevel, Outcome } from '@/types';
 
 export interface OrderBookProps {
   marketId: string;
 }
 
+function depthSummary(orderBook: OrderBook | undefined): string | null {
+  if (!orderBook) {
+    return null;
+  }
+
+  if (orderBook.includesMirror && orderBook.includesBootstrap) {
+    return `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`;
+  }
+
+  if (orderBook.includesMirror) {
+    return `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`;
+  }
+
+  if (orderBook.includesBootstrap) {
+    return `Unified depth includes bootstrap quotes. Organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)}`;
+  }
+
+  return `Organic depth $${formatPrice(orderBook.organicDepth || 0)}`;
+}
+
 export function OrderBookDisplay({ marketId }: OrderBookProps) {
   const [outcome, setOutcome] = useState<Outcome>('yes');
-  const { data: orderBook, isLoading, error, refetch } = useOrderBook(marketId, outcome);
+  const [paidSnapshots, setPaidSnapshots] = useState<
+    Partial<Record<Outcome, OrderBook>>
+  >({});
+  const { data: orderBook, isLoading, error } = useOrderBook(marketId, outcome);
+  const paidOrderBook = paidSnapshots[outcome];
+  const summary = depthSummary(orderBook ?? paidOrderBook);
+
+  useEffect(() => {
+    setPaidSnapshots({});
+  }, [marketId]);
 
   if (error instanceof ApiError && error.status === 402) {
+    if (paidOrderBook) {
+      return (
+        <Card>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="font-semibold">Order Book</h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Paid snapshot. Refreshing depth requires another x402 payment.
+              </p>
+              {summary ? (
+                <p className="mt-1 text-xs text-text-secondary">{summary}</p>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-3">
+              <Tabs
+                tabs={[
+                  { value: 'yes', label: 'Yes' },
+                  { value: 'no', label: 'No' },
+                ]}
+                value={outcome}
+                onChange={(value) => setOutcome(value as Outcome)}
+              />
+              <button
+                type="button"
+                className="text-xs text-text-secondary underline-offset-4 hover:underline"
+                onClick={() =>
+                  setPaidSnapshots((current) => ({
+                    ...current,
+                    [outcome]: undefined,
+                  }))
+                }
+              >
+                Load fresh snapshot
+              </button>
+            </div>
+          </div>
+
+          <OrderBookTable bids={paidOrderBook.bids} asks={paidOrderBook.asks} />
+        </Card>
+      );
+    }
+
     return (
       <PaymentGate
         title="Premium order book"
-        body="Full depth is payment-gated. Unlock premium order book access to see live depth for this market."
-        resourcePath={`/evm/markets/${marketId}/orderbook`}
-        onUnlocked={() => refetch()}
+        body="Full depth is payment-gated. Pay once to load a live snapshot for this side of the market."
+        resource="orderbook"
+        resourcePath={`/evm/markets/${marketId}/orderbook?outcome=${outcome}&depth=20`}
+        onPaidData={(data) => {
+          if (!data || typeof data !== 'object') {
+            return;
+          }
+          setPaidSnapshots((current) => ({
+            ...current,
+            [outcome]: normalizeBaseOrderBookResponse(
+              data as BaseOrderBookResponse,
+            ),
+          }));
+        }}
       />
     );
   }
@@ -42,16 +129,8 @@ export function OrderBookDisplay({ marketId }: OrderBookProps) {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="font-semibold">Order Book</h3>
-          {orderBook ? (
-            <p className="mt-1 text-xs text-text-secondary">
-              {orderBook.includesMirror && orderBook.includesBootstrap
-                ? `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`
-                : orderBook.includesMirror
-                  ? `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`
-                  : orderBook.includesBootstrap
-                    ? `Unified depth includes bootstrap quotes. Organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)}`
-                    : `Organic depth $${formatPrice(orderBook.organicDepth || 0)}`}
-            </p>
+          {summary ? (
+            <p className="mt-1 text-xs text-text-secondary">{summary}</p>
           ) : null}
         </div>
         <Tabs
@@ -60,7 +139,7 @@ export function OrderBookDisplay({ marketId }: OrderBookProps) {
             { value: 'no', label: 'No' },
           ]}
           value={outcome}
-          onChange={(v) => setOutcome(v as Outcome)}
+          onChange={(value) => setOutcome(value as Outcome)}
         />
       </div>
 
@@ -69,9 +148,7 @@ export function OrderBookDisplay({ marketId }: OrderBookProps) {
       ) : orderBook ? (
         <OrderBookTable bids={orderBook.bids} asks={orderBook.asks} />
       ) : (
-        <div className="text-center py-8 text-text-secondary">
-          No orders yet
-        </div>
+        <div className="py-8 text-center text-text-secondary">No orders yet</div>
       )}
     </Card>
   );
@@ -84,9 +161,9 @@ interface OrderBookTableProps {
 
 function OrderBookTable({ bids, asks }: OrderBookTableProps) {
   const maxQuantity = Math.max(
-    ...bids.map((b) => b.quantity),
-    ...asks.map((a) => a.quantity),
-    1
+    ...bids.map((bid) => bid.quantity),
+    ...asks.map((ask) => ask.quantity),
+    1,
   );
 
   return (
@@ -99,25 +176,28 @@ function OrderBookTable({ bids, asks }: OrderBookTableProps) {
         </div>
 
         <div className="space-y-1">
-          {asks.slice(0, 5).reverse().map((level, i) => (
-            <OrderBookRow
-              key={`ask-${i}`}
-              level={level}
-              side="ask"
-              maxQuantity={maxQuantity}
-            />
-          ))}
+          {asks
+            .slice(0, 5)
+            .reverse()
+            .map((level, index) => (
+              <OrderBookRow
+                key={`ask-${index}`}
+                level={level}
+                side="ask"
+                maxQuantity={maxQuantity}
+              />
+            ))}
         </div>
       </div>
 
       <div className="border-t border-border py-2 text-center">
-        <span className="text-text-secondary text-sm">Spread</span>
+        <span className="text-sm text-text-secondary">Spread</span>
       </div>
 
       <div className="space-y-1">
-        {bids.slice(0, 5).map((level, i) => (
+        {bids.slice(0, 5).map((level, index) => (
           <OrderBookRow
-            key={`bid-${i}`}
+            key={`bid-${index}`}
             level={level}
             side="bid"
             maxQuantity={maxQuantity}

@@ -1,3 +1,4 @@
+import type { PaymentRequired } from "@x402/core/types";
 import type {
   Agent,
   AgentFilters,
@@ -55,6 +56,11 @@ const FALLBACK_API_BASE =
   process.env.NEXT_PUBLIC_API_FALLBACK_URL?.trim() || "";
 const LOCAL_BASE_READ_API_BASE =
   process.env.NEXT_PUBLIC_LOCAL_BASE_READ_API_URL?.trim() || "";
+
+export function resolveApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${PRIMARY_API_BASE}${normalizedPath}`;
+}
 
 export interface BaseTokenState {
   chain_id: number;
@@ -139,7 +145,7 @@ interface BaseOrderBookLevel {
   orders: number;
 }
 
-interface BaseOrderBookResponse {
+export interface BaseOrderBookResponse {
   market_id: string;
   outcome: "yes" | "no";
   bids: BaseOrderBookLevel[];
@@ -178,6 +184,20 @@ interface BaseTradesResponse {
   chain_id?: number;
   provider_market_ref?: string;
   is_synthetic?: boolean;
+}
+
+interface SwarmMessageResponse {
+  id: string;
+  sender: string;
+  message: string;
+  created_at: string;
+}
+
+interface SwarmMessagesResponse {
+  data: SwarmMessageResponse[];
+  total_returned: number;
+  limit: number;
+  offset: number;
 }
 
 interface BaseAgentSnapshot {
@@ -779,6 +799,23 @@ export function normalizeBaseMarketsResponse(
     limit,
     offset,
     hasMore: offset + limit < total,
+  };
+}
+
+export function normalizeBaseOrderBookResponse(
+  response: BaseOrderBookResponse,
+): OrderBook {
+  return {
+    marketId: response.market_id,
+    outcome: response.outcome,
+    bids: response.bids ?? [],
+    asks: response.asks ?? [],
+    lastUpdated: toIsoString(response.last_updated),
+    includesBootstrap: Boolean(response.includes_bootstrap),
+    includesMirror: Boolean(response.includes_mirror),
+    bootstrapDepth: toOptionalNumber(response.bootstrap_depth),
+    organicDepth: toOptionalNumber(response.organic_depth),
+    mirrorDepth: toOptionalNumber(response.mirror_depth),
   };
 }
 
@@ -1536,19 +1573,7 @@ class ApiClient {
     const response = await this.requestBaseRead<BaseOrderBookResponse>(
       `/evm/markets/${encodedMarketId}/orderbook${query}`,
     );
-
-    return {
-      marketId: response.market_id,
-      outcome: response.outcome,
-      bids: response.bids ?? [],
-      asks: response.asks ?? [],
-      lastUpdated: toIsoString(response.last_updated),
-      includesBootstrap: Boolean(response.includes_bootstrap),
-      includesMirror: Boolean(response.includes_mirror),
-      bootstrapDepth: toOptionalNumber(response.bootstrap_depth),
-      organicDepth: toOptionalNumber(response.organic_depth),
-      mirrorDepth: toOptionalNumber(response.mirror_depth),
-    };
+    return normalizeBaseOrderBookResponse(response);
   }
 
   async getBaseTrades(
@@ -2783,20 +2808,10 @@ class ApiClient {
   }
 
   // x402 payments
-  async getPaymentQuote(resource: string): Promise<{
-    amount: string;
-    recipient: string;
-    token: string;
-    description: string;
-  }> {
+  async getX402Quote(
+    resource: "orderbook" | "trades" | "mcp_tool_call",
+  ): Promise<PaymentRequired> {
     return this.request(`/payments/x402/quote?resource=${encodeURIComponent(resource)}`);
-  }
-
-  async verifyPayment(resource: string, txHash: string): Promise<{ verified: boolean }> {
-    return this.request('/payments/x402/verify', {
-      method: 'POST',
-      body: JSON.stringify({ resource, txHash }),
-    });
   }
 
   // Swarm messaging (XMTP bridge)
@@ -2814,17 +2829,20 @@ class ApiClient {
     has_more: boolean;
   }> {
     const query = this.buildQuery(params || {});
-    return this.request(`/swarm/${encodeURIComponent(swarmId)}/messages${query}`);
-  }
+    const response = await this.request<SwarmMessagesResponse>(
+      `/web4/xmtp/swarm/${encodeURIComponent(swarmId)}/messages${query}`,
+    );
+    const data = response.data ?? [];
 
-  async sendSwarmMessage(
-    swarmId: string,
-    content: string,
-  ): Promise<{ id: string; sentAt: string }> {
-    return this.request("/swarm/send", {
-      method: "POST",
-      body: JSON.stringify({ swarm_id: swarmId, content }),
-    });
+    return {
+      data: data.map((message) => ({
+        id: message.id,
+        sender: message.sender,
+        content: message.message,
+        sentAt: toIsoString(message.created_at),
+      })),
+      has_more: data.length >= (params?.limit ?? response.limit ?? data.length),
+    };
   }
 
   // Oracle resolver
