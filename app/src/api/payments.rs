@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::api::ApiError;
 use crate::services::x402::{
-    build_quote_for_request, ensure_payment_from_payload, X402PaymentPayload, X402Resource,
+    build_quote_for_request, encode_payment_response_header, ensure_payment_from_payload,
+    X402PaymentPayload, X402Resource,
 };
 use crate::AppState;
 
@@ -41,8 +42,16 @@ pub async fn verify_x402_payment(
     body: web::Json<X402PaymentPayload>,
 ) -> Result<impl Responder, ApiError> {
     let resource = parse_resource(query.resource.as_deref())?;
-    ensure_payment_from_payload(&state, body.into_inner(), resource, None).await?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({
+    let settlement = ensure_payment_from_payload(&state, body.into_inner(), resource, None).await?;
+    let mut response = HttpResponse::Ok();
+    if let Some(settle_response) = settlement.as_ref() {
+        response.append_header((
+            "PAYMENT-RESPONSE",
+            encode_payment_response_header(settle_response)?,
+        ));
+    }
+
+    Ok(response.json(serde_json::json!({
         "ok": true,
         "resource": resource.as_str()
     })))
