@@ -2,7 +2,7 @@
 name = "r44"
 version = "0.1.0"
 edition = "2021"
-description = "Relay44 CLI — prediction markets from the terminal"
+description = "relay44 CLI — prediction markets and agent execution"
 license = "Apache-2.0"
 repository = "https://github.com/relay44/relay44"
 keywords = ["prediction-markets", "trading", "cli", "polymarket", "solana"]

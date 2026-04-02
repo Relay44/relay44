@@ -318,6 +318,22 @@ pub fn spinner(msg: &str) -> ProgressBar {
     pb
 }
 
+pub fn banner() {
+    if is_quiet() {
+        return;
+    }
+    if is_tty() {
+        eprintln!(
+            "  {}  {}",
+            "relay44".green().bold(),
+            "prediction markets · agent execution".dimmed()
+        );
+    } else {
+        eprintln!("  relay44  prediction markets · agent execution");
+    }
+    eprintln!();
+}
+
 pub fn confirm(prompt: &str) -> bool {
     if !is_tty() || is_quiet() {
         return true;
