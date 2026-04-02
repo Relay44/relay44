@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
 # Copy workspace files
 COPY Cargo.toml Cargo.lock ./
 COPY app ./app
+COPY cli ./cli
 COPY programs ./programs
 
 # Build release binary
