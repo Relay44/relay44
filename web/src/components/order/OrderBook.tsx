@@ -44,11 +44,13 @@ export function OrderBookDisplay({ marketId }: OrderBookProps) {
           <h3 className="font-semibold">Order Book</h3>
           {orderBook ? (
             <p className="mt-1 text-xs text-text-secondary">
-              {orderBook.includesBootstrap
-                ? `Unified depth includes bootstrap quotes. Organic $${formatPrice(
-                    orderBook.organicDepth || 0,
-                  )} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)}`
-                : `Organic depth $${formatPrice(orderBook.organicDepth || 0)}`}
+              {orderBook.includesMirror && orderBook.includesBootstrap
+                ? `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`
+                : orderBook.includesMirror
+                  ? `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`
+                  : orderBook.includesBootstrap
+                    ? `Unified depth includes bootstrap quotes. Organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)}`
+                    : `Organic depth $${formatPrice(orderBook.organicDepth || 0)}`}
             </p>
           ) : null}
         </div>
