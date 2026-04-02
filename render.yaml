@@ -289,6 +289,44 @@ services:
       sizeGB: 1
 
   - type: cron
+    name: relay44-health-monitor
+    runtime: node
+    region: oregon
+    plan: starter
+    schedule: "*/5 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run ops:health-monitor
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: API_URL
+        value: https://relay44-api.onrender.com/v1
+      - key: NEYNAR_API_KEY
+        sync: false
+      - key: NEYNAR_SIGNER_UUID
+        sync: false
+      - key: ALERT_WEBHOOK_URL
+        sync: false
+      - key: X402_SMOKE_ENABLED
+        value: "true"
+      - key: X402_SMOKE_API_URL
+        value: https://relay44-api.onrender.com/v1
+      - key: X402_SMOKE_PATH
+        value: /evm/markets/12/orderbook?outcome=yes&depth=5
+      - key: X402_SMOKE_PAYER_PRIVATE_KEY
+        sync: false
+      - key: X402_SMOKE_INTERVAL_HOURS
+        value: "1"
+      - key: X402_SMOKE_MINUTE
+        value: "0"
+      - key: X402_SMOKE_WINDOW_MINUTES
+        value: "5"
+      - key: X402_SMOKE_MIN_USDC
+        value: "1"
+      - key: X402_SMOKE_RPC_URL
+        value: https://mainnet.base.org
+
+  - type: cron
     name: relay44-paper-cohort-seeder
     runtime: node
     region: singapore
