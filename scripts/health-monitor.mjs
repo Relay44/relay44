@@ -88,11 +88,13 @@ console.log(JSON.stringify(data, null, 2));
 
 const failures = [];
 let opsState = null;
+let opsStateError = null;
 
 try {
   opsState = await connectOpsState(process.env);
 } catch (error) {
-  failures.push(`ops_state: failed (${error.message})`);
+  opsStateError = error;
+  console.warn(`ops_state unavailable: ${error.message}`);
 }
 
 if (data.status !== "healthy") {
@@ -174,6 +176,21 @@ if (failures.length > 0) {
 
 if (x402Result) {
   console.log(JSON.stringify({ x402Smoke: x402Result }, null, 2));
+}
+
+if (opsStateError) {
+  console.log(
+    JSON.stringify(
+      {
+        opsState: {
+          status: "degraded",
+          message: opsStateError.message,
+        },
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 await closeOpsState(opsState);
