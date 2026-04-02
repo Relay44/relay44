@@ -305,6 +305,8 @@ services:
           property: connectionString
       - key: API_URL
         value: https://relay44-api.onrender.com/v1
+      - key: ADMIN_CONTROL_KEY
+        sync: false
       - key: OPS_STATE_CONNECT_ATTEMPTS
         value: "4"
       - key: OPS_STATE_CONNECT_RETRY_MS
