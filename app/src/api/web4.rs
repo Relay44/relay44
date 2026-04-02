@@ -383,7 +383,7 @@ fn tool_payment_required_payload(
     resource: X402Resource,
 ) -> Value {
     let origin = api_base.trim_end_matches("/v1");
-    let quote = serde_json::to_value(build_quote_for_origin(state, origin, resource)).ok();
+    let quote = serde_json::to_value(build_quote_for_origin(&state.config, origin, resource)).ok();
     tool_error_payload(
         402,
         web4_error_payload(
@@ -1226,7 +1226,7 @@ async fn handle_tool_call(
             };
             let origin = api_base.trim_end_matches("/v1");
             Ok(tool_result_payload(
-                json!(build_quote_for_origin(state, origin, resource)),
+                json!(build_quote_for_origin(&state.config, origin, resource)),
                 false,
             ))
         }
@@ -1280,7 +1280,7 @@ async fn handle_mcp_method(
     let id = request.id.clone().unwrap_or(Value::Null);
     let api_base = format!(
         "{}/v1",
-        api_origin_from_request(state, req).trim_end_matches('/')
+        api_origin_from_request(&state.config, req).trim_end_matches('/')
     );
 
     match request.method.as_str() {
@@ -1772,7 +1772,7 @@ pub async fn get_web4_capabilities(state: web::Data<Arc<AppState>>) -> impl Resp
 pub async fn get_mcp_manifest(req: HttpRequest, state: web::Data<Arc<AppState>>) -> impl Responder {
     let api_base = format!(
         "{}/v1",
-        api_origin_from_request(&state, &req).trim_end_matches('/')
+        api_origin_from_request(&state.config, &req).trim_end_matches('/')
     );
 
     HttpResponse::Ok().json(json!({
@@ -1819,7 +1819,7 @@ pub async fn get_mcp_manifest(req: HttpRequest, state: web::Data<Arc<AppState>>)
 pub async fn get_agent_card(req: HttpRequest, state: web::Data<Arc<AppState>>) -> impl Responder {
     let api_base = format!(
         "{}/v1",
-        api_origin_from_request(&state, &req).trim_end_matches('/')
+        api_origin_from_request(&state.config, &req).trim_end_matches('/')
     );
     let chains = configured_chains(&state);
     let auth = if state.config.chain_mode == "solana" {
