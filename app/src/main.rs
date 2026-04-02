@@ -312,6 +312,15 @@ async fn main() -> std::io::Result<()> {
     // Internal agent scheduler (replaces external-tick-only dependency)
     services::agent_scheduler::spawn_agent_scheduler(app_state.clone());
 
+    // Cross-venue liquidity mirror
+    services::liquidity_mirror::spawn_liquidity_mirror(app_state.clone());
+
+    // Auto-hedge engine
+    services::hedge_engine::spawn_hedge_engine(app_state.clone());
+
+    // Market auto-creation pipeline
+    services::market_creator::spawn_market_creator(app_state.clone());
+
     let shutdown_state = app_state.clone();
     tokio::spawn(async move {
         graceful_shutdown(shutdown_state).await;
@@ -604,6 +613,23 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/bootstrap/runner/report",
                                 web::post().to(api::evm::bootstrap_runner_report),
+                            )
+                            // ---- Liquidity Mirror routes ----
+                            .route(
+                                "/mirror/links",
+                                web::post().to(api::evm::create_mirror_link),
+                            )
+                            .route(
+                                "/mirror/links",
+                                web::get().to(api::evm::list_mirror_links),
+                            )
+                            .route(
+                                "/mirror/links/{link_id}",
+                                web::patch().to(api::evm::update_mirror_link),
+                            )
+                            .route(
+                                "/mirror/status",
+                                web::get().to(api::evm::get_mirror_status),
                             )
                             .route(
                                 "/oracle/markets/{market_id}/config",

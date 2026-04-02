@@ -374,6 +374,25 @@ pub async fn fetch_active_markets(
     Ok(markets)
 }
 
+/// Fetch raw Limitless market JSON (preserves venue.exchange, tokens, positionIds).
+pub async fn fetch_market_raw(
+    client: &Client,
+    api_base: &str,
+    slug: &str,
+) -> Result<Value, ApiError> {
+    let url = format!("{}/markets/{}", api_base.trim_end_matches('/'), slug.trim());
+    client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|err| api_error("limitless market request failed", err))?
+        .error_for_status()
+        .map_err(|err| api_error("limitless market response failed", err))?
+        .json::<Value>()
+        .await
+        .map_err(|err| api_error("limitless market payload invalid", err))
+}
+
 pub async fn fetch_market_by_slug(
     client: &Client,
     api_base: &str,

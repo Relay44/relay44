@@ -150,8 +150,10 @@ interface BaseOrderBookResponse {
   provider_market_ref?: string;
   is_synthetic?: boolean;
   includes_bootstrap?: boolean;
+  includes_mirror?: boolean;
   bootstrap_depth?: number;
   organic_depth?: number;
+  mirror_depth?: number;
 }
 
 interface BaseTradeSnapshot {
@@ -1542,8 +1544,10 @@ class ApiClient {
       asks: response.asks ?? [],
       lastUpdated: toIsoString(response.last_updated),
       includesBootstrap: Boolean(response.includes_bootstrap),
+      includesMirror: Boolean(response.includes_mirror),
       bootstrapDepth: toOptionalNumber(response.bootstrap_depth),
       organicDepth: toOptionalNumber(response.organic_depth),
+      mirrorDepth: toOptionalNumber(response.mirror_depth),
     };
   }
 
