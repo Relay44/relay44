@@ -4531,7 +4531,12 @@ pub async fn get_base_orderbook(
             "EVM services are disabled",
         ));
     }
-    x402::ensure_payment_for_request(&state, &req, X402Resource::OrderBook).await?;
+    let settlement =
+        x402::ensure_payment_for_request(&state, &req, X402Resource::OrderBook).await?;
+    let payment_response_header = settlement
+        .as_ref()
+        .map(x402::encode_payment_response_header)
+        .transpose()?;
 
     let market_id_raw = path.into_inner();
     let outcome = match query.outcome.as_deref().unwrap_or("yes") {
@@ -4557,7 +4562,12 @@ pub async fn get_base_orderbook(
             external::fetch_orderbook(&state.config, &state.redis, &external_id, outcome, depth)
                 .await?;
 
-        return Ok(HttpResponse::Ok().json(BaseOrderBookResponse {
+        let mut response = HttpResponse::Ok();
+        if let Some(header) = payment_response_header.as_ref() {
+            response.append_header(("PAYMENT-RESPONSE", header.clone()));
+        }
+
+        return Ok(response.json(BaseOrderBookResponse {
             market_id: snapshot.market_id,
             outcome: snapshot.outcome,
             bids: snapshot
@@ -4742,7 +4752,12 @@ pub async fn get_base_orderbook(
         .as_ref()
         .is_some_and(|config| bootstrap_active_for_market(config, &market_snapshot, now));
 
-    Ok(HttpResponse::Ok().json(BaseOrderBookResponse {
+    let mut response = HttpResponse::Ok();
+    if let Some(header) = payment_response_header.as_ref() {
+        response.append_header(("PAYMENT-RESPONSE", header.clone()));
+    }
+
+    Ok(response.json(BaseOrderBookResponse {
         market_id: market_id_raw,
         outcome: outcome.to_string(),
         bids,
@@ -4773,7 +4788,11 @@ pub async fn get_base_trades(
             "EVM services are disabled",
         ));
     }
-    x402::ensure_payment_for_request(&state, &req, X402Resource::Trades).await?;
+    let settlement = x402::ensure_payment_for_request(&state, &req, X402Resource::Trades).await?;
+    let payment_response_header = settlement
+        .as_ref()
+        .map(x402::encode_payment_response_header)
+        .transpose()?;
 
     let market_id_raw = path.into_inner();
     let limit = query.limit.unwrap_or(50).min(MAX_TRADES_PAGE_SIZE);
@@ -4825,7 +4844,12 @@ pub async fn get_base_trades(
             })
             .collect::<Vec<_>>();
 
-        return Ok(HttpResponse::Ok().json(BaseTradesResponse {
+        let mut response = HttpResponse::Ok();
+        if let Some(header) = payment_response_header.as_ref() {
+            response.append_header(("PAYMENT-RESPONSE", header.clone()));
+        }
+
+        return Ok(response.json(BaseTradesResponse {
             trades,
             total: snapshot.total,
             limit: snapshot.limit,
@@ -4867,7 +4891,12 @@ pub async fn get_base_trades(
         .await
         .map_err(map_evm_rpc_error)?;
     if latest_block == 0 {
-        return Ok(HttpResponse::Ok().json(BaseTradesResponse {
+        let mut response = HttpResponse::Ok();
+        if let Some(header) = payment_response_header.as_ref() {
+            response.append_header(("PAYMENT-RESPONSE", header.clone()));
+        }
+
+        return Ok(response.json(BaseTradesResponse {
             trades: vec![],
             total: 0,
             limit,
@@ -5015,7 +5044,12 @@ pub async fn get_base_trades(
 
     let total = trades.len() as u64;
     if offset >= total {
-        return Ok(HttpResponse::Ok().json(BaseTradesResponse {
+        let mut response = HttpResponse::Ok();
+        if let Some(header) = payment_response_header.as_ref() {
+            response.append_header(("PAYMENT-RESPONSE", header.clone()));
+        }
+
+        return Ok(response.json(BaseTradesResponse {
             trades: vec![],
             total,
             limit,
@@ -5049,7 +5083,12 @@ pub async fn get_base_trades(
         });
     }
 
-    Ok(HttpResponse::Ok().json(BaseTradesResponse {
+    let mut response = HttpResponse::Ok();
+    if let Some(header) = payment_response_header.as_ref() {
+        response.append_header(("PAYMENT-RESPONSE", header.clone()));
+    }
+
+    Ok(response.json(BaseTradesResponse {
         trades: page,
         total,
         limit,
