@@ -40,6 +40,73 @@ function parsePositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function buildApiStateConfig(env) {
+  const apiBaseUrl = String(env.OPS_STATE_API_URL || env.API_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+  const adminKey = String(env.OPS_STATE_ADMIN_KEY || env.ADMIN_CONTROL_KEY || "").trim();
+
+  if (!apiBaseUrl || !adminKey) {
+    return null;
+  }
+
+  return {
+    apiBaseUrl,
+    adminKey,
+  };
+}
+
+function normalizeApiRunnerState(payload) {
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    runner_name: payload.runnerName ?? payload.runner_name ?? null,
+    last_started_at: payload.lastStartedAt ?? payload.last_started_at ?? null,
+    last_succeeded_at: payload.lastSucceededAt ?? payload.last_succeeded_at ?? null,
+    last_failed_at: payload.lastFailedAt ?? payload.last_failed_at ?? null,
+    last_status: payload.lastStatus ?? payload.last_status ?? null,
+    last_error_code: payload.lastErrorCode ?? payload.last_error_code ?? null,
+    last_error_message: payload.lastErrorMessage ?? payload.last_error_message ?? null,
+    metadata: payload.metadata ?? {},
+    created_at: payload.createdAt ?? payload.created_at ?? null,
+    updated_at: payload.updatedAt ?? payload.updated_at ?? null,
+  };
+}
+
+async function requestApiState(state, path, init = {}) {
+  const response = await fetch(`${state.apiBaseUrl}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      "x-admin-key": state.adminKey,
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(init.headers || {}),
+    },
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `ops_state api ${response.status}: ${text || response.statusText || "request failed"}`,
+    );
+  }
+
+  return response.json();
+}
+
+async function reportApiRunnerState(state, payload) {
+  return requestApiState(state, "/evm/ops/runner-state/report", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 function buildConfig(connectionString) {
   const url = new URL(connectionString);
   const sslmode = (url.searchParams.get("sslmode") || "").trim().toLowerCase();
@@ -147,12 +214,22 @@ async function runQuery(state, sql, params = []) {
 }
 
 export async function connectOpsState(env = process.env) {
+  const apiConfig = buildApiStateConfig(env);
+  if (apiConfig) {
+    return {
+      mode: "api",
+      env,
+      ...apiConfig,
+    };
+  }
+
   const connectionString = String(env.DATABASE_URL || "").trim();
   if (!connectionString) {
     return null;
   }
 
   return {
+    mode: "db",
     client: await connectWithRetries(connectionString, env),
     connectionString,
     env,
@@ -160,7 +237,7 @@ export async function connectOpsState(env = process.env) {
 }
 
 export async function closeOpsState(state) {
-  if (!state) {
+  if (!state || state.mode === "api") {
     return;
   }
 
@@ -170,6 +247,14 @@ export async function closeOpsState(state) {
 export async function getRunnerState(state, runnerName) {
   if (!state) {
     return null;
+  }
+
+  if (state.mode === "api") {
+    const payload = await requestApiState(
+      state,
+      `/evm/ops/runner-state/${encodeURIComponent(runnerName)}`,
+    );
+    return normalizeApiRunnerState(payload);
   }
 
   const { rows } = await runQuery(
@@ -200,6 +285,15 @@ export async function reportRunnerStarted(state, runnerName, metadata = {}) {
     return;
   }
 
+  if (state.mode === "api") {
+    await reportApiRunnerState(state, {
+      runnerName: runnerName,
+      status: "running",
+      metadata,
+    });
+    return;
+  }
+
   await runQuery(
     state,
     `
@@ -223,6 +317,15 @@ export async function reportRunnerStarted(state, runnerName, metadata = {}) {
 
 export async function reportRunnerSuccess(state, runnerName, metadata = {}) {
   if (!state) {
+    return;
+  }
+
+  if (state.mode === "api") {
+    await reportApiRunnerState(state, {
+      runnerName: runnerName,
+      status: "healthy",
+      metadata,
+    });
     return;
   }
 
@@ -261,6 +364,17 @@ export async function reportRunnerFailure(
   metadata = {},
 ) {
   if (!state) {
+    return;
+  }
+
+  if (state.mode === "api") {
+    await reportApiRunnerState(state, {
+      runnerName: runnerName,
+      status: "failed",
+      errorCode,
+      errorMessage,
+      metadata,
+    });
     return;
   }
 

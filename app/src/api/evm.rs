@@ -6039,6 +6039,218 @@ pub struct OracleKeeperReportResponse {
     pub last_error: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsRunnerStateResponse {
+    pub runner_name: String,
+    pub last_started_at: Option<String>,
+    pub last_succeeded_at: Option<String>,
+    pub last_failed_at: Option<String>,
+    pub last_status: String,
+    pub last_error_code: Option<String>,
+    pub last_error_message: Option<String>,
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsRunnerStateReportRequest {
+    pub runner_name: String,
+    pub status: String,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    #[serde(default = "default_json_object")]
+    pub metadata: serde_json::Value,
+}
+
+fn default_json_object() -> serde_json::Value {
+    json!({})
+}
+
+fn map_ops_runner_state_row(row: &sqlx::postgres::PgRow) -> OpsRunnerStateResponse {
+    use sqlx::Row;
+
+    OpsRunnerStateResponse {
+        runner_name: row.get("runner_name"),
+        last_started_at: row.get("last_started_at"),
+        last_succeeded_at: row.get("last_succeeded_at"),
+        last_failed_at: row.get("last_failed_at"),
+        last_status: row.get("last_status"),
+        last_error_code: row.get("last_error_code"),
+        last_error_message: row.get("last_error_message"),
+        metadata: row
+            .try_get("metadata")
+            .unwrap_or_else(|_| default_json_object()),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+async fn load_ops_runner_state(
+    state: &AppState,
+    runner_name: &str,
+) -> Result<Option<OpsRunnerStateResponse>, ApiError> {
+    let row = sqlx::query(
+        "select \
+            runner_name, \
+            last_started_at::text as last_started_at, \
+            last_succeeded_at::text as last_succeeded_at, \
+            last_failed_at::text as last_failed_at, \
+            last_status, \
+            last_error_code, \
+            last_error_message, \
+            metadata, \
+            created_at::text as created_at, \
+            updated_at::text as updated_at \
+         from ops_runner_state \
+         where runner_name = $1",
+    )
+    .bind(runner_name)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|error| ApiError::internal(&format!("ops runner state query failed: {}", error)))?;
+
+    Ok(row.as_ref().map(map_ops_runner_state_row))
+}
+
+pub async fn get_ops_runner_state(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let runner_name = path.into_inner();
+    if runner_name.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_RUNNER_NAME",
+            "runner name is required",
+        ));
+    }
+
+    match load_ops_runner_state(&state, runner_name.trim()).await? {
+        Some(snapshot) => Ok(HttpResponse::Ok().json(snapshot)),
+        None => Err(ApiError::not_found("runner state")),
+    }
+}
+
+pub async fn report_ops_runner_state(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<OpsRunnerStateReportRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_admin_control(&req, &state)?;
+
+    let runner_name = body.runner_name.trim();
+    if runner_name.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_RUNNER_NAME",
+            "runner name is required",
+        ));
+    }
+
+    let status = body.status.trim().to_ascii_lowercase();
+    let metadata = body.metadata.clone();
+
+    match status.as_str() {
+        "running" => {
+            sqlx::query(
+                "insert into ops_runner_state (\
+                    runner_name, \
+                    last_started_at, \
+                    last_status, \
+                    metadata \
+                 ) values ($1, now(), 'running', $2::jsonb) \
+                 on conflict (runner_name) do update \
+                 set last_started_at = now(), \
+                     last_status = 'running', \
+                     metadata = $2::jsonb, \
+                     updated_at = now()",
+            )
+            .bind(runner_name)
+            .bind(metadata)
+            .execute(state.db.pool())
+            .await
+            .map_err(|error| {
+                ApiError::internal(&format!("ops runner state update failed: {}", error))
+            })?;
+        }
+        "healthy" => {
+            sqlx::query(
+                "insert into ops_runner_state (\
+                    runner_name, \
+                    last_started_at, \
+                    last_succeeded_at, \
+                    last_status, \
+                    last_error_code, \
+                    last_error_message, \
+                    metadata \
+                 ) values ($1, now(), now(), 'healthy', null, null, $2::jsonb) \
+                 on conflict (runner_name) do update \
+                 set last_started_at = now(), \
+                     last_succeeded_at = now(), \
+                     last_status = 'healthy', \
+                     last_error_code = null, \
+                     last_error_message = null, \
+                     metadata = $2::jsonb, \
+                     updated_at = now()",
+            )
+            .bind(runner_name)
+            .bind(metadata)
+            .execute(state.db.pool())
+            .await
+            .map_err(|error| {
+                ApiError::internal(&format!("ops runner state update failed: {}", error))
+            })?;
+        }
+        "failed" => {
+            sqlx::query(
+                "insert into ops_runner_state (\
+                    runner_name, \
+                    last_started_at, \
+                    last_failed_at, \
+                    last_status, \
+                    last_error_code, \
+                    last_error_message, \
+                    metadata \
+                 ) values ($1, now(), now(), 'failed', $2, $3, $4::jsonb) \
+                 on conflict (runner_name) do update \
+                 set last_started_at = now(), \
+                     last_failed_at = now(), \
+                     last_status = 'failed', \
+                     last_error_code = $2, \
+                     last_error_message = $3, \
+                     metadata = $4::jsonb, \
+                     updated_at = now()",
+            )
+            .bind(runner_name)
+            .bind(body.error_code.clone())
+            .bind(body.error_message.clone())
+            .bind(metadata)
+            .execute(state.db.pool())
+            .await
+            .map_err(|error| {
+                ApiError::internal(&format!("ops runner state update failed: {}", error))
+            })?;
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_RUNNER_STATUS",
+                "status must be running, healthy, or failed",
+            ));
+        }
+    }
+
+    let snapshot = load_ops_runner_state(&state, runner_name)
+        .await?
+        .ok_or_else(|| {
+            ApiError::internal("ops runner state write succeeded but no row was returned")
+        })?;
+    Ok(HttpResponse::Ok().json(snapshot))
+}
+
 pub async fn get_oracle_market_config(
     state: web::Data<Arc<AppState>>,
     path: web::Path<u64>,

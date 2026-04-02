@@ -614,6 +614,14 @@ async fn main() -> std::io::Result<()> {
                                 "/bootstrap/runner/report",
                                 web::post().to(api::evm::bootstrap_runner_report),
                             )
+                            .route(
+                                "/ops/runner-state/{runner_name}",
+                                web::get().to(api::evm::get_ops_runner_state),
+                            )
+                            .route(
+                                "/ops/runner-state/report",
+                                web::post().to(api::evm::report_ops_runner_state),
+                            )
                             // ---- Liquidity Mirror routes ----
                             .route(
                                 "/mirror/links",
