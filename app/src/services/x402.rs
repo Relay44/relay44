@@ -275,6 +275,14 @@ pub fn encode_payment_signature_header(
         .map_err(|_| ApiError::bad_request("INVALID_X402_PAYMENT", "payment payload is invalid"))
 }
 
+pub fn encode_payment_response_header(
+    settle_response: &X402SettleResponse,
+) -> Result<String, ApiError> {
+    serde_json::to_vec(settle_response)
+        .map(|bytes| BASE64.encode(bytes))
+        .map_err(|_| ApiError::internal("x402 settlement response is invalid"))
+}
+
 fn decode_payment_signature_header(header: &str) -> Result<X402PaymentPayload, ApiError> {
     let decoded = BASE64.decode(header).map_err(|_| {
         ApiError::bad_request(
@@ -373,9 +381,9 @@ pub async fn ensure_payment_for_request(
     state: &AppState,
     req: &HttpRequest,
     resource: X402Resource,
-) -> Result<(), ApiError> {
+) -> Result<Option<X402SettleResponse>, ApiError> {
     if !state.config.x402_enabled {
-        return Ok(());
+        return Ok(None);
     }
 
     let resource_url = resource_url_from_request(state, req);
@@ -412,9 +420,9 @@ pub async fn ensure_payment_from_payload(
     payment_payload: X402PaymentPayload,
     resource: X402Resource,
     resource_url: Option<String>,
-) -> Result<(), ApiError> {
+) -> Result<Option<X402SettleResponse>, ApiError> {
     if !state.config.x402_enabled {
-        return Ok(());
+        return Ok(None);
     }
 
     let resource_url = resource_url.unwrap_or_else(|| {
@@ -458,7 +466,7 @@ pub async fn ensure_payment_from_payload(
         ));
     }
 
-    Ok(())
+    Ok(Some(settle_response))
 }
 
 #[cfg(test)]
@@ -491,5 +499,25 @@ mod tests {
         let decoded = decode_payment_signature_header(encoded.as_str()).unwrap();
         assert_eq!(decoded.x402_version, 2);
         assert_eq!(decoded.accepted.network, "eip155:8453");
+    }
+
+    #[test]
+    fn encode_payment_response_header_roundtrip() {
+        let response = X402SettleResponse {
+            success: true,
+            error_reason: None,
+            error_message: None,
+            payer: Some("0x1111111111111111111111111111111111111111".to_string()),
+            transaction: "0xabc".to_string(),
+            network: "eip155:8453".to_string(),
+            extensions: Some(json!({ "foo": "bar" })),
+        };
+
+        let encoded = encode_payment_response_header(&response).unwrap();
+        let decoded: X402SettleResponse =
+            serde_json::from_slice(&BASE64.decode(encoded).unwrap()).unwrap();
+        assert!(decoded.success);
+        assert_eq!(decoded.transaction, "0xabc");
+        assert_eq!(decoded.network, "eip155:8453");
     }
 }
