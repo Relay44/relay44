@@ -22,9 +22,9 @@ const ENSURE_TABLE_SQL = `
 function buildConfig(connectionString) {
   const url = new URL(connectionString);
   const sslmode = (url.searchParams.get("sslmode") || "").trim().toLowerCase();
-  const needsSsl = ["require", "verify-ca", "verify-full", "prefer"].includes(
-    sslmode,
-  );
+  const needsSsl =
+    ["require", "verify-ca", "verify-full", "prefer"].includes(sslmode) ||
+    /\.render\.com$/i.test(url.hostname);
 
   return needsSsl
     ? { connectionString, ssl: { rejectUnauthorized: false } }
