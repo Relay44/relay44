@@ -179,8 +179,10 @@ export interface OrderBook {
   asks: OrderBookLevel[];
   lastUpdated: string;
   includesBootstrap?: boolean;
+  includesMirror?: boolean;
   bootstrapDepth?: number;
   organicDepth?: number;
+  mirrorDepth?: number;
 }
 
 export interface User {
