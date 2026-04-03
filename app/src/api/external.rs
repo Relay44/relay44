@@ -10103,6 +10103,205 @@ pub async fn get_strategy_replay(
 
     Ok(HttpResponse::Ok().json(StrategyReplayResponse { run, fills }))
 }
+
+pub async fn get_agent_promotion_readiness(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let agent_id = path.into_inner();
+    let agent = load_external_agent_by_id(&state, &agent_id).await?;
+
+    let mut gates = Vec::<Value>::new();
+
+    // Gate 1: Replay positive (30-day window).
+    let replay_pnl: Option<f64> = sqlx::query_scalar(
+        "SELECT SUM(f.pnl_usdc)
+         FROM strategy_replay_fills f
+         JOIN strategy_replay_runs r ON r.id = f.replay_run_id
+         WHERE r.target_wallet IS NOT NULL
+           AND r.strategy = $1
+           AND r.status = 'completed'
+           AND r.created_at >= now() - interval '30 days'",
+    )
+    .bind(&agent.strategy)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(None);
+    let replay_positive = replay_pnl.unwrap_or(0.0) > 0.0;
+    gates.push(json!({
+        "name": "replay_positive_30d",
+        "passed": replay_positive,
+        "value": replay_pnl.unwrap_or(0.0),
+        "threshold": 0.0
+    }));
+
+    // Gate 2: 14 consecutive days forward paper positive.
+    let paper_days: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT DATE(created_at))
+         FROM external_agent_runs
+         WHERE agent_id = $1 AND status NOT IN ('failed')
+           AND created_at >= now() - interval '14 days'",
+    )
+    .bind(&agent.id)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(0);
+    let paper_pnl: Option<f64> = sqlx::query_scalar(
+        "SELECT SUM(realized_pnl_usdc)
+         FROM external_outcomes
+         WHERE agent_id = $1
+           AND closed_at >= now() - interval '14 days'",
+    )
+    .bind(&agent.id)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(None);
+    let forward_paper_ok = paper_days >= 14 && paper_pnl.unwrap_or(0.0) > 0.0;
+    gates.push(json!({
+        "name": "forward_paper_14d_positive",
+        "passed": forward_paper_ok,
+        "value": { "days": paper_days, "pnl": paper_pnl.unwrap_or(0.0) },
+        "threshold": { "days": 14, "pnl": 0.0 }
+    }));
+
+    // Gate 3: At least 100 forward paper fills.
+    let fill_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM external_fills
+         WHERE agent_id = $1",
+    )
+    .bind(&agent.id)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(0);
+    let fills_ok = fill_count >= 100;
+    gates.push(json!({
+        "name": "min_fills_100",
+        "passed": fills_ok,
+        "value": fill_count,
+        "threshold": 100
+    }));
+
+    // Gate 4: Net PnL positive after fees.
+    let net_pnl: Option<f64> = sqlx::query_scalar(
+        "SELECT SUM(realized_pnl_usdc)
+         FROM external_outcomes
+         WHERE agent_id = $1",
+    )
+    .bind(&agent.id)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(None);
+    let pnl_positive = net_pnl.unwrap_or(0.0) > 0.0;
+    gates.push(json!({
+        "name": "net_pnl_positive",
+        "passed": pnl_positive,
+        "value": net_pnl.unwrap_or(0.0),
+        "threshold": 0.0
+    }));
+
+    // Gate 5: p50 detection-to-order <= 1250ms.
+    let mut latencies = Vec::<f64>::new();
+    let run_rows = sqlx::query(
+        "SELECT metadata FROM external_agent_runs
+         WHERE agent_id = $1 AND status != 'failed'
+         ORDER BY created_at DESC LIMIT 200",
+    )
+    .bind(&agent.id)
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap_or_default();
+    for row in &run_rows {
+        let md = row.try_get::<Value, _>("metadata").unwrap_or(json!({}));
+        if let Some(v) = md
+            .pointer("/signalMetrics/detectionToOrderMs")
+            .or_else(|| md.get("detectionToOrderMs"))
+            .and_then(|e| e.as_f64())
+        {
+            latencies.push(v);
+        }
+    }
+    let p50_latency = median_f64(&mut latencies);
+    let latency_ok = p50_latency.map_or(true, |v| v <= 1250.0);
+    gates.push(json!({
+        "name": "p50_latency_lte_1250ms",
+        "passed": latency_ok,
+        "value": p50_latency,
+        "threshold": 1250.0
+    }));
+
+    // Gate 6: p50 slippage <= 1 tick.
+    let mut slippages = Vec::<f64>::new();
+    for row in &run_rows {
+        let md = row.try_get::<Value, _>("metadata").unwrap_or(json!({}));
+        if let Some(v) = md
+            .get("fillSlippageTicks")
+            .or_else(|| md.pointer("/signalMetrics/slippageTicks"))
+            .and_then(|e| e.as_f64())
+        {
+            slippages.push(v);
+        }
+    }
+    let p50_slippage = median_f64(&mut slippages);
+    let slippage_ok = p50_slippage.map_or(true, |v| v <= 1.0);
+    gates.push(json!({
+        "name": "p50_slippage_lte_1_tick",
+        "passed": slippage_ok,
+        "value": p50_slippage,
+        "threshold": 1.0
+    }));
+
+    // Gate 7: Max drawdown < 5% of bankroll.
+    let risk_state = crate::services::risk_governor::get_or_init(
+        state.db.pool(),
+        &agent.owner,
+    )
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    let bankroll = risk_state.bankroll_usdc;
+
+    let outcome_rows = sqlx::query(
+        "SELECT realized_pnl_usdc FROM external_outcomes
+         WHERE agent_id = $1
+         ORDER BY closed_at ASC",
+    )
+    .bind(&agent.id)
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap_or_default();
+    let pnl_series: Vec<f64> = outcome_rows
+        .iter()
+        .map(|r| r.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0))
+        .collect();
+    let max_dd = calculate_max_drawdown(&pnl_series);
+    let max_dd_pct = if bankroll > 0.0 {
+        max_dd / bankroll
+    } else {
+        0.0
+    };
+    let drawdown_ok = max_dd_pct < 0.05;
+    gates.push(json!({
+        "name": "max_drawdown_lt_5pct",
+        "passed": drawdown_ok,
+        "value": { "drawdownUsdc": max_dd, "drawdownPct": max_dd_pct },
+        "threshold": 0.05
+    }));
+
+    let eligible = gates.iter().all(|g| g["passed"].as_bool().unwrap_or(false));
+
+    Ok(HttpResponse::Ok().json(json!({
+        "agentId": agent.id,
+        "strategy": agent.strategy,
+        "eligible": eligible,
+        "gates": gates
+    })))
+}
+
 pub async fn create_external_signal(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
