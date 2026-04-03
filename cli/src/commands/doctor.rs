@@ -31,10 +31,9 @@ pub async fn run(
 
     let api_check = check_api(api_url).await;
     let auth_check = check_auth(api_url, profile.access_token.as_deref()).await;
-    let wallet_check = if profile.wallet.is_some() {
-        ("ok".to_string(), profile.wallet.unwrap())
-    } else {
-        ("warn".to_string(), "wallet not configured".to_string())
+    let wallet_check = match profile.wallet.as_deref() {
+        Some(w) => ("ok".to_string(), w.to_string()),
+        None => ("warn".to_string(), "wallet not configured".to_string()),
     };
     let completion_check = check_completions();
     let profile_check = if profile.api_url.trim().is_empty() {

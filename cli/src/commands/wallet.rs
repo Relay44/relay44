@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Subcommand;
 
 use crate::client::Client;
@@ -20,7 +20,7 @@ pub enum WalletCmd {
 }
 
 pub async fn run(cmd: WalletCmd, api: &Client, fmt: Format) -> Result<()> {
-    require_auth(api)?;
+    api.require_auth()?;
 
     match cmd {
         WalletCmd::Balance => {
@@ -65,13 +65,3 @@ pub async fn run(cmd: WalletCmd, api: &Client, fmt: Format) -> Result<()> {
     Ok(())
 }
 
-fn require_auth(api: &Client) -> Result<()> {
-    if api.is_authenticated() {
-        return Ok(());
-    }
-    bail!(
-        "Not logged in.\n\n  \
-         r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
-         r44 config set-token <TOKEN>  (if you have a token already)"
-    );
-}

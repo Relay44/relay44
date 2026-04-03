@@ -47,7 +47,7 @@ impl SessionLogger {
             std::fs::create_dir_all(parent)?;
         }
 
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self.lock.lock().expect("session logger lock poisoned");
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
