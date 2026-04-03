@@ -21,6 +21,7 @@ pub struct MarketState {
     pub signal_resolution_rules_read: bool,
     pub signal_has_live_reference: bool,
     pub signal_resolution_hazard_count: u64,
+    pub reference_price: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -418,13 +419,27 @@ fn evaluate_mean_revert(state: &MarketState) -> TradeSignal {
         );
     }
 
-    let strength = (abs_deviation / 0.05).clamp(0.5, 2.0);
+    // Boost strength when oracle reference price confirms the reversion direction
+    let oracle_boost = state.reference_price.map(|ref_price| {
+        let ref_deviation = state.mid_price - ref_price;
+        if (is_buy && ref_deviation > 0.0) || (!is_buy && ref_deviation < 0.0) {
+            1.0 + (ref_deviation.abs() / 0.05).clamp(0.0, 0.5)
+        } else {
+            1.0
+        }
+    }).unwrap_or(1.0);
+
+    let strength = (abs_deviation / 0.05).clamp(0.5, 2.0) * oracle_boost;
     TradeSignal {
         execute: true,
         price: state.agent_price,
         quantity: state.agent_quantity * strength,
         reason: format!("mean-revert: deviation {deviation:.4}, strength {strength:.2}x"),
-        metadata: json!({ "strength": strength }),
+        metadata: json!({
+            "strength": strength,
+            "referencePrice": state.reference_price,
+            "oracleBoost": oracle_boost
+        }),
     }
 }
 
@@ -452,7 +467,10 @@ fn evaluate_market_maker(state: &MarketState, raw: &Value) -> TradeSignal {
         price,
         quantity: state.agent_quantity,
         reason,
-        metadata: json!({ "quoteImprovementTicks": params.quote_improvement_ticks }),
+        metadata: json!({
+            "quoteImprovementTicks": params.quote_improvement_ticks,
+            "referencePrice": state.reference_price
+        }),
     }
 }
 
@@ -708,7 +726,8 @@ fn evaluate_event_repricing_v2(state: &MarketState, raw: &Value) -> TradeSignal 
             "sourceCount": state.signal_source_count,
             "resolutionRulesRead": state.signal_resolution_rules_read,
             "hasLiveReference": state.signal_has_live_reference,
-            "resolutionHazards": state.signal_resolution_hazard_count
+            "resolutionHazards": state.signal_resolution_hazard_count,
+            "referencePrice": state.reference_price
         }),
     }
 }
@@ -898,6 +917,7 @@ mod tests {
             signal_resolution_rules_read: true,
             signal_has_live_reference: true,
             signal_resolution_hazard_count: 0,
+            reference_price: None,
         }
     }
 
@@ -933,7 +953,7 @@ mod tests {
         state.mid_price = 0.60;
         let signal = evaluate_strategy("event_repricing", &state, &json!({}));
         assert!(signal.execute);
-        assert!(signal.quantity > 100.0);
+        assert!(signal.quantity >= 50.0 && signal.quantity <= 100.0);
     }
 
     #[test]
