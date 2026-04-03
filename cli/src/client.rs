@@ -10,6 +10,55 @@ use crate::output;
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF_MS: u64 = 500;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ExitCode {
+    Success = 0,
+    General = 1,
+    Auth = 2,
+    NotFound = 3,
+    Validation = 4,
+    Network = 5,
+    Config = 6,
+}
+
+impl ExitCode {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+#[derive(Debug)]
+pub struct CliError {
+    pub exit_code: ExitCode,
+    pub source: anyhow::Error,
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.source)
+    }
+}
+
+impl std::error::Error for CliError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.source()
+    }
+}
+
+pub fn cli_error(code: ExitCode, err: anyhow::Error) -> anyhow::Error {
+    anyhow::Error::new(CliError {
+        exit_code: code,
+        source: err,
+    })
+}
+
+pub fn exit_code_from(err: &anyhow::Error) -> ExitCode {
+    err.downcast_ref::<CliError>()
+        .map(|e| e.exit_code)
+        .unwrap_or(ExitCode::General)
+}
+
 pub struct Client {
     http: reqwest::Client,
     base_url: String,
@@ -113,9 +162,12 @@ impl Client {
                     output::debug("retrying after auth refresh");
                     continue;
                 }
-                return Err(anyhow!(
-                    "session expired for profile '{}'. run `r44 login solana` or `r44 login siwe` again",
-                    self.profile
+                return Err(cli_error(
+                    ExitCode::Auth,
+                    anyhow!(
+                        "session expired for profile '{}'. run `r44 login solana` or `r44 login siwe` again",
+                        self.profile
+                    ),
                 ));
             }
 
@@ -127,7 +179,15 @@ impl Client {
 
             if !status.is_success() {
                 let text = response.text().await.unwrap_or_default();
-                return Err(format_api_error(status, &text, path));
+                let code = match status {
+                    StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ExitCode::Auth,
+                    StatusCode::NOT_FOUND => ExitCode::NotFound,
+                    StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
+                        ExitCode::Validation
+                    }
+                    _ => ExitCode::General,
+                };
+                return Err(cli_error(code, format_api_error(status, &text, path)));
             }
 
             return response
@@ -136,7 +196,10 @@ impl Client {
                 .with_context(|| format!("parse {path}"));
         }
 
-        Err(last_error.unwrap_or_else(|| anyhow!("{method} {path}: max retries exceeded")))
+        Err(cli_error(
+            ExitCode::Network,
+            last_error.unwrap_or_else(|| anyhow!("{method} {path}: max retries exceeded")),
+        ))
     }
 
     async fn try_refresh(&self) -> bool {
@@ -213,11 +276,14 @@ impl Client {
         if self.is_authenticated() {
             return Ok(());
         }
-        Err(anyhow!(
-            "Not logged in.\n\n  \
-             r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
-             r44 login siwe --address 0x... --signature 0x... --message <MSG>\n  \
-             r44 config set-token <TOKEN>  (if you have a token already)"
+        Err(cli_error(
+            ExitCode::Auth,
+            anyhow!(
+                "Not logged in.\n\n  \
+                 r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
+                 r44 login siwe --address 0x... --signature 0x... --message <MSG>\n  \
+                 r44 config set-token <TOKEN>  (if you have a token already)"
+            ),
         ))
     }
 

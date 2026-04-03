@@ -1,7 +1,10 @@
+pub mod activity;
 pub mod agents;
 pub mod config;
+pub mod decisions;
 pub mod doctor;
 pub mod edge_scanner;
+pub mod leaderboard;
 pub mod login;
 pub mod markets;
 pub mod orders;
