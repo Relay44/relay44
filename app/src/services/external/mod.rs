@@ -1,6 +1,7 @@
 pub mod credentials;
 pub mod ledger;
 pub mod paper;
+pub mod polymarket_index;
 pub mod providers;
 pub mod strategy;
 pub mod types;

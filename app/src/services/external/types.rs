@@ -148,6 +148,14 @@ pub struct ExternalTradesSnapshot {
     pub chain_id: u64,
     pub provider_market_ref: String,
     pub is_synthetic: bool,
+    #[serde(rename = "indexStatus", skip_serializing_if = "Option::is_none")]
+    pub index_status: Option<String>,
+    #[serde(rename = "indexedFrom", skip_serializing_if = "Option::is_none")]
+    pub indexed_from: Option<String>,
+    #[serde(rename = "indexedThrough", skip_serializing_if = "Option::is_none")]
+    pub indexed_through: Option<String>,
+    #[serde(rename = "isPartialBackfill", default)]
+    pub is_partial_backfill: bool,
 }
 
 pub fn now_rfc3339() -> String {

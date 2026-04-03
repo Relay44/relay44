@@ -22,6 +22,14 @@ const mode = values.mode;
 const environment = mode === "production" ? "production" : "staging";
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const expectedContracts = manifest.environments?.[environment]?.contracts || {};
+const polymarketIndexerEnabled = ["1", "true", "yes", "on"].includes(
+  String(process.env.POLYMARKET_INDEXER_ENABLED || "").trim().toLowerCase(),
+);
+const creatorEconomicsMaterializerEnabled = ["1", "true", "yes", "on"].includes(
+  String(process.env.CREATOR_ECONOMICS_MATERIALIZER_ENABLED || "")
+    .trim()
+    .toLowerCase(),
+);
 
 const checks = [
   {
@@ -150,6 +158,113 @@ const checks = [
     kind: "secret",
     validate: (value) => value.length > 0,
     description: "polymarket builder api passphrase",
+  },
+  {
+    name: "POLYMARKET_INDEXER_API_URL",
+    kind: "config",
+    validate: (value) => value.startsWith("http"),
+    description: "polymarket indexer api url",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_SIWE_DOMAIN",
+    kind: "config",
+    validate: (value) => value.length > 0,
+    description: "polymarket indexer siwe domain",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_ADMIN_PRIVATE_KEY",
+    kind: "secret",
+    validate: (value) => value.startsWith("0x") && value.length >= 66,
+    description: "polymarket indexer operator key",
+    optionalIf: () => !polymarketIndexerEnabled,
+  },
+  {
+    name: "POLYMARKET_INDEXER_CHAIN_ID",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "polymarket indexer chain id",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_LIMIT",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "polymarket indexer tick limit",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_FORWARDER_URL",
+    kind: "config",
+    validate: (value) => value.startsWith("http"),
+    description: "polymarket indexer forwarder url",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_OVERDUE_MS",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "polymarket indexer overdue threshold",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_MAX_BACKFILL_LAG_BLOCKS",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "polymarket indexer max backfill lag",
+    optionalIf: () => true,
+  },
+  {
+    name: "POLYMARKET_INDEXER_MAX_RECONCILIATION_FAILURES",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "polymarket indexer max reconciliation failures",
+    optionalIf: () => true,
+  },
+  {
+    name: "CREATOR_ECONOMICS_MATERIALIZER_API_URL",
+    kind: "config",
+    validate: (value) => value.startsWith("http"),
+    description: "creator economics materializer api url",
+    optionalIf: () => true,
+  },
+  {
+    name: "CREATOR_ECONOMICS_MATERIALIZER_ADMIN_KEY",
+    kind: "secret",
+    validate: (value) => value.length >= 16,
+    description: "creator economics materializer admin key",
+    optionalIf: () =>
+      !creatorEconomicsMaterializerEnabled ||
+      Boolean(process.env.ADMIN_CONTROL_KEY?.trim()),
+  },
+  {
+    name: "CREATOR_ECONOMICS_MATERIALIZER_WINDOW_DAYS",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "creator economics materializer window days",
+    optionalIf: () => true,
+  },
+  {
+    name: "CREATOR_ECONOMICS_MATERIALIZER_LIMIT",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "creator economics materializer limit",
+    optionalIf: () => true,
+  },
+  {
+    name: "CREATOR_ECONOMICS_MATERIALIZER_OVERDUE_MS",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) > 0,
+    description: "creator economics materializer overdue threshold",
+    optionalIf: () => true,
+  },
+  {
+    name: "CREATOR_ECONOMICS_MATERIALIZER_MAX_LAG_DAYS",
+    kind: "config",
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) >= 0,
+    description: "creator economics materializer max lag days",
+    optionalIf: () => true,
   },
 ];
 

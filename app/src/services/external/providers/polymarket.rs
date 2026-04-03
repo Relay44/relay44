@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde_json::Value;
 
 use crate::api::ApiError;
+use crate::services::external::polymarket_index;
 use crate::services::external::types::{
     clamp_probability, is_binary_yes_no, now_rfc3339, ExternalMarketSnapshot,
     ExternalOrderBookLevel, ExternalOrderBookSnapshot, ExternalOutcome, ExternalTradesSnapshot,
@@ -466,20 +467,9 @@ pub async fn fetch_trades(
     _gamma_api_base: &str,
     _clob_api_base: &str,
     market_id: &str,
-    _outcome_filter: Option<&str>,
-    _limit: u64,
-    _offset: u64,
+    outcome_filter: Option<&str>,
+    limit: u64,
+    offset: u64,
 ) -> Result<ExternalTradesSnapshot, ApiError> {
-    Err(ApiError {
-        code: "EXTERNAL_TRADES_UNAVAILABLE".to_string(),
-        message: "polymarket trade history is unavailable until Relay44 indexes real fills"
-            .to_string(),
-        status: 503,
-        details: Some(serde_json::json!({
-            "provider": "polymarket",
-            "marketId": market_id,
-            "reason": "price-history-derived trades were removed because they were not truthful",
-        })),
-        headers: Vec::new(),
-    })
+    polymarket_index::fetch_public_trades(market_id, outcome_filter, limit, offset).await
 }

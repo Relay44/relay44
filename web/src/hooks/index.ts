@@ -39,6 +39,11 @@ export {
 export { useRuntimeMode } from './useRuntimeMode';
 export { useSessionState } from './useSessionState';
 export {
+  useCreatorEconomicsOverview,
+  useCreatorEconomicsMarkets,
+  useCreatorEconomicsMarket,
+} from './useCreatorEconomics';
+export {
   useWebSocket,
   useOrderBookSubscription,
   useTradeSubscription,
