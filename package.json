@@ -74,6 +74,8 @@
     "agents:operator": "node scripts/base-agent-operator.mjs",
     "agents:operator:dry": "BASE_AGENT_OPERATOR_DRY_RUN=true node scripts/base-agent-operator.mjs",
     "bootstrap:backfill": "node scripts/bootstrap-backfill.mjs",
+    "edge-scanner:tick": "node scripts/edge-scanner-tick.mjs",
+    "edge-scanner:dry": "EDGE_SCANNER_DRY_RUN=true node scripts/edge-scanner-tick.mjs",
     "polymarket-indexer:tick": "node scripts/polymarket-indexer-tick.mjs",
     "polymarket-indexer:run": "node scripts/polymarket-indexer-run.mjs",
     "polymarket:forwarder": "node services/polymarket-forwarder/server.mjs",

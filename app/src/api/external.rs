@@ -12872,6 +12872,271 @@ pub async fn get_public_external_agents_performance(
     }))
 }
 
+// ============================================================
+// Edge scanner endpoints
+// ============================================================
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdgeScannerSignal {
+    pub id: String,
+    pub strategy: String,
+    pub provider: String,
+    pub market_id: String,
+    pub direction: String,
+    pub edge_bps: i32,
+    pub confidence_bps: i32,
+    pub kelly_fraction: f64,
+    pub market_price: f64,
+    pub fair_value: f64,
+    pub deadline: Option<String>,
+    pub days_remaining: Option<i32>,
+    pub rationale: String,
+    pub metadata: Option<Value>,
+    pub expires_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngestEdgeScannerSignalsRequest {
+    pub signals: Vec<EdgeScannerSignal>,
+}
+
+pub async fn ingest_edge_scanner_signals(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<IngestEdgeScannerSignalsRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let _user = extract_authenticated_user(&req, &state).await?;
+
+    let mut persisted = 0i64;
+    for signal in &body.signals {
+        let strategy = signal.strategy.as_str();
+        if strategy != "calibration_arb" && strategy != "time_decay" {
+            continue;
+        }
+        let direction = signal.direction.as_str();
+        if direction != "yes" && direction != "no" {
+            continue;
+        }
+        let deadline = signal
+            .deadline
+            .as_deref()
+            .and_then(|d| DateTime::parse_from_rfc3339(d).ok())
+            .map(|d| d.with_timezone(&Utc));
+        let expires_at = DateTime::parse_from_rfc3339(signal.expires_at.as_str())
+            .map_err(|_| ApiError::bad_request("INVALID_EXPIRES_AT", "expiresAt must be RFC3339"))?
+            .with_timezone(&Utc);
+
+        sqlx::query(
+            "INSERT INTO edge_scanner_signals (
+                id, strategy, provider, market_id, direction, edge_bps, confidence_bps,
+                kelly_fraction, market_price, fair_value, deadline, days_remaining,
+                rationale, metadata, active, expires_at, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,TRUE,$15,NOW())
+            ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(&signal.id)
+        .bind(strategy)
+        .bind(&signal.provider)
+        .bind(&signal.market_id)
+        .bind(direction)
+        .bind(signal.edge_bps)
+        .bind(signal.confidence_bps)
+        .bind(signal.kelly_fraction)
+        .bind(signal.market_price)
+        .bind(signal.fair_value)
+        .bind(deadline)
+        .bind(signal.days_remaining)
+        .bind(&signal.rationale)
+        .bind(signal.metadata.as_ref().unwrap_or(&json!({})))
+        .bind(expires_at)
+        .execute(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+        persisted += 1;
+    }
+
+    // expire stale signals
+    sqlx::query("UPDATE edge_scanner_signals SET active = FALSE WHERE active = TRUE AND expires_at < NOW()")
+        .execute(state.db.pool())
+        .await
+        .ok();
+
+    Ok(HttpResponse::Ok().json(json!({ "persisted": persisted })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListEdgeScannerSignalsQuery {
+    pub strategy: Option<String>,
+    pub active_only: Option<bool>,
+    pub min_edge_bps: Option<i32>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+pub async fn list_edge_scanner_signals(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListEdgeScannerSignalsQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let limit = query.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let active_only = query.active_only.unwrap_or(true);
+    let min_edge = query.min_edge_bps.unwrap_or(0);
+
+    let mut qb = QueryBuilder::<Postgres>::new(
+        "SELECT id, strategy, provider, market_id, direction, edge_bps, confidence_bps,
+                kelly_fraction, market_price, fair_value, deadline, days_remaining,
+                rationale, metadata, active, expires_at, created_at, acted_on, acted_at
+         FROM edge_scanner_signals WHERE 1=1",
+    );
+
+    if active_only {
+        qb.push(" AND active = TRUE AND expires_at > NOW()");
+    }
+    if let Some(ref strategy) = query.strategy {
+        qb.push(" AND strategy = ");
+        qb.push_bind(strategy.as_str());
+    }
+    if min_edge > 0 {
+        qb.push(" AND edge_bps >= ");
+        qb.push_bind(min_edge);
+    }
+
+    qb.push(" ORDER BY edge_bps DESC LIMIT ");
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+
+    let rows = qb
+        .build()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let signals: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "id": row.get::<String, _>("id"),
+                "strategy": row.get::<String, _>("strategy"),
+                "provider": row.get::<String, _>("provider"),
+                "marketId": row.get::<String, _>("market_id"),
+                "direction": row.get::<String, _>("direction"),
+                "edgeBps": row.get::<i32, _>("edge_bps"),
+                "confidenceBps": row.get::<i32, _>("confidence_bps"),
+                "kellyFraction": row.get::<f64, _>("kelly_fraction"),
+                "marketPrice": row.get::<f64, _>("market_price"),
+                "fairValue": row.get::<f64, _>("fair_value"),
+                "deadline": row.get::<Option<DateTime<Utc>>, _>("deadline").map(|d| d.to_rfc3339()),
+                "daysRemaining": row.get::<Option<i32>, _>("days_remaining"),
+                "rationale": row.get::<String, _>("rationale"),
+                "metadata": row.get::<Value, _>("metadata"),
+                "active": row.get::<bool, _>("active"),
+                "expiresAt": row.get::<DateTime<Utc>, _>("expires_at").to_rfc3339(),
+                "createdAt": row.get::<DateTime<Utc>, _>("created_at").to_rfc3339(),
+                "actedOn": row.get::<bool, _>("acted_on"),
+            })
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(json!({ "signals": signals, "count": signals.len() })))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationBucket {
+    pub bucket_low_bps: i32,
+    pub bucket_high_bps: i32,
+    pub sample_count: i32,
+    pub resolved_yes: i32,
+    pub actual_rate_bps: i32,
+    pub expected_midpoint_bps: i32,
+    pub edge_bps: i32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngestCalibrationCurveRequest {
+    pub provider: String,
+    pub buckets: Vec<CalibrationBucket>,
+}
+
+pub async fn ingest_calibration_curve(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<IngestCalibrationCurveRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let _user = extract_authenticated_user(&req, &state).await?;
+
+    let mut persisted = 0i64;
+    for bucket in &body.buckets {
+        sqlx::query(
+            "INSERT INTO calibration_curve_snapshots (
+                id, provider, bucket_low_bps, bucket_high_bps, sample_count, resolved_yes,
+                actual_rate_bps, expected_midpoint_bps, edge_bps, computed_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&body.provider)
+        .bind(bucket.bucket_low_bps)
+        .bind(bucket.bucket_high_bps)
+        .bind(bucket.sample_count)
+        .bind(bucket.resolved_yes)
+        .bind(bucket.actual_rate_bps)
+        .bind(bucket.expected_midpoint_bps)
+        .bind(bucket.edge_bps)
+        .execute(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+        persisted += 1;
+    }
+
+    Ok(HttpResponse::Ok().json(json!({ "persisted": persisted })))
+}
+
+pub async fn get_calibration_curve(
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+
+    let rows = sqlx::query(
+        "SELECT DISTINCT ON (bucket_low_bps, bucket_high_bps)
+                id, provider, bucket_low_bps, bucket_high_bps, sample_count, resolved_yes,
+                actual_rate_bps, expected_midpoint_bps, edge_bps, computed_at
+         FROM calibration_curve_snapshots
+         WHERE provider = 'polymarket'
+         ORDER BY bucket_low_bps, bucket_high_bps, computed_at DESC",
+    )
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let buckets: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "bucketLowBps": row.get::<i32, _>("bucket_low_bps"),
+                "bucketHighBps": row.get::<i32, _>("bucket_high_bps"),
+                "sampleCount": row.get::<i32, _>("sample_count"),
+                "resolvedYes": row.get::<i32, _>("resolved_yes"),
+                "actualRateBps": row.get::<i32, _>("actual_rate_bps"),
+                "expectedMidpointBps": row.get::<i32, _>("expected_midpoint_bps"),
+                "edgeBps": row.get::<i32, _>("edge_bps"),
+                "computedAt": row.get::<DateTime<Utc>, _>("computed_at").to_rfc3339(),
+            })
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(json!({ "provider": "polymarket", "buckets": buckets })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

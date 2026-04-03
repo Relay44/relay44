@@ -887,6 +887,22 @@ async fn main() -> std::io::Result<()> {
                                 web::post().to(api::external::create_external_signal),
                             )
                             .route(
+                                "/edge-scanner/signals",
+                                web::post().to(api::external::ingest_edge_scanner_signals),
+                            )
+                            .route(
+                                "/edge-scanner/signals",
+                                web::get().to(api::external::list_edge_scanner_signals),
+                            )
+                            .route(
+                                "/edge-scanner/calibration",
+                                web::post().to(api::external::ingest_calibration_curve),
+                            )
+                            .route(
+                                "/edge-scanner/calibration",
+                                web::get().to(api::external::get_calibration_curve),
+                            )
+                            .route(
                                 "/agents",
                                 web::get().to(api::external::list_external_agents),
                             )
