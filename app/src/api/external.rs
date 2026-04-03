@@ -268,9 +268,13 @@ pub struct CreateExternalAgentRequest {
     pub quantity: f64,
     pub cadence_seconds: u64,
     pub strategy: String,
+    pub strategy_params: Option<Value>,
     pub credential_id: Option<String>,
     pub execution_mode: Option<String>,
     pub active: Option<bool>,
+    pub max_notional_per_execution: Option<f64>,
+    pub max_daily_spend_usdc: Option<f64>,
+    pub max_slippage_bps: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -283,9 +287,13 @@ pub struct UpdateExternalAgentRequest {
     pub quantity: Option<f64>,
     pub cadence_seconds: Option<u64>,
     pub strategy: Option<String>,
+    pub strategy_params: Option<Value>,
     pub credential_id: Option<String>,
     pub execution_mode: Option<String>,
     pub active: Option<bool>,
+    pub max_notional_per_execution: Option<f64>,
+    pub max_daily_spend_usdc: Option<f64>,
+    pub max_slippage_bps: Option<i32>,
 }
 
 #[derive(Deserialize)]
@@ -330,8 +338,12 @@ pub struct ExternalAgentResponse {
     pub cadence_seconds: u64,
     pub strategy: String,
     pub strategy_label: String,
+    pub strategy_params: Value,
     pub execution_mode: String,
     pub credential_id: Option<String>,
+    pub max_notional_per_execution: Option<f64>,
+    pub max_daily_spend_usdc: Option<f64>,
+    pub max_slippage_bps: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub active: bool,
@@ -418,6 +430,10 @@ pub struct ExternalAgentPerformanceTotals {
     pub realized_pnl_usdc: f64,
     pub unrealized_pnl_usdc: f64,
     pub net_pnl_usdc: f64,
+    pub max_drawdown_usdc: f64,
+    pub runner_reliability: f64,
+    pub p50_detection_to_order_ms: Option<f64>,
+    pub p50_slippage_ticks: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -435,6 +451,7 @@ pub struct ExternalAgentStrategyPerformance {
     pub unrealized_pnl_usdc: f64,
     pub net_pnl_usdc: f64,
     pub win_rate: f64,
+    pub max_drawdown_usdc: f64,
 }
 
 #[derive(Serialize)]
@@ -445,6 +462,77 @@ pub struct ExternalAgentPerformancePoint {
     pub realized_pnl_usdc: f64,
     pub unrealized_pnl_usdc: f64,
     pub net_pnl_usdc: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateExternalSignalRequest {
+    pub publisher: Option<String>,
+    pub provider: String,
+    pub market_id: String,
+    pub direction: String,
+    pub confidence_bps: i32,
+    pub fair_value_low: f64,
+    pub fair_value_high: f64,
+    pub midpoint_delta_bps: i32,
+    pub catalyst_summary: String,
+    pub invalidators: Vec<String>,
+    pub rationale: Option<String>,
+    pub expires_at: String,
+    pub signal_type: Option<String>,
+    pub metadata: Option<Value>,
+    pub agent_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListExternalSignalsQuery {
+    pub provider: Option<String>,
+    pub market_id: Option<String>,
+    pub active_only: Option<bool>,
+    pub publisher: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSignalResponse {
+    pub id: String,
+    pub publisher: String,
+    pub provider: String,
+    pub market_id: String,
+    pub signal_type: String,
+    pub direction: String,
+    pub confidence_bps: i32,
+    pub fair_value_low: f64,
+    pub fair_value_high: f64,
+    pub midpoint_delta_bps: i32,
+    pub catalyst_summary: String,
+    pub invalidators: Vec<String>,
+    pub rationale: Option<String>,
+    pub metadata: Value,
+    pub active: bool,
+    pub expires_at: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub agent_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSignalsListResponse {
+    pub signals: Vec<ExternalSignalResponse>,
+    pub total: u64,
+    pub limit: u64,
+    pub offset: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalMarketOrderbookQuery {
+    pub outcome: String,
+    pub depth: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -477,6 +565,7 @@ pub(crate) struct ExternalAgentRecord {
     pub(crate) quantity: f64,
     pub(crate) cadence_seconds: i64,
     pub(crate) strategy: String,
+    pub(crate) strategy_params: Value,
     pub(crate) execution_mode: ExternalExecutionMode,
     pub(crate) credential_id: Option<String>,
     pub(crate) active: bool,
@@ -534,6 +623,9 @@ fn strategy_label(strategy: &str) -> String {
         "momentum" => "proving".to_string(),
         "mean-revert" => "research".to_string(),
         "market-maker" => "optimization".to_string(),
+        "maker-reward" | "maker_reward" => "rebates".to_string(),
+        "event-repricing" | "event_repricing" => "scenario".to_string(),
+        "wallet-follow" | "wallet_follow" => "mirror".to_string(),
         _ => strategy.trim().to_string(),
     }
 }
@@ -632,6 +724,69 @@ fn normalize_namespaced_market_id(provider: ExternalProvider, market_id: &str) -
         return market_id.trim().to_string();
     }
     format!("{}:{}", provider.as_str(), market_id.trim())
+}
+
+fn normalize_direction(raw: &str) -> Result<String, ApiError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "yes" | "no" | "neutral" => Ok(raw.trim().to_ascii_lowercase()),
+        _ => Err(ApiError::bad_request(
+            "INVALID_DIRECTION",
+            "direction must be one of: yes, no, neutral",
+        )),
+    }
+}
+
+fn normalize_strategy_params(strategy: &str, value: Option<&Value>) -> Result<Value, ApiError> {
+    let empty = json!({});
+    crate::services::external::strategy::validate_strategy_params(strategy, value.unwrap_or(&empty))
+}
+
+fn validate_agent_risk_fields(
+    max_notional_per_execution: Option<f64>,
+    max_daily_spend_usdc: Option<f64>,
+    max_slippage_bps: Option<i32>,
+) -> Result<(), ApiError> {
+    if let Some(value) = max_notional_per_execution {
+        if value <= 0.0 {
+            return Err(ApiError::bad_request(
+                "INVALID_MAX_NOTIONAL",
+                "maxNotionalPerExecution must be greater than zero",
+            ));
+        }
+    }
+    if let Some(value) = max_daily_spend_usdc {
+        if value <= 0.0 {
+            return Err(ApiError::bad_request(
+                "INVALID_MAX_DAILY_SPEND",
+                "maxDailySpendUsdc must be greater than zero",
+            ));
+        }
+    }
+    if let Some(value) = max_slippage_bps {
+        if value < 0 {
+            return Err(ApiError::bad_request(
+                "INVALID_MAX_SLIPPAGE",
+                "maxSlippageBps must be zero or positive",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_live_strategy_allowed(
+    strategy: &str,
+    execution_mode: ExternalExecutionMode,
+) -> Result<(), ApiError> {
+    if matches!(execution_mode, ExternalExecutionMode::Live) {
+        let normalized = strategy.trim().to_ascii_lowercase().replace('_', "-");
+        if normalized != "maker-reward" {
+            return Err(ApiError::bad_request(
+                "LIVE_STRATEGY_RESTRICTED",
+                "only maker_reward agents can run in live mode",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn mask_credentials(value: &Value) -> Value {
@@ -973,9 +1128,13 @@ async fn import_external_state_rows(
                 quantity,
                 cadence_seconds,
                 strategy,
+                strategy_params,
                 execution_mode,
                 credential_id,
                 active,
+                max_notional_per_execution,
+                max_daily_spend_usdc,
+                max_slippage_bps,
                 last_executed_at,
                 next_execution_at,
                 created_at,
@@ -994,9 +1153,13 @@ async fn import_external_state_rows(
                 entry.quantity,
                 entry.cadence_seconds,
                 entry.strategy,
+                COALESCE(entry.strategy_params, '{}'::jsonb),
                 COALESCE(NULLIF(LOWER(entry.execution_mode), ''), 'live'),
                 entry.credential_id,
                 entry.active,
+                entry.max_notional_per_execution,
+                entry.max_daily_spend_usdc,
+                entry.max_slippage_bps,
                 entry.last_executed_at,
                 entry.next_execution_at,
                 entry.created_at,
@@ -1014,9 +1177,13 @@ async fn import_external_state_rows(
                 quantity DOUBLE PRECISION,
                 cadence_seconds BIGINT,
                 strategy TEXT,
+                strategy_params JSONB,
                 execution_mode TEXT,
                 credential_id TEXT,
                 active BOOLEAN,
+                max_notional_per_execution DOUBLE PRECISION,
+                max_daily_spend_usdc DOUBLE PRECISION,
+                max_slippage_bps INTEGER,
                 last_executed_at TIMESTAMPTZ,
                 next_execution_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ,
@@ -1034,9 +1201,13 @@ async fn import_external_state_rows(
                 quantity = EXCLUDED.quantity,
                 cadence_seconds = EXCLUDED.cadence_seconds,
                 strategy = EXCLUDED.strategy,
+                strategy_params = EXCLUDED.strategy_params,
                 execution_mode = EXCLUDED.execution_mode,
                 credential_id = EXCLUDED.credential_id,
                 active = EXCLUDED.active,
+                max_notional_per_execution = EXCLUDED.max_notional_per_execution,
+                max_daily_spend_usdc = EXCLUDED.max_daily_spend_usdc,
+                max_slippage_bps = EXCLUDED.max_slippage_bps,
                 last_executed_at = EXCLUDED.last_executed_at,
                 next_execution_at = EXCLUDED.next_execution_at,
                 created_at = EXCLUDED.created_at,
@@ -1197,6 +1368,7 @@ fn parse_external_agent_record(
         strategy: row
             .try_get("strategy")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
+        strategy_params: row.try_get("strategy_params").unwrap_or_else(|_| json!({})),
         execution_mode: parse_external_execution_mode(execution_mode_raw.as_str())?,
         credential_id: row.try_get("credential_id").ok(),
         active: row
@@ -1205,9 +1377,7 @@ fn parse_external_agent_record(
         next_execution_at: row
             .try_get("next_execution_at")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
-        consecutive_failures: row
-            .try_get::<i32, _>("consecutive_failures")
-            .unwrap_or(0),
+        consecutive_failures: row.try_get::<i32, _>("consecutive_failures").unwrap_or(0),
         last_error_code: row.try_get("last_error_code").ok(),
         max_notional_per_execution: row.try_get("max_notional_per_execution").ok().flatten(),
         max_daily_spend_usdc: row.try_get("max_daily_spend_usdc").ok().flatten(),
@@ -1245,7 +1415,7 @@ pub(crate) async fn load_external_agent_for_owner(
 ) -> Result<ExternalAgentRecord, ApiError> {
     let row = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
          FROM external_agents
@@ -1267,7 +1437,7 @@ async fn load_due_external_agents(
 ) -> Result<Vec<ExternalAgentRecord>, ApiError> {
     let rows = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
          FROM external_agents
@@ -2112,7 +2282,10 @@ async fn build_provider_submit_payload(
         ExternalProvider::Aerodrome => {
             // Parse pool address from market_id (format: "aerodrome:0x...")
             let pool_address = if market_id.contains(':') {
-                market_id.split_once(':').map(|(_, v)| v).unwrap_or(market_id)
+                market_id
+                    .split_once(':')
+                    .map(|(_, v)| v)
+                    .unwrap_or(market_id)
             } else if !provider_market_ref.is_empty() {
                 provider_market_ref
             } else {
@@ -2155,11 +2328,11 @@ async fn build_provider_submit_payload(
             // Get base wallet from credential
             let base_wallet = payload_string(&credential.payload, &["baseWallet", "base_wallet"])
                 .ok_or_else(|| {
-                    ApiError::bad_request(
-                        "INVALID_CREDENTIALS",
-                        "aerodrome credential must include baseWallet",
-                    )
-                })?;
+                ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "aerodrome credential must include baseWallet",
+                )
+            })?;
 
             // Quote the swap to get expected output
             let quote = crate::services::external::providers::aerodrome::quote_swap(
@@ -3502,19 +3675,18 @@ async fn submit_to_provider(
             // Extract private key from credential (encrypted at rest)
             let private_key = payload_string(&credential.payload, &["privateKey", "private_key"])
                 .ok_or_else(|| {
-                    ApiError::bad_request(
-                        "INVALID_CREDENTIALS",
-                        "aerodrome credential must include privateKey for autonomous execution",
-                    )
-                })?;
+                ApiError::bad_request(
+                    "INVALID_CREDENTIALS",
+                    "aerodrome credential must include privateKey for autonomous execution",
+                )
+            })?;
 
             // Validate derived address matches stored baseWallet
             let derived_address =
                 crate::services::evm_signer::address_from_private_key(&private_key)?;
-            let stored_wallet =
-                payload_string(&credential.payload, &["baseWallet", "base_wallet"])
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
+            let stored_wallet = payload_string(&credential.payload, &["baseWallet", "base_wallet"])
+                .unwrap_or_default()
+                .to_ascii_lowercase();
             if derived_address.to_ascii_lowercase() != stored_wallet {
                 return Err(ApiError::bad_request(
                     "CREDENTIAL_MISMATCH",
@@ -3527,7 +3699,10 @@ async fn submit_to_provider(
                 .get("calldata")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
-                    ApiError::bad_request("INVALID_SWAP_PAYLOAD", "missing calldata in swap payload")
+                    ApiError::bad_request(
+                        "INVALID_SWAP_PAYLOAD",
+                        "missing calldata in swap payload",
+                    )
                 })?;
             let to = signed_order
                 .get("to")
@@ -3547,18 +3722,15 @@ async fn submit_to_provider(
                 .map_err(|e| ApiError::internal(&format!("failed to fetch nonce: {}", e)))?;
 
             // Fetch gas prices
-            let base_fee = state
-                .evm_rpc
-                .eth_gas_price()
-                .await
-                .map_err(|e| ApiError::internal(&format!("failed to fetch gas price: {}", e)))?;
+            let base_fee =
+                state.evm_rpc.eth_gas_price().await.map_err(|e| {
+                    ApiError::internal(&format!("failed to fetch gas price: {}", e))
+                })?;
             let priority_fee = state
                 .evm_rpc
                 .eth_max_priority_fee_per_gas()
                 .await
-                .map_err(|e| {
-                    ApiError::internal(&format!("failed to fetch priority fee: {}", e))
-                })?;
+                .map_err(|e| ApiError::internal(&format!("failed to fetch priority fee: {}", e)))?;
             let max_fee = base_fee + priority_fee;
 
             // Estimate gas (with 20% buffer)
@@ -3780,8 +3952,12 @@ fn parse_external_agent(
             .max(1) as u64,
         strategy_label: strategy_label(strategy.as_str()),
         strategy,
+        strategy_params: row.try_get("strategy_params").unwrap_or_else(|_| json!({})),
         execution_mode: execution_mode.as_str().to_string(),
         credential_id: row.try_get("credential_id").ok(),
+        max_notional_per_execution: row.try_get("max_notional_per_execution").ok().flatten(),
+        max_daily_spend_usdc: row.try_get("max_daily_spend_usdc").ok().flatten(),
+        max_slippage_bps: row.try_get("max_slippage_bps").ok().flatten(),
         source: source.map(str::to_string),
         active: row
             .try_get("active")
@@ -3793,6 +3969,122 @@ fn parse_external_agent(
         created_at: created_at.to_rfc3339(),
         updated_at: updated_at.to_rfc3339(),
     })
+}
+
+fn parse_external_signal(row: sqlx::postgres::PgRow) -> Result<ExternalSignalResponse, ApiError> {
+    let created_at: chrono::DateTime<Utc> = row
+        .try_get("created_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let updated_at: chrono::DateTime<Utc> = row
+        .try_get("updated_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let expires_at: chrono::DateTime<Utc> = row
+        .try_get("expires_at")
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let invalidators_value: Value = row.try_get("invalidators").unwrap_or_else(|_| json!([]));
+    let invalidators = invalidators_value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+
+    Ok(ExternalSignalResponse {
+        id: row
+            .try_get("id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        publisher: row
+            .try_get("publisher")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        provider: row
+            .try_get("provider")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        market_id: row
+            .try_get("market_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        signal_type: row
+            .try_get("signal_type")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        direction: row
+            .try_get("direction")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        confidence_bps: row
+            .try_get("confidence_bps")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        fair_value_low: row
+            .try_get("fair_value_low")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        fair_value_high: row
+            .try_get("fair_value_high")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        midpoint_delta_bps: row
+            .try_get("midpoint_delta_bps")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        catalyst_summary: row
+            .try_get("catalyst_summary")
+            .map_err(|err| ApiError::internal(&err.to_string()))?,
+        invalidators,
+        rationale: row.try_get("rationale").ok(),
+        metadata: row.try_get("metadata").unwrap_or_else(|_| json!({})),
+        active: row.try_get("active").unwrap_or(true),
+        expires_at: expires_at.to_rfc3339(),
+        created_at: created_at.to_rfc3339(),
+        updated_at: updated_at.to_rfc3339(),
+        agent_id: row.try_get("agent_id").ok(),
+    })
+}
+
+async fn load_active_market_signal(
+    state: &AppState,
+    market_id: &str,
+) -> Result<Option<ExternalSignalResponse>, ApiError> {
+    let row = sqlx::query(
+        "SELECT id, publisher, provider, market_id, signal_type, direction, confidence_bps,
+                fair_value_low, fair_value_high, midpoint_delta_bps, catalyst_summary, invalidators,
+                rationale, metadata, active, expires_at, created_at, updated_at, agent_id
+         FROM external_market_signals
+         WHERE market_id = $1
+           AND active = TRUE
+           AND expires_at > NOW()
+         ORDER BY created_at DESC
+         LIMIT 1",
+    )
+    .bind(market_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    row.map(parse_external_signal).transpose()
+}
+
+fn calculate_max_drawdown(points: &[f64]) -> f64 {
+    let mut equity = 0.0;
+    let mut peak = 0.0;
+    let mut max_drawdown = 0.0;
+    for point in points {
+        equity += point;
+        if equity > peak {
+            peak = equity;
+        }
+        let drawdown = peak - equity;
+        if drawdown > max_drawdown {
+            max_drawdown = drawdown;
+        }
+    }
+    max_drawdown
+}
+
+fn median_f64(values: &mut [f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        Some((values[mid - 1] + values[mid]) / 2.0)
+    } else {
+        Some(values[mid])
+    }
 }
 
 async fn record_paper_mark(
@@ -3843,6 +4135,7 @@ async fn close_due_paper_position(
         exit_side,
         position.filled_quantity,
         state.config.paper_fee_bps,
+        None,
     );
 
     if fill.filled_quantity <= 0.0 {
@@ -4090,6 +4383,12 @@ async fn open_paper_position(
         .or(best_bid)
         .or(best_ask)
         .unwrap_or(market.yes_price);
+    let active_signal = load_active_market_signal(state, agent.market_id.as_str()).await?;
+    let time_to_resolution_seconds = if market.close_time > 0 {
+        Some(market.close_time as i64 - now.timestamp())
+    } else {
+        None
+    };
 
     let market_state = crate::services::external::strategy::MarketState {
         yes_price: market.yes_price,
@@ -4101,10 +4400,17 @@ async fn open_paper_position(
         agent_side: agent.side.clone(),
         agent_outcome: agent.outcome.clone(),
         agent_quantity: agent.quantity,
+        time_to_resolution_seconds,
+        fair_value_low: active_signal.as_ref().map(|signal| signal.fair_value_low),
+        fair_value_high: active_signal.as_ref().map(|signal| signal.fair_value_high),
+        midpoint_delta_bps: active_signal
+            .as_ref()
+            .map(|signal| signal.midpoint_delta_bps),
     };
     let signal = crate::services::external::strategy::evaluate_strategy(
         agent.strategy.as_str(),
         &market_state,
+        &agent.strategy_params,
     );
 
     if !signal.execute {
@@ -4122,7 +4428,10 @@ async fn open_paper_position(
                 "mode": "paper",
                 "reason": "strategy_skip",
                 "strategy": agent.strategy,
+                "strategyParams": agent.strategy_params,
                 "signal": signal.reason,
+                "signalMetrics": signal.metadata,
+                "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
                 "midPrice": mid
             }),
         )
@@ -4139,7 +4448,8 @@ async fn open_paper_position(
             response: json!({
                 "mode": "paper",
                 "status": "strategy_skip",
-                "signal": signal.reason
+                "signal": signal.reason,
+                "signalMetrics": signal.metadata
             }),
         });
     }
@@ -4151,7 +4461,14 @@ async fn open_paper_position(
         agent.side.as_str(),
         signal.quantity,
         state.config.paper_fee_bps,
+        Some(signal.price),
     );
+    let fill_slippage_bps = if mid > 0.0 {
+        (((fill.average_price - mid).abs() / mid) * 10_000.0).round()
+    } else {
+        0.0
+    };
+    let fill_slippage_ticks = ((fill.average_price - signal.price).abs() / 0.001).round();
 
     if fill.filled_quantity <= 0.0 {
         let run_id = Uuid::new_v4().to_string();
@@ -4168,6 +4485,11 @@ async fn open_paper_position(
                 "mode": "paper",
                 "reason": "no_fill_liquidity",
                 "marketQuestion": market.question,
+                "strategy": agent.strategy,
+                "strategyParams": agent.strategy_params,
+                "signal": signal.reason,
+                "signalMetrics": signal.metadata,
+                "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
                 "markPrice": fill.mark_price
             }),
         )
@@ -4216,8 +4538,8 @@ async fn open_paper_position(
         "mode": "paper",
         "side": agent.side,
         "outcome": agent.outcome,
-        "quantity": agent.quantity,
-        "price": agent.price
+        "quantity": signal.quantity,
+        "price": signal.price
     }))
     .bind(json!({
         "mode": "paper",
@@ -4274,7 +4596,14 @@ async fn open_paper_position(
             "mode": "paper",
             "positionId": position_id,
             "holdUntil": hold_until.to_rfc3339(),
-            "fill": fill
+            "fill": fill,
+            "strategy": agent.strategy,
+            "strategyParams": agent.strategy_params,
+            "signal": signal.reason,
+            "signalMetrics": signal.metadata,
+            "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
+            "fillSlippageBps": fill_slippage_bps,
+            "fillSlippageTicks": fill_slippage_ticks
         }),
     )
     .await?;
@@ -4339,7 +4668,11 @@ async fn open_paper_position(
             "status": "opened",
             "positionId": position_id,
             "fill": fill,
-            "holdUntil": hold_until.to_rfc3339()
+            "holdUntil": hold_until.to_rfc3339(),
+            "signal": signal.reason,
+            "signalMetrics": signal.metadata,
+            "fillSlippageBps": fill_slippage_bps,
+            "fillSlippageTicks": fill_slippage_ticks
         }),
     })
 }
@@ -4366,7 +4699,7 @@ async fn execute_paper_agent(
     state: &AppState,
     agent: &ExternalAgentRecord,
 ) -> Result<AgentExecutionOutcome, ApiError> {
-    check_execution_guardrails(state, agent).await?;
+    check_execution_guardrails(state, agent, None).await?;
     let now = Utc::now();
     let market_id = ExternalMarketId::parse(agent.market_id.as_str())?;
 
@@ -4394,6 +4727,7 @@ async fn execute_paper_agent(
                 agent.side.as_str(),
                 position.filled_quantity,
                 state.config.paper_fee_bps,
+                None,
             );
             let unrealized = unrealized_pnl(
                 agent.side.as_str(),
@@ -4606,6 +4940,7 @@ async fn execute_paper_agent(
 async fn check_execution_guardrails(
     state: &AppState,
     agent: &ExternalAgentRecord,
+    reference_price: Option<f64>,
 ) -> Result<(), ApiError> {
     let notional = agent.price * agent.quantity;
 
@@ -4652,6 +4987,25 @@ async fn check_execution_guardrails(
         }
     }
 
+    if let Some(max_slippage_bps) = agent.max_slippage_bps {
+        if let Some(reference_price) = reference_price {
+            if reference_price > 0.0 {
+                let slippage_bps = (((agent.price - reference_price).abs() / reference_price)
+                    * 10_000.0)
+                    .round() as i32;
+                if slippage_bps > max_slippage_bps {
+                    return Err(ApiError::bad_request(
+                        "GUARDRAIL_MAX_SLIPPAGE",
+                        &format!(
+                            "price slippage {}bps exceeds agent limit {}bps",
+                            slippage_bps, max_slippage_bps
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -4661,7 +5015,135 @@ async fn execute_live_agent(
     signed_order_override: Option<Value>,
 ) -> Result<AgentExecutionOutcome, ApiError> {
     ensure_live_write_mode(state)?;
-    check_execution_guardrails(state, agent).await?;
+    let now = Utc::now();
+    let market_id = ExternalMarketId::parse(agent.market_id.as_str())?;
+    let market = external::fetch_market_by_id(&state.config, &market_id).await?;
+    if market_is_closed_for_paper_entry(&market, now) {
+        deactivate_external_agent(state, agent.id.as_str(), now).await?;
+        let run_id = Uuid::new_v4().to_string();
+        insert_external_agent_run(
+            state,
+            run_id.as_str(),
+            agent,
+            "skipped",
+            None,
+            Some("market_closed"),
+            &json!({
+                "mode": "live",
+                "reason": "market_closed",
+                "marketQuestion": market.question,
+                "marketStatus": market.status,
+                "marketResolved": market.resolved,
+                "marketCloseTime": market.close_time
+            }),
+        )
+        .await?;
+
+        return Ok(AgentExecutionOutcome {
+            executed: false,
+            skip_reason: Some("market_closed".to_string()),
+            run_status: "skipped".to_string(),
+            run_id,
+            external_order_id: None,
+            provider_order_id: None,
+            next_execution_at: now,
+            response: json!({
+                "mode": "live",
+                "status": "skipped",
+                "reason": "market_closed"
+            }),
+        });
+    }
+
+    let orderbook = external::fetch_orderbook(
+        &state.config,
+        &state.redis,
+        &market_id,
+        agent.outcome.as_str(),
+        20,
+    )
+    .await?;
+    let best_bid = orderbook.bids.first().map(|level| level.price);
+    let best_ask = orderbook.asks.first().map(|level| level.price);
+    let mid = best_bid
+        .zip(best_ask)
+        .map(|(bid, ask)| (bid + ask) / 2.0)
+        .or(best_bid)
+        .or(best_ask)
+        .unwrap_or(market.yes_price);
+    let active_signal = load_active_market_signal(state, agent.market_id.as_str()).await?;
+    let market_state = crate::services::external::strategy::MarketState {
+        yes_price: market.yes_price,
+        no_price: market.no_price,
+        best_bid,
+        best_ask,
+        mid_price: mid,
+        agent_price: agent.price,
+        agent_side: agent.side.clone(),
+        agent_outcome: agent.outcome.clone(),
+        agent_quantity: agent.quantity,
+        time_to_resolution_seconds: if market.close_time > 0 {
+            Some(market.close_time as i64 - now.timestamp())
+        } else {
+            None
+        },
+        fair_value_low: active_signal.as_ref().map(|signal| signal.fair_value_low),
+        fair_value_high: active_signal.as_ref().map(|signal| signal.fair_value_high),
+        midpoint_delta_bps: active_signal
+            .as_ref()
+            .map(|signal| signal.midpoint_delta_bps),
+    };
+    let strategy_signal = crate::services::external::strategy::evaluate_strategy(
+        agent.strategy.as_str(),
+        &market_state,
+        &agent.strategy_params,
+    );
+    if !strategy_signal.execute {
+        let run_id = Uuid::new_v4().to_string();
+        let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+        update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at).await?;
+        insert_external_agent_run(
+            state,
+            run_id.as_str(),
+            agent,
+            "skipped",
+            None,
+            Some("strategy_skip"),
+            &json!({
+                "mode": "live",
+                "reason": "strategy_skip",
+                "strategy": agent.strategy,
+                "strategyParams": agent.strategy_params,
+                "signal": strategy_signal.reason,
+                "signalMetrics": strategy_signal.metadata,
+                "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
+                "midPrice": mid
+            }),
+        )
+        .await?;
+
+        return Ok(AgentExecutionOutcome {
+            executed: false,
+            skip_reason: Some("strategy_skip".to_string()),
+            run_status: "skipped".to_string(),
+            run_id,
+            external_order_id: None,
+            provider_order_id: None,
+            next_execution_at,
+            response: json!({
+                "mode": "live",
+                "status": "skipped",
+                "signal": strategy_signal.reason
+            }),
+        });
+    }
+
+    let reference_price = if agent.side == "buy" {
+        best_ask.or(best_bid).unwrap_or(mid)
+    } else {
+        best_bid.or(best_ask).unwrap_or(mid)
+    };
+    check_execution_guardrails(state, agent, Some(reference_price)).await?;
 
     let credential = load_credential(
         state,
@@ -4697,7 +5179,6 @@ async fn execute_live_agent(
     let submit_payload =
         submit_to_provider(state, agent.provider, &credential, &provider_payload).await?;
     let provider_order_id = provider_order_id_from_payload(&submit_payload);
-    let now = Utc::now();
     let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
     let order_id = Uuid::new_v4().to_string();
     let run_id = Uuid::new_v4().to_string();
@@ -4731,6 +5212,11 @@ async fn execute_live_agent(
         &json!({
             "mode": "live",
             "providerOrderId": provider_order_id,
+            "strategy": agent.strategy,
+            "strategyParams": agent.strategy_params,
+            "signal": strategy_signal.reason,
+            "signalMetrics": strategy_signal.metadata,
+            "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
             "response": submit_payload
         }),
     )
@@ -4772,7 +5258,7 @@ pub(crate) async fn execute_agent_record_by_id(
 ) -> Result<bool, String> {
     let row = sqlx::query(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
-                cadence_seconds, strategy, execution_mode, credential_id, active,
+                cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
                 last_executed_at, next_execution_at, consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
          FROM external_agents
@@ -4793,8 +5279,9 @@ pub(crate) async fn execute_agent_record_by_id(
     match execute_agent_record(state, &agent, None).await {
         Ok(outcome) => {
             if outcome.executed {
-                state.event_bus.emit(
-                    crate::services::event_bus::PlatformEvent::AgentExecuted(
+                state
+                    .event_bus
+                    .emit(crate::services::event_bus::PlatformEvent::AgentExecuted(
                         crate::services::event_bus::AgentExecutedEvent {
                             agent_id: agent.id.clone(),
                             owner: agent.owner.clone(),
@@ -4810,8 +5297,7 @@ pub(crate) async fn execute_agent_record_by_id(
                             metadata: outcome.response,
                             timestamp: chrono::Utc::now(),
                         },
-                    ),
-                );
+                    ));
             }
             if agent.consecutive_failures > 0 {
                 let _ = reset_agent_failures(state, agent.id.as_str()).await;
@@ -4819,8 +5305,9 @@ pub(crate) async fn execute_agent_record_by_id(
             Ok(outcome.executed)
         }
         Err(err) => {
-            state.event_bus.emit(
-                crate::services::event_bus::PlatformEvent::AgentFailed(
+            state
+                .event_bus
+                .emit(crate::services::event_bus::PlatformEvent::AgentFailed(
                     crate::services::event_bus::AgentFailedEvent {
                         agent_id: agent.id.clone(),
                         owner: agent.owner.clone(),
@@ -4831,8 +5318,7 @@ pub(crate) async fn execute_agent_record_by_id(
                         consecutive_failures: agent.consecutive_failures + 1,
                         timestamp: chrono::Utc::now(),
                     },
-                ),
-            );
+                ));
             let _ = record_agent_failure(
                 state,
                 agent.id.as_str(),
@@ -5095,23 +5581,20 @@ pub async fn upsert_external_credentials(
             polymarket_signature_type_from_payload(&body.credentials)?;
         }
         ExternalProvider::Aerodrome => {
-            let base_wallet =
-                payload_string(&body.credentials, &["baseWallet", "base_wallet"]).ok_or_else(
-                    || {
-                        ApiError::bad_request(
-                            "INVALID_CREDENTIALS",
-                            "aerodrome credential must include baseWallet",
-                        )
-                    },
-                )?;
+            let base_wallet = payload_string(&body.credentials, &["baseWallet", "base_wallet"])
+                .ok_or_else(|| {
+                    ApiError::bad_request(
+                        "INVALID_CREDENTIALS",
+                        "aerodrome credential must include baseWallet",
+                    )
+                })?;
             normalize_evm_wallet(base_wallet.as_str())?;
 
             // Validate privateKey if provided (required for autonomous execution)
             if let Some(pk) = payload_string(&body.credentials, &["privateKey", "private_key"]) {
                 let derived = crate::services::evm_signer::address_from_private_key(&pk)?;
                 if derived.to_ascii_lowercase()
-                    != normalize_evm_wallet(base_wallet.as_str())?
-                        .to_ascii_lowercase()
+                    != normalize_evm_wallet(base_wallet.as_str())?.to_ascii_lowercase()
                 {
                     return Err(ApiError::bad_request(
                         "CREDENTIAL_MISMATCH",
@@ -5886,8 +6369,9 @@ pub async fn list_external_agents(
 
     let mut sql = QueryBuilder::<Postgres>::new(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
-                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
-                consecutive_failures, last_error_code, created_at, updated_at
+                strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                consecutive_failures, last_error_code, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
+                created_at, updated_at
          FROM external_agents
          WHERE TRUE",
     );
@@ -5971,6 +6455,10 @@ fn empty_public_agents_performance(owner: Option<String>) -> ExternalAgentPerfor
             realized_pnl_usdc: 0.0,
             unrealized_pnl_usdc: 0.0,
             net_pnl_usdc: 0.0,
+            max_drawdown_usdc: 0.0,
+            runner_reliability: 0.0,
+            p50_detection_to_order_ms: None,
+            p50_slippage_ticks: None,
         },
         strategies: Vec::new(),
         timeline: Vec::new(),
@@ -5991,8 +6479,9 @@ pub async fn list_public_external_agents(
 
     let mut sql = QueryBuilder::<Postgres>::new(
         "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
-                strategy, execution_mode, credential_id, active, last_executed_at, next_execution_at,
-                consecutive_failures, last_error_code, created_at, updated_at
+                strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
+                consecutive_failures, last_error_code, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
+                created_at, updated_at
          FROM external_agents
          WHERE owner = ",
     );
@@ -6054,6 +6543,203 @@ pub async fn list_public_external_agents(
     }))
 }
 
+pub async fn get_external_market_snapshot(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let market_id = ExternalMarketId::parse(path.as_str())?;
+    let market = external::fetch_market_by_id(&state.config, &market_id).await?;
+    Ok(HttpResponse::Ok().json(market))
+}
+
+pub async fn get_external_market_orderbook(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    query: web::Query<ExternalMarketOrderbookQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let market_id = ExternalMarketId::parse(path.as_str())?;
+    let outcome = normalize_outcome(query.outcome.as_str())?;
+    let depth = query.depth.unwrap_or(20).clamp(1, 100);
+    let orderbook = external::fetch_orderbook(
+        &state.config,
+        &state.redis,
+        &market_id,
+        outcome.as_str(),
+        depth,
+    )
+    .await?;
+    Ok(HttpResponse::Ok().json(orderbook))
+}
+
+pub async fn create_external_signal(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateExternalSignalRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+    let provider = normalize_provider(body.provider.as_str())?;
+    let market_id = normalize_namespaced_market_id(provider, body.market_id.as_str());
+    let direction = normalize_direction(body.direction.as_str())?;
+    if !(0..=10_000).contains(&body.confidence_bps) {
+        return Err(ApiError::bad_request(
+            "INVALID_CONFIDENCE_BPS",
+            "confidenceBps must be between 0 and 10000",
+        ));
+    }
+    if !(0.0..=1.0).contains(&body.fair_value_low)
+        || !(0.0..=1.0).contains(&body.fair_value_high)
+        || body.fair_value_low > body.fair_value_high
+    {
+        return Err(ApiError::bad_request(
+            "INVALID_FAIR_VALUE_RANGE",
+            "fairValueLow/fairValueHigh must be between 0 and 1 with low <= high",
+        ));
+    }
+    if body.catalyst_summary.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_CATALYST_SUMMARY",
+            "catalystSummary is required",
+        ));
+    }
+    let expires_at = chrono::DateTime::parse_from_rfc3339(body.expires_at.as_str())
+        .map_err(|_| ApiError::bad_request("INVALID_EXPIRES_AT", "expiresAt must be RFC3339"))?
+        .with_timezone(&Utc);
+    if expires_at <= Utc::now() {
+        return Err(ApiError::bad_request(
+            "INVALID_EXPIRES_AT",
+            "expiresAt must be in the future",
+        ));
+    }
+    let parsed_market_id = ExternalMarketId::parse(market_id.as_str())?;
+    external::fetch_market_by_id(&state.config, &parsed_market_id).await?;
+
+    let publisher = body
+        .publisher
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(user.wallet_address.as_str())
+        .to_ascii_lowercase();
+    let row = sqlx::query(
+        "INSERT INTO external_market_signals (
+            id, publisher, provider, market_id, signal_type, direction, confidence_bps,
+            fair_value_low, fair_value_high, midpoint_delta_bps, catalyst_summary, invalidators,
+            rationale, metadata, active, expires_at, created_at, updated_at, agent_id
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,TRUE,$15,NOW(),NOW(),$16)
+        RETURNING id, publisher, provider, market_id, signal_type, direction, confidence_bps,
+                  fair_value_low, fair_value_high, midpoint_delta_bps, catalyst_summary, invalidators,
+                  rationale, metadata, active, expires_at, created_at, updated_at, agent_id",
+    )
+    .bind(Uuid::new_v4().to_string())
+    .bind(publisher)
+    .bind(provider.as_str())
+    .bind(market_id)
+    .bind(
+        body.signal_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("scenario_lab"),
+    )
+    .bind(direction)
+    .bind(body.confidence_bps)
+    .bind(body.fair_value_low)
+    .bind(body.fair_value_high)
+    .bind(body.midpoint_delta_bps)
+    .bind(body.catalyst_summary.trim())
+    .bind(json!(body.invalidators))
+    .bind(body.rationale.as_deref())
+    .bind(body.metadata.clone().unwrap_or_else(|| json!({})))
+    .bind(expires_at)
+    .bind(body.agent_id.as_deref())
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(parse_external_signal(row)?))
+}
+
+pub async fn list_external_signals(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ListExternalSignalsQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let limit = query.limit.unwrap_or(50).clamp(1, MAX_PAGE_SIZE);
+    let offset = query.offset.unwrap_or(0).max(0);
+    let active_only = query.active_only.unwrap_or(true);
+
+    let mut sql = QueryBuilder::<Postgres>::new(
+        "SELECT id, publisher, provider, market_id, signal_type, direction, confidence_bps,
+                fair_value_low, fair_value_high, midpoint_delta_bps, catalyst_summary, invalidators,
+                rationale, metadata, active, expires_at, created_at, updated_at, agent_id
+         FROM external_market_signals
+         WHERE TRUE",
+    );
+    let mut count_sql = QueryBuilder::<Postgres>::new(
+        "SELECT COUNT(*) AS total
+         FROM external_market_signals
+         WHERE TRUE",
+    );
+
+    if active_only {
+        sql.push(" AND active = TRUE AND expires_at > NOW()");
+        count_sql.push(" AND active = TRUE AND expires_at > NOW()");
+    }
+    if let Some(provider_raw) = query.provider.as_ref() {
+        let provider = normalize_provider(provider_raw.as_str())?;
+        sql.push(" AND provider = ").push_bind(provider.as_str());
+        count_sql
+            .push(" AND provider = ")
+            .push_bind(provider.as_str());
+    }
+    if let Some(market_id_raw) = query.market_id.as_ref() {
+        let market_id = market_id_raw.trim();
+        if !market_id.is_empty() {
+            sql.push(" AND market_id = ").push_bind(market_id);
+            count_sql.push(" AND market_id = ").push_bind(market_id);
+        }
+    }
+    if let Some(publisher) = query.publisher.as_ref() {
+        let normalized = publisher.trim().to_ascii_lowercase();
+        if !normalized.is_empty() {
+            sql.push(" AND publisher = ").push_bind(normalized.clone());
+            count_sql.push(" AND publisher = ").push_bind(normalized);
+        }
+    }
+
+    sql.push(" ORDER BY created_at DESC LIMIT ")
+        .push_bind(limit)
+        .push(" OFFSET ")
+        .push_bind(offset);
+
+    let rows = sql
+        .build()
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let count_row = count_sql
+        .build()
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let total: i64 = count_row.try_get("total").unwrap_or(0);
+
+    let mut signals = Vec::with_capacity(rows.len());
+    for row in rows {
+        signals.push(parse_external_signal(row)?);
+    }
+
+    Ok(HttpResponse::Ok().json(ExternalSignalsListResponse {
+        signals,
+        total: total.max(0) as u64,
+        limit: limit as u64,
+        offset: offset as u64,
+    }))
+}
+
 pub async fn create_external_agent(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
@@ -6078,9 +6764,18 @@ pub async fn create_external_agent(
         user_role,
         body.execution_mode.as_deref(),
     )?;
+    let strategy = body.strategy.trim().to_string();
+    let strategy_params =
+        normalize_strategy_params(strategy.as_str(), body.strategy_params.as_ref())?;
 
     if body.name.trim().is_empty() {
         return Err(ApiError::bad_request("INVALID_NAME", "name is required"));
+    }
+    if strategy.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_STRATEGY",
+            "strategy is required",
+        ));
     }
     if body.cadence_seconds == 0 {
         return Err(ApiError::bad_request(
@@ -6100,6 +6795,12 @@ pub async fn create_external_agent(
             "quantity must be greater than zero",
         ));
     }
+    validate_agent_risk_fields(
+        body.max_notional_per_execution,
+        body.max_daily_spend_usdc,
+        body.max_slippage_bps,
+    )?;
+    ensure_live_strategy_allowed(strategy.as_str(), execution_mode)?;
 
     let namespaced_market_id = normalize_namespaced_market_id(provider, body.market_id.as_str());
     let parsed_market_id = ExternalMarketId::parse(namespaced_market_id.as_str())?;
@@ -6130,12 +6831,14 @@ pub async fn create_external_agent(
     let row = sqlx::query(
         "INSERT INTO external_agents (
             id, owner, name, provider, market_id, provider_market_ref,
-            outcome, side, price, quantity, cadence_seconds, strategy, execution_mode,
-            credential_id, active, next_execution_at, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW(),NOW())
+            outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode,
+            credential_id, active, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
+            next_execution_at, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW(),NOW())
         RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
-                  cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
-                  next_execution_at, consecutive_failures, last_error_code, created_at, updated_at",
+                  cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at,
+                  next_execution_at, consecutive_failures, last_error_code, max_notional_per_execution,
+                  max_daily_spend_usdc, max_slippage_bps, created_at, updated_at",
     )
     .bind(id.as_str())
     .bind(user.wallet_address.as_str())
@@ -6148,10 +6851,14 @@ pub async fn create_external_agent(
     .bind(body.price)
     .bind(body.quantity)
     .bind(body.cadence_seconds as i64)
-    .bind(body.strategy.trim())
+    .bind(strategy)
+    .bind(strategy_params)
     .bind(execution_mode.as_str())
     .bind(credential_id.as_deref())
     .bind(body.active.unwrap_or(true))
+    .bind(body.max_notional_per_execution)
+    .bind(body.max_daily_spend_usdc)
+    .bind(body.max_slippage_bps)
     .fetch_one(state.db.pool())
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
@@ -6171,7 +6878,8 @@ pub async fn update_external_agent(
     let agent_id = path.into_inner();
     let current = if matches!(user.role, UserRole::Admin) {
         sqlx::query(
-            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, execution_mode, credential_id, active
+            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
+                    max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
              FROM external_agents
              WHERE id = $1",
         )
@@ -6182,7 +6890,8 @@ pub async fn update_external_agent(
         .ok_or_else(|| ApiError::not_found("External agent"))?
     } else {
         sqlx::query(
-            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, execution_mode, credential_id, active
+            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
+                    max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
              FROM external_agents
              WHERE id = $1 AND owner = $2",
         )
@@ -6237,6 +6946,13 @@ pub async fn update_external_agent(
         .unwrap_or_else(|| current.try_get("strategy").unwrap_or("external"))
         .trim()
         .to_string();
+    let next_strategy_params = match body.strategy_params.as_ref() {
+        Some(value) => normalize_strategy_params(next_strategy.as_str(), Some(value))?,
+        None if body.strategy.is_some() => normalize_strategy_params(next_strategy.as_str(), None)?,
+        None => current
+            .try_get("strategy_params")
+            .unwrap_or_else(|_| json!({})),
+    };
     let next_name = body.name.as_deref().unwrap_or("").trim().to_string();
     let next_active = body
         .active
@@ -6250,6 +6966,49 @@ pub async fn update_external_agent(
         }
         None => current_execution_mode,
     };
+    let next_max_notional_per_execution = body.max_notional_per_execution.or_else(|| {
+        current
+            .try_get::<Option<f64>, _>("max_notional_per_execution")
+            .ok()
+            .flatten()
+    });
+    let next_max_daily_spend_usdc = body.max_daily_spend_usdc.or_else(|| {
+        current
+            .try_get::<Option<f64>, _>("max_daily_spend_usdc")
+            .ok()
+            .flatten()
+    });
+    let next_max_slippage_bps = body.max_slippage_bps.or_else(|| {
+        current
+            .try_get::<Option<i32>, _>("max_slippage_bps")
+            .ok()
+            .flatten()
+    });
+
+    if next_price <= 0.0 || next_price >= 1.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_PRICE",
+            "price must be between 0 and 1",
+        ));
+    }
+    if next_quantity <= 0.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_QUANTITY",
+            "quantity must be greater than zero",
+        ));
+    }
+    if next_cadence == 0 {
+        return Err(ApiError::bad_request(
+            "INVALID_CADENCE",
+            "cadenceSeconds must be greater than zero",
+        ));
+    }
+    validate_agent_risk_fields(
+        next_max_notional_per_execution,
+        next_max_daily_spend_usdc,
+        next_max_slippage_bps,
+    )?;
+    ensure_live_strategy_allowed(next_strategy.as_str(), next_execution_mode)?;
 
     let credential_id = if let Some(id) = body.credential_id.as_deref() {
         let credential = load_credential(&state, owner.as_str(), provider, Some(id)).await?;
@@ -6276,16 +7035,21 @@ pub async fn update_external_agent(
                  quantity = $6,
                  cadence_seconds = $7,
                  strategy = $8,
-                 execution_mode = $9,
-                 credential_id = $10,
-                 active = $11,
-                 consecutive_failures = CASE WHEN $11 = TRUE THEN 0 ELSE consecutive_failures END,
-                 last_error_code = CASE WHEN $11 = TRUE THEN NULL ELSE last_error_code END,
+                 strategy_params = $9,
+                 execution_mode = $10,
+                 credential_id = $11,
+                 active = $12,
+                 max_notional_per_execution = $13,
+                 max_daily_spend_usdc = $14,
+                 max_slippage_bps = $15,
+                 consecutive_failures = CASE WHEN $12 = TRUE THEN 0 ELSE consecutive_failures END,
+                 last_error_code = CASE WHEN $12 = TRUE THEN NULL ELSE last_error_code END,
                  updated_at = NOW()
              WHERE id = $1
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
-                       cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
-                       next_execution_at, consecutive_failures, last_error_code, created_at, updated_at",
+                       cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at,
+                       next_execution_at, consecutive_failures, last_error_code, max_notional_per_execution,
+                       max_daily_spend_usdc, max_slippage_bps, created_at, updated_at",
         )
         .bind(agent_id.as_str())
         .bind(next_name)
@@ -6295,9 +7059,13 @@ pub async fn update_external_agent(
         .bind(next_quantity)
         .bind(next_cadence as i64)
         .bind(next_strategy)
+        .bind(next_strategy_params)
         .bind(next_execution_mode.as_str())
         .bind(credential_id.as_deref())
         .bind(next_active)
+        .bind(next_max_notional_per_execution)
+        .bind(next_max_daily_spend_usdc)
+        .bind(next_max_slippage_bps)
         .fetch_one(state.db.pool())
         .await
         .map_err(|err| ApiError::internal(&err.to_string()))?
@@ -6311,16 +7079,21 @@ pub async fn update_external_agent(
                  quantity = $7,
                  cadence_seconds = $8,
                  strategy = $9,
-                 execution_mode = $10,
-                 credential_id = $11,
-                 active = $12,
-                 consecutive_failures = CASE WHEN $12 = TRUE THEN 0 ELSE consecutive_failures END,
-                 last_error_code = CASE WHEN $12 = TRUE THEN NULL ELSE last_error_code END,
+                 strategy_params = $10,
+                 execution_mode = $11,
+                 credential_id = $12,
+                 active = $13,
+                 max_notional_per_execution = $14,
+                 max_daily_spend_usdc = $15,
+                 max_slippage_bps = $16,
+                 consecutive_failures = CASE WHEN $13 = TRUE THEN 0 ELSE consecutive_failures END,
+                 last_error_code = CASE WHEN $13 = TRUE THEN NULL ELSE last_error_code END,
                  updated_at = NOW()
              WHERE id = $1 AND owner = $2
              RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
-                       cadence_seconds, strategy, execution_mode, credential_id, active, last_executed_at,
-                       next_execution_at, consecutive_failures, last_error_code, created_at, updated_at",
+                       cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at,
+                       next_execution_at, consecutive_failures, last_error_code, max_notional_per_execution,
+                       max_daily_spend_usdc, max_slippage_bps, created_at, updated_at",
         )
         .bind(agent_id.as_str())
         .bind(user.wallet_address.as_str())
@@ -6331,9 +7104,13 @@ pub async fn update_external_agent(
         .bind(next_quantity)
         .bind(next_cadence as i64)
         .bind(next_strategy)
+        .bind(next_strategy_params)
         .bind(next_execution_mode.as_str())
         .bind(credential_id.as_deref())
         .bind(next_active)
+        .bind(next_max_notional_per_execution)
+        .bind(next_max_daily_spend_usdc)
+        .bind(next_max_slippage_bps)
         .fetch_one(state.db.pool())
         .await
         .map_err(|err| ApiError::internal(&err.to_string()))?
@@ -6434,8 +7211,9 @@ pub async fn run_external_agents_tick(
                 agent.last_error_code.as_deref().unwrap_or("unknown")
             );
             deactivate_external_agent(&state, agent.id.as_str(), now).await?;
-            state.event_bus.emit(
-                crate::services::event_bus::PlatformEvent::AgentDeactivated(
+            state
+                .event_bus
+                .emit(crate::services::event_bus::PlatformEvent::AgentDeactivated(
                     crate::services::event_bus::AgentLifecycleEvent {
                         agent_id: agent.id.clone(),
                         owner: agent.owner.clone(),
@@ -6445,8 +7223,7 @@ pub async fn run_external_agents_tick(
                         ),
                         timestamp: now,
                     },
-                ),
-            );
+                ));
             increment_skip_reason(&mut skips_by_reason, "auto_deactivated");
             continue;
         }
@@ -6481,8 +7258,9 @@ pub async fn run_external_agents_tick(
             Ok(outcome) => {
                 if outcome.executed {
                     agents_executed += 1;
-                    state.event_bus.emit(
-                        crate::services::event_bus::PlatformEvent::AgentExecuted(
+                    state
+                        .event_bus
+                        .emit(crate::services::event_bus::PlatformEvent::AgentExecuted(
                             crate::services::event_bus::AgentExecutedEvent {
                                 agent_id: agent.id.clone(),
                                 owner: agent.owner.clone(),
@@ -6498,8 +7276,7 @@ pub async fn run_external_agents_tick(
                                 metadata: outcome.response.clone(),
                                 timestamp: now,
                             },
-                        ),
-                    );
+                        ));
                 } else if let Some(reason) = outcome.skip_reason.as_deref() {
                     increment_skip_reason(&mut skips_by_reason, reason);
                 }
@@ -6531,8 +7308,9 @@ pub async fn run_external_agents_tick(
                         .map(Value::to_string)
                         .unwrap_or_else(|| "null".to_string()),
                 );
-                state.event_bus.emit(
-                    crate::services::event_bus::PlatformEvent::AgentFailed(
+                state
+                    .event_bus
+                    .emit(crate::services::event_bus::PlatformEvent::AgentFailed(
                         crate::services::event_bus::AgentFailedEvent {
                             agent_id: agent.id.clone(),
                             owner: agent.owner.clone(),
@@ -6543,8 +7321,7 @@ pub async fn run_external_agents_tick(
                             consecutive_failures: agent.consecutive_failures + 1,
                             timestamp: now,
                         },
-                    ),
-                );
+                    ));
                 increment_skip_reason(&mut skips_by_reason, reason.as_str());
                 let run_id = Uuid::new_v4().to_string();
                 insert_external_agent_run(
@@ -6742,6 +7519,48 @@ pub async fn get_external_agents_performance(
     }
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    let outcome_drawdown_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT realized_pnl_usdc
+             FROM paper_outcomes
+             WHERE owner = $1
+             ORDER BY closed_at ASC, id ASC",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT realized_pnl_usdc
+             FROM paper_outcomes
+             ORDER BY closed_at ASC, id ASC",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let run_metric_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT status, metadata
+             FROM external_agent_runs
+             WHERE owner = $1
+               AND created_at >= NOW() - INTERVAL '30 days'",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT status, metadata
+             FROM external_agent_runs
+             WHERE created_at >= NOW() - INTERVAL '30 days'",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
     let agents = agents_row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64;
     let active_agents = agents_row
         .try_get::<i64, _>("active_agents")
@@ -6764,6 +7583,53 @@ pub async fn get_external_agents_performance(
     let unrealized_pnl_usdc = positions_row
         .try_get::<f64, _>("unrealized_pnl_usdc")
         .unwrap_or(0.0);
+    let max_drawdown_usdc = calculate_max_drawdown(
+        &outcome_drawdown_rows
+            .iter()
+            .map(|row| row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0))
+            .collect::<Vec<_>>(),
+    );
+    let mut successful_runs = 0_u64;
+    let mut detection_latencies = Vec::<f64>::new();
+    let mut slippage_ticks = Vec::<f64>::new();
+    for row in &run_metric_rows {
+        let status = row.try_get::<String, _>("status").unwrap_or_default();
+        if status != "failed" {
+            successful_runs += 1;
+        }
+        let metadata = row
+            .try_get::<Value, _>("metadata")
+            .unwrap_or_else(|_| json!({}));
+        if let Some(value) = metadata
+            .pointer("/signalMetrics/detectionToOrderMs")
+            .and_then(|entry| entry.as_f64())
+            .or_else(|| {
+                metadata
+                    .get("detectionToOrderMs")
+                    .and_then(|entry| entry.as_f64())
+            })
+        {
+            detection_latencies.push(value);
+        }
+        if let Some(value) = metadata
+            .get("fillSlippageTicks")
+            .and_then(|entry| entry.as_f64())
+            .or_else(|| {
+                metadata
+                    .pointer("/signalMetrics/slippageTicks")
+                    .and_then(|entry| entry.as_f64())
+            })
+        {
+            slippage_ticks.push(value);
+        }
+    }
+    let runner_reliability = if run_metric_rows.is_empty() {
+        0.0
+    } else {
+        successful_runs as f64 / run_metric_rows.len() as f64
+    };
+    let p50_detection_to_order_ms = median_f64(&mut detection_latencies);
+    let p50_slippage_ticks = median_f64(&mut slippage_ticks);
 
     let strategy_rows = if let Some(owner) = owner_filter.as_ref() {
         sqlx::query(
@@ -6879,6 +7745,27 @@ pub async fn get_external_agents_performance(
     }
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    let outcome_strategy_drawdown_rows = if let Some(owner) = owner_filter.as_ref() {
+        sqlx::query(
+            "SELECT strategy, realized_pnl_usdc
+             FROM paper_outcomes
+             WHERE owner = $1
+             ORDER BY strategy ASC, closed_at ASC, id ASC",
+        )
+        .bind(owner.as_str())
+        .fetch_all(state.db.pool())
+        .await
+    } else {
+        sqlx::query(
+            "SELECT strategy, realized_pnl_usdc
+             FROM paper_outcomes
+             ORDER BY strategy ASC, closed_at ASC, id ASC",
+        )
+        .fetch_all(state.db.pool())
+        .await
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
     let mut strategy_map = BTreeMap::new();
     for row in strategy_rows {
         let strategy = row
@@ -6899,6 +7786,7 @@ pub async fn get_external_agents_performance(
                 unrealized_pnl_usdc: 0.0,
                 net_pnl_usdc: 0.0,
                 win_rate: 0.0,
+                max_drawdown_usdc: 0.0,
             },
         );
     }
@@ -6923,6 +7811,7 @@ pub async fn get_external_agents_performance(
                     unrealized_pnl_usdc: 0.0,
                     net_pnl_usdc: 0.0,
                     win_rate: 0.0,
+                    max_drawdown_usdc: 0.0,
                 });
         entry.open_positions = row.try_get::<i64, _>("open_positions").unwrap_or(0).max(0) as u64;
         entry.closed_positions = row
@@ -6952,6 +7841,7 @@ pub async fn get_external_agents_performance(
                     unrealized_pnl_usdc: 0.0,
                     net_pnl_usdc: 0.0,
                     win_rate: 0.0,
+                    max_drawdown_usdc: 0.0,
                 });
         entry.fills = row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
         entry.volume_usdc = row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
@@ -6978,9 +7868,27 @@ pub async fn get_external_agents_performance(
                     unrealized_pnl_usdc: 0.0,
                     net_pnl_usdc: 0.0,
                     win_rate: 0.0,
+                    max_drawdown_usdc: 0.0,
                 });
         entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
         entry.win_rate = row.try_get::<f64, _>("win_rate").unwrap_or(0.0);
+    }
+
+    let mut strategy_drawdown_points = BTreeMap::<String, Vec<f64>>::new();
+    for row in outcome_strategy_drawdown_rows {
+        let strategy = row
+            .try_get::<String, _>("strategy")
+            .unwrap_or_else(|_| "unclassified".to_string());
+        let realized = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+        strategy_drawdown_points
+            .entry(strategy)
+            .or_default()
+            .push(realized);
+    }
+    for (strategy, points) in strategy_drawdown_points {
+        if let Some(entry) = strategy_map.get_mut(strategy.as_str()) {
+            entry.max_drawdown_usdc = calculate_max_drawdown(points.as_slice());
+        }
     }
 
     let mut strategies = strategy_map.into_values().collect::<Vec<_>>();
@@ -7159,6 +8067,10 @@ pub async fn get_external_agents_performance(
             realized_pnl_usdc,
             unrealized_pnl_usdc,
             net_pnl_usdc: realized_pnl_usdc + unrealized_pnl_usdc,
+            max_drawdown_usdc,
+            runner_reliability,
+            p50_detection_to_order_ms,
+            p50_slippage_ticks,
         },
         strategies,
         timeline,
@@ -7229,6 +8141,34 @@ pub async fn get_public_external_agents_performance(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    let outcome_drawdown_rows = sqlx::query(
+        "SELECT po.realized_pnl_usdc
+         FROM paper_outcomes po
+         JOIN external_agents ea ON ea.id = po.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+         ORDER BY po.closed_at ASC, po.id ASC",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let run_metric_rows = sqlx::query(
+        "SELECT ear.status, ear.metadata
+         FROM external_agent_runs ear
+         JOIN external_agents ea ON ea.id = ear.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+           AND ear.created_at >= NOW() - INTERVAL '30 days'",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
     let agents = agents_row.try_get::<i64, _>("agents").unwrap_or(0).max(0) as u64;
     let active_agents = agents_row
         .try_get::<i64, _>("active_agents")
@@ -7251,6 +8191,53 @@ pub async fn get_public_external_agents_performance(
     let unrealized_pnl_usdc = positions_row
         .try_get::<f64, _>("unrealized_pnl_usdc")
         .unwrap_or(0.0);
+    let max_drawdown_usdc = calculate_max_drawdown(
+        &outcome_drawdown_rows
+            .iter()
+            .map(|row| row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0))
+            .collect::<Vec<_>>(),
+    );
+    let mut successful_runs = 0_u64;
+    let mut detection_latencies = Vec::<f64>::new();
+    let mut slippage_ticks = Vec::<f64>::new();
+    for row in &run_metric_rows {
+        let status = row.try_get::<String, _>("status").unwrap_or_default();
+        if status != "failed" {
+            successful_runs += 1;
+        }
+        let metadata = row
+            .try_get::<Value, _>("metadata")
+            .unwrap_or_else(|_| json!({}));
+        if let Some(value) = metadata
+            .pointer("/signalMetrics/detectionToOrderMs")
+            .and_then(|entry| entry.as_f64())
+            .or_else(|| {
+                metadata
+                    .get("detectionToOrderMs")
+                    .and_then(|entry| entry.as_f64())
+            })
+        {
+            detection_latencies.push(value);
+        }
+        if let Some(value) = metadata
+            .get("fillSlippageTicks")
+            .and_then(|entry| entry.as_f64())
+            .or_else(|| {
+                metadata
+                    .pointer("/signalMetrics/slippageTicks")
+                    .and_then(|entry| entry.as_f64())
+            })
+        {
+            slippage_ticks.push(value);
+        }
+    }
+    let runner_reliability = if run_metric_rows.is_empty() {
+        0.0
+    } else {
+        successful_runs as f64 / run_metric_rows.len() as f64
+    };
+    let p50_detection_to_order_ms = median_f64(&mut detection_latencies);
+    let p50_slippage_ticks = median_f64(&mut slippage_ticks);
 
     let strategy_rows = sqlx::query(
         "SELECT ea.strategy,
@@ -7318,6 +8305,20 @@ pub async fn get_public_external_agents_performance(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    let outcome_strategy_drawdown_rows = sqlx::query(
+        "SELECT ea.strategy, po.realized_pnl_usdc
+         FROM paper_outcomes po
+         JOIN external_agents ea ON ea.id = po.agent_id
+         WHERE ea.owner = $1
+           AND ea.execution_mode = 'paper'
+           AND LOWER(ea.name) LIKE 'paper-%'
+         ORDER BY ea.strategy ASC, po.closed_at ASC, po.id ASC",
+    )
+    .bind(owner.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
     let mut strategy_map = BTreeMap::<String, ExternalAgentStrategyPerformance>::new();
 
     for row in strategy_rows {
@@ -7339,6 +8340,7 @@ pub async fn get_public_external_agents_performance(
                 unrealized_pnl_usdc: 0.0,
                 net_pnl_usdc: 0.0,
                 win_rate: 0.0,
+                max_drawdown_usdc: 0.0,
             },
         );
     }
@@ -7363,6 +8365,7 @@ pub async fn get_public_external_agents_performance(
                     unrealized_pnl_usdc: 0.0,
                     net_pnl_usdc: 0.0,
                     win_rate: 0.0,
+                    max_drawdown_usdc: 0.0,
                 });
         entry.open_positions = row.try_get::<i64, _>("open_positions").unwrap_or(0).max(0) as u64;
         entry.closed_positions = row
@@ -7393,6 +8396,7 @@ pub async fn get_public_external_agents_performance(
                     unrealized_pnl_usdc: 0.0,
                     net_pnl_usdc: 0.0,
                     win_rate: 0.0,
+                    max_drawdown_usdc: 0.0,
                 });
         entry.fills = row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
         entry.volume_usdc = row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
@@ -7419,10 +8423,28 @@ pub async fn get_public_external_agents_performance(
                     unrealized_pnl_usdc: 0.0,
                     net_pnl_usdc: 0.0,
                     win_rate: 0.0,
+                    max_drawdown_usdc: 0.0,
                 });
         entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
         entry.win_rate = row.try_get::<f64, _>("win_rate").unwrap_or(0.0);
         entry.net_pnl_usdc = entry.realized_pnl_usdc + entry.unrealized_pnl_usdc;
+    }
+
+    let mut strategy_drawdown_points = BTreeMap::<String, Vec<f64>>::new();
+    for row in outcome_strategy_drawdown_rows {
+        let strategy: String = row
+            .try_get("strategy")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let realized = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+        strategy_drawdown_points
+            .entry(strategy)
+            .or_default()
+            .push(realized);
+    }
+    for (strategy, points) in strategy_drawdown_points {
+        if let Some(entry) = strategy_map.get_mut(strategy.as_str()) {
+            entry.max_drawdown_usdc = calculate_max_drawdown(points.as_slice());
+        }
     }
 
     let strategies = strategy_map.into_values().collect::<Vec<_>>();
@@ -7558,6 +8580,10 @@ pub async fn get_public_external_agents_performance(
             realized_pnl_usdc,
             unrealized_pnl_usdc,
             net_pnl_usdc: realized_pnl_usdc + unrealized_pnl_usdc,
+            max_drawdown_usdc,
+            runner_reliability,
+            p50_detection_to_order_ms,
+            p50_slippage_ticks,
         },
         strategies,
         timeline,
@@ -8040,6 +9066,9 @@ mod tests {
         assert_eq!(strategy_label("momentum"), "proving");
         assert_eq!(strategy_label("mean-revert"), "research");
         assert_eq!(strategy_label("market-maker"), "optimization");
+        assert_eq!(strategy_label("maker_reward"), "rebates");
+        assert_eq!(strategy_label("event_repricing"), "scenario");
+        assert_eq!(strategy_label("wallet_follow"), "mirror");
         assert_eq!(strategy_label("custom"), "custom");
     }
 

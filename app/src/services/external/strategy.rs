@@ -1,73 +1,212 @@
-//! Pluggable trading strategy logic.
-//!
-//! Strategies compute a trade signal from market state and agent config.
-//! The `strategy` field on `ExternalAgentRecord` selects which logic runs.
-
+use crate::api::ApiError;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
-/// Market state snapshot passed to strategy evaluation.
 #[derive(Debug, Clone)]
 pub struct MarketState {
-    /// Current yes price (0–1 probability).
     pub yes_price: f64,
-    /// Current no price (0–1 probability).
     pub no_price: f64,
-    /// Best bid price for the agent's outcome.
     pub best_bid: Option<f64>,
-    /// Best ask price for the agent's outcome.
     pub best_ask: Option<f64>,
-    /// Mid price for the agent's outcome.
     pub mid_price: f64,
-    /// Agent's configured price target.
     pub agent_price: f64,
-    /// Agent's configured side ("buy" or "sell").
     pub agent_side: String,
-    /// Agent's configured outcome ("yes" or "no").
     pub agent_outcome: String,
-    /// Agent's configured quantity.
     pub agent_quantity: f64,
+    pub time_to_resolution_seconds: Option<i64>,
+    pub fair_value_low: Option<f64>,
+    pub fair_value_high: Option<f64>,
+    pub midpoint_delta_bps: Option<i32>,
 }
 
-/// Signal returned by a strategy evaluation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeSignal {
-    /// Whether to execute this tick.
     pub execute: bool,
-    /// Adjusted price (may differ from agent_price).
     pub price: f64,
-    /// Adjusted quantity (may differ from agent_quantity).
     pub quantity: f64,
-    /// Reason for the decision.
     pub reason: String,
+    #[serde(default)]
+    pub metadata: Value,
 }
 
-/// Evaluate the strategy and return a trade signal.
-///
-/// Falls back to the default (always-execute) behavior for unknown strategies.
-pub fn evaluate_strategy(strategy: &str, state: &MarketState) -> TradeSignal {
-    match strategy {
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct MarketMakerParams {
+    #[serde(default = "default_one_tick")]
+    quote_improvement_ticks: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct MakerRewardParams {
+    #[serde(default = "default_true")]
+    fee_enabled: bool,
+    #[serde(default = "default_true")]
+    rebate_eligible: bool,
+    #[serde(default)]
+    allow_fee_free: bool,
+    #[serde(default = "default_min_spread_bps")]
+    min_spread_bps: i32,
+    #[serde(default = "default_zero_i32")]
+    maker_rebate_bps: i32,
+    #[serde(default = "default_one_tick")]
+    quote_improvement_ticks: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct EventRepricingParams {
+    #[serde(default = "default_min_hours_to_resolution")]
+    min_hours_to_resolution: u64,
+    #[serde(default = "default_signal_edge_bps")]
+    min_edge_bps: i32,
+    #[serde(default = "default_fee_buffer_bps")]
+    fee_buffer_bps: i32,
+    #[serde(default = "default_slippage_buffer_bps")]
+    slippage_buffer_bps: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct WalletFollowParams {
+    target_wallet: String,
+    #[serde(default = "default_wallet_latency_ms")]
+    observed_detection_to_order_ms: i64,
+    #[serde(default)]
+    observed_slippage_ticks: f64,
+    #[serde(default = "default_wallet_latency_ms")]
+    max_detection_to_order_ms: i64,
+    #[serde(default = "default_wallet_slippage_ticks")]
+    max_slippage_ticks: f64,
+    #[serde(default = "default_copy_size_multiplier")]
+    copy_size_multiplier: f64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_zero_i32() -> i32 {
+    0
+}
+
+fn default_one_tick() -> f64 {
+    1.0
+}
+
+fn default_min_spread_bps() -> i32 {
+    15
+}
+
+fn default_min_hours_to_resolution() -> u64 {
+    24
+}
+
+fn default_signal_edge_bps() -> i32 {
+    400
+}
+
+fn default_fee_buffer_bps() -> i32 {
+    25
+}
+
+fn default_slippage_buffer_bps() -> i32 {
+    25
+}
+
+fn default_wallet_latency_ms() -> i64 {
+    1_500
+}
+
+fn default_wallet_slippage_ticks() -> f64 {
+    1.0
+}
+
+fn default_copy_size_multiplier() -> f64 {
+    0.8
+}
+
+fn normalized_strategy(strategy: &str) -> String {
+    strategy.trim().to_ascii_lowercase().replace('_', "-")
+}
+
+fn parse_params<T>(raw: &Value) -> Result<T, ApiError>
+where
+    T: for<'de> Deserialize<'de> + Serialize + Default,
+{
+    let payload = if raw.is_null() {
+        json!({})
+    } else {
+        raw.clone()
+    };
+    serde_json::from_value(payload)
+        .map_err(|err| ApiError::bad_request("INVALID_STRATEGY_PARAMS", &err.to_string()))
+}
+
+pub fn validate_strategy_params(strategy: &str, raw: &Value) -> Result<Value, ApiError> {
+    let normalized = normalized_strategy(strategy);
+    let params = match normalized.as_str() {
+        "market-maker" => serde_json::to_value(parse_params::<MarketMakerParams>(raw)?),
+        "maker-reward" => serde_json::to_value(parse_params::<MakerRewardParams>(raw)?),
+        "event-repricing" => serde_json::to_value(parse_params::<EventRepricingParams>(raw)?),
+        "wallet-follow" => {
+            let parsed = parse_params::<WalletFollowParams>(raw)?;
+            if parsed.target_wallet.trim().is_empty() {
+                return Err(ApiError::bad_request(
+                    "INVALID_STRATEGY_PARAMS",
+                    "wallet_follow requires targetWallet",
+                ));
+            }
+            serde_json::to_value(parsed)
+        }
+        "momentum" | "mean-revert" | "default" | "" => Ok(json!({})),
+        _ => Ok(raw.clone()),
+    }
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    Ok(params)
+}
+
+pub fn evaluate_strategy(
+    strategy: &str,
+    state: &MarketState,
+    strategy_params: &Value,
+) -> TradeSignal {
+    match normalized_strategy(strategy).as_str() {
         "momentum" => evaluate_momentum(state),
-        "mean-revert" | "mean_revert" => evaluate_mean_revert(state),
-        "market-maker" | "market_maker" => evaluate_market_maker(state),
+        "mean-revert" => evaluate_mean_revert(state),
+        "market-maker" => evaluate_market_maker(state, strategy_params),
+        "maker-reward" => evaluate_maker_reward(state, strategy_params),
+        "event-repricing" => evaluate_event_repricing(state, strategy_params),
+        "wallet-follow" => evaluate_wallet_follow(state, strategy_params),
         _ => evaluate_default(state),
     }
 }
 
-/// Default strategy: always execute at the agent's configured price/quantity.
-fn evaluate_default(state: &MarketState) -> TradeSignal {
+fn execute_signal(state: &MarketState, reason: String) -> TradeSignal {
     TradeSignal {
         execute: true,
         price: state.agent_price,
         quantity: state.agent_quantity,
-        reason: "default: execute at configured price".to_string(),
+        reason,
+        metadata: json!({}),
     }
 }
 
-/// Momentum strategy: only buy when price is trending in favorable direction.
-///
-/// For buys: execute when mid price < agent_price (price hasn't run away).
-/// For sells: execute when mid price > agent_price.
-/// Quantity scales up when signal is strong (bigger gap = more conviction).
+fn skip_signal(state: &MarketState, reason: String) -> TradeSignal {
+    TradeSignal {
+        execute: false,
+        price: state.agent_price,
+        quantity: state.agent_quantity,
+        reason,
+        metadata: json!({}),
+    }
+}
+
+fn evaluate_default(state: &MarketState) -> TradeSignal {
+    execute_signal(state, "default: execute at configured price".to_string())
+}
+
 fn evaluate_momentum(state: &MarketState) -> TradeSignal {
     let is_buy = state.agent_side == "buy";
     let spread = if is_buy {
@@ -77,98 +216,72 @@ fn evaluate_momentum(state: &MarketState) -> TradeSignal {
     };
 
     if spread <= 0.0 {
-        return TradeSignal {
-            execute: false,
-            price: state.agent_price,
-            quantity: state.agent_quantity,
-            reason: format!(
-                "momentum: unfavorable spread ({:.4}), waiting",
-                spread
-            ),
-        };
+        return skip_signal(
+            state,
+            format!("momentum: unfavorable spread ({spread:.4}), waiting"),
+        );
     }
 
-    // Scale quantity: 50% at edge, 100% at 5%+ spread, 150% at 10%+ spread.
     let strength = (spread / 0.05).clamp(0.5, 1.5);
-    let adjusted_qty = state.agent_quantity * strength;
-
     TradeSignal {
         execute: true,
         price: state.agent_price,
-        quantity: adjusted_qty,
-        reason: format!(
-            "momentum: favorable spread {:.4}, strength {:.2}x",
-            spread, strength
-        ),
+        quantity: state.agent_quantity * strength,
+        reason: format!("momentum: favorable spread {spread:.4}, strength {strength:.2}x"),
+        metadata: json!({ "strength": strength }),
     }
 }
 
-/// Mean-revert strategy: execute when price deviates from a neutral zone.
-///
-/// Buys when price drops below agent_price (expecting reversion up).
-/// Sells when price rises above agent_price (expecting reversion down).
-/// Skips when price is within a tight band around agent_price.
 fn evaluate_mean_revert(state: &MarketState) -> TradeSignal {
     let deviation = state.mid_price - state.agent_price;
     let abs_deviation = deviation.abs();
 
-    // Dead zone: skip when within 2% of target.
     if abs_deviation < 0.02 {
-        return TradeSignal {
-            execute: false,
-            price: state.agent_price,
-            quantity: state.agent_quantity,
-            reason: format!(
-                "mean-revert: price within dead zone (deviation={:.4})",
-                deviation
-            ),
-        };
+        return skip_signal(
+            state,
+            format!("mean-revert: price within dead zone (deviation={deviation:.4})"),
+        );
     }
 
     let is_buy = state.agent_side == "buy";
     let favorable = (is_buy && deviation < 0.0) || (!is_buy && deviation > 0.0);
-
     if !favorable {
-        return TradeSignal {
-            execute: false,
-            price: state.agent_price,
-            quantity: state.agent_quantity,
-            reason: format!(
-                "mean-revert: deviation {:.4} not favorable for {}",
-                deviation, state.agent_side
+        return skip_signal(
+            state,
+            format!(
+                "mean-revert: deviation {deviation:.4} not favorable for {}",
+                state.agent_side
             ),
-        };
+        );
     }
 
-    // More aggressive sizing when deviation is larger.
     let strength = (abs_deviation / 0.05).clamp(0.5, 2.0);
-    let adjusted_qty = state.agent_quantity * strength;
-
     TradeSignal {
         execute: true,
         price: state.agent_price,
-        quantity: adjusted_qty,
-        reason: format!(
-            "mean-revert: deviation {:.4}, strength {:.2}x",
-            deviation, strength
-        ),
+        quantity: state.agent_quantity * strength,
+        reason: format!("mean-revert: deviation {deviation:.4}, strength {strength:.2}x"),
+        metadata: json!({ "strength": strength }),
     }
 }
 
-/// Market-maker strategy: place orders on both sides of the spread.
-///
-/// Always executes, but adjusts price to sit at best_bid/best_ask edges.
-/// Flips the side based on inventory considerations (simplified: alternates).
-fn evaluate_market_maker(state: &MarketState) -> TradeSignal {
+fn evaluate_market_maker(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = parse_params::<MarketMakerParams>(raw).unwrap_or_default();
+    let tick = 0.001 * params.quote_improvement_ticks.max(0.0);
     let (price, reason) = if state.agent_side == "buy" {
         let bid = state.best_bid.unwrap_or(state.mid_price - 0.01);
-        // Improve by 0.001 to sit at top of book.
-        let price = (bid + 0.001).min(state.agent_price);
-        (price, format!("market-maker: bid at {:.4} (book={:.4})", price, bid))
+        let price = (bid + tick).min(state.agent_price);
+        (
+            price,
+            format!("market-maker: bid at {price:.4} (book={bid:.4})"),
+        )
     } else {
         let ask = state.best_ask.unwrap_or(state.mid_price + 0.01);
-        let price = (ask - 0.001).max(state.agent_price);
-        (price, format!("market-maker: ask at {:.4} (book={:.4})", price, ask))
+        let price = (ask - tick).max(state.agent_price);
+        (
+            price,
+            format!("market-maker: ask at {price:.4} (book={ask:.4})"),
+        )
     };
 
     TradeSignal {
@@ -176,6 +289,211 @@ fn evaluate_market_maker(state: &MarketState) -> TradeSignal {
         price,
         quantity: state.agent_quantity,
         reason,
+        metadata: json!({ "quoteImprovementTicks": params.quote_improvement_ticks }),
+    }
+}
+
+fn evaluate_maker_reward(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = parse_params::<MakerRewardParams>(raw).unwrap_or_default();
+    let spread_bps = book_spread_bps(state);
+
+    if !params.fee_enabled && !params.allow_fee_free {
+        return skip_signal(
+            state,
+            "maker_reward: fee-free market skipped without spread-only override".to_string(),
+        );
+    }
+    if params.fee_enabled && !params.rebate_eligible {
+        return skip_signal(
+            state,
+            "maker_reward: market not rebate eligible".to_string(),
+        );
+    }
+    if spread_bps < f64::from(params.min_spread_bps) {
+        return skip_signal(
+            state,
+            format!(
+                "maker_reward: spread {:.1}bps below threshold {}bps",
+                spread_bps, params.min_spread_bps
+            ),
+        );
+    }
+
+    let tick = 0.001 * params.quote_improvement_ticks.max(0.0);
+    let (price, side_label) = if state.agent_side == "buy" {
+        (
+            (state.best_bid.unwrap_or(state.mid_price - 0.01) + tick).min(state.agent_price),
+            "bid",
+        )
+    } else {
+        (
+            (state.best_ask.unwrap_or(state.mid_price + 0.01) - tick).max(state.agent_price),
+            "ask",
+        )
+    };
+
+    TradeSignal {
+        execute: true,
+        price,
+        quantity: state.agent_quantity,
+        reason: format!(
+            "maker_reward: {side_label} at {price:.4}, spread {:.1}bps, rebate {}bps",
+            spread_bps, params.maker_rebate_bps
+        ),
+        metadata: json!({
+            "spreadBps": spread_bps,
+            "makerRebateBps": params.maker_rebate_bps,
+            "rebateEligible": params.rebate_eligible,
+            "feeEnabled": params.fee_enabled
+        }),
+    }
+}
+
+fn evaluate_event_repricing(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = parse_params::<EventRepricingParams>(raw).unwrap_or_default();
+    let Some(low) = state.fair_value_low else {
+        return skip_signal(
+            state,
+            "event_repricing: no active fair-value signal".to_string(),
+        );
+    };
+    let Some(high) = state.fair_value_high else {
+        return skip_signal(
+            state,
+            "event_repricing: no active fair-value signal".to_string(),
+        );
+    };
+    let Some(time_to_resolution_seconds) = state.time_to_resolution_seconds else {
+        return skip_signal(
+            state,
+            "event_repricing: market close window unavailable".to_string(),
+        );
+    };
+    if time_to_resolution_seconds < (params.min_hours_to_resolution as i64 * 3600) {
+        return skip_signal(
+            state,
+            format!(
+                "event_repricing: market resolves too soon ({}h required)",
+                params.min_hours_to_resolution
+            ),
+        );
+    }
+
+    let (fair_low, fair_high) = agent_probability_range(state, low, high);
+    let fair_mid = (fair_low + fair_high) / 2.0;
+    let edge_bps = ((fair_mid - state.mid_price).abs() * 10_000.0).round() as i32;
+    let net_edge_bps = edge_bps - params.fee_buffer_bps - params.slippage_buffer_bps;
+    if net_edge_bps < params.min_edge_bps {
+        return skip_signal(
+            state,
+            format!(
+                "event_repricing: net edge {}bps below threshold {}bps",
+                net_edge_bps, params.min_edge_bps
+            ),
+        );
+    }
+
+    let favorable = if state.agent_side == "buy" {
+        fair_mid > state.mid_price
+    } else {
+        fair_mid < state.mid_price
+    };
+    if !favorable {
+        return skip_signal(
+            state,
+            "event_repricing: signal direction does not match configured side".to_string(),
+        );
+    }
+
+    let strength = (f64::from(net_edge_bps.max(params.min_edge_bps))
+        / f64::from(params.min_edge_bps))
+    .clamp(1.0, 2.0);
+    TradeSignal {
+        execute: true,
+        price: state.agent_price,
+        quantity: state.agent_quantity * strength,
+        reason: format!(
+            "event_repricing: fair {:.4}-{:.4}, mid {:.4}, net edge {}bps",
+            fair_low, fair_high, state.mid_price, net_edge_bps
+        ),
+        metadata: json!({
+            "fairValueLow": fair_low,
+            "fairValueHigh": fair_high,
+            "midpointDeltaBps": state.midpoint_delta_bps,
+            "netEdgeBps": net_edge_bps
+        }),
+    }
+}
+
+fn evaluate_wallet_follow(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = match parse_params::<WalletFollowParams>(raw) {
+        Ok(value) => value,
+        Err(_) => {
+            return skip_signal(state, "wallet_follow: invalid strategy params".to_string());
+        }
+    };
+
+    if params.target_wallet.trim().is_empty() {
+        return skip_signal(state, "wallet_follow: target wallet missing".to_string());
+    }
+    if params.observed_detection_to_order_ms > params.max_detection_to_order_ms {
+        return skip_signal(
+            state,
+            format!(
+                "wallet_follow: latency {}ms above gate {}ms",
+                params.observed_detection_to_order_ms, params.max_detection_to_order_ms
+            ),
+        );
+    }
+    if params.observed_slippage_ticks > params.max_slippage_ticks {
+        return skip_signal(
+            state,
+            format!(
+                "wallet_follow: slippage {:.2} ticks above gate {:.2}",
+                params.observed_slippage_ticks, params.max_slippage_ticks
+            ),
+        );
+    }
+
+    TradeSignal {
+        execute: true,
+        price: state.agent_price,
+        quantity: state.agent_quantity * params.copy_size_multiplier.clamp(0.1, 1.0),
+        reason: format!(
+            "wallet_follow: {} within latency/slippage gate",
+            params.target_wallet
+        ),
+        metadata: json!({
+            "targetWallet": params.target_wallet,
+            "detectionToOrderMs": params.observed_detection_to_order_ms,
+            "slippageTicks": params.observed_slippage_ticks
+        }),
+    }
+}
+
+fn book_spread_bps(state: &MarketState) -> f64 {
+    match (state.best_bid, state.best_ask) {
+        (Some(bid), Some(ask)) if bid > 0.0 && ask > 0.0 && ask >= bid => {
+            let mid = (bid + ask) / 2.0;
+            if mid <= 0.0 {
+                0.0
+            } else {
+                ((ask - bid) / mid) * 10_000.0
+            }
+        }
+        _ => 0.0,
+    }
+}
+
+fn agent_probability_range(
+    state: &MarketState,
+    fair_value_low: f64,
+    fair_value_high: f64,
+) -> (f64, f64) {
+    if state.agent_outcome == "no" {
+        (1.0 - fair_value_high, 1.0 - fair_value_low)
+    } else {
+        (fair_value_low, fair_value_high)
     }
 }
 
@@ -194,51 +512,97 @@ mod tests {
             agent_side: "buy".to_string(),
             agent_outcome: "yes".to_string(),
             agent_quantity: 100.0,
+            time_to_resolution_seconds: Some(48 * 3600),
+            fair_value_low: None,
+            fair_value_high: None,
+            midpoint_delta_bps: None,
         }
     }
 
     #[test]
     fn default_always_executes() {
-        let signal = evaluate_strategy("unknown", &base_state());
+        let signal = evaluate_strategy("unknown", &base_state(), &json!({}));
         assert!(signal.execute);
         assert!((signal.price - 0.55).abs() < f64::EPSILON);
     }
 
     #[test]
     fn momentum_executes_when_favorable() {
-        // mid=0.6, agent_price=0.55 → spread is negative for buy → skip
-        let signal = evaluate_strategy("momentum", &base_state());
+        let signal = evaluate_strategy("momentum", &base_state(), &json!({}));
         assert!(!signal.execute);
 
-        // Now set mid below agent_price → favorable
         let mut state = base_state();
         state.mid_price = 0.50;
-        let signal = evaluate_strategy("momentum", &state);
+        let signal = evaluate_strategy("momentum", &state, &json!({}));
         assert!(signal.execute);
-        assert!(signal.quantity >= 100.0); // scaled up
+        assert!(signal.quantity >= 100.0);
     }
 
     #[test]
     fn mean_revert_skips_in_dead_zone() {
         let mut state = base_state();
-        state.mid_price = 0.56; // within 2% of 0.55
-        let signal = evaluate_strategy("mean-revert", &state);
+        state.mid_price = 0.56;
+        let signal = evaluate_strategy("mean-revert", &state, &json!({}));
         assert!(!signal.execute);
     }
 
     #[test]
-    fn mean_revert_executes_on_deviation() {
-        let mut state = base_state();
-        state.mid_price = 0.50; // 5% below target, buy is favorable
-        let signal = evaluate_strategy("mean-revert", &state);
+    fn maker_reward_requires_rebate_or_override() {
+        let signal = evaluate_strategy(
+            "maker_reward",
+            &base_state(),
+            &json!({ "feeEnabled": false, "rebateEligible": false }),
+        );
+        assert!(!signal.execute);
+
+        let signal = evaluate_strategy(
+            "maker_reward",
+            &base_state(),
+            &json!({ "feeEnabled": true, "rebateEligible": true, "makerRebateBps": 4 }),
+        );
         assert!(signal.execute);
     }
 
     #[test]
-    fn market_maker_always_executes() {
-        let signal = evaluate_strategy("market-maker", &base_state());
+    fn event_repricing_uses_signal_range() {
+        let mut state = base_state();
+        state.fair_value_low = Some(0.66);
+        state.fair_value_high = Some(0.70);
+        state.mid_price = 0.60;
+        let signal = evaluate_strategy("event_repricing", &state, &json!({}));
         assert!(signal.execute);
-        // Price should be near best_bid + 0.001 but capped at agent_price
-        assert!(signal.price <= 0.55);
+        assert!(signal.quantity > 100.0);
+    }
+
+    #[test]
+    fn wallet_follow_respects_latency_gate() {
+        let signal = evaluate_strategy(
+            "wallet_follow",
+            &base_state(),
+            &json!({
+                "targetWallet": "0xabc",
+                "observedDetectionToOrderMs": 1800,
+                "observedSlippageTicks": 0.5
+            }),
+        );
+        assert!(!signal.execute);
+
+        let signal = evaluate_strategy(
+            "wallet_follow",
+            &base_state(),
+            &json!({
+                "targetWallet": "0xabc",
+                "observedDetectionToOrderMs": 900,
+                "observedSlippageTicks": 0.5
+            }),
+        );
+        assert!(signal.execute);
+        assert!((signal.quantity - 80.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn validate_wallet_follow_requires_target_wallet() {
+        let err = validate_strategy_params("wallet_follow", &json!({})).unwrap_err();
+        assert_eq!(err.code, "INVALID_STRATEGY_PARAMS");
     }
 }
