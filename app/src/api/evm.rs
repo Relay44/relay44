@@ -6698,10 +6698,10 @@ pub async fn register_oracle_market_config(
     check_role(user.role, UserRole::Admin)?;
 
     let feed_type = body.feed_type.trim().to_ascii_lowercase();
-    if feed_type != "chainlink" && feed_type != "manual" {
+    if !["chainlink", "pyth", "manual"].contains(&feed_type.as_str()) {
         return Err(ApiError::bad_request(
             "INVALID_FEED_TYPE",
-            "feedType must be 'chainlink' or 'manual'",
+            "feedType must be 'chainlink', 'pyth', or 'manual'",
         ));
     }
 
@@ -6714,20 +6714,38 @@ pub async fn register_oracle_market_config(
     }
 
     let feed_address = body.feed_address.as_deref().map(|a| a.trim());
-    if feed_type == "chainlink" {
-        if let Some(addr) = feed_address {
-            if !is_valid_evm_address(addr) {
+    match feed_type.as_str() {
+        "chainlink" => {
+            if let Some(addr) = feed_address {
+                if !is_valid_evm_address(addr) {
+                    return Err(ApiError::bad_request(
+                        "INVALID_FEED_ADDRESS",
+                        "feedAddress must be a valid 0x EVM address",
+                    ));
+                }
+            } else {
                 return Err(ApiError::bad_request(
-                    "INVALID_FEED_ADDRESS",
-                    "feedAddress must be a valid 0x EVM address",
+                    "MISSING_FEED_ADDRESS",
+                    "feedAddress is required for chainlink feeds",
                 ));
             }
-        } else {
-            return Err(ApiError::bad_request(
-                "MISSING_FEED_ADDRESS",
-                "feedAddress is required for chainlink feeds",
-            ));
         }
+        "pyth" => {
+            if let Some(addr) = feed_address {
+                if !is_valid_bytes32(addr) {
+                    return Err(ApiError::bad_request(
+                        "INVALID_FEED_ADDRESS",
+                        "feedAddress must be a 0x-prefixed 32-byte hex Pyth price feed ID",
+                    ));
+                }
+            } else {
+                return Err(ApiError::bad_request(
+                    "MISSING_FEED_ADDRESS",
+                    "feedAddress (Pyth price feed ID) is required for pyth feeds",
+                ));
+            }
+        }
+        _ => {}
     }
 
     let config = state
@@ -6768,10 +6786,10 @@ pub async fn prepare_configure_oracle_write(
     )?;
     let from = normalize_optional_address(body.from.as_ref())?;
 
-    if body.feed_type > 1 {
+    if body.feed_type > 2 {
         return Err(ApiError::bad_request(
             "INVALID_FEED_TYPE",
-            "feedType must be 0 (MANUAL) or 1 (CHAINLINK)",
+            "feedType must be 0 (MANUAL), 1 (CHAINLINK), or 2 (PYTH)",
         ));
     }
     if body.comparison > 4 {
@@ -6881,7 +6899,7 @@ pub async fn oracle_keeper_tick(
         }
         scanned = scanned.saturating_add(1);
 
-        if config.feed_type != "chainlink" {
+        if config.feed_type != "chainlink" && config.feed_type != "pyth" {
             continue;
         }
 
@@ -6905,7 +6923,6 @@ pub async fn oracle_keeper_tick(
         let resolved = parse_u64_hex(&format!("0x{}", word_at(&market_slot, 4)?))? != 0;
 
         if resolved {
-            // Already resolved on-chain, update DB
             let _ = state
                 .db
                 .update_oracle_keeper_check(config.market_id, None)
@@ -6914,8 +6931,42 @@ pub async fn oracle_keeper_tick(
         }
 
         if now < close_time {
-            // Market not yet closed, skip
             continue;
+        }
+
+        // For Pyth feeds, pre-validate price against threshold before generating resolve action
+        if config.feed_type == "pyth" {
+            if let Some(feed_id) = config.feed_address.as_deref() {
+                match fetch_pyth_price_and_check_threshold(feed_id, &config).await {
+                    Ok(true) => {} // threshold met, proceed to resolve
+                    Ok(false) => {
+                        let _ = state
+                            .db
+                            .update_oracle_keeper_check(config.market_id, None)
+                            .await;
+                        continue;
+                    }
+                    Err(e) => {
+                        let _ = state
+                            .db
+                            .update_oracle_keeper_check(
+                                config.market_id,
+                                Some(&format!("pyth fetch error: {e}")),
+                            )
+                            .await;
+                        continue;
+                    }
+                }
+            } else {
+                let _ = state
+                    .db
+                    .update_oracle_keeper_check(
+                        config.market_id,
+                        Some("pyth feed: missing feed_address"),
+                    )
+                    .await;
+                continue;
+            }
         }
 
         // Market is past close time and not resolved — generate resolve action
@@ -7022,6 +7073,68 @@ fn encode_configure_oracle_calldata(
         format!("{:064x}", comparison),
         target_hex,
     ))
+}
+
+const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network";
+
+async fn fetch_pyth_price_and_check_threshold(
+    feed_id: &str,
+    config: &crate::services::database::OracleMarketConfigRecord,
+) -> Result<bool, String> {
+    let id = feed_id.trim_start_matches("0x");
+    let url = format!("{PYTH_HERMES_BASE}/v2/updates/price/latest?ids[]={id}");
+
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("hermes request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("hermes returned {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("hermes response parse error: {e}"))?;
+
+    let price_obj = body["parsed"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|p| p["price"].as_object())
+        .ok_or("no price data in hermes response")?;
+
+    let price_str = price_obj
+        .get("price")
+        .and_then(|v| v.as_str())
+        .ok_or("missing price field")?;
+    let expo = price_obj
+        .get("expo")
+        .and_then(|v| v.as_i64())
+        .ok_or("missing expo field")?;
+
+    let raw_price: f64 = price_str
+        .parse()
+        .map_err(|_| "invalid price value")?;
+    let price = raw_price * 10f64.powi(expo as i32);
+
+    let target: f64 = config
+        .target_value
+        .parse()
+        .map_err(|_| "invalid target_value in config")?;
+
+    let met = match config.comparison.as_str() {
+        "gt" => price > target,
+        "gte" => price >= target,
+        "lt" => price < target,
+        "lte" => price <= target,
+        "eq" => (price - target).abs() < f64::EPSILON,
+        _ => return Err(format!("unknown comparison: {}", config.comparison)),
+    };
+
+    Ok(met)
 }
 
 async fn matcher_runtime_state(state: &AppState) -> Result<MatcherRuntimeState, ApiError> {
