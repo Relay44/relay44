@@ -6006,6 +6006,21 @@ async fn load_active_market_signal(
     row.map(parse_external_signal).transpose()
 }
 
+async fn resolve_pyth_reference_price(
+    state: &AppState,
+    strategy_params: &serde_json::Value,
+) -> Option<f64> {
+    let feed_id = strategy_params
+        .get("pythFeedId")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?;
+
+    crate::services::pyth::fetch_price(&state.redis, feed_id)
+        .await
+        .ok()
+        .flatten()
+}
+
 fn calculate_max_drawdown(points: &[f64]) -> f64 {
     let mut equity = 0.0;
     let mut peak = 0.0;
@@ -7334,6 +7349,7 @@ async fn open_paper_position(
         signal_resolution_rules_read,
         signal_has_live_reference,
         signal_resolution_hazard_count,
+        reference_price: resolve_pyth_reference_price(state, &agent.strategy_params).await,
     };
     let signal = crate::services::external::strategy::evaluate_strategy(
         agent.strategy.as_str(),
@@ -8126,6 +8142,7 @@ async fn execute_live_agent(
         signal_resolution_rules_read,
         signal_has_live_reference,
         signal_resolution_hazard_count,
+        reference_price: resolve_pyth_reference_price(state, &agent.strategy_params).await,
     };
     let strategy_signal = crate::services::external::strategy::evaluate_strategy(
         agent.strategy.as_str(),
