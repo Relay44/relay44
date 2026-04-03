@@ -1,6 +1,6 @@
 [package]
 name = "r44"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "relay44 CLI — prediction markets and agent execution"
 license = "Apache-2.0"
@@ -37,6 +37,7 @@ rust_decimal = "1"
 rustyline = "15"
 async-recursion = "1"
 shlex = "1"
+strsim = "0.11"
 
 [dev-dependencies]
 tempfile = "3"

@@ -104,6 +104,24 @@ pub(crate) enum Commands {
         cmd: commands::edge_scanner::EdgeScannerCmd,
     },
 
+    /// Decision cells — DAG automation for market trading
+    Decisions {
+        #[command(subcommand)]
+        cmd: commands::decisions::DecisionCmd,
+    },
+
+    /// Trader leaderboard and rankings
+    Leaderboard {
+        #[command(subcommand)]
+        cmd: commands::leaderboard::LeaderboardCmd,
+    },
+
+    /// Transaction history
+    Activity {
+        #[command(subcommand)]
+        cmd: commands::activity::ActivityCmd,
+    },
+
     /// Wallet balance and deposit info
     Wallet {
         #[command(subcommand)]
@@ -150,6 +168,9 @@ impl Cli {
             Commands::Positions { cmd } => format!("positions {}", position_path(cmd)),
             Commands::Agents { cmd } => format!("agents {}", agent_path(cmd)),
             Commands::EdgeScanner { cmd } => format!("edge-scanner {}", edge_scanner_path(cmd)),
+            Commands::Decisions { cmd } => format!("decisions {}", decision_path(cmd)),
+            Commands::Leaderboard { cmd } => format!("leaderboard {}", leaderboard_path(cmd)),
+            Commands::Activity { cmd } => format!("activity {}", activity_path(cmd)),
             Commands::Wallet { cmd } => format!("wallet {}", wallet_path(cmd)),
             Commands::Config { cmd } => format!("config {}", config_path(cmd)),
             Commands::Profile { cmd } => format!("profile {}", profile_path(cmd)),
@@ -179,7 +200,7 @@ async fn main() {
         Ok(config) => Arc::new(Mutex::new(config)),
         Err(error) => {
             output::error(&format!("failed to load config: {error}"));
-            std::process::exit(1);
+            std::process::exit(client::ExitCode::Config.as_i32());
         }
     };
 
@@ -191,8 +212,9 @@ async fn main() {
     )
     .await
     {
+        let code = client::exit_code_from(&error);
         output::error(&format!("{error:#}"));
-        std::process::exit(1);
+        std::process::exit(code.as_i32());
     }
 }
 
@@ -291,5 +313,26 @@ fn edge_scanner_path(cmd: &commands::edge_scanner::EdgeScannerCmd) -> &'static s
     match cmd {
         commands::edge_scanner::EdgeScannerCmd::Signals { .. } => "signals",
         commands::edge_scanner::EdgeScannerCmd::Curve => "curve",
+    }
+}
+
+fn decision_path(cmd: &commands::decisions::DecisionCmd) -> &'static str {
+    match cmd {
+        commands::decisions::DecisionCmd::List { .. } => "list",
+        commands::decisions::DecisionCmd::Get { .. } => "get",
+        commands::decisions::DecisionCmd::Create { .. } => "create",
+    }
+}
+
+fn leaderboard_path(cmd: &commands::leaderboard::LeaderboardCmd) -> &'static str {
+    match cmd {
+        commands::leaderboard::LeaderboardCmd::Top { .. } => "top",
+        commands::leaderboard::LeaderboardCmd::Rank { .. } => "rank",
+    }
+}
+
+fn activity_path(cmd: &commands::activity::ActivityCmd) -> &'static str {
+    match cmd {
+        commands::activity::ActivityCmd::List { .. } => "list",
     }
 }

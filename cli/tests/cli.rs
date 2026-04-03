@@ -125,6 +125,152 @@ fn workflow_validate_accepts_placeholder_steps() {
 }
 
 #[test]
+fn exit_code_auth_when_not_logged_in() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["orders", "list"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(2)); // ExitCode::Auth
+}
+
+#[test]
+fn exit_code_config_for_missing_profile() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--profile", "nonexistent", "markets", "list"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(6)); // ExitCode::Config
+}
+
+#[test]
+fn typo_suggestion_in_stderr() {
+    let out = r44().arg("markts").output().unwrap();
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("markets"), "expected 'markets' suggestion in: {stderr}");
+}
+
+#[test]
+fn completions_zsh() {
+    let out = r44().args(["completions", "zsh"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("r44"));
+}
+
+#[test]
+fn completions_fish() {
+    let out = r44().args(["completions", "fish"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("r44"));
+}
+
+#[test]
+fn new_commands_appear_in_help() {
+    let out = r44().arg("--help").output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("decisions"));
+    assert!(stdout.contains("leaderboard"));
+    assert!(stdout.contains("activity"));
+    assert!(stdout.contains("edge-scanner"));
+}
+
+#[test]
+fn decisions_help() {
+    let out = r44().args(["decisions", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("list"));
+    assert!(stdout.contains("get"));
+    assert!(stdout.contains("create"));
+}
+
+#[test]
+fn leaderboard_help() {
+    let out = r44().args(["leaderboard", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("top"));
+    assert!(stdout.contains("rank"));
+}
+
+#[test]
+fn activity_help() {
+    let out = r44().args(["activity", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("list"));
+}
+
+#[test]
+fn legacy_config_migration() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "api_url": "https://legacy.example.com/v1",
+          "access_token": "tok123",
+          "wallet": "wallet-1"
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "profile", "list"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("https://legacy.example.com/v1"));
+}
+
+#[test]
+fn no_color_flag() {
+    let out = r44().args(["--no-color", "--help"]).output().unwrap();
+    assert!(out.status.success());
+}
+
+#[test]
+fn timeout_flag_accepted() {
+    let out = r44().args(["--timeout", "60", "--help"]).output().unwrap();
+    assert!(out.status.success());
+}
+
+#[test]
 fn session_export_reads_jsonl() {
     let (_dir, config_root) = config_env();
     write_config(
