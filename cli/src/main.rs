@@ -46,6 +46,14 @@ pub(crate) struct Cli {
     /// Show HTTP requests and debug info
     #[arg(long, short, global = true)]
     pub verbose: bool,
+
+    /// Disable colored output
+    #[arg(long, global = true, env = "NO_COLOR")]
+    pub no_color: bool,
+
+    /// HTTP request timeout in seconds
+    #[arg(long, global = true, env = "R44_TIMEOUT", default_value = "30")]
+    pub timeout: u64,
 }
 
 #[derive(Subcommand, Clone)]
@@ -163,7 +171,7 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    if std::env::var("NO_COLOR").is_ok() || std::env::var("CI").is_ok() {
+    if cli.no_color || std::env::var("CI").is_ok() {
         colored::control::set_override(false);
     }
 
@@ -222,7 +230,7 @@ fn order_path(cmd: &commands::orders::OrderCmd) -> &'static str {
 
 fn position_path(cmd: &commands::positions::PositionCmd) -> &'static str {
     match cmd {
-        commands::positions::PositionCmd::List => "list",
+        commands::positions::PositionCmd::List { .. } => "list",
         commands::positions::PositionCmd::Get { .. } => "get",
         commands::positions::PositionCmd::Claim { .. } => "claim",
     }
@@ -230,7 +238,7 @@ fn position_path(cmd: &commands::positions::PositionCmd) -> &'static str {
 
 fn agent_path(cmd: &commands::agents::AgentCmd) -> &'static str {
     match cmd {
-        commands::agents::AgentCmd::List => "list",
+        commands::agents::AgentCmd::List { .. } => "list",
         commands::agents::AgentCmd::Get { .. } => "get",
         commands::agents::AgentCmd::Public => "public",
         commands::agents::AgentCmd::Create { .. } => "create",

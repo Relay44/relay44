@@ -22,10 +22,11 @@ impl Client {
         base_url: &str,
         config: Arc<Mutex<Config>>,
         profile: impl Into<String>,
+        timeout_secs: u64,
     ) -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_secs(timeout_secs))
                 .build()
                 .context("failed to build HTTP client")?,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -39,7 +40,7 @@ impl Client {
             || self
                 .config
                 .lock()
-                .unwrap()
+                .expect("config lock")
                 .profile(&self.profile)
                 .and_then(|profile| profile.access_token.as_ref())
                 .is_some()
@@ -144,7 +145,7 @@ impl Client {
         }
 
         let refresh_token = {
-            let config = self.config.lock().unwrap();
+            let config = self.config.lock().expect("config lock");
             config
                 .profile(&self.profile)
                 .and_then(|profile| profile.refresh_token.clone())
@@ -174,7 +175,7 @@ impl Client {
             return false;
         };
 
-        let mut config = self.config.lock().unwrap();
+        let mut config = self.config.lock().expect("config lock");
         let profile = config.ensure_profile(&self.profile);
         profile.access_token = Some(access_token);
         if refresh_token.is_some() {
@@ -208,11 +209,23 @@ impl Client {
         self.request(Method::DELETE, path, None).await
     }
 
+    pub fn require_auth(&self) -> Result<()> {
+        if self.is_authenticated() {
+            return Ok(());
+        }
+        Err(anyhow!(
+            "Not logged in.\n\n  \
+             r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
+             r44 login siwe --address 0x... --signature 0x... --message <MSG>\n  \
+             r44 config set-token <TOKEN>  (if you have a token already)"
+        ))
+    }
+
     fn access_token(&self) -> Option<String> {
         std::env::var("R44_ACCESS_TOKEN").ok().or_else(|| {
             self.config
                 .lock()
-                .unwrap()
+                .expect("config lock")
                 .profile(&self.profile)
                 .and_then(|profile| profile.access_token.clone())
         })

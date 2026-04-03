@@ -239,6 +239,7 @@ mod tests {
             output: Format::Table,
             quiet: false,
             verbose: false,
+            timeout_secs: 30,
         };
 
         let rendered = render_step(

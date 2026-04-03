@@ -6,7 +6,7 @@ use clap::Subcommand;
 use ed25519_dalek::{Signer, SigningKey};
 
 use crate::config::Config;
-use crate::output;
+use crate::output::{self, Format};
 
 #[derive(Subcommand, Clone)]
 pub enum LoginCmd {
@@ -80,6 +80,7 @@ pub async fn run(
     config: Arc<Mutex<Config>>,
     profile_name: &str,
     api_url: &str,
+    fmt: Format,
 ) -> Result<()> {
     match cmd {
         LoginCmd::Solana {
@@ -115,30 +116,53 @@ pub async fn run(
             .await
         }
         LoginCmd::Status => {
-            let cfg = config.lock().unwrap();
+            let cfg = config.lock().expect("config lock");
             let profile = cfg.profile(profile_name).cloned().unwrap_or_default();
-            if profile.access_token.is_some() || std::env::var("R44_ACCESS_TOKEN").ok().is_some() {
-                let wallet_str = profile.wallet.as_deref().unwrap_or("unknown");
-                output::print_detail(&[
-                    ("Status", "authenticated".into()),
-                    ("Profile", profile_name.into()),
-                    ("Wallet", wallet_str.into()),
-                    ("API", profile.api_url),
-                ]);
-            } else {
-                output::warn("Not logged in");
-                output::dimmed("  r44 login solana --wallet <PUBKEY> --private-key <KEY>");
+            let authenticated =
+                profile.access_token.is_some() || std::env::var("R44_ACCESS_TOKEN").ok().is_some();
+            let wallet_str = profile.wallet.as_deref().unwrap_or("unknown");
+
+            match fmt {
+                Format::Json => output::print_json(&serde_json::json!({
+                    "authenticated": authenticated,
+                    "profile": profile_name,
+                    "wallet": wallet_str,
+                    "apiUrl": profile.api_url,
+                })),
+                Format::Table => {
+                    if authenticated {
+                        output::print_detail(&[
+                            ("Status", "authenticated".into()),
+                            ("Profile", profile_name.into()),
+                            ("Wallet", wallet_str.into()),
+                            ("API", profile.api_url),
+                        ]);
+                    } else {
+                        output::warn("Not logged in");
+                        output::dimmed(
+                            "  r44 login solana --wallet <PUBKEY> --private-key <KEY>",
+                        );
+                    }
+                }
             }
             Ok(())
         }
         LoginCmd::Logout => {
-            let mut cfg = config.lock().unwrap();
+            let mut cfg = config.lock().expect("config lock");
             let profile = cfg.ensure_profile(profile_name);
             profile.access_token = None;
             profile.refresh_token = None;
             profile.wallet = None;
             cfg.save()?;
-            output::success(&format!("Logged out from profile '{profile_name}'"));
+            match fmt {
+                Format::Json => output::print_json(&serde_json::json!({
+                    "loggedOut": true,
+                    "profile": profile_name,
+                })),
+                Format::Table => {
+                    output::success(&format!("Logged out from profile '{profile_name}'"));
+                }
+            }
             Ok(())
         }
     }
@@ -302,7 +326,7 @@ async fn finish_login(
     let refresh_token = data["refresh_token"].as_str().map(String::from);
 
     {
-        let mut cfg = config.lock().unwrap();
+        let mut cfg = config.lock().expect("config lock");
         let profile = cfg.ensure_profile(profile_name);
         profile.access_token = Some(access_token);
         profile.refresh_token = refresh_token;
