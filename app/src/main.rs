@@ -879,6 +879,10 @@ async fn main() -> std::io::Result<()> {
                                 web::get().to(api::external::get_strategy_replay),
                             )
                             .route(
+                                "/agents/{agent_id}/promotion-readiness",
+                                web::get().to(api::external::get_agent_promotion_readiness),
+                            )
+                            .route(
                                 "/signals",
                                 web::get().to(api::external::list_external_signals),
                             )
