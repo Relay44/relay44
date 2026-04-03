@@ -430,7 +430,7 @@ export default function AgentsPage() {
   return (
     <TooltipProvider delayDuration={200}>
       <PageShell>
-        <section className="mb-6 pt-3 md:pt-4">
+        <section className="mb-6">
           <h1 className="text-2xl font-semibold text-text-primary">Agents</h1>
           <p className="text-sm text-text-secondary mt-2 max-w-3xl">
             Launch, monitor, and manage market agents across onchain and external venues.
