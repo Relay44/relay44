@@ -105,6 +105,16 @@ struct EventRepricingV2Params {
     max_resolution_hazards: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EventRepricingV2Requirements {
+    pub min_hours_to_resolution: u64,
+    pub min_signal_sources: u64,
+    pub require_resolution_rules: bool,
+    pub require_live_reference: bool,
+    pub max_resolution_hazards: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct WalletFollowParams {
@@ -303,6 +313,19 @@ pub fn validate_strategy_params(strategy: &str, raw: &Value) -> Result<Value, Ap
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
     Ok(params)
+}
+
+pub fn event_repricing_v2_requirements(
+    raw: &Value,
+) -> Result<EventRepricingV2Requirements, ApiError> {
+    let params = parse_params::<EventRepricingV2Params>(raw)?;
+    Ok(EventRepricingV2Requirements {
+        min_hours_to_resolution: params.min_hours_to_resolution,
+        min_signal_sources: params.min_signal_sources,
+        require_resolution_rules: params.require_resolution_rules,
+        require_live_reference: params.require_live_reference,
+        max_resolution_hazards: params.max_resolution_hazards,
+    })
 }
 
 pub fn evaluate_strategy(
