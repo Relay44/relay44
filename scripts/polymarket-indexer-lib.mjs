@@ -621,7 +621,20 @@ function normalizeMetadata(health, backfill, userStream, relayer) {
 }
 
 export async function loginAdmin() {
-  const privateKey = envOrThrow('POLYMARKET_INDEXER_ADMIN_PRIVATE_KEY');
+  const privateKey = String(process.env.POLYMARKET_INDEXER_ADMIN_PRIVATE_KEY || '').trim();
+  if (!privateKey) {
+    const adminKey = String(process.env.ADMIN_CONTROL_KEY || '').trim();
+    if (!adminKey) {
+      throw new Error('POLYMARKET_INDEXER_ADMIN_PRIVATE_KEY or ADMIN_CONTROL_KEY is required');
+    }
+
+    return {
+      account: null,
+      accessToken: null,
+      authMode: 'admin_key',
+    };
+  }
+
   const account = privateKeyToAccount(privateKey);
   const noncePayload = await fetchJson(`${apiBase}/auth/siwe/nonce`);
   const nonce = noncePayload?.nonce;
@@ -650,6 +663,7 @@ export async function loginAdmin() {
   return {
     account,
     accessToken: tokens.access_token,
+    authMode: 'siwe',
   };
 }
 
