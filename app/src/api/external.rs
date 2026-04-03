@@ -20,7 +20,9 @@ use crate::services::external;
 use crate::services::external::credentials::{decrypt_json, encrypt_json, mask_secret};
 use crate::services::external::ledger::{self, PerformanceLedgerKind};
 use crate::services::external::paper::{realized_pnl, simulate_fill, unrealized_pnl};
-use crate::services::external::types::{ExternalMarketId, ExternalProvider};
+use crate::services::external::types::{
+    ExternalMarketId, ExternalMarketSnapshot, ExternalProvider,
+};
 use crate::services::provider_rails::{evaluate_provider_access, ProviderRailAction, RailProvider};
 use crate::AppState;
 use sqlx::{Postgres, QueryBuilder};
@@ -273,6 +275,7 @@ pub struct CreateExternalAgentRequest {
     pub strategy_params: Option<Value>,
     pub credential_id: Option<String>,
     pub execution_mode: Option<String>,
+    pub cohort: Option<String>,
     pub active: Option<bool>,
     pub max_notional_per_execution: Option<f64>,
     pub max_daily_spend_usdc: Option<f64>,
@@ -292,6 +295,7 @@ pub struct UpdateExternalAgentRequest {
     pub strategy_params: Option<Value>,
     pub credential_id: Option<String>,
     pub execution_mode: Option<String>,
+    pub cohort: Option<String>,
     pub active: Option<bool>,
     pub max_notional_per_execution: Option<f64>,
     pub max_daily_spend_usdc: Option<f64>,
@@ -325,6 +329,48 @@ pub struct PublicExternalAgentsQuery {
     pub offset: Option<i64>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketPublicTradesQuery {
+    pub market_id: Option<String>,
+    pub wallet: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketOrderbookHistoryQuery {
+    pub market_id: Option<String>,
+    pub outcome: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchWalletsQuery {
+    pub market_category: Option<String>,
+    pub window: Option<i64>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReplayRequest {
+    pub strategy: String,
+    pub baseline: Option<String>,
+    pub market_id: Option<String>,
+    pub market_category: Option<String>,
+    pub target_wallet: Option<String>,
+    pub delay_ms: Option<u64>,
+    pub window_hours: Option<u64>,
+    pub follow_ratio: Option<f64>,
+    pub markout_minutes: Option<u64>,
+    pub max_trades: Option<u64>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAgentResponse {
@@ -342,6 +388,7 @@ pub struct ExternalAgentResponse {
     pub strategy_label: String,
     pub strategy_params: Value,
     pub execution_mode: String,
+    pub cohort: String,
     pub credential_id: Option<String>,
     pub max_notional_per_execution: Option<f64>,
     pub max_daily_spend_usdc: Option<f64>,
@@ -419,7 +466,16 @@ pub struct ExternalAgentPerformanceResponse {
     pub updated_at: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StrategyReplayResponse {
+    pub run: external::polymarket_index::StrategyReplayRunRecord,
+    pub fills: Vec<external::polymarket_index::StrategyReplayFillRecord>,
+}
+
 const PUBLIC_PAPER_AGENT_SOURCE: &str = "relay44-paper";
+const PUBLIC_RESEARCH_COHORT: &str = "public_research";
+const PRIVATE_ALPHA_COHORT: &str = "private_alpha";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -500,6 +556,14 @@ pub struct CreateExternalSignalRequest {
     pub signal_type: Option<String>,
     pub metadata: Option<Value>,
     pub agent_id: Option<String>,
+    pub memo_mode: Option<String>,
+    pub sources: Option<Vec<String>>,
+    pub resolution_rules_read: Option<bool>,
+    pub resolution_criteria: Option<String>,
+    pub resolution_hazards: Option<Vec<String>>,
+    pub has_live_reference: Option<bool>,
+    pub repricing_half_life_minutes: Option<i32>,
+    pub confidence_reasoning: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -530,6 +594,14 @@ pub struct ExternalSignalResponse {
     pub invalidators: Vec<String>,
     pub rationale: Option<String>,
     pub metadata: Value,
+    pub memo_mode: Option<String>,
+    pub sources: Vec<String>,
+    pub resolution_rules_read: bool,
+    pub resolution_criteria: Option<String>,
+    pub resolution_hazards: Vec<String>,
+    pub has_live_reference: bool,
+    pub repricing_half_life_minutes: Option<i32>,
+    pub confidence_reasoning: Option<String>,
     pub active: bool,
     pub expires_at: String,
     pub created_at: String,
@@ -648,6 +720,7 @@ struct ExternalOrderIntentRecord {
 pub(crate) struct ExternalAgentRecord {
     pub(crate) id: String,
     pub(crate) owner: String,
+    pub(crate) cohort: String,
     pub(crate) name: String,
     pub(crate) provider: ExternalProvider,
     pub(crate) market_id: String,
@@ -721,14 +794,58 @@ fn parse_external_execution_mode(raw: &str) -> Result<ExternalExecutionMode, Api
     })
 }
 
+fn normalize_agent_cohort(raw: &str) -> Result<String, ApiError> {
+    match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        PUBLIC_RESEARCH_COHORT => Ok(PUBLIC_RESEARCH_COHORT.to_string()),
+        PRIVATE_ALPHA_COHORT => Ok(PRIVATE_ALPHA_COHORT.to_string()),
+        _ => Err(ApiError::bad_request(
+            "INVALID_AGENT_COHORT",
+            "cohort must be one of: public_research, private_alpha",
+        )),
+    }
+}
+
+fn resolve_agent_cohort(
+    role: UserRole,
+    owner: &str,
+    execution_mode: ExternalExecutionMode,
+    requested: Option<&str>,
+    public_owner: Option<&str>,
+) -> Result<String, ApiError> {
+    match requested {
+        Some(_raw) if !matches!(role, UserRole::Admin) => Err(ApiError::forbidden(
+            "Only admins can override external agent cohort",
+        )),
+        Some(raw) => normalize_agent_cohort(raw),
+        None => {
+            let owner = owner.trim().to_ascii_lowercase();
+            let public_owner = public_owner
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_default();
+            if execution_mode == ExternalExecutionMode::Paper
+                && !public_owner.is_empty()
+                && owner == public_owner
+            {
+                Ok(PUBLIC_RESEARCH_COHORT.to_string())
+            } else {
+                Ok(PRIVATE_ALPHA_COHORT.to_string())
+            }
+        }
+    }
+}
+
 fn strategy_label(strategy: &str) -> String {
     match strategy.trim().to_ascii_lowercase().as_str() {
         "momentum" => "proving".to_string(),
         "mean-revert" => "research".to_string(),
         "market-maker" => "optimization".to_string(),
         "maker-reward" | "maker_reward" => "rebates".to_string(),
-        "event-repricing" | "event_repricing" => "scenario".to_string(),
-        "wallet-follow" | "wallet_follow" => "mirror".to_string(),
+        "event-repricing" | "event_repricing" | "event-repricing-v2" | "event_repricing_v2" => {
+            "scenario".to_string()
+        }
+        "wallet-follow" | "wallet_follow" | "wallet-follow-v2" | "wallet_follow_v2" => {
+            "mirror".to_string()
+        }
         _ => strategy.trim().to_string(),
     }
 }
@@ -882,14 +999,32 @@ fn ensure_live_strategy_allowed(
 ) -> Result<(), ApiError> {
     if matches!(execution_mode, ExternalExecutionMode::Live) {
         let normalized = strategy.trim().to_ascii_lowercase().replace('_', "-");
-        if normalized != "maker-reward" {
+        if normalized != "wallet-follow-v2" {
             return Err(ApiError::bad_request(
                 "LIVE_STRATEGY_RESTRICTED",
-                "only maker_reward agents can run in live mode",
+                "only wallet_follow_v2 agents can run in live mode",
             ));
         }
     }
     Ok(())
+}
+
+fn parse_query_datetime(
+    raw: Option<&str>,
+    field: &str,
+) -> Result<Option<chrono::DateTime<Utc>>, ApiError> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|value| Some(value.with_timezone(&Utc)))
+        .map_err(|_| {
+            ApiError::bad_request(
+                "INVALID_TIMESTAMP",
+                format!("{field} must be an RFC3339 timestamp").as_str(),
+            )
+        })
 }
 
 fn mask_credentials(value: &Value) -> Value {
@@ -1490,6 +1625,9 @@ fn parse_external_agent_record(
         owner: row
             .try_get("owner")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
+        cohort: row
+            .try_get("cohort")
+            .unwrap_or_else(|_| PRIVATE_ALPHA_COHORT.to_string()),
         name: row
             .try_get("name")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
@@ -1587,7 +1725,7 @@ pub(crate) async fn load_external_agent_for_owner(
     owner: &str,
 ) -> Result<ExternalAgentRecord, ApiError> {
     let row = sqlx::query(
-        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
+        "SELECT id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                 cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
@@ -1609,7 +1747,7 @@ async fn load_external_agent_by_id(
     agent_id: &str,
 ) -> Result<ExternalAgentRecord, ApiError> {
     let row = sqlx::query(
-        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
+        "SELECT id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                 cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
@@ -1630,7 +1768,7 @@ async fn load_due_external_agents(
     limit: i64,
 ) -> Result<Vec<ExternalAgentRecord>, ApiError> {
     let rows = sqlx::query(
-        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
+        "SELECT id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                 cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
@@ -2002,6 +2140,239 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
     }
 
     Vec::new()
+}
+
+fn normalized_string_list(values: Option<&[String]>) -> Vec<String> {
+    values
+        .into_iter()
+        .flatten()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn metadata_string_list(value: &Value, key: &str) -> Vec<String> {
+    parse_string_list(value.get(key))
+}
+
+fn metadata_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn metadata_bool(value: &Value, key: &str) -> Option<bool> {
+    value.get(key).and_then(Value::as_bool)
+}
+
+fn metadata_i32(value: &Value, key: &str) -> Option<i32> {
+    value
+        .get(key)
+        .and_then(Value::as_i64)
+        .and_then(|entry| i32::try_from(entry).ok())
+}
+
+fn normalize_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn push_unique_string(values: &mut Vec<String>, candidate: &str) {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty()
+        || values
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
+        return;
+    }
+
+    values.push(trimmed.to_string());
+}
+
+fn looks_like_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://")
+}
+
+fn supports_resolution_inference(market: &ExternalMarketSnapshot) -> bool {
+    market
+        .provider
+        .eq_ignore_ascii_case(ExternalProvider::Polymarket.as_str())
+}
+
+fn inferred_resolution_criteria(market: &ExternalMarketSnapshot) -> Option<String> {
+    if !supports_resolution_inference(market) {
+        return None;
+    }
+
+    let description = normalize_whitespace(market.description.as_str());
+    if description.is_empty() {
+        return None;
+    }
+
+    Some(description)
+}
+
+fn inferred_resolution_hazards(
+    market: &ExternalMarketSnapshot,
+    criteria: Option<&str>,
+) -> Vec<String> {
+    let Some(criteria) = criteria else {
+        return vec!["missing_resolution_criteria".to_string()];
+    };
+
+    let mut hazards = Vec::new();
+    let normalized_criteria = criteria.to_ascii_lowercase();
+    let normalized_question = normalize_whitespace(market.question.as_str()).to_ascii_lowercase();
+
+    if normalized_criteria.contains("50-50") || normalized_criteria.contains("50/50") {
+        hazards.push("fallback_split_resolution".to_string());
+    }
+    if normalized_question.contains(" before ")
+        || normalized_question.contains(" after ")
+        || normalized_criteria.contains("if neither occurs")
+    {
+        hazards.push("relative_event_dependency".to_string());
+    }
+    if normalized_criteria.contains("will not count")
+        || normalized_criteria.contains("will not qualify")
+        || (normalized_criteria.contains("only") && normalized_criteria.contains("qualify"))
+    {
+        hazards.push("narrow_qualification_clauses".to_string());
+    }
+    if normalized_criteria.contains("credible reporting")
+        || normalized_criteria.contains("credible media reporting")
+        || normalized_criteria.contains("consensus of credible")
+    {
+        hazards.push("credible_reporting_discretion".to_string());
+    }
+    if normalized_criteria.contains("official information from")
+        || normalized_criteria.contains("official announcement")
+        || normalized_criteria.contains("official announcements")
+    {
+        hazards.push("official_source_dependency".to_string());
+    }
+
+    hazards.sort();
+    hazards.dedup();
+    hazards
+}
+
+fn inferred_signal_sources(
+    body: &CreateExternalSignalRequest,
+    market: &ExternalMarketSnapshot,
+) -> Vec<String> {
+    let mut sources = normalized_string_list(body.sources.as_deref());
+    if !market.external_url.trim().is_empty() {
+        push_unique_string(&mut sources, market.external_url.as_str());
+    }
+    sources
+}
+
+fn inferred_has_live_reference(
+    body: &CreateExternalSignalRequest,
+    market: &ExternalMarketSnapshot,
+    sources: &[String],
+) -> bool {
+    if let Some(value) = body.has_live_reference {
+        return value;
+    }
+
+    sources.iter().any(|source| {
+        looks_like_url(source) && !source.eq_ignore_ascii_case(market.external_url.as_str())
+    })
+}
+
+fn merge_signal_metadata(
+    body: &CreateExternalSignalRequest,
+    market: &ExternalMarketSnapshot,
+) -> Value {
+    let mut metadata = match body.metadata.clone() {
+        Some(Value::Object(map)) => Value::Object(map),
+        Some(other) => json!({ "payload": other }),
+        None => json!({}),
+    };
+    if let Some(memo_mode) = body
+        .memo_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        metadata.as_object_mut().expect("metadata object").insert(
+            "memoMode".to_string(),
+            json!(memo_mode.to_ascii_lowercase()),
+        );
+    }
+
+    let sources = inferred_signal_sources(body, market);
+    let has_live_reference = inferred_has_live_reference(body, market, &sources);
+    if !sources.is_empty() {
+        metadata
+            .as_object_mut()
+            .expect("metadata object")
+            .insert("sources".to_string(), json!(sources));
+    }
+    let inferred_criteria = inferred_resolution_criteria(market);
+    if let Some(value) = body
+        .resolution_rules_read
+        .or_else(|| inferred_criteria.as_ref().map(|_| true))
+    {
+        metadata
+            .as_object_mut()
+            .expect("metadata object")
+            .insert("resolutionRulesRead".to_string(), json!(value));
+    }
+    if let Some(value) = body
+        .resolution_criteria
+        .as_deref()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToOwned::to_owned)
+        .or(inferred_criteria)
+    {
+        metadata
+            .as_object_mut()
+            .expect("metadata object")
+            .insert("resolutionCriteria".to_string(), json!(value));
+    }
+    let resolution_criteria = metadata_string(&metadata, "resolutionCriteria");
+    let hazards = if body.resolution_hazards.is_some() {
+        normalized_string_list(body.resolution_hazards.as_deref())
+    } else {
+        inferred_resolution_hazards(market, resolution_criteria.as_deref())
+    };
+    if !hazards.is_empty() {
+        metadata
+            .as_object_mut()
+            .expect("metadata object")
+            .insert("resolutionHazards".to_string(), json!(hazards));
+    }
+    metadata
+        .as_object_mut()
+        .expect("metadata object")
+        .insert("hasLiveReference".to_string(), json!(has_live_reference));
+    if let Some(value) = body.repricing_half_life_minutes.filter(|value| *value > 0) {
+        metadata
+            .as_object_mut()
+            .expect("metadata object")
+            .insert("repricingHalfLifeMinutes".to_string(), json!(value));
+    }
+    if let Some(value) = body
+        .confidence_reasoning
+        .as_deref()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    {
+        metadata
+            .as_object_mut()
+            .expect("metadata object")
+            .insert("confidenceReasoning".to_string(), json!(value));
+    }
+
+    metadata
 }
 
 fn parse_json_f64(value: Option<&Value>) -> Option<f64> {
@@ -2687,6 +3058,7 @@ struct PolymarketTrackedMarket {
     market_id: String,
     provider_market_ref: String,
     condition_id: String,
+    market_category: Option<String>,
     token_outcomes: BTreeMap<String, String>,
 }
 
@@ -3208,6 +3580,12 @@ async fn load_polymarket_tracked_market(
         market_id: format!("polymarket:{}", provider_market_ref.trim()),
         provider_market_ref: provider_market_ref.trim().to_string(),
         condition_id,
+        market_category: response
+            .get("category")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase()),
         token_outcomes,
     })
 }
@@ -3372,6 +3750,7 @@ async fn backfill_polymarket_public_trades_for_market(
                 provider_trade_id: polymarket_public_trade_event_id(row),
                 market_id: market.market_id.clone(),
                 provider_market_ref: market.provider_market_ref.clone(),
+                market_category: market.market_category.clone(),
                 outcome,
                 side: (!side.is_empty()).then_some(side),
                 price: parse_f64_value(row.get("price")),
@@ -5351,6 +5730,9 @@ fn parse_external_agent(
         owner: row
             .try_get("owner")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
+        cohort: row
+            .try_get("cohort")
+            .unwrap_or_else(|_| PRIVATE_ALPHA_COHORT.to_string()),
         name: row
             .try_get("name")
             .map_err(|err| ApiError::internal(&err.to_string()))?,
@@ -5415,6 +5797,9 @@ fn parse_external_signal(row: sqlx::postgres::PgRow) -> Result<ExternalSignalRes
         .flatten()
         .filter_map(|entry| entry.as_str().map(str::to_string))
         .collect::<Vec<_>>();
+    let metadata: Value = row.try_get("metadata").unwrap_or_else(|_| json!({}));
+    let sources = metadata_string_list(&metadata, "sources");
+    let resolution_hazards = metadata_string_list(&metadata, "resolutionHazards");
 
     Ok(ExternalSignalResponse {
         id: row
@@ -5452,7 +5837,15 @@ fn parse_external_signal(row: sqlx::postgres::PgRow) -> Result<ExternalSignalRes
             .map_err(|err| ApiError::internal(&err.to_string()))?,
         invalidators,
         rationale: row.try_get("rationale").ok(),
-        metadata: row.try_get("metadata").unwrap_or_else(|_| json!({})),
+        metadata: metadata.clone(),
+        memo_mode: metadata_string(&metadata, "memoMode"),
+        sources,
+        resolution_rules_read: metadata_bool(&metadata, "resolutionRulesRead").unwrap_or(false),
+        resolution_criteria: metadata_string(&metadata, "resolutionCriteria"),
+        resolution_hazards,
+        has_live_reference: metadata_bool(&metadata, "hasLiveReference").unwrap_or(false),
+        repricing_half_life_minutes: metadata_i32(&metadata, "repricingHalfLifeMinutes"),
+        confidence_reasoning: metadata_string(&metadata, "confidenceReasoning"),
         active: row.try_get("active").unwrap_or(true),
         expires_at: expires_at.to_rfc3339(),
         created_at: created_at.to_rfc3339(),
@@ -6770,6 +7163,22 @@ async fn open_paper_position(
         .or(best_ask)
         .unwrap_or(market.yes_price);
     let active_signal = load_active_market_signal(state, agent.market_id.as_str()).await?;
+    let signal_source_count = active_signal
+        .as_ref()
+        .map(|signal| signal.sources.len() as u64)
+        .unwrap_or(0);
+    let signal_resolution_rules_read = active_signal
+        .as_ref()
+        .map(|signal| signal.resolution_rules_read)
+        .unwrap_or(false);
+    let signal_has_live_reference = active_signal
+        .as_ref()
+        .map(|signal| signal.has_live_reference)
+        .unwrap_or(false);
+    let signal_resolution_hazard_count = active_signal
+        .as_ref()
+        .map(|signal| signal.resolution_hazards.len() as u64)
+        .unwrap_or(0);
     let time_to_resolution_seconds = if market.close_time > 0 {
         Some(market.close_time as i64 - now.timestamp())
     } else {
@@ -6792,6 +7201,10 @@ async fn open_paper_position(
         midpoint_delta_bps: active_signal
             .as_ref()
             .map(|signal| signal.midpoint_delta_bps),
+        signal_source_count,
+        signal_resolution_rules_read,
+        signal_has_live_reference,
+        signal_resolution_hazard_count,
     };
     let signal = crate::services::external::strategy::evaluate_strategy(
         agent.strategy.as_str(),
@@ -7544,6 +7957,22 @@ async fn execute_live_agent(
         .or(best_ask)
         .unwrap_or(market.yes_price);
     let active_signal = load_active_market_signal(state, agent.market_id.as_str()).await?;
+    let signal_source_count = active_signal
+        .as_ref()
+        .map(|signal| signal.sources.len() as u64)
+        .unwrap_or(0);
+    let signal_resolution_rules_read = active_signal
+        .as_ref()
+        .map(|signal| signal.resolution_rules_read)
+        .unwrap_or(false);
+    let signal_has_live_reference = active_signal
+        .as_ref()
+        .map(|signal| signal.has_live_reference)
+        .unwrap_or(false);
+    let signal_resolution_hazard_count = active_signal
+        .as_ref()
+        .map(|signal| signal.resolution_hazards.len() as u64)
+        .unwrap_or(0);
     let market_state = crate::services::external::strategy::MarketState {
         yes_price: market.yes_price,
         no_price: market.no_price,
@@ -7564,6 +7993,10 @@ async fn execute_live_agent(
         midpoint_delta_bps: active_signal
             .as_ref()
             .map(|signal| signal.midpoint_delta_bps),
+        signal_source_count,
+        signal_resolution_rules_read,
+        signal_has_live_reference,
+        signal_resolution_hazard_count,
     };
     let strategy_signal = crate::services::external::strategy::evaluate_strategy(
         agent.strategy.as_str(),
@@ -7764,6 +8197,7 @@ pub(crate) async fn execute_agent_record(
     agent: &ExternalAgentRecord,
     signed_order_override: Option<Value>,
 ) -> Result<AgentExecutionOutcome, ApiError> {
+    ensure_live_strategy_allowed(agent.strategy.as_str(), agent.execution_mode)?;
     match agent.execution_mode {
         ExternalExecutionMode::Paper => execute_paper_agent(state, agent).await,
         ExternalExecutionMode::Live => {
@@ -7779,7 +8213,7 @@ pub(crate) async fn execute_agent_record_by_id(
     agent_id: &str,
 ) -> Result<bool, String> {
     let row = sqlx::query(
-        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity,
+        "SELECT id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                 cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
                 last_executed_at, next_execution_at, consecutive_failures, last_error_code,
                 max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
@@ -8890,7 +9324,7 @@ pub async fn list_external_agents(
         resolve_external_agent_owner_scope(&user, query.scope.as_deref(), query.owner.as_deref())?;
 
     let mut sql = QueryBuilder::<Postgres>::new(
-        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
+        "SELECT id, owner, cohort, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
                 strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
                 created_at, updated_at
@@ -9150,7 +9584,7 @@ pub async fn list_public_external_agents(
     };
 
     let mut sql = QueryBuilder::<Postgres>::new(
-        "SELECT id, owner, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
+        "SELECT id, owner, cohort, name, provider, market_id, outcome, side, price, quantity, cadence_seconds,
                 strategy, strategy_params, execution_mode, credential_id, active, last_executed_at, next_execution_at,
                 consecutive_failures, last_error_code, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
                 created_at, updated_at
@@ -9158,16 +9592,16 @@ pub async fn list_public_external_agents(
          WHERE owner = ",
     );
     sql.push_bind(owner.as_str())
-        .push(" AND execution_mode = 'paper' AND LOWER(name) LIKE 'paper-%'");
+        .push(" AND cohort = 'public_research' AND execution_mode = 'paper' AND LOWER(name) LIKE 'paper-%'");
 
     let mut count_sql = QueryBuilder::<Postgres>::new(
         "SELECT COUNT(*) AS total
          FROM external_agents
          WHERE owner = ",
     );
-    count_sql
-        .push_bind(owner.as_str())
-        .push(" AND execution_mode = 'paper' AND LOWER(name) LIKE 'paper-%'");
+    count_sql.push_bind(owner.as_str()).push(
+        " AND cohort = 'public_research' AND execution_mode = 'paper' AND LOWER(name) LIKE 'paper-%'",
+    );
 
     if let Some(provider_raw) = query.provider.as_ref() {
         let provider = normalize_provider(provider_raw.as_str())?;
@@ -9284,6 +9718,179 @@ pub async fn get_external_market_trades(
     .await?;
     Ok(HttpResponse::Ok().json(snapshot))
 }
+
+pub async fn get_polymarket_public_trades(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<PolymarketPublicTradesQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let market_id = query
+        .market_id
+        .as_deref()
+        .map(|value| normalize_namespaced_market_id(ExternalProvider::Polymarket, value));
+    let wallet = query
+        .wallet
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+    let limit = query.limit.unwrap_or(100).clamp(1, MAX_PAGE_SIZE) as u64;
+    let offset = query.offset.unwrap_or(0).max(0) as u64;
+    let page = external::polymarket_index::query_public_trades(
+        market_id.as_deref(),
+        wallet.as_deref(),
+        limit,
+        offset,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(page))
+}
+
+pub async fn get_polymarket_orderbook_history(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<PolymarketOrderbookHistoryQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let market_id = query
+        .market_id
+        .as_deref()
+        .map(|value| normalize_namespaced_market_id(ExternalProvider::Polymarket, value));
+    let outcome = match query.outcome.as_deref() {
+        Some(raw) => Some(normalize_outcome(raw)?),
+        None => None,
+    };
+    let from = parse_query_datetime(query.from.as_deref(), "from")?;
+    let to = parse_query_datetime(query.to.as_deref(), "to")?;
+    let limit = query.limit.unwrap_or(200).clamp(1, 500) as u64;
+    let items = external::polymarket_index::fetch_orderbook_history(
+        market_id.as_deref(),
+        outcome.as_deref(),
+        from,
+        to,
+        limit,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "items": items,
+        "limit": limit
+    })))
+}
+
+pub async fn list_research_wallets(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ResearchWalletsQuery>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let market_category = query
+        .market_category
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+    let window_hours = query.window.unwrap_or(24 * 7).clamp(1, 24 * 30) as u64;
+    let limit = query.limit.unwrap_or(25).clamp(1, 250) as u64;
+    let items = external::polymarket_index::compute_wallet_scores(
+        market_category.as_deref(),
+        window_hours,
+        limit,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "items": items,
+        "marketCategory": market_category,
+        "windowHours": window_hours,
+        "limit": limit
+    })))
+}
+
+pub async fn create_strategy_replay(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateReplayRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let strategy = body.strategy.trim().to_string();
+    if strategy.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_REPLAY_STRATEGY",
+            "strategy is required",
+        ));
+    }
+
+    let market_id = body
+        .market_id
+        .as_deref()
+        .map(|value| normalize_namespaced_market_id(ExternalProvider::Polymarket, value));
+    let request = external::polymarket_index::StrategyReplayRequest {
+        created_by: Some(user.wallet_address.to_ascii_lowercase()),
+        strategy,
+        baseline: body
+            .baseline
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned),
+        market_id,
+        market_category: body
+            .market_category
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase()),
+        target_wallet: body
+            .target_wallet
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase()),
+        delay_ms: body.delay_ms.unwrap_or(800),
+        window_hours: body.window_hours.unwrap_or(24 * 7),
+        follow_ratio: body.follow_ratio.unwrap_or(0.8),
+        markout_minutes: body.markout_minutes.unwrap_or(30),
+        max_trades: body.max_trades.unwrap_or(500),
+    };
+    let run = external::polymarket_index::run_strategy_replay(&request).await?;
+    let fills = external::polymarket_index::load_strategy_replay_fills(run.id.as_str()).await?;
+
+    Ok(HttpResponse::Ok().json(StrategyReplayResponse { run, fills }))
+}
+
+pub async fn get_strategy_replay(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_jwt_user(&req, &state)?;
+    check_role(user.role, UserRole::Admin)?;
+
+    let replay_run_id = path.into_inner();
+    let run = external::polymarket_index::load_strategy_replay_run(replay_run_id.as_str())
+        .await?
+        .ok_or_else(|| ApiError::not_found("Strategy replay"))?;
+    let fills =
+        external::polymarket_index::load_strategy_replay_fills(replay_run_id.as_str()).await?;
+
+    Ok(HttpResponse::Ok().json(StrategyReplayResponse { run, fills }))
+}
 pub async fn create_external_signal(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
@@ -9325,7 +9932,7 @@ pub async fn create_external_signal(
         ));
     }
     let parsed_market_id = ExternalMarketId::parse(market_id.as_str())?;
-    external::fetch_market_by_id(&state.config, &parsed_market_id).await?;
+    let market = external::fetch_market_by_id(&state.config, &parsed_market_id).await?;
 
     let publisher = body
         .publisher
@@ -9363,7 +9970,7 @@ pub async fn create_external_signal(
     .bind(body.catalyst_summary.trim())
     .bind(json!(body.invalidators))
     .bind(body.rationale.as_deref())
-    .bind(body.metadata.clone().unwrap_or_else(|| json!({})))
+    .bind(merge_signal_metadata(&body, &market))
     .bind(expires_at)
     .bind(body.agent_id.as_deref())
     .fetch_one(state.db.pool())
@@ -9475,6 +10082,13 @@ pub async fn create_external_agent(
         user_role,
         body.execution_mode.as_deref(),
     )?;
+    let cohort = resolve_agent_cohort(
+        user_role,
+        user.wallet_address.as_str(),
+        execution_mode,
+        body.cohort.as_deref(),
+        public_paper_cohort_owner(&state),
+    )?;
     let strategy = body.strategy.trim().to_string();
     let strategy_params =
         normalize_strategy_params(strategy.as_str(), body.strategy_params.as_ref())?;
@@ -9543,10 +10157,10 @@ pub async fn create_external_agent(
         "INSERT INTO external_agents (
             id, owner, name, provider, market_id, provider_market_ref,
             outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode,
-            credential_id, active, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
+            credential_id, cohort, active, max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps,
             next_execution_at, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),NOW(),NOW())
-        RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),NOW())
+        RETURNING id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                   cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at,
                   next_execution_at, consecutive_failures, last_error_code, max_notional_per_execution,
                   max_daily_spend_usdc, max_slippage_bps, created_at, updated_at",
@@ -9566,6 +10180,7 @@ pub async fn create_external_agent(
     .bind(strategy_params)
     .bind(execution_mode.as_str())
     .bind(credential_id.as_deref())
+    .bind(cohort)
     .bind(body.active.unwrap_or(true))
     .bind(body.max_notional_per_execution)
     .bind(body.max_daily_spend_usdc)
@@ -9589,7 +10204,7 @@ pub async fn update_external_agent(
     let agent_id = path.into_inner();
     let current = if matches!(user.role, UserRole::Admin) {
         sqlx::query(
-            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
+            "SELECT id, owner, cohort, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
                     max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
              FROM external_agents
              WHERE id = $1",
@@ -9601,7 +10216,7 @@ pub async fn update_external_agent(
         .ok_or_else(|| ApiError::not_found("External agent"))?
     } else {
         sqlx::query(
-            "SELECT id, owner, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
+            "SELECT id, owner, cohort, provider, market_id, outcome, side, price, quantity, cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active,
                     max_notional_per_execution, max_daily_spend_usdc, max_slippage_bps
              FROM external_agents
              WHERE id = $1 AND owner = $2",
@@ -9621,6 +10236,9 @@ pub async fn update_external_agent(
     let owner: String = current
         .try_get("owner")
         .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let current_cohort = current
+        .try_get::<String, _>("cohort")
+        .unwrap_or_else(|_| PRIVATE_ALPHA_COHORT.to_string());
     let current_execution_mode = parse_external_execution_mode(
         current
             .try_get::<String, _>("execution_mode")
@@ -9676,6 +10294,22 @@ pub async fn update_external_agent(
             ));
         }
         None => current_execution_mode,
+    };
+    let next_cohort = match body.cohort.as_deref() {
+        Some(raw) => resolve_agent_cohort(
+            user.role,
+            owner.as_str(),
+            next_execution_mode,
+            Some(raw),
+            public_paper_cohort_owner(&state),
+        )?,
+        None => resolve_agent_cohort(
+            UserRole::Admin,
+            owner.as_str(),
+            next_execution_mode,
+            Some(current_cohort.as_str()),
+            public_paper_cohort_owner(&state),
+        )?,
     };
     let next_max_notional_per_execution = body.max_notional_per_execution.or_else(|| {
         current
@@ -9749,15 +10383,16 @@ pub async fn update_external_agent(
                  strategy_params = $9,
                  execution_mode = $10,
                  credential_id = $11,
-                 active = $12,
-                 max_notional_per_execution = $13,
-                 max_daily_spend_usdc = $14,
-                 max_slippage_bps = $15,
-                 consecutive_failures = CASE WHEN $12 = TRUE THEN 0 ELSE consecutive_failures END,
-                 last_error_code = CASE WHEN $12 = TRUE THEN NULL ELSE last_error_code END,
+                 cohort = $12,
+                 active = $13,
+                 max_notional_per_execution = $14,
+                 max_daily_spend_usdc = $15,
+                 max_slippage_bps = $16,
+                 consecutive_failures = CASE WHEN $13 = TRUE THEN 0 ELSE consecutive_failures END,
+                 last_error_code = CASE WHEN $13 = TRUE THEN NULL ELSE last_error_code END,
                  updated_at = NOW()
              WHERE id = $1
-             RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
+             RETURNING id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                        cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at,
                        next_execution_at, consecutive_failures, last_error_code, max_notional_per_execution,
                        max_daily_spend_usdc, max_slippage_bps, created_at, updated_at",
@@ -9773,6 +10408,7 @@ pub async fn update_external_agent(
         .bind(next_strategy_params)
         .bind(next_execution_mode.as_str())
         .bind(credential_id.as_deref())
+        .bind(next_cohort)
         .bind(next_active)
         .bind(next_max_notional_per_execution)
         .bind(next_max_daily_spend_usdc)
@@ -9793,15 +10429,16 @@ pub async fn update_external_agent(
                  strategy_params = $10,
                  execution_mode = $11,
                  credential_id = $12,
-                 active = $13,
-                 max_notional_per_execution = $14,
-                 max_daily_spend_usdc = $15,
-                 max_slippage_bps = $16,
-                 consecutive_failures = CASE WHEN $13 = TRUE THEN 0 ELSE consecutive_failures END,
-                 last_error_code = CASE WHEN $13 = TRUE THEN NULL ELSE last_error_code END,
+                 cohort = $13,
+                 active = $14,
+                 max_notional_per_execution = $15,
+                 max_daily_spend_usdc = $16,
+                 max_slippage_bps = $17,
+                 consecutive_failures = CASE WHEN $14 = TRUE THEN 0 ELSE consecutive_failures END,
+                 last_error_code = CASE WHEN $14 = TRUE THEN NULL ELSE last_error_code END,
                  updated_at = NOW()
              WHERE id = $1 AND owner = $2
-             RETURNING id, owner, name, provider, market_id, outcome, side, price, quantity,
+             RETURNING id, owner, cohort, name, provider, market_id, outcome, side, price, quantity,
                        cadence_seconds, strategy, strategy_params, execution_mode, credential_id, active, last_executed_at,
                        next_execution_at, consecutive_failures, last_error_code, max_notional_per_execution,
                        max_daily_spend_usdc, max_slippage_bps, created_at, updated_at",
@@ -9818,6 +10455,7 @@ pub async fn update_external_agent(
         .bind(next_strategy_params)
         .bind(next_execution_mode.as_str())
         .bind(credential_id.as_deref())
+        .bind(next_cohort)
         .bind(next_active)
         .bind(next_max_notional_per_execution)
         .bind(next_max_daily_spend_usdc)
@@ -11567,6 +12205,7 @@ pub async fn get_public_external_agents_performance(
                 COUNT(*) FILTER (WHERE ea.active) AS active_agents
          FROM external_agents ea
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'",
     )
@@ -11582,6 +12221,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_positions pp
          JOIN external_agents ea ON ea.id = pp.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'",
     )
@@ -11597,6 +12237,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_fills pf
          JOIN external_agents ea ON ea.id = pf.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'",
     )
@@ -11610,6 +12251,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_outcomes po
          JOIN external_agents ea ON ea.id = po.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'",
     )
@@ -11623,6 +12265,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_outcomes po
          JOIN external_agents ea ON ea.id = po.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
          ORDER BY po.closed_at ASC, po.id ASC",
@@ -11637,6 +12280,7 @@ pub async fn get_public_external_agents_performance(
          FROM external_agent_runs ear
          JOIN external_agents ea ON ea.id = ear.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
            AND ear.created_at >= NOW() - INTERVAL '30 days'",
@@ -11722,6 +12366,7 @@ pub async fn get_public_external_agents_performance(
                 COUNT(*) FILTER (WHERE ea.active) AS active_agents
          FROM external_agents ea
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
          GROUP BY ea.strategy
@@ -11740,6 +12385,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_positions pp
          JOIN external_agents ea ON ea.id = pp.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
          GROUP BY ea.strategy",
@@ -11757,6 +12403,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_fills pf
          JOIN external_agents ea ON ea.id = pf.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
          GROUP BY ea.strategy",
@@ -11773,6 +12420,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_outcomes po
          JOIN external_agents ea ON ea.id = po.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
          GROUP BY ea.strategy",
@@ -11787,6 +12435,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_outcomes po
          JOIN external_agents ea ON ea.id = po.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
          ORDER BY ea.strategy ASC, po.closed_at ASC, po.id ASC",
@@ -11932,6 +12581,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_fills pf
          JOIN external_agents ea ON ea.id = pf.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
            AND pf.created_at >= NOW() - INTERVAL '24 hours'
@@ -11949,6 +12599,7 @@ pub async fn get_public_external_agents_performance(
          FROM paper_outcomes po
          JOIN external_agents ea ON ea.id = po.agent_id
          WHERE ea.owner = $1
+           AND ea.cohort = 'public_research'
            AND ea.execution_mode = 'paper'
            AND LOWER(ea.name) LIKE 'paper-%'
            AND po.closed_at >= NOW() - INTERVAL '24 hours'
@@ -11970,6 +12621,7 @@ pub async fn get_public_external_agents_performance(
              FROM paper_marks pm
              JOIN external_agents ea ON ea.id = pm.agent_id
              WHERE ea.owner = $1
+               AND ea.cohort = 'public_research'
                AND ea.execution_mode = 'paper'
                AND LOWER(ea.name) LIKE 'paper-%'
                AND pm.created_at >= NOW() - INTERVAL '24 hours'
@@ -12105,6 +12757,71 @@ mod tests {
                 },
             ],
             provider_market_ref: "ref".to_string(),
+        }
+    }
+
+    fn sample_polymarket_market(description: &str) -> external::types::ExternalMarketSnapshot {
+        external::types::ExternalMarketSnapshot {
+            id: "polymarket:540843".to_string(),
+            question: "Will China invade Taiwan before GTA VI?".to_string(),
+            description: description.to_string(),
+            category: "politics".to_string(),
+            status: "active".to_string(),
+            close_time: 1_785_499_200,
+            resolved: false,
+            outcome: None,
+            yes_price: 0.52,
+            no_price: 0.48,
+            volume: 1_500_000.0,
+            source: "external_polymarket".to_string(),
+            provider: "polymarket".to_string(),
+            is_external: true,
+            external_url:
+                "https://polymarket.com/event/will-china-invades-taiwan-before-gta-vi-716"
+                    .to_string(),
+            chain_id: 137,
+            requires_credentials: true,
+            execution_users: true,
+            execution_agents: true,
+            outcomes: vec![
+                ExternalOutcome {
+                    label: "Yes".to_string(),
+                    probability: 0.52,
+                },
+                ExternalOutcome {
+                    label: "No".to_string(),
+                    probability: 0.48,
+                },
+            ],
+            provider_market_ref: "540843".to_string(),
+        }
+    }
+
+    fn sample_signal_request() -> CreateExternalSignalRequest {
+        CreateExternalSignalRequest {
+            publisher: None,
+            provider: "polymarket".to_string(),
+            market_id: "polymarket:540843".to_string(),
+            direction: "yes".to_string(),
+            confidence_bps: 6200,
+            fair_value_low: 0.58,
+            fair_value_high: 0.66,
+            midpoint_delta_bps: 900,
+            catalyst_summary: "sample".to_string(),
+            invalidators: vec!["invalidator".to_string()],
+            rationale: Some("sample rationale".to_string()),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+            signal_type: Some("scenario_lab".to_string()),
+            metadata: None,
+            agent_id: None,
+            memo_mode: None,
+            sources: None,
+            resolution_rules_read: None,
+            resolution_criteria: None,
+            resolution_hazards: None,
+            has_live_reference: None,
+            repricing_half_life_minutes: None,
+            confidence_reasoning: None,
         }
     }
 
@@ -12589,8 +13306,33 @@ mod tests {
         assert_eq!(strategy_label("market-maker"), "optimization");
         assert_eq!(strategy_label("maker_reward"), "rebates");
         assert_eq!(strategy_label("event_repricing"), "scenario");
+        assert_eq!(strategy_label("event_repricing_v2"), "scenario");
         assert_eq!(strategy_label("wallet_follow"), "mirror");
+        assert_eq!(strategy_label("wallet_follow_v2"), "mirror");
         assert_eq!(strategy_label("custom"), "custom");
+    }
+
+    #[test]
+    fn normalize_agent_cohort_accepts_hyphenated_alias() {
+        assert_eq!(
+            normalize_agent_cohort("public-research").unwrap(),
+            PUBLIC_RESEARCH_COHORT
+        );
+        assert_eq!(
+            normalize_agent_cohort("private_alpha").unwrap(),
+            PRIVATE_ALPHA_COHORT
+        );
+    }
+
+    #[test]
+    fn live_strategy_gate_only_allows_wallet_follow_v2() {
+        assert!(
+            ensure_live_strategy_allowed("wallet_follow_v2", ExternalExecutionMode::Live).is_ok()
+        );
+
+        let err =
+            ensure_live_strategy_allowed("maker_reward", ExternalExecutionMode::Live).unwrap_err();
+        assert_eq!(err.code, "LIVE_STRATEGY_RESTRICTED");
     }
 
     #[test]
@@ -12603,5 +13345,71 @@ mod tests {
             err.message,
             "Only admins can override external agent execution mode"
         );
+    }
+
+    #[test]
+    fn merge_signal_metadata_infers_polymarket_rule_metadata() {
+        let body = sample_signal_request();
+        let market = sample_polymarket_market(
+            "This market will resolve to \"Yes\" if China commences a military offensive intended \
+             to establish control over any portion of the Republic of China (Taiwan) before Grand \
+             Theft Auto VI is officially released in the US. Otherwise, this market will resolve \
+             to \"No\". If neither occurs by July 31, 2026, 11:59 PM ET, this market will resolve \
+             to 50-50. Early access or leaks will not count. The resolution source for the release \
+             of GTA VI is official information from Rockstar Games. A consensus of credible media \
+             reporting will suffice.",
+        );
+
+        let metadata = merge_signal_metadata(&body, &market);
+
+        assert_eq!(metadata_bool(&metadata, "resolutionRulesRead"), Some(true));
+        assert_eq!(
+            metadata_string(&metadata, "resolutionCriteria"),
+            Some(normalize_whitespace(market.description.as_str()))
+        );
+        assert_eq!(
+            metadata_string_list(&metadata, "sources"),
+            vec![market.external_url.clone()]
+        );
+        assert_eq!(metadata_bool(&metadata, "hasLiveReference"), Some(false));
+
+        let hazards = metadata_string_list(&metadata, "resolutionHazards");
+        assert!(hazards.contains(&"fallback_split_resolution".to_string()));
+        assert!(hazards.contains(&"relative_event_dependency".to_string()));
+        assert!(hazards.contains(&"narrow_qualification_clauses".to_string()));
+        assert!(hazards.contains(&"credible_reporting_discretion".to_string()));
+        assert!(hazards.contains(&"official_source_dependency".to_string()));
+    }
+
+    #[test]
+    fn merge_signal_metadata_preserves_explicit_research_fields() {
+        let mut body = sample_signal_request();
+        body.sources = Some(vec![
+            "https://example.com/live-feed".to_string(),
+            "https://example.com/research".to_string(),
+        ]);
+        body.resolution_rules_read = Some(false);
+        body.resolution_criteria = Some("manual criteria".to_string());
+        body.resolution_hazards = Some(vec!["manual_hazard".to_string()]);
+        body.has_live_reference = Some(true);
+
+        let market = sample_polymarket_market("This market resolves from a description.");
+        let metadata = merge_signal_metadata(&body, &market);
+
+        assert_eq!(metadata_bool(&metadata, "resolutionRulesRead"), Some(false));
+        assert_eq!(
+            metadata_string(&metadata, "resolutionCriteria"),
+            Some("manual criteria".to_string())
+        );
+        assert_eq!(
+            metadata_string_list(&metadata, "resolutionHazards"),
+            vec!["manual_hazard".to_string()]
+        );
+        assert_eq!(metadata_bool(&metadata, "hasLiveReference"), Some(true));
+
+        let sources = metadata_string_list(&metadata, "sources");
+        assert!(sources.contains(&"https://example.com/live-feed".to_string()));
+        assert!(sources.contains(&"https://example.com/research".to_string()));
+        assert!(sources.contains(&market.external_url));
     }
 }

@@ -605,6 +605,17 @@ pub async fn fetch_orderbook_with_rpc(
         .set(&cache_key, &value, Some(ORDERBOOK_CACHE_TTL_SECONDS))
         .await;
 
+    if matches!(market_id.provider, ExternalProvider::Polymarket) {
+        if let Err(err) = polymarket_index::record_orderbook_snapshot(&value).await {
+            log::warn!(
+                "failed to persist polymarket orderbook snapshot for {} {}: {}",
+                market_id.full_id(),
+                outcome,
+                err.message
+            );
+        }
+    }
+
     Ok(value)
 }
 
