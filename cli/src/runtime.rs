@@ -34,9 +34,19 @@ pub fn parse_shell_line(line: &str, config: &Config) -> Result<Cli> {
     let line = expand_alias(line, &config.aliases);
     let args = shlex::split(&line).ok_or_else(|| anyhow!("invalid shell quoting"))?;
     let argv = std::iter::once("r44".to_string())
-        .chain(args)
+        .chain(args.clone())
         .collect::<Vec<_>>();
-    Cli::try_parse_from(argv).map_err(|error| anyhow!(error.to_string()))
+    Cli::try_parse_from(argv).map_err(|error| {
+        let msg = error.to_string();
+        if !msg.contains("a similar subcommand exists") {
+            if let Some(suggestion) =
+                suggest_command(args.first().map(|s| s.as_str()).unwrap_or(""))
+            {
+                return anyhow!("{msg}\n  tip: did you mean '{suggestion}'?");
+            }
+        }
+        anyhow!(msg)
+    })
 }
 
 pub fn render_help(args: &[String]) -> String {
@@ -156,6 +166,39 @@ pub async fn execute(
     result
 }
 
+const KNOWN_COMMANDS: &[&str] = &[
+    "setup",
+    "shell",
+    "doctor",
+    "login",
+    "markets",
+    "orders",
+    "positions",
+    "agents",
+    "edge-scanner",
+    "decisions",
+    "leaderboard",
+    "activity",
+    "wallet",
+    "config",
+    "profile",
+    "workflow",
+    "session",
+    "completions",
+];
+
+fn suggest_command(input: &str) -> Option<&'static str> {
+    if input.is_empty() || KNOWN_COMMANDS.contains(&input) {
+        return None;
+    }
+    KNOWN_COMMANDS
+        .iter()
+        .map(|cmd| (*cmd, strsim::jaro_winkler(input, cmd)))
+        .filter(|(_, score)| *score > 0.75)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(cmd, _)| cmd)
+}
+
 fn expand_alias(line: &str, aliases: &std::collections::BTreeMap<String, String>) -> String {
     let Some(parts) = shlex::split(line) else {
         return line.to_string();
@@ -244,6 +287,15 @@ async fn execute_command(
         Commands::Agents { cmd } => commands::agents::run(cmd, client, effective.output).await,
         Commands::EdgeScanner { cmd } => {
             commands::edge_scanner::run(cmd, client, effective.output).await
+        }
+        Commands::Decisions { cmd } => {
+            commands::decisions::run(cmd, client, effective.output).await
+        }
+        Commands::Leaderboard { cmd } => {
+            commands::leaderboard::run(cmd, client, effective.output).await
+        }
+        Commands::Activity { cmd } => {
+            commands::activity::run(cmd, client, effective.output).await
         }
         Commands::Wallet { cmd } => commands::wallet::run(cmd, client, effective.output).await,
         Commands::Config { cmd } => {
@@ -349,6 +401,17 @@ mod tests {
 
         let cli = parse_shell_line("ob market-1", &config).unwrap();
         assert_eq!(cli.command_path(), "markets orderbook");
+    }
+
+    #[test]
+    fn suggests_similar_commands() {
+        assert_eq!(suggest_command("markts"), Some("markets"));
+        assert_eq!(suggest_command("ordrs"), Some("orders"));
+        assert_eq!(suggest_command("wal"), Some("wallet"));
+        assert_eq!(suggest_command("agnt"), Some("agents"));
+        assert_eq!(suggest_command("markets"), None);
+        assert_eq!(suggest_command("zzzzz"), None);
+        assert_eq!(suggest_command(""), None);
     }
 
     #[test]

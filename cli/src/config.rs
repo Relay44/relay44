@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+
+use crate::client::{cli_error, ExitCode};
 use serde::{Deserialize, Serialize};
 
 use crate::output::Format;
@@ -168,7 +170,10 @@ impl Config {
         if self.profiles.contains_key(name) {
             return Ok(name.to_string());
         }
-        Err(anyhow!("profile '{name}' not found"))
+        Err(cli_error(
+            ExitCode::Config,
+            anyhow::anyhow!("profile '{name}' not found"),
+        ))
     }
 
     pub fn profile(&self, name: &str) -> Option<&Profile> {
@@ -183,7 +188,10 @@ impl Config {
 
     pub fn set_active_profile(&mut self, name: &str) -> Result<()> {
         if !self.profiles.contains_key(name) {
-            return Err(anyhow!("profile '{name}' not found"));
+            return Err(cli_error(
+                ExitCode::Config,
+                anyhow::anyhow!("profile '{name}' not found"),
+            ));
         }
         self.active_profile = name.to_string();
         Ok(())
