@@ -25,6 +25,7 @@ use crate::AppState;
 const HEDGE_TICK_INTERVAL_SECS: u64 = 10;
 const HEDGE_REDIS_PREFIX: &str = "hedge:pending:";
 const HEDGE_REDIS_TTL: u64 = 300;
+const HEDGE_ORACLE_MAX_DEVIATION_PCT: f64 = 3.0;
 
 // Limitless EIP-712 constants (must match api/external.rs)
 const LIMITLESS_SIGNING_NAME: &str = "Limitless CTF Exchange";
@@ -596,6 +597,27 @@ async fn execute_aerodrome_hedge(
     let wallet_address = evm_signer::address_from_private_key(&private_key)
         .map_err(|e| format!("Invalid private key: {}", e))?;
 
+    // Oracle pre-check: if we have a Pyth feed for this token, verify pool price isn't stale/manipulated.
+    if let Some(pyth_feed_id) = lookup_pyth_feed_for_token(state, external_market_id).await {
+        if let Ok(Some(oracle_price)) =
+            crate::services::pyth::fetch_price(&state.redis, &pyth_feed_id).await
+        {
+            if oracle_price > 0.0 && price > 0.0 {
+                let deviation_pct = ((price - oracle_price) / oracle_price * 100.0).abs();
+                if deviation_pct > HEDGE_ORACLE_MAX_DEVIATION_PCT {
+                    return Err(format!(
+                        "oracle safety: pool price {:.4} deviates {:.1}% from pyth oracle {:.4} (max {:.1}%)",
+                        price, deviation_pct, oracle_price, HEDGE_ORACLE_MAX_DEVIATION_PCT
+                    ));
+                }
+                info!(
+                    "Hedge oracle check OK: pool={:.4} oracle={:.4} deviation={:.1}%",
+                    price, oracle_price, deviation_pct
+                );
+            }
+        }
+    }
+
     // For Aerodrome, the external_market_id contains the token address to swap into.
     let amount_in = (quantity * 1_000_000.0).round() as u128; // USDC in 6 decimals
     let amount_out_min = (amount_in * 95) / 100; // 5% slippage tolerance
@@ -670,6 +692,16 @@ async fn load_hedge_credential(
         &row.0,
     )
     .map_err(|e| format!("Decrypt credential: {} {}", e.code, e.message))
+}
+
+/// Look up the Pyth price feed ID for a token address via Redis config.
+/// Mapping is stored as `hedge:pyth_feed:<token_address_lowercase>` → feed ID string.
+async fn lookup_pyth_feed_for_token(state: &AppState, token_address: &str) -> Option<String> {
+    let key = format!(
+        "hedge:pyth_feed:{}",
+        token_address.to_ascii_lowercase().trim_start_matches("0x")
+    );
+    state.redis.get::<String>(&key).await.ok().flatten()
 }
 
 fn extract_limitless_token_id_from_market(market: &Value, outcome: &str) -> Result<String, String> {
