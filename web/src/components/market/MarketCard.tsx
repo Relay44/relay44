@@ -132,6 +132,11 @@ export function MarketCard({ market }: MarketCardProps) {
                 {bootstrapLabel} ${Math.round(market.bootstrapSeedUsdc)}
               </span>
             ) : null}
+            {typeof market.tradabilityScore === "number" ? (
+              <span className="text-text-secondary">
+                tradability {Math.round(market.tradabilityScore)}
+              </span>
+            ) : null}
             {market.frequency && (
               <>
                 <RefreshCw className="w-3 h-3" />

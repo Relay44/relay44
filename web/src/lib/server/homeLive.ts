@@ -1,4 +1,5 @@
 import { fetchLiveBaseMarkets } from '@/lib/server/baseMarketData';
+import type { Market } from '@/types';
 
 export interface MarketDraftOption {
   id: string;
@@ -164,6 +165,49 @@ const NEWS_FALLBACKS: NewsSlide[] = [
 let newsCache: CacheEntry<NewsSlide[]> | null = null;
 let signalCache: CacheEntry<SignalSnapshot> | null = null;
 
+function marketTradabilityScore(market: Market): number {
+  if (typeof market.tradabilityScore === 'number') {
+    return market.tradabilityScore;
+  }
+
+  let score = market.volume24h + market.totalVolume * 0.05;
+
+  if (market.status !== 'active') {
+    score -= 100_000;
+  }
+  if (!market.executionUsers) {
+    score -= 50_000;
+  }
+  if (!market.executionAgents) {
+    score -= 10_000;
+  }
+
+  if (market.liquidityMode === 'bootstrap_hybrid') {
+    const status = String(market.bootstrapStatus || '').toLowerCase();
+    if (status === 'active') {
+      score += (market.bootstrapReservedUsdc || 0) * 4;
+      score += (market.bootstrapOrganicDepthRatio || 0) * 2_500;
+    }
+    if (status === 'graduated') {
+      score += 5_000;
+    }
+    if (
+      status === 'paused' ||
+      status === 'error' ||
+      status === 'pending_funding' ||
+      status === 'pending_authorization'
+    ) {
+      score -= 20_000;
+    }
+  }
+
+  if (market.requiresCredentials) {
+    score -= 2_500;
+  }
+
+  return score;
+}
+
 function getApiBases(): string[] {
   const primary =
     process.env.API_PROXY_TARGET?.trim()
@@ -221,8 +265,8 @@ async function fetchSignalSnapshot(): Promise<SignalSnapshot> {
   const now = new Date().toISOString();
   const marketData = markets?.data ?? [];
   const rankedMarkets = [...marketData].sort((left, right) => {
-    const leftScore = left.volume24h + left.totalVolume * 0.05;
-    const rightScore = right.volume24h + right.totalVolume * 0.05;
+    const leftScore = marketTradabilityScore(left);
+    const rightScore = marketTradabilityScore(right);
     return rightScore - leftScore;
   });
   const points = rankedMarkets.slice(0, 24).map((market) => {

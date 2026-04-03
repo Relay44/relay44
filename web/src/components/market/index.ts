@@ -2,6 +2,7 @@ export { MarketCard } from './MarketCard';
 export { MarketArtwork } from './MarketArtwork';
 export { MarketHeader } from './MarketHeader';
 export { MarketStats, MarketInfo } from './MarketStats';
+export { MarketLiquidityPanel } from './MarketLiquidityPanel';
 export { PriceBar } from './PriceBar';
 export { MarketList } from './MarketList';
 export { FeaturedSlider } from './FeaturedSlider';

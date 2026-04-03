@@ -185,6 +185,21 @@ X402_SMOKE_LOW_BALANCE_USDC=2 \
 npm run x402:smoke
 ```
 
+### Run the internal order smoke locally
+
+The order smoke signs in with SIWE using a dedicated low-privilege wallet, places one tiny passive internal order, cancels it, and verifies the cancelled order still reads back as cancelled. It never broadcasts a chain transaction or moves funds. The health monitor persists the last smoke result in Postgres so it can alert when the smoke goes overdue.
+The scheduled run uses the same `ORDER_SMOKE_MINUTE`, `ORDER_SMOKE_INTERVAL_HOURS`, `ORDER_SMOKE_WINDOW_MINUTES`, and `ORDER_SMOKE_OVERDUE_GRACE_MINUTES` knobs as the x402 smoke, just with the `ORDER_SMOKE_` prefix.
+
+```bash
+ORDER_SMOKE_ENABLED=true \
+ORDER_SMOKE_PRIVATE_KEY=0x... \
+ORDER_SMOKE_API_URL=https://relay44-api.onrender.com/v1 \
+ORDER_SMOKE_MARKET_ID=123 \
+ORDER_SMOKE_QUANTITY=1 \
+ORDER_SMOKE_PRICE_BPS=1 \
+node scripts/order-smoke.mjs
+```
+
 ### Bootstrap presets and health
 
 Creator-funded bootstrap markets use one of three presets in the normal create flow:
