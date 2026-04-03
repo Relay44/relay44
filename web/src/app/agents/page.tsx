@@ -453,164 +453,6 @@ export default function AgentsPage() {
           ) : null}
         </section>
 
-        <section className="mb-8">
-          <Card className="space-y-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-text-primary">Relay44 Paper Lab</h2>
-                <p className="mt-1 text-sm text-text-secondary">
-                  Relay44-run paper agents continuously research, prove, and optimize live venue markets.
-                </p>
-              </div>
-              <span className="font-mono text-[0.72rem] uppercase tracking-[0.14em] text-accent">
-                Public cohort
-              </span>
-            </div>
-
-            {isLoadingPublicPerformance ? (
-              <div className="grid gap-2 sm:gap-3 md:grid-cols-5">
-                {Array.from({ length: 5 }).map((_, index) => (
-                  <div key={index} className="border border-border p-4 animate-pulse">
-                    <div className="h-3 w-20 bg-bg-secondary" />
-                    <div className="mt-3 h-6 w-16 bg-bg-secondary" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid gap-2 sm:gap-3 md:grid-cols-5">
-                <div className="border border-border p-4">
-                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
-                    Active agents
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-text-primary">
-                    {publicPerformance?.totals.activeAgents ?? 0}
-                  </div>
-                </div>
-                <div className="border border-border p-4">
-                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
-                    Open positions
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-text-primary">
-                    {publicPerformance?.totals.openPositions ?? 0}
-                  </div>
-                </div>
-                <div className="border border-border p-4">
-                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
-                    Fills
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-text-primary">
-                    {publicPerformance?.totals.fills ?? 0}
-                  </div>
-                </div>
-                <div className="border border-border p-4">
-                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
-                    Volume
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-text-primary">
-                    {formatCompactUsd(publicPerformance?.totals.volumeUsdc ?? 0)}
-                  </div>
-                </div>
-                <div className="border border-border p-4">
-                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
-                    Net PnL
-                  </div>
-                  <div
-                    className={cn(
-                      'mt-2 text-2xl font-semibold',
-                      (publicPerformance?.totals.netPnlUsdc ?? 0) >= 0 ? 'text-bid' : 'text-ask'
-                    )}
-                  >
-                    {formatCompactUsd(publicPerformance?.totals.netPnlUsdc ?? 0)}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isLoadingPublicAgents ? (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {Array.from({ length: 4 }).map((_, index) => (
-                  <div key={index} className="border border-border p-4 animate-pulse">
-                    <div className="h-4 w-24 bg-bg-secondary" />
-                    <div className="mt-3 h-5 w-3/4 bg-bg-secondary" />
-                    <div className="mt-2 h-4 w-1/2 bg-bg-secondary" />
-                  </div>
-                ))}
-              </div>
-            ) : publicAgents.length === 0 ? (
-              <div className="border border-border p-4 text-sm text-text-secondary">
-                Relay44 paper agents are warming up. This section will populate as soon as the public cohort is seeded.
-              </div>
-            ) : (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {publicAgents.map((agent) => (
-                  <Card
-                    key={agent.id}
-                    className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
-                  >
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium text-text-primary">
-                        {formatPublicPaperAgentName(agent)}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <span className="border border-accent px-2 py-1 text-[0.68rem] uppercase tracking-[0.12em] text-accent">
-                          {agent.strategy_label}
-                        </span>
-                        <span className="text-xs text-text-muted">{agent.provider}</span>
-                      </div>
-                      <p className="text-sm text-text-primary">{agent.market_id}</p>
-                      <p className="text-xs text-text-muted">
-                        {agent.outcome.toUpperCase()} {agent.side.toUpperCase()} · price {Math.round(agent.price * 100)}% · qty {agent.quantity}
-                      </p>
-                      <p className="text-xs text-text-muted">
-                        Cadence {agent.cadence_seconds}s · {formatPublicAgentSchedule(agent.last_executed_at, agent.next_execution_at)}
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 pt-1 text-xs sm:grid-cols-4">
-                        <div className="border border-border px-2 py-1">
-                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Fills</div>
-                          <div className="mt-1 text-sm text-text-primary">
-                            {agent.paper_performance?.fills ?? 0}
-                          </div>
-                        </div>
-                        <div className="border border-border px-2 py-1">
-                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Open</div>
-                          <div className="mt-1 text-sm text-text-primary">
-                            {agent.paper_performance?.openPositions ?? 0}
-                          </div>
-                        </div>
-                        <div className="border border-border px-2 py-1">
-                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Net PnL</div>
-                          <div
-                            className={cn(
-                              'mt-1 text-sm',
-                              (agent.paper_performance?.netPnlUsdc ?? 0) >= 0 ? 'text-bid' : 'text-ask'
-                            )}
-                          >
-                            {formatCompactUsd(agent.paper_performance?.netPnlUsdc ?? 0)}
-                          </div>
-                        </div>
-                        <div className="border border-border px-2 py-1">
-                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Drawdown</div>
-                          <div className="mt-1 text-sm text-text-primary">
-                            {formatCompactUsd(agent.paper_performance?.maxDrawdownUsdc ?? 0)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <Link
-                        href={`/markets/${encodeURIComponent(agent.market_id)}`}
-                        className="flex h-9 items-center justify-center border border-border px-3 text-sm sm:w-auto"
-                      >
-                        Open Market
-                      </Link>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </Card>
-        </section>
-
         <section className="mb-6">
           <div className="inline-flex w-full overflow-hidden border border-border sm:w-auto">
             <button
@@ -1184,6 +1026,163 @@ export default function AgentsPage() {
           </section>
           </>
         )}
+        <section className="mt-12 border-t border-border pt-8">
+          <Card className="space-y-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-text-primary">Relay44 Paper Lab</h2>
+                <p className="mt-1 text-sm text-text-secondary">
+                  Relay44-run paper agents continuously research, prove, and optimize live venue markets.
+                </p>
+              </div>
+              <span className="font-mono text-[0.72rem] uppercase tracking-[0.14em] text-accent">
+                Public cohort
+              </span>
+            </div>
+
+            {isLoadingPublicPerformance ? (
+              <div className="grid gap-2 sm:gap-3 md:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="border border-border p-4 animate-pulse">
+                    <div className="h-3 w-20 bg-bg-secondary" />
+                    <div className="mt-3 h-6 w-16 bg-bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:gap-3 md:grid-cols-5">
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Active agents
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {publicPerformance?.totals.activeAgents ?? 0}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Open positions
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {publicPerformance?.totals.openPositions ?? 0}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Fills
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {publicPerformance?.totals.fills ?? 0}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Volume
+                  </div>
+                  <div className="mt-2 text-2xl font-semibold text-text-primary">
+                    {formatCompactUsd(publicPerformance?.totals.volumeUsdc ?? 0)}
+                  </div>
+                </div>
+                <div className="border border-border p-4">
+                  <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-text-muted">
+                    Net PnL
+                  </div>
+                  <div
+                    className={cn(
+                      'mt-2 text-2xl font-semibold',
+                      (publicPerformance?.totals.netPnlUsdc ?? 0) >= 0 ? 'text-bid' : 'text-ask'
+                    )}
+                  >
+                    {formatCompactUsd(publicPerformance?.totals.netPnlUsdc ?? 0)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isLoadingPublicAgents ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="border border-border p-4 animate-pulse">
+                    <div className="h-4 w-24 bg-bg-secondary" />
+                    <div className="mt-3 h-5 w-3/4 bg-bg-secondary" />
+                    <div className="mt-2 h-4 w-1/2 bg-bg-secondary" />
+                  </div>
+                ))}
+              </div>
+            ) : publicAgents.length === 0 ? (
+              <div className="border border-border p-4 text-sm text-text-secondary">
+                Relay44 paper agents are warming up. This section will populate as soon as the public cohort is seeded.
+              </div>
+            ) : (
+              <div className="grid gap-3 lg:grid-cols-2">
+                {publicAgents.map((agent) => (
+                  <Card
+                    key={agent.id}
+                    className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
+                  >
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-text-primary">
+                        {formatPublicPaperAgentName(agent)}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="border border-accent px-2 py-1 text-[0.68rem] uppercase tracking-[0.12em] text-accent">
+                          {agent.strategy_label}
+                        </span>
+                        <span className="text-xs text-text-muted">{agent.provider}</span>
+                      </div>
+                      <p className="text-sm text-text-primary">{agent.market_id}</p>
+                      <p className="text-xs text-text-muted">
+                        {agent.outcome.toUpperCase()} {agent.side.toUpperCase()} · price {Math.round(agent.price * 100)}% · qty {agent.quantity}
+                      </p>
+                      <p className="text-xs text-text-muted">
+                        Cadence {agent.cadence_seconds}s · {formatPublicAgentSchedule(agent.last_executed_at, agent.next_execution_at)}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 pt-1 text-xs sm:grid-cols-4">
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Fills</div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {agent.paper_performance?.fills ?? 0}
+                          </div>
+                        </div>
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Open</div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {agent.paper_performance?.openPositions ?? 0}
+                          </div>
+                        </div>
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Net PnL</div>
+                          <div
+                            className={cn(
+                              'mt-1 text-sm',
+                              (agent.paper_performance?.netPnlUsdc ?? 0) >= 0 ? 'text-bid' : 'text-ask'
+                            )}
+                          >
+                            {formatCompactUsd(agent.paper_performance?.netPnlUsdc ?? 0)}
+                          </div>
+                        </div>
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Drawdown</div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {formatCompactUsd(agent.paper_performance?.maxDrawdownUsdc ?? 0)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <Link
+                        href={`/markets/${encodeURIComponent(agent.market_id)}`}
+                        className="flex h-9 items-center justify-center border border-border px-3 text-sm sm:w-auto"
+                      >
+                        Open Market
+                      </Link>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </Card>
+        </section>
       </PageShell>
     </TooltipProvider>
   );
