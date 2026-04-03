@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use tabled::settings::object::Columns;
 use tabled::settings::style::Style;
 use tabled::settings::{Alignment, Modify, Width};
-use tabled::settings::object::Columns;
 use tabled::{Table, Tabled};
 
 static QUIET: AtomicBool = AtomicBool::new(false);
@@ -29,7 +30,8 @@ pub fn is_verbose() -> bool {
     VERBOSE.load(Ordering::Relaxed)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Format {
     Table,
     Json,
@@ -244,10 +246,7 @@ pub fn pagination_hint(offset: u32, limit: u32, total: Option<u64>) {
             dimmed(&format!("showing {}-{} of {t}", offset + 1, end));
         }
         if end < t {
-            dimmed(&format!(
-                "next page: add --offset {}",
-                offset + limit
-            ));
+            dimmed(&format!("next page: add --offset {}", offset + limit));
         }
     }
 }

@@ -5,20 +5,16 @@ use tabled::Tabled;
 use crate::client::Client;
 use crate::output::{self, Format};
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum PositionCmd {
     /// List all positions
-    #[command(
-        long_about = "List all your open positions across markets.\n\n\
-                      Example:\n  r44 positions list"
-    )]
+    #[command(long_about = "List all your open positions across markets.\n\n\
+                      Example:\n  r44 positions list")]
     List,
 
     /// Get position for a specific market
-    #[command(
-        long_about = "Show your position in a specific market.\n\n\
-                      Example:\n  r44 positions get abc123"
-    )]
+    #[command(long_about = "Show your position in a specific market.\n\n\
+                      Example:\n  r44 positions get abc123")]
     Get {
         /// Market ID
         market_id: String,
@@ -84,8 +80,7 @@ pub async fn run(cmd: PositionCmd, api: &Client, fmt: Format) -> Result<()> {
         }
         PositionCmd::Get { market_id } => {
             let sp = output::spinner("Fetching position…");
-            let data: serde_json::Value =
-                api.get_raw(&format!("/positions/{market_id}")).await?;
+            let data: serde_json::Value = api.get_raw(&format!("/positions/{market_id}")).await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
@@ -111,8 +106,9 @@ pub async fn run(cmd: PositionCmd, api: &Client, fmt: Format) -> Result<()> {
             }
             let sp = output::spinner("Claiming winnings…");
             let body = serde_json::json!({});
-            let data: serde_json::Value =
-                api.post_raw(&format!("/positions/{market_id}/claim"), &body).await?;
+            let data: serde_json::Value = api
+                .post_raw(&format!("/positions/{market_id}/claim"), &body)
+                .await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),

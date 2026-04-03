@@ -4,95 +4,99 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use crate::config::Config;
-use crate::output;
+use crate::output::{self, Format};
 
-pub async fn run(config: Arc<Mutex<Config>>, api_url: &str) -> Result<()> {
+pub async fn run(config: Arc<Mutex<Config>>, profile_name: &str, api_url: &str) -> Result<()> {
     println!();
     output::banner();
-    output::dimmed("  first-time setup");
+    output::dimmed(&format!("  setup profile '{profile_name}'"));
     println!();
 
-    // Step 1: API connection
-    println!("Step 1/3 — Checking API connection");
-    let sp = output::spinner("Connecting…");
-    let http = reqwest::Client::builder()
+    {
+        let mut config = config.lock().unwrap();
+        config.ensure_profile(profile_name).api_url = api_url.to_string();
+        config.save()?;
+    }
+
+    println!("1/4 API connectivity");
+    let health = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .build()?;
-    let health = http
-        .get(format!(
-            "{}/health",
-            api_url.trim_end_matches("/v1")
-        ))
+        .build()?
+        .get(format!("{}/health", api_url.trim_end_matches("/v1")))
         .send()
         .await;
-    sp.finish_and_clear();
 
     match health {
-        Ok(r) if r.status().is_success() => {
+        Ok(response) if response.status().is_success() => {
             output::success(&format!("API reachable at {api_url}"));
         }
-        _ => {
-            output::warn(&format!("Could not reach API at {api_url}"));
-            output::dimmed("  You can change this later: r44 config set-url <URL>");
+        Ok(response) => {
+            output::warn(&format!("health check returned {}", response.status()));
+        }
+        Err(error) => {
+            output::warn(&format!("could not reach API at {api_url}: {error}"));
         }
     }
     println!();
 
-    // Step 2: Wallet configuration
-    println!("Step 2/3 — Wallet configuration");
-    println!("  How do you want to authenticate?");
-    println!("  [1] I have a Solana private key (agent/automated use)");
-    println!("  [2] I have a JWT token from the web app");
-    println!("  [3] Skip for now (browse markets without auth)");
+    println!("2/4 authentication");
+    println!("  [1] Solana wallet (agent mode)");
+    println!("  [2] JWT token");
+    println!("  [3] Skip for now");
     println!();
 
-    let choice = prompt("Choose [1/2/3]: ")?;
-
-    match choice.trim() {
+    match prompt("Choose [1/2/3]: ")?.trim() {
         "1" => {
-            let wallet = prompt("Solana wallet address (base58): ")?;
-            let wallet = wallet.trim().to_string();
+            let wallet = prompt("Solana wallet address: ")?;
+            let wallet = wallet.trim();
             if wallet.is_empty() {
-                output::warn("No wallet provided, skipping auth");
+                output::warn("wallet was empty, skipping auth");
             } else {
-                println!();
-                output::dimmed("To complete login, run:");
+                let mut config = config.lock().unwrap();
+                config.ensure_profile(profile_name).wallet = Some(wallet.to_string());
+                config.save()?;
                 output::dimmed(&format!(
-                    "  r44 login solana --wallet {wallet} --private-key <YOUR_KEY>"
+                    "next: r44 --profile {profile_name} login solana --wallet {wallet} --private-key <KEY>"
                 ));
-                println!();
-                output::dimmed("Or set environment variables:");
-                output::dimmed(&format!("  export R44_WALLET={wallet}"));
-                output::dimmed("  export R44_PRIVATE_KEY=<YOUR_KEY>");
-
-                let mut cfg = config.lock().unwrap();
-                cfg.wallet = Some(wallet);
-                cfg.save()?;
             }
         }
         "2" => {
             let token = prompt("JWT access token: ")?;
-            let token = token.trim().to_string();
+            let token = token.trim();
             if token.is_empty() {
-                output::warn("No token provided, skipping auth");
+                output::warn("token was empty, skipping auth");
             } else {
-                let mut cfg = config.lock().unwrap();
-                cfg.access_token = Some(token);
-                cfg.save()?;
-                output::success("Token saved");
+                let mut config = config.lock().unwrap();
+                config.ensure_profile(profile_name).access_token = Some(token.to_string());
+                config.save()?;
+                output::success("token saved");
             }
         }
-        _ => {
-            output::dimmed("Skipping auth — you can set up later with `r44 login`");
-        }
+        _ => output::dimmed("skipping auth"),
     }
     println!();
 
-    // Step 3: Shell completions
-    println!("Step 3/3 — Shell completions");
+    println!("3/4 default output");
+    println!("  [1] table");
+    println!("  [2] json");
+    println!();
+    let output_choice = prompt("Choose [1/2]: ")?;
+    let format = match output_choice.trim() {
+        "2" => Format::Json,
+        _ => Format::Table,
+    };
+    {
+        let mut config = config.lock().unwrap();
+        config.ensure_profile(profile_name).output = Some(format);
+        config.save()?;
+    }
+    output::success(&format!("default output → {format}"));
+    println!();
+
+    println!("4/4 shell completions");
     let shell = std::env::var("SHELL").unwrap_or_default();
     if shell.contains("zsh") {
-        output::dimmed("  r44 completions zsh > ~/.zfunc/_r44 && echo 'fpath=(~/.zfunc $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc");
+        output::dimmed("  r44 completions zsh > ~/.zfunc/_r44");
     } else if shell.contains("bash") {
         output::dimmed("  r44 completions bash >> ~/.bashrc");
     } else if shell.contains("fish") {
@@ -103,20 +107,18 @@ pub async fn run(config: Arc<Mutex<Config>>, api_url: &str) -> Result<()> {
     println!();
 
     output::success("setup complete");
-    println!();
-    output::dimmed("  r44 markets list          browse markets");
-    output::dimmed("  r44 agents public         community agents");
-    output::dimmed("  r44 shell                 interactive mode");
-    output::dimmed("  r44 --help                full command list");
+    output::dimmed(&format!("  r44 --profile {profile_name} doctor"));
+    output::dimmed(&format!("  r44 --profile {profile_name} markets list"));
+    output::dimmed(&format!("  r44 --profile {profile_name} shell"));
     println!();
 
     Ok(())
 }
 
-fn prompt(msg: &str) -> Result<String> {
-    eprint!("{msg}");
+fn prompt(message: &str) -> Result<String> {
+    eprint!("{message}");
     io::stderr().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input)
+    let mut value = String::new();
+    io::stdin().read_line(&mut value)?;
+    Ok(value)
 }

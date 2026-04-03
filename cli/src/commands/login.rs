@@ -8,7 +8,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use crate::config::Config;
 use crate::output;
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum LoginCmd {
     /// Login with a Solana wallet
     #[command(
@@ -78,6 +78,7 @@ pub enum LoginCmd {
 pub async fn run(
     cmd: LoginCmd,
     config: Arc<Mutex<Config>>,
+    profile_name: &str,
     api_url: &str,
 ) -> Result<()> {
     match cmd {
@@ -87,23 +88,42 @@ pub async fn run(
             signature,
             message,
         } => {
-            login_solana(config, api_url, &wallet, private_key, signature, message).await
+            login_solana(
+                config,
+                profile_name,
+                api_url,
+                &wallet,
+                private_key,
+                signature,
+                message,
+            )
+            .await
         }
         LoginCmd::Siwe {
             address,
             message,
             signature,
         } => {
-            login_siwe(config, api_url, &address, &message, &signature).await
+            login_siwe(
+                config,
+                profile_name,
+                api_url,
+                &address,
+                &message,
+                &signature,
+            )
+            .await
         }
         LoginCmd::Status => {
             let cfg = config.lock().unwrap();
-            if cfg.access_token.is_some() {
-                let wallet_str = cfg.wallet.as_deref().unwrap_or("unknown");
+            let profile = cfg.profile(profile_name).cloned().unwrap_or_default();
+            if profile.access_token.is_some() || std::env::var("R44_ACCESS_TOKEN").ok().is_some() {
+                let wallet_str = profile.wallet.as_deref().unwrap_or("unknown");
                 output::print_detail(&[
                     ("Status", "authenticated".into()),
+                    ("Profile", profile_name.into()),
                     ("Wallet", wallet_str.into()),
-                    ("API", cfg.api_url.clone()),
+                    ("API", profile.api_url),
                 ]);
             } else {
                 output::warn("Not logged in");
@@ -113,11 +133,12 @@ pub async fn run(
         }
         LoginCmd::Logout => {
             let mut cfg = config.lock().unwrap();
-            cfg.access_token = None;
-            cfg.refresh_token = None;
-            cfg.wallet = None;
+            let profile = cfg.ensure_profile(profile_name);
+            profile.access_token = None;
+            profile.refresh_token = None;
+            profile.wallet = None;
             cfg.save()?;
-            output::success("Logged out");
+            output::success(&format!("Logged out from profile '{profile_name}'"));
             Ok(())
         }
     }
@@ -125,6 +146,7 @@ pub async fn run(
 
 async fn login_solana(
     config: Arc<Mutex<Config>>,
+    profile_name: &str,
     api_url: &str,
     wallet: &str,
     private_key: Option<String>,
@@ -173,12 +195,8 @@ async fn login_solana(
             .context("invalid base58 private key — check R44_PRIVATE_KEY")?;
 
         let signing_key = match key_bytes.len() {
-            64 => SigningKey::from_bytes(
-                key_bytes[..32].try_into().context("key slice")?,
-            ),
-            32 => SigningKey::from_bytes(
-                key_bytes.as_slice().try_into().context("key slice")?,
-            ),
+            64 => SigningKey::from_bytes(key_bytes[..32].try_into().context("key slice")?),
+            32 => SigningKey::from_bytes(key_bytes.as_slice().try_into().context("key slice")?),
             n => bail!("private key must be 32 or 64 bytes, got {n}"),
         };
 
@@ -197,11 +215,22 @@ async fn login_solana(
         );
     };
 
-    finish_login(&http, &config, api_url, wallet, "/auth/solana/login", &final_message, &final_signature).await
+    finish_login(
+        &http,
+        &config,
+        profile_name,
+        api_url,
+        wallet,
+        "/auth/solana/login",
+        &final_message,
+        &final_signature,
+    )
+    .await
 }
 
 async fn login_siwe(
     config: Arc<Mutex<Config>>,
+    profile_name: &str,
     api_url: &str,
     address: &str,
     message: &str,
@@ -215,12 +244,23 @@ async fn login_siwe(
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
 
-    finish_login(&http, &config, api_url, address, "/auth/siwe/login", message, signature).await
+    finish_login(
+        &http,
+        &config,
+        profile_name,
+        api_url,
+        address,
+        "/auth/siwe/login",
+        message,
+        signature,
+    )
+    .await
 }
 
 async fn finish_login(
     http: &reqwest::Client,
     config: &Arc<Mutex<Config>>,
+    profile_name: &str,
     api_url: &str,
     wallet: &str,
     login_path: &str,
@@ -263,14 +303,17 @@ async fn finish_login(
 
     {
         let mut cfg = config.lock().unwrap();
-        cfg.access_token = Some(access_token);
-        cfg.refresh_token = refresh_token;
-        cfg.wallet = Some(wallet.to_string());
+        let profile = cfg.ensure_profile(profile_name);
+        profile.access_token = Some(access_token);
+        profile.refresh_token = refresh_token;
+        profile.wallet = Some(wallet.to_string());
         cfg.save()?;
     }
 
     sp.finish_and_clear();
-    output::success(&format!("Logged in as {wallet}"));
+    output::success(&format!(
+        "Logged in as {wallet} on profile '{profile_name}'"
+    ));
     Ok(())
 }
 
