@@ -37,6 +37,46 @@ fn parse_u64(value: Option<&Value>) -> u64 {
     0
 }
 
+fn normalize_unix_timestamp(value: u64) -> u64 {
+    if value > 10_000_000_000 {
+        value / 1_000
+    } else {
+        value
+    }
+}
+
+fn parse_timestamp(value: Option<&Value>) -> u64 {
+    let Some(raw) = value else {
+        return 0;
+    };
+
+    if let Some(number) = raw.as_u64() {
+        return normalize_unix_timestamp(number);
+    }
+
+    let Some(raw_str) = raw.as_str().map(str::trim).filter(|entry| !entry.is_empty()) else {
+        return 0;
+    };
+
+    if let Ok(number) = raw_str.parse::<u64>() {
+        return normalize_unix_timestamp(number);
+    }
+
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(raw_str) {
+        return parsed.timestamp().max(0) as u64;
+    }
+
+    if let Ok(parsed) = chrono::NaiveDate::parse_from_str(raw_str, "%Y-%m-%d") {
+        if let Some(naive) = parsed.and_hms_opt(0, 0, 0) {
+            return chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive, chrono::Utc)
+                .timestamp()
+                .max(0) as u64;
+        }
+    }
+
+    0
+}
+
 fn parse_f64(value: Option<&Value>) -> f64 {
     if let Some(raw) = value {
         if let Some(number) = raw.as_f64() {
@@ -136,13 +176,20 @@ fn parse_polymarket_market(row: &Value) -> Option<ExternalMarketSnapshot> {
 
     let executable = is_binary_yes_no(&outcomes) && parse_bool(row.get("enableOrderBook"));
 
+    let close_time = parse_timestamp(row.get("endDate"));
+    let close_time = if close_time > 0 {
+        close_time
+    } else {
+        parse_timestamp(row.get("endDateIso"))
+    };
+
     Some(ExternalMarketSnapshot {
         id: format!("polymarket:{}", id),
         question: parse_string(row.get("question")),
         description: parse_string(row.get("description")),
         category: parse_string(row.get("category")).to_ascii_lowercase(),
         status: status.to_string(),
-        close_time: parse_u64(row.get("endDate")),
+        close_time,
         resolved,
         outcome: None,
         yes_price,
@@ -159,6 +206,54 @@ fn parse_polymarket_market(row: &Value) -> Option<ExternalMarketSnapshot> {
         outcomes,
         provider_market_ref: id,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_polymarket_market;
+    use serde_json::json;
+
+    #[test]
+    fn parses_rfc3339_end_date_into_close_time() {
+        let market = parse_polymarket_market(&json!({
+            "id": "540816",
+            "slug": "russia-ukraine-ceasefire-before-gta-vi-554",
+            "question": "Russia-Ukraine Ceasefire before GTA VI?",
+            "description": "test market",
+            "category": "news",
+            "active": true,
+            "closed": false,
+            "resolved": false,
+            "enableOrderBook": true,
+            "endDate": "2026-07-31T12:00:00Z",
+            "outcomes": ["Yes", "No"],
+            "outcomePrices": ["0.545", "0.455"]
+        }))
+        .expect("market should parse");
+
+        assert_eq!(market.close_time, 1_785_499_200);
+    }
+
+    #[test]
+    fn falls_back_to_date_only_end_date_iso() {
+        let market = parse_polymarket_market(&json!({
+            "id": "540843",
+            "slug": "will-china-invades-taiwan-before-gta-vi-716",
+            "question": "Will China invades Taiwan before GTA VI?",
+            "description": "test market",
+            "category": "news",
+            "active": true,
+            "closed": false,
+            "resolved": false,
+            "enableOrderBook": true,
+            "endDateIso": "2026-07-31",
+            "outcomes": ["Yes", "No"],
+            "outcomePrices": ["0.515", "0.485"]
+        }))
+        .expect("market should parse");
+
+        assert_eq!(market.close_time, 1_785_456_000);
+    }
 }
 
 fn parse_orderbook_levels(value: Option<&Value>) -> Vec<ExternalOrderBookLevel> {
