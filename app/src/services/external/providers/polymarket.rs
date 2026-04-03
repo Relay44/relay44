@@ -3,9 +3,8 @@ use serde_json::Value;
 
 use crate::api::ApiError;
 use crate::services::external::types::{
-    clamp_probability, is_binary_yes_no, now_rfc3339, price_to_bps, ExternalMarketSnapshot,
-    ExternalOrderBookLevel, ExternalOrderBookSnapshot, ExternalOutcome, ExternalTradeSnapshot,
-    ExternalTradesSnapshot,
+    clamp_probability, is_binary_yes_no, now_rfc3339, ExternalMarketSnapshot,
+    ExternalOrderBookLevel, ExternalOrderBookSnapshot, ExternalOutcome, ExternalTradesSnapshot,
 };
 
 fn api_error(prefix: &str, err: impl ToString) -> ApiError {
@@ -356,42 +355,6 @@ async fn fetch_market_row(
         .map_err(|err| api_error("polymarket market payload invalid", err))
 }
 
-async fn fetch_price_history(
-    client: &Client,
-    clob_api_base: &str,
-    token_id: &str,
-) -> Result<Vec<(u64, f64)>, ApiError> {
-    let url = format!(
-        "{}/prices-history?market={}&interval=1h&fidelity=60",
-        clob_api_base.trim_end_matches('/'),
-        token_id
-    );
-
-    let payload = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|err| api_error("polymarket prices-history request failed", err))?
-        .error_for_status()
-        .map_err(|err| api_error("polymarket prices-history response failed", err))?
-        .json::<Value>()
-        .await
-        .map_err(|err| api_error("polymarket prices-history payload invalid", err))?;
-
-    let mut rows = Vec::new();
-    if let Some(history) = payload.get("history").and_then(|value| value.as_array()) {
-        for item in history {
-            let timestamp = parse_u64(item.get("t"));
-            let price = clamp_probability(parse_f64(item.get("p")));
-            if timestamp == 0 {
-                continue;
-            }
-            rows.push((timestamp, price));
-        }
-    }
-    Ok(rows)
-}
-
 pub async fn fetch_active_markets(
     client: &Client,
     gamma_api_base: &str,
@@ -499,83 +462,24 @@ pub async fn fetch_orderbook(
 }
 
 pub async fn fetch_trades(
-    client: &Client,
-    gamma_api_base: &str,
-    clob_api_base: &str,
+    _client: &Client,
+    _gamma_api_base: &str,
+    _clob_api_base: &str,
     market_id: &str,
-    outcome_filter: Option<&str>,
-    limit: u64,
-    offset: u64,
+    _outcome_filter: Option<&str>,
+    _limit: u64,
+    _offset: u64,
 ) -> Result<ExternalTradesSnapshot, ApiError> {
-    let market = fetch_market_row(client, gamma_api_base, market_id).await?;
-    let outcome_labels = parse_string_list(market.get("outcomes"));
-    let token_ids = parse_string_list(market.get("clobTokenIds"));
-
-    let mut targets: Vec<(&str, String)> = Vec::new();
-    match outcome_filter {
-        Some("yes") => {
-            if let Some(token) = token_for_outcome(&outcome_labels, &token_ids, "yes") {
-                targets.push(("yes", token));
-            }
-        }
-        Some("no") => {
-            if let Some(token) = token_for_outcome(&outcome_labels, &token_ids, "no") {
-                targets.push(("no", token));
-            }
-        }
-        _ => {
-            if let Some(token) = token_for_outcome(&outcome_labels, &token_ids, "yes") {
-                targets.push(("yes", token));
-            }
-            if let Some(token) = token_for_outcome(&outcome_labels, &token_ids, "no") {
-                targets.push(("no", token));
-            }
-        }
-    }
-
-    let mut all_trades = Vec::new();
-    for (side, token_id) in targets {
-        let history = fetch_price_history(client, clob_api_base, token_id.as_str()).await?;
-        for (timestamp, price) in history {
-            all_trades.push(ExternalTradeSnapshot {
-                id: format!("polymarket:{}:{}:{}", market_id, side, timestamp),
-                market_id: format!("polymarket:{}", market_id),
-                outcome: side.to_string(),
-                price,
-                price_bps: price_to_bps(price),
-                quantity: 0,
-                tx_hash: String::new(),
-                block_number: 0,
-                created_at: chrono::DateTime::from_timestamp(timestamp as i64, 0)
-                    .map(|entry| entry.to_rfc3339())
-                    .unwrap_or_else(now_rfc3339),
-            });
-        }
-    }
-
-    all_trades.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    let total = all_trades.len() as u64;
-    let start = (offset as usize).min(all_trades.len());
-    let end = (start + limit as usize).min(all_trades.len());
-    let page = all_trades[start..end].to_vec();
-
-    let provider_market_ref = if let Some(first) = token_ids.first() {
-        first.clone()
-    } else {
-        market_id.to_string()
-    };
-
-    Ok(ExternalTradesSnapshot {
-        trades: page,
-        total,
-        limit,
-        offset,
-        has_more: end < all_trades.len(),
-        source: "external_polymarket".to_string(),
-        provider: "polymarket".to_string(),
-        chain_id: 137,
-        provider_market_ref,
-        is_synthetic: true,
+    Err(ApiError {
+        code: "EXTERNAL_TRADES_UNAVAILABLE".to_string(),
+        message: "polymarket trade history is unavailable until Relay44 indexes real fills"
+            .to_string(),
+        status: 503,
+        details: Some(serde_json::json!({
+            "provider": "polymarket",
+            "marketId": market_id,
+            "reason": "price-history-derived trades were removed because they were not truthful",
+        })),
+        headers: Vec::new(),
     })
 }

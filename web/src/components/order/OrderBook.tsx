@@ -11,7 +11,7 @@ import {
   type BaseOrderBookResponse,
   normalizeBaseOrderBookResponse,
 } from '@/lib/api';
-import { formatPrice } from '@/lib/utils';
+import { formatPrice, formatTimeAgo } from '@/lib/utils';
 import type { OrderBook, OrderBookLevel, Outcome } from '@/types';
 
 export interface OrderBookProps {
@@ -23,16 +23,71 @@ function depthSummary(orderBook: OrderBook | undefined): string | null {
     return null;
   }
 
+  const provenance: string[] = [];
+  if (orderBook.includesBootstrap) {
+    provenance.push(
+      `bootstrap ${formatPrice(orderBook.bootstrapDepth || 0)}`
+    );
+    if (
+      orderBook.bootstrapInventoryYesUsdc != null ||
+      orderBook.bootstrapInventoryNoUsdc != null
+    ) {
+      provenance.push(
+        `inventory Y ${formatPrice(orderBook.bootstrapInventoryYesUsdc || 0)} / N ${formatPrice(orderBook.bootstrapInventoryNoUsdc || 0)}`
+      );
+    }
+  }
+
   if (orderBook.includesMirror && orderBook.includesBootstrap) {
-    return `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`;
+    const mirrorBits = [
+      `mirror ${formatPrice(orderBook.mirrorDepth || 0)}`,
+      typeof orderBook.mirrorActiveLinkCount === 'number' &&
+        typeof orderBook.mirrorLinkCount === 'number'
+        ? `links ${orderBook.mirrorActiveLinkCount}/${orderBook.mirrorLinkCount}`
+        : null,
+      orderBook.mirrorLastMirrorAt
+        ? `fresh ${formatTimeAgo(orderBook.mirrorLastMirrorAt)}`
+        : null,
+      orderBook.mirrorLastHedgeAt
+        ? `hedged ${formatTimeAgo(orderBook.mirrorLastHedgeAt)}`
+        : null,
+      typeof orderBook.mirrorPendingHedges === 'number'
+        ? `${orderBook.mirrorPendingHedges} hedges pending`
+        : null,
+      typeof orderBook.mirrorLinksWithErrors === 'number' &&
+        orderBook.mirrorLinksWithErrors > 0
+        ? `${orderBook.mirrorLinksWithErrors} mirror errors`
+        : null,
+    ].filter(Boolean);
+    return `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | ${provenance.join(' | ')} | ${mirrorBits.join(' | ')}`;
   }
 
   if (orderBook.includesMirror) {
-    return `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | mirrored $${formatPrice(orderBook.mirrorDepth || 0)}`;
+    const mirrorBits = [
+      `mirror ${formatPrice(orderBook.mirrorDepth || 0)}`,
+      typeof orderBook.mirrorActiveLinkCount === 'number' &&
+        typeof orderBook.mirrorLinkCount === 'number'
+        ? `links ${orderBook.mirrorActiveLinkCount}/${orderBook.mirrorLinkCount}`
+        : null,
+      orderBook.mirrorLastMirrorAt
+        ? `fresh ${formatTimeAgo(orderBook.mirrorLastMirrorAt)}`
+        : null,
+      orderBook.mirrorLastHedgeAt
+        ? `hedged ${formatTimeAgo(orderBook.mirrorLastHedgeAt)}`
+        : null,
+      typeof orderBook.mirrorPendingHedges === 'number'
+        ? `${orderBook.mirrorPendingHedges} hedges pending`
+        : null,
+      typeof orderBook.mirrorLinksWithErrors === 'number' &&
+        orderBook.mirrorLinksWithErrors > 0
+        ? `${orderBook.mirrorLinksWithErrors} mirror errors`
+        : null,
+    ].filter(Boolean);
+    return `Cross-venue depth: organic $${formatPrice(orderBook.organicDepth || 0)} | ${mirrorBits.join(' | ')}`;
   }
 
   if (orderBook.includesBootstrap) {
-    return `Unified depth includes bootstrap quotes. Organic $${formatPrice(orderBook.organicDepth || 0)} | bootstrap $${formatPrice(orderBook.bootstrapDepth || 0)}`;
+    return `Unified depth includes bootstrap quotes. Organic $${formatPrice(orderBook.organicDepth || 0)} | ${provenance.join(' | ')}`;
   }
 
   return `Organic depth $${formatPrice(orderBook.organicDepth || 0)}`;

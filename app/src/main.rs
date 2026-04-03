@@ -846,6 +846,10 @@ async fn main() -> std::io::Result<()> {
                                 web::get().to(api::external::get_external_market_orderbook),
                             )
                             .route(
+                                "/markets/{market_id}/trades",
+                                web::get().to(api::external::get_external_market_trades),
+                            )
+                            .route(
                                 "/signals",
                                 web::get().to(api::external::list_external_signals),
                             )

@@ -1,6 +1,7 @@
 use actix_web::http::header::HeaderMap;
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use chrono::Utc;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -10,10 +11,11 @@ use super::{
     validate_uuid, ApiError,
 };
 use crate::models::{
-    CancelOrderResponse, ListOrdersQuery, Order, OrderListResponse, OrderSide, OrderStatus,
-    Outcome, PlaceOrderRequest, PlaceOrderResponse,
+    CancelOrderResponse, ListOrdersQuery, MatchedTrade, Order, OrderListResponse, OrderSide,
+    OrderStatus, Outcome, PlaceOrderRequest, PlaceOrderResponse, Trade,
 };
 use crate::require_auth;
+use crate::services::database::LocalTradeSettlement;
 use crate::AppState;
 
 const IDEMPOTENCY_KEY_HEADER: &str = "idempotency-key";
@@ -48,6 +50,52 @@ fn get_idempotency_key(headers: &HeaderMap) -> Option<String> {
         .get(IDEMPOTENCY_KEY_HEADER)
         .and_then(|v| v.to_str().ok())
         .map(String::from)
+}
+
+fn settlement_deltas(outcome: Outcome, quantity: u64) -> (i64, i64, i64, i64) {
+    let quantity = quantity as i64;
+    match outcome {
+        Outcome::Yes => (quantity, 0, 0, quantity),
+        Outcome::No => (0, quantity, quantity, 0),
+    }
+}
+
+fn build_trade_settlement(
+    matched_trade: &MatchedTrade,
+    created_at: chrono::DateTime<Utc>,
+) -> LocalTradeSettlement {
+    let trade = Trade {
+        id: Uuid::new_v4().to_string(),
+        market_id: matched_trade.market_id.clone(),
+        buy_order_id: matched_trade.buy_order_id.clone(),
+        sell_order_id: matched_trade.sell_order_id.clone(),
+        outcome: matched_trade.outcome,
+        price: matched_trade.fill_price_bps as f64 / 10_000.0,
+        price_bps: matched_trade.fill_price_bps,
+        quantity: matched_trade.fill_quantity,
+        collateral_amount: matched_trade.fill_quantity,
+        buyer: matched_trade.buyer.clone(),
+        seller: matched_trade.seller.clone(),
+        tx_signature: String::new(),
+        created_at,
+    };
+    let (buyer_yes_delta, buyer_no_delta, seller_yes_delta, seller_no_delta) =
+        settlement_deltas(matched_trade.outcome, matched_trade.fill_quantity);
+
+    LocalTradeSettlement {
+        trade,
+        buyer_yes_delta,
+        buyer_no_delta,
+        seller_yes_delta,
+        seller_no_delta,
+    }
+}
+
+async fn reload_orderbook_from_database(state: &Arc<AppState>) {
+    match state.db.load_orderbook_entries().await {
+        Ok(entries) => state.orderbook.replace_from_entries(entries),
+        Err(err) => log::error!("failed to resync orderbook from database: {}", err),
+    }
 }
 
 /// List orders for authenticated user
@@ -223,52 +271,6 @@ pub async fn place_order(
     // Add to order book and attempt matching
     let matches = state.orderbook.add_order(&order);
 
-    // Persist to database order book
-    if order.remaining_quantity > 0 {
-        state
-            .db
-            .add_orderbook_entry(
-                &order.id,
-                &order.market_id,
-                order.outcome,
-                order.side,
-                order.price_bps,
-                order.remaining_quantity,
-                &order.owner,
-            )
-            .await
-            .ok();
-    }
-
-    // Process matches
-    for matched_trade in &matches {
-        // Publish trade event via Redis
-        let outcome_str = match order.outcome {
-            Outcome::Yes => "yes",
-            Outcome::No => "no",
-        };
-        state
-            .redis
-            .publish_trade(
-                &order.market_id,
-                outcome_str,
-                matched_trade.fill_price_bps as f64 / 10000.0,
-                matched_trade.fill_quantity,
-            )
-            .await
-            .ok();
-
-        // Update persistent order book for matched orders
-        state
-            .db
-            .update_orderbook_entry_quantity(
-                &matched_trade.buy_order_id.to_string(),
-                0, // Buyer order filled
-            )
-            .await
-            .ok();
-    }
-
     // Calculate filled amount
     let total_filled: u64 = matches.iter().map(|m| m.fill_quantity).sum();
     let remaining = body.quantity.saturating_sub(total_filled);
@@ -286,30 +288,97 @@ pub async fn place_order(
     final_order.filled_quantity = total_filled;
     final_order.remaining_quantity = remaining;
     final_order.status = final_status;
+    final_order.updated_at = Utc::now();
 
-    // Save to database
-    state
+    let mut maker_fill_totals = HashMap::<String, u64>::new();
+    for matched_trade in &matches {
+        let maker_order_id = match body.side {
+            OrderSide::Buy => matched_trade.sell_order_id.as_str(),
+            OrderSide::Sell => matched_trade.buy_order_id.as_str(),
+        };
+        maker_fill_totals
+            .entry(maker_order_id.to_string())
+            .and_modify(|total| *total += matched_trade.fill_quantity)
+            .or_insert(matched_trade.fill_quantity);
+    }
+
+    let mut maker_updates = Vec::with_capacity(maker_fill_totals.len());
+    for (maker_order_id, filled_delta) in maker_fill_totals {
+        let mut maker_order = match state.db.get_order(maker_order_id.as_str()).await {
+            Ok(Some(order)) => order,
+            Ok(None) => {
+                reload_orderbook_from_database(state.get_ref()).await;
+                return Err(ApiError::internal(&format!(
+                    "matched resting order {} was missing from storage",
+                    maker_order_id
+                )));
+            }
+            Err(err) => {
+                reload_orderbook_from_database(state.get_ref()).await;
+                return Err(ApiError::internal(&format!(
+                    "failed to load matched resting order {}: {}",
+                    maker_order_id, err
+                )));
+            }
+        };
+        maker_order.filled_quantity = maker_order.filled_quantity.saturating_add(filled_delta);
+        maker_order.remaining_quantity =
+            maker_order.remaining_quantity.saturating_sub(filled_delta);
+        maker_order.status = if maker_order.remaining_quantity == 0 {
+            OrderStatus::Filled
+        } else {
+            OrderStatus::PartiallyFilled
+        };
+        maker_order.updated_at = Utc::now();
+        maker_updates.push(maker_order);
+    }
+
+    let settlements = matches
+        .iter()
+        .map(|matched_trade| build_trade_settlement(matched_trade, Utc::now()))
+        .collect::<Vec<_>>();
+
+    if let Err(err) = state
         .db
-        .create_order(&final_order)
+        .persist_local_order_flow(&final_order, &maker_updates, &settlements)
         .await
-        .map_err(ApiError::from)?;
+    {
+        reload_orderbook_from_database(state.get_ref()).await;
+        return Err(ApiError::from(err));
+    }
 
-    // Publish order book update
-    let outcome_str = match body.outcome {
+    // Process matches after durable persistence
+    for matched_trade in &matches {
+        let outcome_str = match matched_trade.outcome {
+            Outcome::Yes => "yes",
+            Outcome::No => "no",
+        };
+        state
+            .redis
+            .publish_trade(
+                matched_trade.market_id.as_str(),
+                outcome_str,
+                matched_trade.fill_price_bps as f64 / 10000.0,
+                matched_trade.fill_quantity,
+            )
+            .await
+            .ok();
+    }
+    let outcome_str = match final_order.outcome {
         Outcome::Yes => "yes",
         Outcome::No => "no",
     };
-    let side_str = match body.side {
+    let side_str = match final_order.side {
         OrderSide::Buy => "bid",
         OrderSide::Sell => "ask",
     };
     state
         .redis
         .publish_orderbook_update(
-            &body.market_id,
+            &final_order.market_id,
             outcome_str,
             side_str,
-            body.price,
+            final_order.price,
             remaining,
         )
         .await

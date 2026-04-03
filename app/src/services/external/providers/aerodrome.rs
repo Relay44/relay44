@@ -1,12 +1,16 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::api::ApiError;
 use crate::services::aerodrome;
 use crate::services::evm_rpc::EvmRpcService;
 use crate::services::external::types::{
-    clamp_probability, now_rfc3339, ExternalMarketSnapshot, ExternalOrderBookLevel,
-    ExternalOrderBookSnapshot, ExternalOutcome,
+    clamp_probability, now_rfc3339, price_to_bps, ExternalMarketSnapshot, ExternalOrderBookLevel,
+    ExternalOrderBookSnapshot, ExternalOutcome, ExternalTradeSnapshot, ExternalTradesSnapshot,
 };
+
+const SWAP_TOPIC: &str = "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67";
+const DEFAULT_TRADE_LOOKBACK_BLOCKS: u64 = 50_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AerodromePoolState {
@@ -172,10 +176,7 @@ pub async fn fetch_pool_state(
                 }
                 last_err = Some(err);
                 if attempt < 2 {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        200 * (attempt + 1),
-                    ))
-                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * (attempt + 1))).await;
                 }
             }
         }
@@ -330,14 +331,12 @@ pub async fn quote_swap(
                 });
             }
             Err(err) => {
-                last_err = Some(
-                    ApiError::internal(&format!("aerodrome quoter call failed: {}", err)),
-                );
+                last_err = Some(ApiError::internal(&format!(
+                    "aerodrome quoter call failed: {}",
+                    err
+                )));
                 if attempt < 2 {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        200 * (attempt + 1),
-                    ))
-                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(200 * (attempt + 1))).await;
                 }
             }
         }
@@ -361,10 +360,7 @@ pub fn pool_to_market_snapshot(
         Ok(p) => p.clamp(0.01, 0.99),
         Err(_) => return None,
     };
-    let question = format!(
-        "{}/{} on Aerodrome",
-        pool.token0_symbol, pool.token1_symbol
-    );
+    let question = format!("{}/{} on Aerodrome", pool.token0_symbol, pool.token1_symbol);
 
     Some(ExternalMarketSnapshot {
         id: format!("aerodrome:{}", market_id),
@@ -388,10 +384,7 @@ pub fn pool_to_market_snapshot(
         source: "external_aerodrome".to_string(),
         provider: "aerodrome".to_string(),
         is_external: true,
-        external_url: format!(
-            "https://aerodrome.finance/pools/{}",
-            pool.pool_address
-        ),
+        external_url: format!("https://aerodrome.finance/pools/{}", pool.pool_address),
         chain_id: 8453,
         requires_credentials: false,
         execution_users: true,
@@ -468,6 +461,148 @@ pub fn synthesize_orderbook(
         provider_market_ref: pool.pool_address.clone(),
         is_synthetic: true,
     }
+}
+
+fn parse_hex_i128(word: &str) -> Result<i128, ApiError> {
+    let clean = word.trim().trim_start_matches("0x");
+    if clean.len() != 64 || !clean.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(ApiError::bad_request(
+            "INVALID_HEX",
+            "invalid int256 word in swap log",
+        ));
+    }
+
+    let bytes = hex::decode(clean)
+        .map_err(|_| ApiError::bad_request("INVALID_HEX", "failed to decode swap log integer"))?;
+    let sign_extension = if bytes[0] & 0x80 == 0 { 0x00 } else { 0xff };
+    if bytes[..16].iter().any(|byte| *byte != sign_extension) {
+        return Err(ApiError::bad_request(
+            "INVALID_HEX",
+            "swap log integer exceeds supported range",
+        ));
+    }
+
+    let tail: [u8; 16] = bytes[16..32]
+        .try_into()
+        .map_err(|_| ApiError::bad_request("INVALID_HEX", "invalid swap log integer width"))?;
+    Ok(i128::from_be_bytes(tail))
+}
+
+fn word_at(data: &str, index: usize) -> Result<&str, ApiError> {
+    let clean = data.trim().trim_start_matches("0x");
+    let start = index * 64;
+    let end = start + 64;
+    clean
+        .get(start..end)
+        .ok_or_else(|| ApiError::bad_request("INVALID_SWAP_LOG", "swap log payload is truncated"))
+}
+
+pub async fn fetch_trades(
+    rpc: &EvmRpcService,
+    pool_address: &str,
+    outcome_filter: Option<&str>,
+    limit: u64,
+    offset: u64,
+) -> Result<ExternalTradesSnapshot, ApiError> {
+    let pool = fetch_pool_state(rpc, pool_address).await?;
+    let latest_block = rpc
+        .eth_block_number()
+        .await
+        .map_err(|err| ApiError::internal(&format!("aerodrome latest block failed: {}", err)))?;
+    let from_block = latest_block.saturating_sub(DEFAULT_TRADE_LOOKBACK_BLOCKS);
+    let logs = rpc
+        .eth_get_logs(pool_address, SWAP_TOPIC, from_block, latest_block)
+        .await
+        .map_err(|err| ApiError::internal(&format!("aerodrome swap log fetch failed: {}", err)))?;
+
+    let mut block_timestamps = HashMap::<u64, String>::new();
+    let mut trades = Vec::new();
+    for (index, log) in logs.iter().enumerate() {
+        let amount0 = parse_hex_i128(word_at(log.data.as_str(), 0)?)?;
+        let amount1 = parse_hex_i128(word_at(log.data.as_str(), 1)?)?;
+        let sqrt_price_x96 = parse_hex_u128(word_at(log.data.as_str(), 2)?)?;
+        if amount0 == 0 || amount1 == 0 {
+            continue;
+        }
+
+        let outcome = if amount0 < 0 && amount1 > 0 {
+            "yes"
+        } else if amount0 > 0 && amount1 < 0 {
+            "no"
+        } else {
+            continue;
+        };
+        if outcome_filter.is_some_and(|filter| filter != outcome) {
+            continue;
+        }
+
+        let block_number = log
+            .block_number
+            .as_deref()
+            .map(parse_hex_u64)
+            .transpose()?
+            .unwrap_or_default();
+        let created_at = if let Some(timestamp) = block_timestamps.get(&block_number) {
+            timestamp.clone()
+        } else {
+            let timestamp = rpc
+                .eth_get_block_timestamp(block_number)
+                .await
+                .map_err(|err| {
+                    ApiError::internal(&format!("aerodrome block timestamp fetch failed: {}", err))
+                })?;
+            let rendered = chrono::DateTime::from_timestamp(timestamp as i64, 0)
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_else(now_rfc3339);
+            block_timestamps.insert(block_number, rendered.clone());
+            rendered
+        };
+
+        let quantity = ((amount0.unsigned_abs() as f64) / 10_f64.powi(pool.token0_decimals as i32))
+            .round()
+            .max(1.0) as u64;
+        let mut trade_pool = pool.clone();
+        trade_pool.sqrt_price_x96 = sqrt_price_x96;
+        let price = clamp_probability(trade_pool.price()?);
+        let tx_hash = log.transaction_hash.clone().unwrap_or_default();
+        let log_index = log.log_index.clone().unwrap_or_else(|| index.to_string());
+        trades.push(ExternalTradeSnapshot {
+            id: format!("aerodrome:{}:{}", tx_hash, log_index),
+            market_id: format!("aerodrome:{}", pool_address),
+            outcome: outcome.to_string(),
+            price,
+            price_bps: price_to_bps(price),
+            quantity,
+            tx_hash,
+            block_number,
+            created_at,
+        });
+    }
+
+    trades.sort_by(|left, right| {
+        right
+            .created_at
+            .cmp(&left.created_at)
+            .then_with(|| right.block_number.cmp(&left.block_number))
+    });
+
+    let total = trades.len() as u64;
+    let start = (offset as usize).min(trades.len());
+    let end = (start + limit as usize).min(trades.len());
+    let page = trades[start..end].to_vec();
+
+    Ok(ExternalTradesSnapshot {
+        trades: page,
+        total,
+        limit,
+        offset,
+        has_more: end < total as usize,
+        source: "external_aerodrome".to_string(),
+        provider: "aerodrome".to_string(),
+        chain_id: 8453,
+        provider_market_ref: pool_address.to_string(),
+        is_synthetic: false,
+    })
 }
 
 #[cfg(test)]
