@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Subcommand;
 use tabled::Tabled;
 
@@ -80,7 +80,7 @@ struct CurveRow {
 }
 
 pub async fn run(cmd: EdgeScannerCmd, api: &Client, fmt: Format) -> Result<()> {
-    require_auth(api)?;
+    api.require_auth()?;
 
     match cmd {
         EdgeScannerCmd::Signals {
@@ -172,7 +172,7 @@ fn print_signals_table(data: &serde_json::Value) {
         })
         .collect();
 
-    output::print_tabled(&rows);
+    output::print_tabled_with_cols(&rows, &[2, 3, 4, 5]);
 }
 
 fn print_curve_table(data: &serde_json::Value) {
@@ -210,16 +210,6 @@ fn print_curve_table(data: &serde_json::Value) {
         })
         .collect();
 
-    output::print_tabled(&rows);
+    output::print_tabled_with_cols(&rows, &[1, 2, 3, 4]);
 }
 
-fn require_auth(api: &Client) -> Result<()> {
-    if api.is_authenticated() {
-        return Ok(());
-    }
-    bail!(
-        "Not logged in.\n\n  \
-         r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
-         r44 config set-token <TOKEN>  (if you have a token already)"
-    );
-}

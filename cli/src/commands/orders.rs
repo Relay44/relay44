@@ -18,6 +18,12 @@ pub enum OrderCmd {
         /// Filter by market ID
         #[arg(long, short)]
         market: Option<String>,
+        /// Max results
+        #[arg(long, short, default_value = "50")]
+        limit: u32,
+        /// Offset for pagination
+        #[arg(long, default_value = "0")]
+        offset: u32,
     },
 
     /// Place a new order
@@ -92,14 +98,14 @@ struct OrderRow {
 }
 
 pub async fn run(cmd: OrderCmd, api: &Client, fmt: Format) -> Result<()> {
-    require_auth(api)?;
+    api.require_auth()?;
 
     match cmd {
-        OrderCmd::List { market } => {
+        OrderCmd::List { market, limit, offset } => {
             let sp = output::spinner("Fetching orders…");
-            let mut path = "/orders".to_string();
+            let mut path = format!("/orders?limit={limit}&offset={offset}");
             if let Some(m) = &market {
-                path.push_str(&format!("?marketId={m}"));
+                path.push_str(&format!("&marketId={m}"));
             }
             let data: serde_json::Value = api.get_raw(&path).await?;
             sp.finish_and_clear();
@@ -259,13 +265,3 @@ pub async fn run(cmd: OrderCmd, api: &Client, fmt: Format) -> Result<()> {
     Ok(())
 }
 
-fn require_auth(api: &Client) -> Result<()> {
-    if api.is_authenticated() {
-        return Ok(());
-    }
-    bail!(
-        "Not logged in.\n\n  \
-         r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
-         r44 config set-token <TOKEN>  (if you have a token already)"
-    );
-}

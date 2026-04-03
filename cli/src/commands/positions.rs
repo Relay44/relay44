@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Subcommand;
 use tabled::Tabled;
 
@@ -9,8 +9,15 @@ use crate::output::{self, Format};
 pub enum PositionCmd {
     /// List all positions
     #[command(long_about = "List all your open positions across markets.\n\n\
-                      Example:\n  r44 positions list")]
-    List,
+                      Examples:\n  r44 positions list\n  r44 positions list --limit 10")]
+    List {
+        /// Max results
+        #[arg(long, short, default_value = "50")]
+        limit: u32,
+        /// Offset for pagination
+        #[arg(long, default_value = "0")]
+        offset: u32,
+    },
 
     /// Get position for a specific market
     #[command(long_about = "Show your position in a specific market.\n\n\
@@ -49,12 +56,14 @@ struct PositionRow {
 }
 
 pub async fn run(cmd: PositionCmd, api: &Client, fmt: Format) -> Result<()> {
-    require_auth(api)?;
+    api.require_auth()?;
 
     match cmd {
-        PositionCmd::List => {
+        PositionCmd::List { limit, offset } => {
             let sp = output::spinner("Fetching positions…");
-            let data: serde_json::Value = api.get_raw("/positions").await?;
+            let data: serde_json::Value = api
+                .get_raw(&format!("/positions?limit={limit}&offset={offset}"))
+                .await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
@@ -128,13 +137,3 @@ pub async fn run(cmd: PositionCmd, api: &Client, fmt: Format) -> Result<()> {
     Ok(())
 }
 
-fn require_auth(api: &Client) -> Result<()> {
-    if api.is_authenticated() {
-        return Ok(());
-    }
-    bail!(
-        "Not logged in.\n\n  \
-         r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
-         r44 config set-token <TOKEN>  (if you have a token already)"
-    );
-}

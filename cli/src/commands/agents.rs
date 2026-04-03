@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::Subcommand;
 use tabled::Tabled;
 
@@ -9,8 +9,15 @@ use crate::output::{self, Format};
 pub enum AgentCmd {
     /// List your agents
     #[command(long_about = "List all agents owned by your account.\n\n\
-                            Example:\n  r44 agents list")]
-    List,
+                            Examples:\n  r44 agents list\n  r44 agents list --limit 10")]
+    List {
+        /// Max results
+        #[arg(long, short, default_value = "50")]
+        limit: u32,
+        /// Offset for pagination
+        #[arg(long, default_value = "0")]
+        offset: u32,
+    },
 
     /// Get agent details
     #[command(
@@ -82,12 +89,14 @@ pub async fn run(cmd: AgentCmd, api: &Client, fmt: Format) -> Result<()> {
         return Ok(());
     }
 
-    require_auth(api)?;
+    api.require_auth()?;
 
     match cmd {
-        AgentCmd::List => {
+        AgentCmd::List { limit, offset } => {
             let sp = output::spinner("Fetching agents…");
-            let data: serde_json::Value = api.get_raw("/external/agents").await?;
+            let data: serde_json::Value = api
+                .get_raw(&format!("/external/agents?limit={limit}&offset={offset}"))
+                .await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
@@ -185,13 +194,3 @@ fn print_agent_table(data: &serde_json::Value) {
     output::print_tabled(&rows);
 }
 
-fn require_auth(api: &Client) -> Result<()> {
-    if api.is_authenticated() {
-        return Ok(());
-    }
-    bail!(
-        "Not logged in.\n\n  \
-         r44 login solana --wallet <PUBKEY> --private-key <KEY>\n  \
-         r44 config set-token <TOKEN>  (if you have a token already)"
-    );
-}
