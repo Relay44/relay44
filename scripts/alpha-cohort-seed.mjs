@@ -55,15 +55,13 @@ async function loginAlphaAdmin() {
 }
 
 const AGENT_COUNT = Number(process.env.ALPHA_AGENT_COUNT || 5);
-const MARKET_CATEGORY = (
-  process.env.ALPHA_MARKET_CATEGORY || "crypto"
-).toLowerCase();
+const MARKET_CATEGORY = (process.env.ALPHA_MARKET_CATEGORY || "").toLowerCase();
 
 async function fetchTopWallets(token) {
-  const payload = await apiGet(
-    `/external/research/wallets?marketCategory=${MARKET_CATEGORY}&limit=20`,
-    token,
-  );
+  const qs = MARKET_CATEGORY
+    ? `marketCategory=${MARKET_CATEGORY}&limit=20`
+    : "limit=20";
+  const payload = await apiGet(`/external/research/wallets?${qs}`, token);
   const wallets = payload?.items || payload?.wallets || payload?.data || [];
   return wallets
     .filter((w) => (w.composite_score ?? w.compositeScore ?? 0) >= 0.55)
