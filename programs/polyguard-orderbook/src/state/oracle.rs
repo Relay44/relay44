@@ -59,6 +59,20 @@ impl OracleConfig {
         config
     }
 
+    pub fn new_pyth(threshold: i128, operator: ComparisonOp, max_staleness: u32, max_confidence: u64) -> Self {
+        let mut config = Self {
+            oracle_type: OracleType::Pyth as u8,
+            max_staleness,
+            threshold_lo: 0,
+            threshold_hi: 0,
+            operator: operator as u8,
+            max_confidence,
+            _padding: [0; 6],
+        };
+        config.set_threshold(threshold);
+        config
+    }
+
     pub fn get_oracle_type(&self) -> OracleType {
         match self.oracle_type {
             1 => OracleType::Switchboard,

@@ -2,6 +2,7 @@
 members = [
     "app",
     "cli",
+    "programs/polyguard-orderbook",
 ]
 resolver = "2"
 
