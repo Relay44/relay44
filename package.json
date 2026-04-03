@@ -62,6 +62,8 @@
     "agents:executor": "npm run agents:operator",
     "agents:executor:sepolia": "BASE_CHAIN_ID=84532 node scripts/base-agent-operator.mjs",
     "agents:executor:dry": "BASE_AGENT_OPERATOR_DRY_RUN=true node scripts/base-agent-operator.mjs",
+    "alpha-cohort:seed": "node scripts/alpha-cohort-seed.mjs",
+    "alpha-cohort:health": "node scripts/alpha-cohort-health.mjs",
     "paper-cohort:start": "node scripts/paper-cohort-start.mjs",
     "paper-cohort:tick": "node scripts/paper-cohort-tick.mjs",
     "paper-cohort:run": "node scripts/paper-cohort-run.mjs",
