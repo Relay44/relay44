@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use sqlx::Row;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -39,6 +39,7 @@ const POLYMARKET_PRICE_SCALE: u128 = 1_000_000;
 const POLYMARKET_LOT_STEP_INT: u128 = 10_000;
 const POLYMARKET_EXCHANGE: &str = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E";
 const POLYMARKET_NEG_RISK_EXCHANGE: &str = "0xC5d563A36AE78145C45a50134d48A1215220f80a";
+const POLYMARKET_RELAYER_API_BASE: &str = "https://relayer-v2.polymarket.com";
 
 struct PolymarketCredentials {
     api_key: String,
@@ -559,6 +560,73 @@ pub struct ExternalMarketTradesQuery {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketIndexerBackfillRequest {
+    pub market_id: Option<String>,
+    pub days: Option<u64>,
+    pub public_tape: Option<bool>,
+    pub user_fills: Option<bool>,
+    pub max_markets: Option<u64>,
+    pub max_pages_per_market: Option<u64>,
+    #[serde(default)]
+    pub user_events: Vec<Value>,
+    #[serde(default)]
+    pub relayer_transactions: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketIndexerTrackedMarketResponse {
+    pub market_id: String,
+    pub provider_market_ref: String,
+    pub condition_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketIndexerLaneHealth {
+    pub lane: String,
+    pub status: String,
+    pub tracked_markets: u64,
+    pub indexed_markets: u64,
+    pub indexed_from: Option<String>,
+    pub indexed_through: Option<String>,
+    pub is_partial_backfill: bool,
+    pub last_error: Option<String>,
+    pub updated_at: Option<String>,
+    pub builder_configured: Option<bool>,
+    pub matched_events: Option<u64>,
+    pub mined_events: Option<u64>,
+    pub confirmed_events: Option<u64>,
+    pub retrying_events: Option<u64>,
+    pub failed_events: Option<u64>,
+    pub last_event_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketIndexerHealthResponse {
+    pub ok: bool,
+    pub tracked_markets: u64,
+    pub tracked_market_details: Vec<PolymarketIndexerTrackedMarketResponse>,
+    pub public_tape: PolymarketIndexerLaneHealth,
+    pub user_fills: PolymarketIndexerLaneHealth,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PolymarketIndexerBackfillResponse {
+    pub ok: bool,
+    pub tracked_markets: u64,
+    pub tracked_market_details: Vec<PolymarketIndexerTrackedMarketResponse>,
+    pub public_trades_ingested: u64,
+    pub user_fill_events_ingested: u64,
+    pub user_lifecycle_events_reconciled: u64,
+    pub public_tape: PolymarketIndexerLaneHealth,
+    pub user_fills: PolymarketIndexerLaneHealth,
+}
 #[derive(Debug, Clone)]
 struct StoredCredential {
     id: String,
@@ -952,9 +1020,53 @@ async fn ensure_external_state_import_admin(
     req: &HttpRequest,
     state: &web::Data<Arc<AppState>>,
 ) -> Result<(), ApiError> {
+    if let Some(expected) = (!state.config.admin_control_key.trim().is_empty())
+        .then_some(state.config.admin_control_key.trim())
+    {
+        let provided = req
+            .headers()
+            .get("x-admin-key")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .unwrap_or("");
+        if provided == expected {
+            return Ok(());
+        }
+    }
+
     let user = extract_jwt_user(req, state)?;
     check_role(user.role, UserRole::Admin)?;
     Ok(())
+}
+
+fn parse_string_value(raw: Option<&Value>) -> String {
+    raw.and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn parse_f64_value(raw: Option<&Value>) -> f64 {
+    match raw {
+        Some(Value::Number(value)) => value.as_f64().unwrap_or(0.0),
+        Some(Value::String(value)) => value.parse::<f64>().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+fn parse_i64_value(raw: Option<&Value>) -> i64 {
+    match raw {
+        Some(Value::Number(value)) => value.as_i64().unwrap_or(0),
+        Some(Value::String(value)) => value.parse::<i64>().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn normalize_polymarket_market_ref(raw: &str) -> String {
+    raw.trim()
+        .strip_prefix("polymarket:")
+        .unwrap_or(raw.trim())
+        .to_string()
 }
 
 async fn import_external_state_rows(
@@ -2568,6 +2680,1206 @@ fn polymarket_clob_url(config: &AppConfig, path: &str) -> String {
         config.polymarket_clob_api_base.trim_end_matches('/'),
         path
     )
+}
+
+#[derive(Debug, Clone)]
+struct PolymarketTrackedMarket {
+    market_id: String,
+    provider_market_ref: String,
+    condition_id: String,
+    token_outcomes: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PolymarketBackfillCounts {
+    public_trades_ingested: u64,
+    user_fill_events_ingested: u64,
+    user_lifecycle_events_reconciled: u64,
+}
+
+fn polymarket_builder_configured(config: &AppConfig) -> bool {
+    polymarket_builder_credentials(config).is_some()
+}
+
+fn map_polymarket_lifecycle_status(
+    value: &str,
+) -> external::polymarket_index::PolymarketTradeLifecycleStatus {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "MATCHED" | "STATE_NEW" | "STATE_EXECUTED" => {
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Matched
+        }
+        "MINED" | "STATE_MINED" => {
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Mined
+        }
+        "RETRYING" => external::polymarket_index::PolymarketTradeLifecycleStatus::Retrying,
+        "FAILED" | "STATE_FAILED" | "STATE_INVALID" => {
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Failed
+        }
+        "CONFIRMED" | "STATE_CONFIRMED" => {
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Confirmed
+        }
+        _ => external::polymarket_index::PolymarketTradeLifecycleStatus::Matched,
+    }
+}
+
+fn build_polymarket_builder_request_headers(
+    config: &AppConfig,
+    method: &str,
+    path: &str,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    let credentials = polymarket_builder_credentials(config).ok_or_else(|| {
+        ApiError::bad_request(
+            "POLYMARKET_BUILDER_NOT_CONFIGURED",
+            "Polymarket builder credentials are not configured",
+        )
+    })?;
+    let timestamp = Utc::now().timestamp().to_string();
+    let builder_headers =
+        polymarket_builder_headers(credentials, method, path, "", timestamp.as_str())?;
+    let mut headers =
+        BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]);
+    insert_polymarket_builder_headers(&mut headers, &builder_headers);
+    Ok(headers)
+}
+
+fn polymarket_relayer_url(path: &str) -> String {
+    format!("{}{}", POLYMARKET_RELAYER_API_BASE, path)
+}
+
+fn parse_polymarket_rfc3339(value: &str) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn parse_polymarket_observed_at(payload: &Value) -> Option<chrono::DateTime<Utc>> {
+    for key in [
+        "last_update",
+        "lastUpdate",
+        "matchtime",
+        "matchTime",
+        "timestamp",
+    ] {
+        let raw = parse_string_value(payload.get(key));
+        if raw.is_empty() {
+            continue;
+        }
+        if let Ok(seconds) = raw.parse::<i64>() {
+            if let Some(timestamp) = parse_polymarket_timestamp(seconds) {
+                return Some(timestamp);
+            }
+        }
+        if let Some(timestamp) = parse_polymarket_rfc3339(raw.as_str()) {
+            return Some(timestamp);
+        }
+    }
+    None
+}
+
+fn parse_polymarket_lifecycle_status(
+    raw: Option<&str>,
+) -> Option<external::polymarket_index::PolymarketTradeLifecycleStatus> {
+    raw.map(map_polymarket_lifecycle_status)
+}
+
+fn lifecycle_rank(status: external::polymarket_index::PolymarketTradeLifecycleStatus) -> u8 {
+    match status {
+        external::polymarket_index::PolymarketTradeLifecycleStatus::Matched => 1,
+        external::polymarket_index::PolymarketTradeLifecycleStatus::Mined => 2,
+        external::polymarket_index::PolymarketTradeLifecycleStatus::Retrying => 3,
+        external::polymarket_index::PolymarketTradeLifecycleStatus::Failed => 4,
+        external::polymarket_index::PolymarketTradeLifecycleStatus::Confirmed => 5,
+    }
+}
+
+fn best_polymarket_lifecycle_status(
+    direct: Option<external::polymarket_index::PolymarketTradeLifecycleStatus>,
+    relayer: Option<external::polymarket_index::PolymarketTradeLifecycleStatus>,
+    tx_hash: Option<&str>,
+) -> external::polymarket_index::PolymarketTradeLifecycleStatus {
+    let mut best = direct.unwrap_or_else(|| {
+        if tx_hash.is_some() {
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Mined
+        } else {
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Matched
+        }
+    });
+    if let Some(relayer) = relayer {
+        if lifecycle_rank(relayer) > lifecycle_rank(best) {
+            best = relayer;
+        }
+    }
+    best
+}
+
+fn relayer_transaction_match_score(
+    tx: &Value,
+    refs: &external::polymarket_index::PolymarketReferenceCandidates,
+) -> u8 {
+    let tx_hash = parse_string_value(tx.get("transactionHash"));
+    if !tx_hash.is_empty()
+        && refs
+            .tx_hashes
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(tx_hash.as_str()))
+    {
+        return 3;
+    }
+
+    let metadata = parse_string_value(tx.get("metadata")).to_ascii_lowercase();
+    if !metadata.is_empty()
+        && refs
+            .provider_order_refs
+            .iter()
+            .any(|candidate| metadata.contains(candidate.to_ascii_lowercase().as_str()))
+    {
+        return 2;
+    }
+    if !metadata.is_empty()
+        && refs
+            .builder_trade_refs
+            .iter()
+            .any(|candidate| metadata.contains(candidate.to_ascii_lowercase().as_str()))
+    {
+        return 1;
+    }
+
+    0
+}
+
+fn match_relayer_transaction<'a>(
+    payload: &Value,
+    relayer_transactions: &'a [Value],
+) -> Option<&'a Value> {
+    let refs = external::polymarket_index::reference_candidates_from_payload(payload);
+    relayer_transactions
+        .iter()
+        .filter_map(|tx| {
+            let score = relayer_transaction_match_score(tx, &refs);
+            if score == 0 {
+                return None;
+            }
+            let updated_at = parse_string_value(tx.get("updatedAt"));
+            Some((score, updated_at, tx))
+        })
+        .max_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)))
+        .map(|(_, _, tx)| tx)
+}
+
+#[derive(Debug, Default, Clone)]
+struct PolymarketOrderContextMatch {
+    agent_id: Option<String>,
+    run_id: Option<String>,
+    external_order_id: Option<String>,
+    owner: Option<String>,
+}
+
+async fn load_polymarket_order_context_match(
+    state: &AppState,
+    market_id: &str,
+    provider_order_refs: &[String],
+) -> Result<PolymarketOrderContextMatch, ApiError> {
+    if provider_order_refs.is_empty() {
+        return Ok(PolymarketOrderContextMatch::default());
+    }
+
+    let refs = provider_order_refs
+        .iter()
+        .filter(|value| !value.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    if refs.is_empty() {
+        return Ok(PolymarketOrderContextMatch::default());
+    }
+
+    let row = sqlx::query(
+        "SELECT
+            eo.id AS external_order_id,
+            eo.owner AS owner,
+            ear.id AS run_id,
+            ear.agent_id AS agent_id
+         FROM external_orders eo
+         LEFT JOIN external_order_agent_runs ear
+            ON ear.external_order_id = eo.id
+         WHERE eo.provider = 'polymarket'
+           AND eo.market_id = $1
+           AND eo.provider_order_id = ANY($2)
+         ORDER BY ear.created_at DESC NULLS LAST, eo.created_at DESC
+         LIMIT 1",
+    )
+    .bind(market_id)
+    .bind(&refs)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|err| {
+        ApiError::internal(&format!("failed to load polymarket order context: {err}"))
+    })?;
+
+    let Some(row) = row else {
+        return Ok(PolymarketOrderContextMatch::default());
+    };
+
+    Ok(PolymarketOrderContextMatch {
+        agent_id: row.try_get("agent_id").ok().flatten(),
+        run_id: row.try_get("run_id").ok().flatten(),
+        external_order_id: row.try_get("external_order_id").ok().flatten(),
+        owner: row.try_get("owner").ok().flatten(),
+    })
+}
+
+async fn fetch_polymarket_relayer_transactions(
+    state: &AppState,
+    client: &reqwest::Client,
+) -> Result<Vec<Value>, ApiError> {
+    if !polymarket_builder_configured(&state.config) {
+        return Ok(Vec::new());
+    }
+
+    let path = "/transactions";
+    let headers = build_polymarket_builder_request_headers(&state.config, "GET", path)?;
+    let mut request = client.get(polymarket_relayer_url(path));
+    for (key, value) in headers {
+        request = request.header(key, value);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!(
+                "failed to fetch polymarket relayer transactions: {err}"
+            ))
+        })?
+        .error_for_status()
+        .map_err(|err| {
+            ApiError::internal(&format!(
+                "polymarket relayer transactions response failed: {err}"
+            ))
+        })?
+        .json::<Value>()
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!(
+                "invalid polymarket relayer transactions payload: {err}"
+            ))
+        })?;
+
+    Ok(response.as_array().cloned().unwrap_or_default())
+}
+
+async fn ingest_polymarket_user_trade_event(
+    state: &AppState,
+    market: &PolymarketTrackedMarket,
+    payload: &Value,
+    relayer_transactions: &[Value],
+) -> Result<(), ApiError> {
+    let relayer_tx = match_relayer_transaction(payload, relayer_transactions);
+    let tx_hash = [
+        parse_string_value(payload.get("transactionHash")),
+        parse_string_value(payload.get("txHash")),
+        relayer_tx
+            .map(|tx| parse_string_value(tx.get("transactionHash")))
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .find(|value| !value.is_empty());
+    let lifecycle_status = best_polymarket_lifecycle_status(
+        parse_polymarket_lifecycle_status(
+            payload
+                .get("status")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("state").and_then(Value::as_str)),
+        ),
+        relayer_tx.and_then(|tx| {
+            parse_polymarket_lifecycle_status(tx.get("state").and_then(Value::as_str))
+        }),
+        tx_hash.as_deref(),
+    );
+    let refs = external::polymarket_index::reference_candidates_from_payload(payload);
+    let context = load_polymarket_order_context_match(
+        state,
+        market.market_id.as_str(),
+        &refs.provider_order_refs,
+    )
+    .await?;
+    let outcome = parse_string_value(payload.get("outcome")).to_ascii_lowercase();
+    let side = parse_string_value(payload.get("side")).to_ascii_lowercase();
+    let fee_usdc = parse_f64_value(payload.get("feeUsdc"));
+    let observed_at = parse_polymarket_observed_at(payload).or_else(|| {
+        relayer_tx.and_then(|tx| {
+            parse_polymarket_rfc3339(parse_string_value(tx.get("updatedAt")).as_str())
+        })
+    });
+
+    external::polymarket_index::upsert_user_trade_event(
+        &external::polymarket_index::PolymarketUserTradeEventUpsert {
+            agent_id: context.agent_id,
+            run_id: context.run_id,
+            external_order_id: context.external_order_id,
+            owner: context.owner.or_else(|| {
+                Some(parse_string_value(payload.get("owner"))).filter(|value| !value.is_empty())
+            }),
+            market_id: market.market_id.clone(),
+            provider_market_ref: Some(market.provider_market_ref.clone()),
+            provider_order_id: refs.provider_order_refs.first().cloned(),
+            builder_trade_id: refs.builder_trade_refs.first().cloned(),
+            taker_hash: [
+                parse_string_value(payload.get("taker_order_id")),
+                parse_string_value(payload.get("takerOrderId")),
+                parse_string_value(payload.get("takerOrderHash")),
+                refs.provider_order_refs.first().cloned().unwrap_or_default(),
+            ]
+            .into_iter()
+            .find(|value| !value.is_empty()),
+            tx_hash,
+            block_number: None,
+            outcome: (!outcome.is_empty()).then_some(outcome),
+            side: (!side.is_empty()).then_some(side),
+            price: Some(parse_f64_value(payload.get("price"))).filter(|value| *value > 0.0),
+            requested_quantity: Some(parse_f64_value(payload.get("original_size")))
+                .filter(|value| *value > 0.0),
+            filled_quantity: Some(
+                parse_f64_value(payload.get("size"))
+                    .max(parse_f64_value(payload.get("matched_amount"))),
+            )
+            .filter(|value| *value > 0.0),
+            fee_usdc: (fee_usdc > 0.0).then_some(fee_usdc),
+            lifecycle_status,
+            attempt_count: 0,
+            last_error: payload
+                .get("error")
+                .or_else(|| payload.get("errorMsg"))
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            raw_payload: json!({
+                "event": payload,
+                "relayerTransaction": relayer_tx.cloned(),
+            }),
+            observed_at,
+        },
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn ingest_polymarket_user_trade_events(
+    state: &AppState,
+    tracked_markets: &[PolymarketTrackedMarket],
+    user_events: &[Value],
+    relayer_transactions: &[Value],
+) -> Result<u64, ApiError> {
+    if user_events.is_empty() {
+        return Ok(0);
+    }
+
+    let by_condition = tracked_markets
+        .iter()
+        .map(|market| (market.condition_id.as_str(), market))
+        .collect::<BTreeMap<_, _>>();
+    let mut ingested = 0_u64;
+
+    for payload in user_events {
+        let event_type = parse_string_value(payload.get("event_type")).to_ascii_lowercase();
+        let event_kind = parse_string_value(payload.get("type")).to_ascii_lowercase();
+        let status = parse_string_value(payload.get("status")).to_ascii_uppercase();
+        if !(event_type == "trade" || event_kind == "trade") {
+            continue;
+        }
+        if !matches!(
+            status.as_str(),
+            "MATCHED" | "MINED" | "CONFIRMED" | "RETRYING" | "FAILED"
+        ) {
+            continue;
+        }
+
+        let condition_id = parse_string_value(payload.get("market"));
+        let Some(market) = by_condition.get(condition_id.as_str()) else {
+            continue;
+        };
+
+        ingest_polymarket_user_trade_event(state, market, payload, relayer_transactions).await?;
+        ingested = ingested.saturating_add(1);
+    }
+
+    Ok(ingested)
+}
+
+async fn load_polymarket_tracked_market_refs(
+    state: &AppState,
+    requested_market_id: Option<&str>,
+    max_markets: u64,
+) -> Result<Vec<String>, ApiError> {
+    let mut refs = BTreeSet::new();
+    if let Some(requested) = requested_market_id {
+        let normalized = normalize_polymarket_market_ref(requested);
+        if !normalized.is_empty() {
+            refs.insert(normalized);
+        }
+    } else {
+        let agent_rows = sqlx::query(
+            "SELECT DISTINCT market_id FROM external_agents WHERE provider = 'polymarket'",
+        )
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!("failed to load tracked polymarket agents: {err}"))
+        })?;
+        for row in agent_rows {
+            let market_id: String = row.get("market_id");
+            refs.insert(normalize_polymarket_market_ref(market_id.as_str()));
+        }
+
+        let order_rows = sqlx::query(
+            "SELECT DISTINCT market_id FROM external_orders WHERE provider = 'polymarket'",
+        )
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!("failed to load tracked polymarket orders: {err}"))
+        })?;
+        for row in order_rows {
+            let market_id: String = row.get("market_id");
+            refs.insert(normalize_polymarket_market_ref(market_id.as_str()));
+        }
+
+        let mirror_rows = sqlx::query(
+            "SELECT DISTINCT external_market_id FROM mirror_market_links WHERE LOWER(external_provider) = 'polymarket'",
+        )
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&format!("failed to load tracked polymarket mirrors: {err}")))?;
+        for row in mirror_rows {
+            let market_id: String = row.get("external_market_id");
+            refs.insert(normalize_polymarket_market_ref(market_id.as_str()));
+        }
+    }
+
+    let mut values = refs
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+    values.truncate(max_markets.max(1) as usize);
+    Ok(values)
+}
+
+async fn load_polymarket_tracked_market(
+    client: &reqwest::Client,
+    config: &AppConfig,
+    provider_market_ref: &str,
+) -> Result<PolymarketTrackedMarket, ApiError> {
+    let response = client
+        .get(format!(
+            "{}/markets/{}",
+            config.polymarket_gamma_api_base.trim_end_matches('/'),
+            provider_market_ref.trim()
+        ))
+        .send()
+        .await
+        .map_err(|err| ApiError::internal(&format!("failed to fetch polymarket market: {err}")))?
+        .error_for_status()
+        .map_err(|err| ApiError::internal(&format!("polymarket market response failed: {err}")))?
+        .json::<Value>()
+        .await
+        .map_err(|err| ApiError::internal(&format!("invalid polymarket market payload: {err}")))?;
+
+    let condition_id = parse_string_value(response.get("conditionId"));
+    if condition_id.is_empty() {
+        return Err(ApiError::internal(
+            "polymarket market payload missing conditionId",
+        ));
+    }
+
+    let token_ids = parse_string_list(response.get("clobTokenIds"));
+    let outcomes = parse_string_list(response.get("outcomes"));
+    let mut token_outcomes = BTreeMap::new();
+    for (index, token_id) in token_ids.iter().enumerate() {
+        let outcome = outcomes
+            .get(index)
+            .map(|value| value.trim().to_ascii_lowercase())
+            .unwrap_or_else(|| String::new());
+        token_outcomes.insert(token_id.clone(), outcome);
+    }
+
+    Ok(PolymarketTrackedMarket {
+        market_id: format!("polymarket:{}", provider_market_ref.trim()),
+        provider_market_ref: provider_market_ref.trim().to_string(),
+        condition_id,
+        token_outcomes,
+    })
+}
+
+fn tracked_market_details(
+    tracked_markets: &[PolymarketTrackedMarket],
+) -> Vec<PolymarketIndexerTrackedMarketResponse> {
+    tracked_markets
+        .iter()
+        .map(|market| PolymarketIndexerTrackedMarketResponse {
+            market_id: market.market_id.clone(),
+            provider_market_ref: market.provider_market_ref.clone(),
+            condition_id: market.condition_id.clone(),
+        })
+        .collect()
+}
+
+async fn fetch_polymarket_public_trade_page(
+    client: &reqwest::Client,
+    condition_id: &str,
+    limit: u64,
+    offset: u64,
+) -> Result<Vec<Value>, ApiError> {
+    let response = client
+        .get("https://data-api.polymarket.com/trades")
+        .query(&[
+            ("market", condition_id),
+            ("limit", &limit.to_string()),
+            ("offset", &offset.to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!("failed to fetch polymarket public trades: {err}"))
+        })?
+        .error_for_status()
+        .map_err(|err| {
+            ApiError::internal(&format!("polymarket public trades response failed: {err}"))
+        })?
+        .json::<Value>()
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!("invalid polymarket public trades payload: {err}"))
+        })?;
+
+    Ok(response.as_array().cloned().unwrap_or_default())
+}
+
+async fn fetch_polymarket_builder_trade_page(
+    state: &AppState,
+    client: &reqwest::Client,
+    condition_id: &str,
+    next_cursor: &str,
+) -> Result<(Vec<Value>, String), ApiError> {
+    let path = "/builder/trades";
+    let headers = build_polymarket_builder_request_headers(&state.config, "GET", path)?;
+    let mut request = client
+        .get(polymarket_clob_url(&state.config, path))
+        .query(&[("market", condition_id), ("next_cursor", next_cursor)]);
+    for (key, value) in headers {
+        request = request.header(key, value);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!("failed to fetch polymarket builder trades: {err}"))
+        })?
+        .error_for_status()
+        .map_err(|err| {
+            ApiError::internal(&format!("polymarket builder trades response failed: {err}"))
+        })?
+        .json::<Value>()
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!("invalid polymarket builder trades payload: {err}"))
+        })?;
+
+    let trades = response
+        .get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let cursor = response
+        .get("next_cursor")
+        .or_else(|| response.get("nextCursor"))
+        .and_then(Value::as_str)
+        .unwrap_or("LTE=")
+        .to_string();
+
+    Ok((trades, cursor))
+}
+
+fn polymarket_public_trade_event_id(row: &Value) -> String {
+    let tx_hash = parse_string_value(row.get("transactionHash"));
+    let asset = parse_string_value(row.get("asset"));
+    let timestamp = parse_i64_value(row.get("timestamp"));
+    let side = parse_string_value(row.get("side")).to_ascii_lowercase();
+    let price = parse_f64_value(row.get("price"));
+    let size = parse_f64_value(row.get("size"));
+    format!("{tx_hash}:{asset}:{timestamp}:{side}:{price:.8}:{size:.8}")
+}
+
+fn parse_polymarket_timestamp(value: i64) -> Option<chrono::DateTime<Utc>> {
+    chrono::DateTime::from_timestamp(value, 0)
+}
+
+async fn backfill_polymarket_public_trades_for_market(
+    _state: &AppState,
+    client: &reqwest::Client,
+    market: &PolymarketTrackedMarket,
+    cutoff: chrono::DateTime<Utc>,
+    max_pages: u64,
+) -> Result<u64, ApiError> {
+    let mut inserted = 0_u64;
+    let mut offset = 0_u64;
+    let mut indexed_from: Option<chrono::DateTime<Utc>> = None;
+    let mut indexed_through: Option<chrono::DateTime<Utc>> = None;
+    let mut reached_cutoff = false;
+    let mut exhausted = false;
+
+    for _ in 0..max_pages.max(1) {
+        let rows =
+            fetch_polymarket_public_trade_page(client, market.condition_id.as_str(), 200, offset)
+                .await?;
+        if rows.is_empty() {
+            exhausted = true;
+            break;
+        }
+
+        let mut upserts = Vec::new();
+        for row in &rows {
+            let timestamp = parse_i64_value(row.get("timestamp"));
+            let Some(match_time) = parse_polymarket_timestamp(timestamp) else {
+                continue;
+            };
+            if match_time < cutoff {
+                reached_cutoff = true;
+                break;
+            }
+
+            indexed_from = Some(indexed_from.map_or(match_time, |current| current.min(match_time)));
+            indexed_through =
+                Some(indexed_through.map_or(match_time, |current| current.max(match_time)));
+
+            let token_id = parse_string_value(row.get("asset"));
+            let outcome = market
+                .token_outcomes
+                .get(token_id.as_str())
+                .cloned()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| parse_string_value(row.get("outcome")).to_ascii_lowercase());
+            let side = parse_string_value(row.get("side")).to_ascii_lowercase();
+            upserts.push(external::polymarket_index::PolymarketPublicTradeUpsert {
+                provider_trade_id: polymarket_public_trade_event_id(row),
+                market_id: market.market_id.clone(),
+                provider_market_ref: market.provider_market_ref.clone(),
+                outcome,
+                side: (!side.is_empty()).then_some(side),
+                price: parse_f64_value(row.get("price")),
+                quantity: parse_f64_value(row.get("size")),
+                tx_hash: Some(parse_string_value(row.get("transactionHash")))
+                    .filter(|value| !value.is_empty()),
+                block_number: None,
+                token_id: (!token_id.is_empty()).then_some(token_id),
+                maker: Some(parse_string_value(row.get("proxyWallet")))
+                    .filter(|value| !value.is_empty()),
+                taker: None,
+                match_time,
+                raw_payload: row.clone(),
+            });
+        }
+
+        inserted = inserted
+            .saturating_add(external::polymarket_index::upsert_public_trades(&upserts).await?);
+
+        if reached_cutoff {
+            break;
+        }
+        offset = offset.saturating_add(rows.len() as u64);
+        if rows.len() < 200 {
+            exhausted = true;
+            break;
+        }
+    }
+
+    external::polymarket_index::upsert_index_state(
+        external::polymarket_index::PolymarketIndexLane::PublicTape,
+        market.market_id.as_str(),
+        market.provider_market_ref.as_str(),
+        if exhausted || reached_cutoff {
+            "ready"
+        } else {
+            "partial"
+        },
+        indexed_from,
+        indexed_through,
+        !(exhausted || reached_cutoff),
+        None,
+    )
+    .await?;
+
+    Ok(inserted)
+}
+
+async fn backfill_polymarket_builder_trades_for_market(
+    state: &AppState,
+    client: &reqwest::Client,
+    market: &PolymarketTrackedMarket,
+    cutoff: chrono::DateTime<Utc>,
+    max_pages: u64,
+    relayer_transactions: &[Value],
+) -> Result<u64, ApiError> {
+    if !polymarket_builder_configured(&state.config) {
+        external::polymarket_index::upsert_index_state(
+            external::polymarket_index::PolymarketIndexLane::UserFills,
+            market.market_id.as_str(),
+            market.provider_market_ref.as_str(),
+            "missing_credentials",
+            None,
+            None,
+            true,
+            Some("builder credentials are not configured"),
+        )
+        .await?;
+        return Ok(0);
+    }
+
+    let mut inserted = 0_u64;
+    let mut cursor = "MA==".to_string();
+    let mut indexed_from: Option<chrono::DateTime<Utc>> = None;
+    let mut indexed_through: Option<chrono::DateTime<Utc>> = None;
+    let mut reached_cutoff = false;
+    let mut exhausted = false;
+
+    for _ in 0..max_pages.max(1) {
+        let (rows, next_cursor) = fetch_polymarket_builder_trade_page(
+            state,
+            client,
+            market.condition_id.as_str(),
+            cursor.as_str(),
+        )
+        .await?;
+        if rows.is_empty() {
+            exhausted = true;
+            break;
+        }
+
+        for row in &rows {
+            let match_time_text = parse_string_value(row.get("matchTime"));
+            let Some(match_time) = chrono::DateTime::parse_from_rfc3339(match_time_text.as_str())
+                .ok()
+                .map(|value| value.with_timezone(&Utc))
+            else {
+                continue;
+            };
+            if match_time < cutoff {
+                reached_cutoff = true;
+                break;
+            }
+
+            indexed_from = Some(indexed_from.map_or(match_time, |current| current.min(match_time)));
+            indexed_through =
+                Some(indexed_through.map_or(match_time, |current| current.max(match_time)));
+
+            let builder_trade_id = parse_string_value(row.get("id"));
+            let taker_hash = parse_string_value(row.get("takerOrderHash"));
+            let outcome = parse_string_value(row.get("outcome")).to_ascii_lowercase();
+            let side = parse_string_value(row.get("side")).to_ascii_lowercase();
+            let owner = parse_string_value(row.get("owner")).to_ascii_lowercase();
+            let relayer_tx = match_relayer_transaction(row, relayer_transactions);
+            let mut tx_hash = parse_string_value(row.get("transactionHash"));
+            if tx_hash.is_empty() {
+                tx_hash = relayer_tx
+                    .map(|tx| parse_string_value(tx.get("transactionHash")))
+                    .unwrap_or_default();
+            }
+            let tx_hash = (!tx_hash.is_empty()).then_some(tx_hash);
+            let lifecycle_status = best_polymarket_lifecycle_status(
+                parse_polymarket_lifecycle_status(
+                    row.get("status")
+                        .and_then(Value::as_str)
+                        .or_else(|| row.get("state").and_then(Value::as_str)),
+                ),
+                relayer_tx.and_then(|tx| {
+                    parse_polymarket_lifecycle_status(tx.get("state").and_then(Value::as_str))
+                }),
+                tx_hash.as_deref(),
+            );
+            let context = load_polymarket_order_context_match(
+                state,
+                market.market_id.as_str(),
+                &[taker_hash.clone()],
+            )
+            .await?;
+
+            let _ = external::polymarket_index::upsert_user_trade_event(
+                &external::polymarket_index::PolymarketUserTradeEventUpsert {
+                    agent_id: context.agent_id,
+                    run_id: context.run_id,
+                    external_order_id: context.external_order_id,
+                    owner: context.owner.or((!owner.is_empty()).then_some(owner)),
+                    market_id: market.market_id.clone(),
+                    provider_market_ref: Some(market.provider_market_ref.clone()),
+                    provider_order_id: (!taker_hash.is_empty()).then_some(taker_hash.clone()),
+                    builder_trade_id: (!builder_trade_id.is_empty()).then_some(builder_trade_id),
+                    taker_hash: (!taker_hash.is_empty()).then_some(taker_hash),
+                    tx_hash,
+                    block_number: None,
+                    outcome: (!outcome.is_empty()).then_some(outcome),
+                    side: (!side.is_empty()).then_some(side),
+                    price: Some(parse_f64_value(row.get("price"))),
+                    requested_quantity: None,
+                    filled_quantity: Some(parse_f64_value(row.get("size"))),
+                    fee_usdc: Some(parse_f64_value(row.get("feeUsdc"))),
+                    lifecycle_status,
+                    attempt_count: 0,
+                    last_error: None,
+                    raw_payload: json!({
+                        "builderTrade": row,
+                        "relayerTransaction": relayer_tx.cloned(),
+                    }),
+                    observed_at: Some(match_time),
+                },
+            )
+            .await?;
+            inserted = inserted.saturating_add(1);
+        }
+
+        if reached_cutoff || next_cursor == "LTE=" || next_cursor == cursor {
+            exhausted = next_cursor == "LTE=" || next_cursor == cursor;
+            break;
+        }
+        cursor = next_cursor;
+    }
+
+    external::polymarket_index::upsert_index_state(
+        external::polymarket_index::PolymarketIndexLane::UserFills,
+        market.market_id.as_str(),
+        market.provider_market_ref.as_str(),
+        if exhausted || reached_cutoff {
+            "ready"
+        } else {
+            "partial"
+        },
+        indexed_from,
+        indexed_through,
+        !(exhausted || reached_cutoff),
+        None,
+    )
+    .await?;
+
+    Ok(inserted)
+}
+
+async fn reconcile_polymarket_relayer_lifecycle(
+    state: &AppState,
+    client: &reqwest::Client,
+    relayer_rows: Option<&[Value]>,
+) -> Result<u64, ApiError> {
+    if !polymarket_builder_configured(&state.config) {
+        return Ok(0);
+    }
+
+    let rows = if let Some(rows) = relayer_rows {
+        rows.to_vec()
+    } else {
+        fetch_polymarket_relayer_transactions(state, client).await?
+    };
+    let mut updated = 0_u64;
+
+    for row in rows {
+        let tx_hash = parse_string_value(row.get("transactionHash")).to_ascii_lowercase();
+        let owner = parse_string_value(row.get("owner")).to_ascii_lowercase();
+        if tx_hash.is_empty() || owner.is_empty() {
+            continue;
+        }
+
+        let lifecycle_status =
+            map_polymarket_lifecycle_status(parse_string_value(row.get("state")).as_str());
+        let observed_at = parse_string_value(row.get("updatedAt"));
+        let observed_at = chrono::DateTime::parse_from_rfc3339(observed_at.as_str())
+            .ok()
+            .map(|value| value.with_timezone(&Utc));
+        let last_error = matches!(
+            lifecycle_status,
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Failed
+        )
+        .then(|| parse_string_value(row.get("state")))
+        .filter(|value| !value.is_empty());
+
+        let existing_rows = sqlx::query(
+            r#"
+            SELECT market_id, provider_market_ref, provider_order_id, builder_trade_id
+            FROM polymarket_user_trade_events
+            WHERE LOWER(owner) = LOWER($1) AND LOWER(tx_hash) = LOWER($2)
+            "#,
+        )
+        .bind(owner.as_str())
+        .bind(tx_hash.as_str())
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!(
+                "failed to load polymarket user events for relayer reconciliation: {err}"
+            ))
+        })?;
+
+        for existing in existing_rows {
+            let market_id = existing
+                .try_get::<String, _>("market_id")
+                .unwrap_or_default();
+            if market_id.is_empty() {
+                continue;
+            }
+            let provider_market_ref = existing
+                .try_get::<Option<String>, _>("provider_market_ref")
+                .ok()
+                .flatten();
+            let provider_order_id = existing
+                .try_get::<Option<String>, _>("provider_order_id")
+                .ok()
+                .flatten();
+            let builder_trade_id = existing
+                .try_get::<Option<String>, _>("builder_trade_id")
+                .ok()
+                .flatten();
+
+            external::polymarket_index::upsert_user_trade_event(
+                &external::polymarket_index::PolymarketUserTradeEventUpsert {
+                    agent_id: None,
+                    run_id: None,
+                    external_order_id: None,
+                    owner: Some(owner.clone()),
+                    market_id,
+                    provider_market_ref,
+                    provider_order_id,
+                    builder_trade_id,
+                    taker_hash: None,
+                    tx_hash: Some(tx_hash.clone()),
+                    block_number: None,
+                    outcome: None,
+                    side: None,
+                    price: None,
+                    requested_quantity: None,
+                    filled_quantity: None,
+                    fee_usdc: None,
+                    lifecycle_status,
+                    attempt_count: 0,
+                    last_error: last_error.clone(),
+                    raw_payload: row.clone(),
+                    observed_at,
+                },
+            )
+            .await?;
+            updated = updated.saturating_add(1);
+        }
+    }
+
+    Ok(updated)
+}
+
+async fn load_polymarket_lane_health(
+    state: &AppState,
+    lane: external::polymarket_index::PolymarketIndexLane,
+    tracked_market_ids: &[String],
+) -> Result<PolymarketIndexerLaneHealth, ApiError> {
+    let builder_configured = polymarket_builder_configured(&state.config);
+    if tracked_market_ids.is_empty() {
+        return Ok(PolymarketIndexerLaneHealth {
+            lane: lane.as_str().to_string(),
+            status: if lane == external::polymarket_index::PolymarketIndexLane::UserFills
+                && !builder_configured
+            {
+                "missing_credentials".to_string()
+            } else {
+                "idle".to_string()
+            },
+            tracked_markets: 0,
+            indexed_markets: 0,
+            indexed_from: None,
+            indexed_through: None,
+            is_partial_backfill: true,
+            last_error: None,
+            updated_at: None,
+            builder_configured: (lane
+                == external::polymarket_index::PolymarketIndexLane::UserFills)
+                .then_some(builder_configured),
+            matched_events: None,
+            mined_events: None,
+            confirmed_events: None,
+            retrying_events: None,
+            failed_events: None,
+            last_event_at: None,
+        });
+    }
+
+    let rows = sqlx::query(
+        "SELECT market_id, index_status, indexed_from, indexed_through, is_partial_backfill, last_error, updated_at
+         FROM polymarket_index_state
+         WHERE lane = $1 AND market_id = ANY($2)",
+    )
+    .bind(lane.as_str())
+    .bind(tracked_market_ids)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&format!("failed to load polymarket index lane health: {err}")))?;
+
+    let indexed_markets = rows.len() as u64;
+    let mut indexed_from: Option<chrono::DateTime<Utc>> = None;
+    let mut indexed_through: Option<chrono::DateTime<Utc>> = None;
+    let mut last_error = None;
+    let mut updated_at: Option<chrono::DateTime<Utc>> = None;
+    let mut partial = false;
+    let mut failed = false;
+
+    for row in rows {
+        let row_indexed_from = row
+            .try_get::<Option<chrono::DateTime<Utc>>, _>("indexed_from")
+            .ok()
+            .flatten();
+        let row_indexed_through = row
+            .try_get::<Option<chrono::DateTime<Utc>>, _>("indexed_through")
+            .ok()
+            .flatten();
+        let row_updated_at = row
+            .try_get::<Option<chrono::DateTime<Utc>>, _>("updated_at")
+            .ok()
+            .flatten();
+        let row_error = row
+            .try_get::<Option<String>, _>("last_error")
+            .ok()
+            .flatten();
+        let row_status = row
+            .try_get::<String, _>("index_status")
+            .unwrap_or_else(|_| "pending".to_string());
+        partial |= row
+            .try_get::<bool, _>("is_partial_backfill")
+            .unwrap_or(true);
+        failed |= matches!(row_status.as_str(), "failed" | "error");
+        if last_error.is_none() {
+            last_error = row_error;
+        }
+        indexed_from = match (indexed_from, row_indexed_from) {
+            (Some(current), Some(row)) => Some(current.min(row)),
+            (None, Some(row)) => Some(row),
+            (Some(current), None) => Some(current),
+            (None, None) => None,
+        };
+        indexed_through = match (indexed_through, row_indexed_through) {
+            (Some(current), Some(row)) => Some(current.max(row)),
+            (None, Some(row)) => Some(row),
+            (Some(current), None) => Some(current),
+            (None, None) => None,
+        };
+        updated_at = match (updated_at, row_updated_at) {
+            (Some(current), Some(row)) => Some(current.max(row)),
+            (None, Some(row)) => Some(row),
+            (Some(current), None) => Some(current),
+            (None, None) => None,
+        };
+    }
+
+    let mut status = if failed {
+        "error"
+    } else if lane == external::polymarket_index::PolymarketIndexLane::UserFills
+        && !builder_configured
+    {
+        "missing_credentials"
+    } else if indexed_markets == 0 {
+        "pending"
+    } else if partial || indexed_markets < tracked_market_ids.len() as u64 {
+        "partial"
+    } else {
+        "ready"
+    }
+    .to_string();
+
+    if status == "pending" && last_error.is_some() {
+        status = "error".to_string();
+    }
+
+    let (
+        matched_events,
+        mined_events,
+        confirmed_events,
+        retrying_events,
+        failed_events,
+        last_event_at,
+    ) = if lane == external::polymarket_index::PolymarketIndexLane::UserFills {
+        let lifecycle_rows = sqlx::query(
+            r#"
+            SELECT lifecycle_status, COUNT(*) AS count
+            FROM polymarket_user_trade_events
+            WHERE market_id = ANY($1)
+            GROUP BY lifecycle_status
+            "#,
+        )
+        .bind(tracked_market_ids)
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|err| {
+            ApiError::internal(&format!(
+                "failed to load polymarket user event lifecycle counts: {err}"
+            ))
+        })?;
+
+        let mut matched = 0_u64;
+        let mut mined = 0_u64;
+        let mut confirmed = 0_u64;
+        let mut retrying = 0_u64;
+        let mut failed_events = 0_u64;
+        for row in lifecycle_rows {
+            let count = row.try_get::<i64, _>("count").unwrap_or_default().max(0) as u64;
+            match row
+                .try_get::<String, _>("lifecycle_status")
+                .unwrap_or_default()
+                .as_str()
+            {
+                "MATCHED" => matched = count,
+                "MINED" => mined = count,
+                "CONFIRMED" => confirmed = count,
+                "RETRYING" => retrying = count,
+                "FAILED" => failed_events = count,
+                _ => {}
+            }
+        }
+
+        let last_event_at = sqlx::query(
+            r#"
+            SELECT MAX(COALESCE(confirmed_at, mined_at, matched_at, updated_at)) AS last_event_at
+            FROM polymarket_user_trade_events
+            WHERE market_id = ANY($1)
+            "#,
+        )
+        .bind(tracked_market_ids)
+        .fetch_one(state.db.pool())
+        .await
+        .ok()
+        .and_then(|row| row.try_get::<Option<chrono::DateTime<Utc>>, _>("last_event_at").ok())
+        .flatten()
+        .map(|value| value.to_rfc3339());
+
+        (
+            Some(matched),
+            Some(mined),
+            Some(confirmed),
+            Some(retrying),
+            Some(failed_events),
+            last_event_at,
+        )
+    } else {
+        (None, None, None, None, None, None)
+    };
+
+    Ok(PolymarketIndexerLaneHealth {
+        lane: lane.as_str().to_string(),
+        status,
+        tracked_markets: tracked_market_ids.len() as u64,
+        indexed_markets,
+        indexed_from: indexed_from.map(|value| value.to_rfc3339()),
+        indexed_through: indexed_through.map(|value| value.to_rfc3339()),
+        is_partial_backfill: partial || indexed_markets < tracked_market_ids.len() as u64,
+        last_error,
+        updated_at: updated_at.map(|value| value.to_rfc3339()),
+        builder_configured: (lane == external::polymarket_index::PolymarketIndexLane::UserFills)
+            .then_some(builder_configured),
+        matched_events,
+        mined_events,
+        confirmed_events,
+        retrying_events,
+        failed_events,
+        last_event_at,
+    })
 }
 
 fn build_polymarket_request_headers(
@@ -4467,6 +5779,272 @@ async fn upsert_live_position(
     Ok(())
 }
 
+async fn reconcile_polymarket_live_agent_execution(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+    run_id: &str,
+    external_order_id: &str,
+    provider_order_id: &str,
+    provider_payload: &Value,
+    submit_payload: &Value,
+    market: &external::types::ExternalMarketSnapshot,
+    orderbook: &external::types::ExternalOrderBookSnapshot,
+    now: chrono::DateTime<Utc>,
+) -> Result<(), ApiError> {
+    let refs = external::polymarket_index::reference_candidates_for_reconciliation(
+        provider_order_id,
+        provider_payload,
+        submit_payload,
+    );
+    let confirmed_fill = external::polymarket_index::load_confirmed_user_fill(
+        agent.market_id.as_str(),
+        run_id,
+        external_order_id,
+        &refs,
+    )
+    .await?;
+    let existing_position = load_open_live_position(state, agent.id.as_str()).await?;
+    let mark_price = orderbook
+        .bids
+        .first()
+        .zip(orderbook.asks.first())
+        .map(|(bid, ask)| (bid.price + ask.price) / 2.0)
+        .or_else(|| orderbook.bids.first().map(|entry| entry.price))
+        .or_else(|| orderbook.asks.first().map(|entry| entry.price))
+        .unwrap_or(market.yes_price);
+
+    let Some(fill) = confirmed_fill else {
+        if let Some(position) = existing_position {
+            let unrealized = unrealized_pnl(
+                agent.side.as_str(),
+                position.entry_price,
+                mark_price,
+                position.filled_quantity,
+            ) - position.fees_paid_usdc;
+            upsert_live_position(
+                state,
+                position.id.as_str(),
+                agent,
+                position.entry_price,
+                mark_price,
+                position.filled_quantity,
+                position.filled_quantity,
+                position.fees_paid_usdc,
+                unrealized,
+                position.hold_until,
+                position.opened_at,
+                now,
+                &json!({
+                    "mode": "live",
+                    "provider": "polymarket",
+                    "reconciledAt": now.to_rfc3339(),
+                    "providerOrderId": provider_order_id,
+                    "providerResponse": submit_payload,
+                    "providerPayload": provider_payload,
+                }),
+            )
+            .await?;
+
+            record_live_mark(
+                state,
+                position.id.as_str(),
+                agent,
+                mark_price,
+                unrealized,
+                position.filled_quantity * mark_price,
+                &json!({
+                    "mode": "live",
+                    "provider": "polymarket",
+                    "reconciledAt": now.to_rfc3339(),
+                    "providerOrderId": provider_order_id,
+                    "providerResponse": submit_payload,
+                    "providerPayload": provider_payload,
+                }),
+            )
+            .await?;
+
+            if market.resolved
+                && external::types::is_binary_yes_no(&market.outcomes)
+                && market.outcome.is_some()
+            {
+                let resolved_yes = market.outcome.as_deref() == Some("yes");
+                let exit_price = if agent.outcome.eq_ignore_ascii_case("yes") {
+                    if resolved_yes {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else if resolved_yes {
+                    0.0
+                } else {
+                    1.0
+                };
+                record_live_outcome(
+                    state,
+                    position.id.as_str(),
+                    agent,
+                    position.entry_price,
+                    exit_price,
+                    position.filled_quantity,
+                    position.fees_paid_usdc,
+                    position.opened_at,
+                    now,
+                    &json!({
+                        "mode": "live",
+                        "provider": "polymarket",
+                        "providerOrderId": provider_order_id,
+                        "providerResponse": submit_payload,
+                        "providerPayload": provider_payload,
+                        "resolvedOutcome": market.outcome,
+                        "reconciledAt": now.to_rfc3339(),
+                    }),
+                )
+                .await?;
+            }
+        }
+
+        return Ok(());
+    };
+
+    let fill_price = fill.price.unwrap_or(market.yes_price);
+    let filled_quantity = fill.filled_quantity.unwrap_or(agent.quantity).max(0.0);
+    let fees_paid_usdc = fill.fee_usdc;
+    let position_id = existing_position
+        .as_ref()
+        .map(|position| position.id.clone())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let hold_until = if market.close_time > 0 {
+        chrono::DateTime::from_timestamp(market.close_time as i64, 0).unwrap_or(now)
+    } else {
+        now + Duration::seconds(agent.cadence_seconds.max(1))
+    };
+    let unrealized = unrealized_pnl(agent.side.as_str(), fill_price, mark_price, filled_quantity)
+        - fees_paid_usdc;
+
+    upsert_live_position(
+        state,
+        position_id.as_str(),
+        agent,
+        fill_price,
+        mark_price,
+        agent.quantity,
+        filled_quantity,
+        fees_paid_usdc,
+        unrealized,
+        hold_until,
+        existing_position
+            .as_ref()
+            .map(|position| position.opened_at)
+            .unwrap_or(now),
+        now,
+        &json!({
+            "mode": "live",
+            "provider": "polymarket",
+            "runId": run_id,
+            "externalOrderId": external_order_id,
+            "providerOrderId": provider_order_id,
+            "providerTradeEventId": fill.id,
+            "providerTradeId": fill.builder_trade_id,
+            "txHash": fill.tx_hash,
+            "blockNumber": fill.block_number,
+            "providerResponse": submit_payload,
+            "providerPayload": provider_payload,
+            "reconciledAt": now.to_rfc3339()
+        }),
+    )
+    .await?;
+
+    record_live_fill(
+        state,
+        run_id,
+        position_id.as_str(),
+        agent,
+        "open",
+        agent.quantity,
+        filled_quantity,
+        fill_price,
+        mark_price,
+        fees_paid_usdc,
+        Some(provider_order_id),
+        fill.tx_hash.as_deref(),
+        fill.block_number,
+        &json!({
+            "mode": "live",
+            "provider": "polymarket",
+            "providerTradeEventId": fill.id,
+            "providerTradeId": fill.builder_trade_id,
+            "providerResponse": submit_payload,
+            "providerPayload": provider_payload,
+            "reconciledAt": now.to_rfc3339()
+        }),
+    )
+    .await?;
+
+    record_live_mark(
+        state,
+        position_id.as_str(),
+        agent,
+        mark_price,
+        unrealized,
+        filled_quantity * mark_price,
+        &json!({
+            "mode": "live",
+            "provider": "polymarket",
+            "providerTradeEventId": fill.id,
+            "providerTradeId": fill.builder_trade_id,
+            "providerResponse": submit_payload,
+            "providerPayload": provider_payload,
+            "reconciledAt": now.to_rfc3339()
+        }),
+    )
+    .await?;
+
+    if market.resolved
+        && external::types::is_binary_yes_no(&market.outcomes)
+        && market.outcome.is_some()
+    {
+        let resolved_yes = market.outcome.as_deref() == Some("yes");
+        let exit_price = if agent.outcome.eq_ignore_ascii_case("yes") {
+            if resolved_yes {
+                1.0
+            } else {
+                0.0
+            }
+        } else if resolved_yes {
+            0.0
+        } else {
+            1.0
+        };
+        record_live_outcome(
+            state,
+            position_id.as_str(),
+            agent,
+            fill_price,
+            exit_price,
+            filled_quantity,
+            fees_paid_usdc,
+            existing_position
+                .as_ref()
+                .map(|position| position.opened_at)
+                .unwrap_or(now),
+            now,
+            &json!({
+                "mode": "live",
+                "provider": "polymarket",
+                "providerTradeEventId": fill.id,
+                "providerTradeId": fill.builder_trade_id,
+                "providerResponse": submit_payload,
+                "providerPayload": provider_payload,
+                "resolvedOutcome": market.outcome,
+                "reconciledAt": now.to_rfc3339()
+            }),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
 async fn reconcile_live_agent_execution(
     state: &AppState,
     agent: &ExternalAgentRecord,
@@ -4479,6 +6057,22 @@ async fn reconcile_live_agent_execution(
     orderbook: &external::types::ExternalOrderBookSnapshot,
     now: chrono::DateTime<Utc>,
 ) -> Result<(), ApiError> {
+    if agent.provider == ExternalProvider::Polymarket {
+        return reconcile_polymarket_live_agent_execution(
+            state,
+            agent,
+            run_id,
+            external_order_id,
+            provider_order_id,
+            provider_payload,
+            submit_payload,
+            market,
+            orderbook,
+            now,
+        )
+        .await;
+    }
+
     if !ledger::live_trade_reconciliation_supported(agent.provider) {
         return Ok(());
     }
@@ -8472,6 +10066,261 @@ pub async fn run_external_agents_tick(
     }))
 }
 
+pub async fn get_polymarket_indexer_health(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_state_import_admin(&req, &state).await?;
+
+    let tracked_market_refs = load_polymarket_tracked_market_refs(&state, None, 250).await?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|err| {
+            ApiError::internal(&format!("failed to build polymarket indexer client: {err}"))
+        })?;
+    let mut tracked_markets = Vec::new();
+    for provider_market_ref in &tracked_market_refs {
+        if let Ok(market) =
+            load_polymarket_tracked_market(&client, &state.config, provider_market_ref.as_str())
+                .await
+        {
+            tracked_markets.push(market);
+        }
+    }
+    let tracked_market_ids = tracked_market_refs
+        .iter()
+        .map(|value| format!("polymarket:{value}"))
+        .collect::<Vec<_>>();
+    let public_tape = load_polymarket_lane_health(
+        &state,
+        external::polymarket_index::PolymarketIndexLane::PublicTape,
+        &tracked_market_ids,
+    )
+    .await?;
+    let user_fills = load_polymarket_lane_health(
+        &state,
+        external::polymarket_index::PolymarketIndexLane::UserFills,
+        &tracked_market_ids,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(PolymarketIndexerHealthResponse {
+        ok: !matches!(public_tape.status.as_str(), "error")
+            && !matches!(user_fills.status.as_str(), "error"),
+        tracked_markets: tracked_market_ids.len() as u64,
+        tracked_market_details: tracked_market_details(&tracked_markets),
+        public_tape,
+        user_fills,
+    }))
+}
+
+pub async fn trigger_polymarket_indexer_backfill(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: Option<web::Json<PolymarketIndexerBackfillRequest>>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_state_import_admin(&req, &state).await?;
+    let body = body
+        .map(web::Json::into_inner)
+        .unwrap_or(PolymarketIndexerBackfillRequest {
+            market_id: None,
+            days: None,
+            public_tape: None,
+            user_fills: None,
+            max_markets: None,
+            max_pages_per_market: None,
+            user_events: Vec::new(),
+            relayer_transactions: Vec::new(),
+        });
+    let max_markets = body.max_markets.unwrap_or(25).clamp(1, 250);
+    let tracked_market_refs =
+        load_polymarket_tracked_market_refs(&state, body.market_id.as_deref(), max_markets).await?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|err| {
+            ApiError::internal(&format!("failed to build polymarket indexer client: {err}"))
+        })?;
+    let cutoff = Utc::now() - Duration::days(body.days.unwrap_or(90).clamp(1, 365) as i64);
+    let max_pages_per_market = body.max_pages_per_market.unwrap_or(20).clamp(1, 250);
+    let mut counts = PolymarketBackfillCounts::default();
+    let mut tracked_markets = Vec::new();
+
+    for provider_market_ref in &tracked_market_refs {
+        let tracked_market = match load_polymarket_tracked_market(
+            &client,
+            &state.config,
+            provider_market_ref.as_str(),
+        )
+        .await
+        {
+            Ok(market) => market,
+            Err(err) => {
+                external::polymarket_index::upsert_index_state(
+                    external::polymarket_index::PolymarketIndexLane::PublicTape,
+                    format!("polymarket:{provider_market_ref}").as_str(),
+                    provider_market_ref.as_str(),
+                    "failed",
+                    None,
+                    None,
+                    true,
+                    Some(err.message.as_str()),
+                )
+                .await?;
+                external::polymarket_index::upsert_index_state(
+                    external::polymarket_index::PolymarketIndexLane::UserFills,
+                    format!("polymarket:{provider_market_ref}").as_str(),
+                    provider_market_ref.as_str(),
+                    "failed",
+                    None,
+                    None,
+                    true,
+                    Some(err.message.as_str()),
+                )
+                .await?;
+                continue;
+            }
+        };
+        tracked_markets.push(tracked_market.clone());
+
+        if body.public_tape.unwrap_or(true) {
+            match backfill_polymarket_public_trades_for_market(
+                &state,
+                &client,
+                &tracked_market,
+                cutoff,
+                max_pages_per_market,
+            )
+            .await
+            {
+                Ok(inserted) => {
+                    counts.public_trades_ingested =
+                        counts.public_trades_ingested.saturating_add(inserted);
+                }
+                Err(err) => {
+                    external::polymarket_index::upsert_index_state(
+                        external::polymarket_index::PolymarketIndexLane::PublicTape,
+                        tracked_market.market_id.as_str(),
+                        tracked_market.provider_market_ref.as_str(),
+                        "failed",
+                        None,
+                        None,
+                        true,
+                        Some(err.message.as_str()),
+                    )
+                    .await?;
+                }
+            }
+        }
+
+        if body.user_fills.unwrap_or(true) {
+            match backfill_polymarket_builder_trades_for_market(
+                &state,
+                &client,
+                &tracked_market,
+                cutoff,
+                max_pages_per_market,
+                &body.relayer_transactions,
+            )
+            .await
+            {
+                Ok(inserted) => {
+                    counts.user_fill_events_ingested =
+                        counts.user_fill_events_ingested.saturating_add(inserted);
+                }
+                Err(err) => {
+                    external::polymarket_index::upsert_index_state(
+                        external::polymarket_index::PolymarketIndexLane::UserFills,
+                        tracked_market.market_id.as_str(),
+                        tracked_market.provider_market_ref.as_str(),
+                        "failed",
+                        None,
+                        None,
+                        true,
+                        Some(err.message.as_str()),
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+
+    if body.user_fills.unwrap_or(true) && !body.user_events.is_empty() {
+        counts.user_fill_events_ingested = counts.user_fill_events_ingested.saturating_add(
+            ingest_polymarket_user_trade_events(
+                &state,
+                &tracked_markets,
+                &body.user_events,
+                &body.relayer_transactions,
+            )
+            .await?,
+        );
+    }
+
+    if body.user_fills.unwrap_or(true) {
+        match reconcile_polymarket_relayer_lifecycle(
+            &state,
+            &client,
+            (!body.relayer_transactions.is_empty()).then_some(body.relayer_transactions.as_slice()),
+        )
+        .await
+        {
+            Ok(updated) => {
+                counts.user_lifecycle_events_reconciled = counts
+                    .user_lifecycle_events_reconciled
+                    .saturating_add(updated);
+            }
+            Err(err) => {
+                for provider_market_ref in &tracked_market_refs {
+                    let market_id = format!("polymarket:{provider_market_ref}");
+                    external::polymarket_index::upsert_index_state(
+                        external::polymarket_index::PolymarketIndexLane::UserFills,
+                        market_id.as_str(),
+                        provider_market_ref.as_str(),
+                        "failed",
+                        None,
+                        None,
+                        true,
+                        Some(err.message.as_str()),
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+
+    let tracked_market_ids = tracked_market_refs
+        .iter()
+        .map(|value| format!("polymarket:{value}"))
+        .collect::<Vec<_>>();
+    let public_tape = load_polymarket_lane_health(
+        &state,
+        external::polymarket_index::PolymarketIndexLane::PublicTape,
+        &tracked_market_ids,
+    )
+    .await?;
+    let user_fills = load_polymarket_lane_health(
+        &state,
+        external::polymarket_index::PolymarketIndexLane::UserFills,
+        &tracked_market_ids,
+    )
+    .await?;
+
+    Ok(HttpResponse::Ok().json(PolymarketIndexerBackfillResponse {
+        ok: !matches!(public_tape.status.as_str(), "error")
+            && !matches!(user_fills.status.as_str(), "error"),
+        tracked_markets: tracked_market_refs.len() as u64,
+        tracked_market_details: tracked_market_details(&tracked_markets),
+        public_trades_ingested: counts.public_trades_ingested,
+        user_fill_events_ingested: counts.user_fill_events_ingested,
+        user_lifecycle_events_reconciled: counts.user_lifecycle_events_reconciled,
+        public_tape,
+        user_fills,
+    }))
+}
+
 pub async fn reset_imported_external_state(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
@@ -10640,6 +12489,50 @@ mod tests {
     fn polymarket_signature_type_rejects_out_of_range_values() {
         let payload = json!({ "signatureType": 3 });
         assert!(polymarket_signature_type_from_payload(&payload).is_err());
+    }
+
+    #[test]
+    fn parse_polymarket_lifecycle_status_accepts_user_and_relayer_states() {
+        assert!(matches!(
+            parse_polymarket_lifecycle_status(Some("MATCHED")),
+            Some(external::polymarket_index::PolymarketTradeLifecycleStatus::Matched)
+        ));
+        assert!(matches!(
+            parse_polymarket_lifecycle_status(Some("STATE_MINED")),
+            Some(external::polymarket_index::PolymarketTradeLifecycleStatus::Mined)
+        ));
+        assert!(matches!(
+            parse_polymarket_lifecycle_status(Some("STATE_CONFIRMED")),
+            Some(external::polymarket_index::PolymarketTradeLifecycleStatus::Confirmed)
+        ));
+        assert!(matches!(
+            parse_polymarket_lifecycle_status(Some("FAILED")),
+            Some(external::polymarket_index::PolymarketTradeLifecycleStatus::Failed)
+        ));
+    }
+
+    #[test]
+    fn best_polymarket_lifecycle_status_prefers_relayer_confirmation() {
+        let status = best_polymarket_lifecycle_status(
+            Some(external::polymarket_index::PolymarketTradeLifecycleStatus::Matched),
+            Some(external::polymarket_index::PolymarketTradeLifecycleStatus::Confirmed),
+            Some("0xtx"),
+        );
+
+        assert!(matches!(
+            status,
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Confirmed
+        ));
+    }
+
+    #[test]
+    fn best_polymarket_lifecycle_status_uses_mined_when_only_tx_hash_exists() {
+        let status = best_polymarket_lifecycle_status(None, None, Some("0xtx"));
+
+        assert!(matches!(
+            status,
+            external::polymarket_index::PolymarketTradeLifecycleStatus::Mined
+        ));
     }
 
     #[test]

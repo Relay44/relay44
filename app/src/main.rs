@@ -507,6 +507,7 @@ async fn main() -> std::io::Result<()> {
                     )
                     .service(
                         web::scope("/evm")
+                            .configure(api::creator::configure)
                             .route("/markets", web::get().to(api::evm::get_base_markets))
                             .route(
                                 "/markets/{market_id}",
@@ -848,6 +849,14 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/markets/{market_id}/trades",
                                 web::get().to(api::external::get_external_market_trades),
+                            )
+                            .route(
+                                "/indexers/polymarket/health",
+                                web::get().to(api::external::get_polymarket_indexer_health),
+                            )
+                            .route(
+                                "/indexers/polymarket/backfill",
+                                web::post().to(api::external::trigger_polymarket_indexer_backfill),
                             )
                             .route(
                                 "/signals",

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use log::info;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -264,6 +264,96 @@ pub struct BaseMarketBootstrapRuntimeUpdate<'a> {
     pub consecutive_failures: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BootstrapFillEventRecord {
+    pub id: String,
+    pub market_id: u64,
+    pub creator: String,
+    pub trade_id: String,
+    pub source: String,
+    pub agent_id: Option<u64>,
+    pub maker_order_id: String,
+    pub outcome: String,
+    pub side: String,
+    pub price: f64,
+    pub quantity: f64,
+    pub notional_usdc: f64,
+    pub occurred_at: DateTime<Utc>,
+    pub raw: Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BootstrapFillEventUpsert<'a> {
+    pub id: &'a str,
+    pub market_id: u64,
+    pub creator: &'a str,
+    pub trade_id: &'a str,
+    pub source: &'a str,
+    pub agent_id: Option<u64>,
+    pub maker_order_id: &'a str,
+    pub outcome: &'a str,
+    pub side: &'a str,
+    pub price: f64,
+    pub quantity: f64,
+    pub notional_usdc: f64,
+    pub occurred_at: DateTime<Utc>,
+    pub raw: &'a Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatorMarketEconomicsDailyRecord {
+    pub market_id: u64,
+    pub creator: String,
+    pub day: NaiveDate,
+    pub seed_usdc: f64,
+    pub available_usdc: f64,
+    pub reserved_usdc: f64,
+    pub inventory_yes: f64,
+    pub inventory_no: f64,
+    pub inventory_mark_value_usdc: f64,
+    pub cumulative_bootstrap_fills_usdc: f64,
+    pub net_liquidity_pnl_usdc: f64,
+    pub subsidy_burn_usdc: f64,
+    pub roi_bps: f64,
+    pub realized_resolution_pnl_usdc: f64,
+    pub organic_depth_ratio: f64,
+    pub graduated: bool,
+    pub graduation_retention_24h: Option<f64>,
+    pub graduation_retention_7d: Option<f64>,
+    pub mirror_freshness_seconds: Option<u64>,
+    pub mirror_pending_hedges: u64,
+    pub mirror_error_count: u64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreatorMarketEconomicsDailyUpsert<'a> {
+    pub market_id: u64,
+    pub creator: &'a str,
+    pub day: NaiveDate,
+    pub seed_usdc: f64,
+    pub available_usdc: f64,
+    pub reserved_usdc: f64,
+    pub inventory_yes: f64,
+    pub inventory_no: f64,
+    pub inventory_mark_value_usdc: f64,
+    pub cumulative_bootstrap_fills_usdc: f64,
+    pub net_liquidity_pnl_usdc: f64,
+    pub subsidy_burn_usdc: f64,
+    pub roi_bps: f64,
+    pub realized_resolution_pnl_usdc: f64,
+    pub organic_depth_ratio: f64,
+    pub graduated: bool,
+    pub graduation_retention_24h: Option<f64>,
+    pub graduation_retention_7d: Option<f64>,
+    pub mirror_freshness_seconds: Option<u64>,
+    pub mirror_pending_hedges: u64,
+    pub mirror_error_count: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct ComplianceDecisionEntry<'a> {
     pub request_id: Option<&'a str>,
@@ -421,6 +511,69 @@ impl DatabaseService {
             last_executed_at: row.try_get("last_executed_at").ok(),
             last_reconciled_at: row.try_get("last_reconciled_at").ok(),
             last_error: row.try_get("last_error").ok(),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+
+    fn map_bootstrap_fill_event_row(row: &PgRow) -> BootstrapFillEventRecord {
+        BootstrapFillEventRecord {
+            id: row.get("id"),
+            market_id: row.get::<i64, _>("market_id") as u64,
+            creator: row.get("creator"),
+            trade_id: row.get("trade_id"),
+            source: row.get("source"),
+            agent_id: row
+                .try_get::<Option<i64>, _>("agent_id")
+                .ok()
+                .flatten()
+                .map(|value| value as u64),
+            maker_order_id: row.get("maker_order_id"),
+            outcome: row.get("outcome"),
+            side: row.get("side"),
+            price: row.get("price"),
+            quantity: row.get("quantity"),
+            notional_usdc: row.get("notional_usdc"),
+            occurred_at: row.get("occurred_at"),
+            raw: row.get("raw"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        }
+    }
+
+    fn map_creator_market_economics_daily_row(row: &PgRow) -> CreatorMarketEconomicsDailyRecord {
+        CreatorMarketEconomicsDailyRecord {
+            market_id: row.get::<i64, _>("market_id") as u64,
+            creator: row.get("creator"),
+            day: row.get("day"),
+            seed_usdc: row.get("seed_usdc"),
+            available_usdc: row.get("available_usdc"),
+            reserved_usdc: row.get("reserved_usdc"),
+            inventory_yes: row.get("inventory_yes"),
+            inventory_no: row.get("inventory_no"),
+            inventory_mark_value_usdc: row.get("inventory_mark_value_usdc"),
+            cumulative_bootstrap_fills_usdc: row.get("cumulative_bootstrap_fills_usdc"),
+            net_liquidity_pnl_usdc: row.get("net_liquidity_pnl_usdc"),
+            subsidy_burn_usdc: row.get("subsidy_burn_usdc"),
+            roi_bps: row.get("roi_bps"),
+            realized_resolution_pnl_usdc: row.get("realized_resolution_pnl_usdc"),
+            organic_depth_ratio: row.get("organic_depth_ratio"),
+            graduated: row.get("graduated"),
+            graduation_retention_24h: row
+                .try_get::<Option<f64>, _>("graduation_retention_24h")
+                .ok()
+                .flatten(),
+            graduation_retention_7d: row
+                .try_get::<Option<f64>, _>("graduation_retention_7d")
+                .ok()
+                .flatten(),
+            mirror_freshness_seconds: row
+                .try_get::<Option<i64>, _>("mirror_freshness_seconds")
+                .ok()
+                .flatten()
+                .map(|value| value as u64),
+            mirror_pending_hedges: row.get::<i64, _>("mirror_pending_hedges").max(0) as u64,
+            mirror_error_count: row.get::<i64, _>("mirror_error_count").max(0) as u64,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         }
@@ -1012,11 +1165,13 @@ impl DatabaseService {
     }
 
     pub async fn get_position(&self, owner: &str, market_id: &str) -> Result<Option<Position>> {
-        let row = sqlx::query("SELECT * FROM positions WHERE owner = $1 AND market_id = $2")
-            .bind(owner)
-            .bind(market_id)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            "SELECT * FROM positions WHERE LOWER(owner) = LOWER($1) AND market_id = $2",
+        )
+        .bind(owner)
+        .bind(market_id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         Ok(row.map(|r| self.row_to_position(&r)))
     }
@@ -1755,6 +1910,23 @@ impl DatabaseService {
             .collect())
     }
 
+    pub async fn list_base_market_bootstrap_configs_for_creator(
+        &self,
+        creator: &str,
+    ) -> Result<Vec<BaseMarketBootstrapConfigRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM base_market_bootstrap_configs WHERE LOWER(creator) = LOWER($1) ORDER BY market_id ASC",
+        )
+        .bind(creator)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(Self::map_base_market_bootstrap_row)
+            .collect())
+    }
+
     pub async fn update_base_market_bootstrap_runtime(
         &self,
         market_id: u64,
@@ -1952,6 +2124,202 @@ impl DatabaseService {
         .await?;
 
         Ok(Self::map_base_market_bootstrap_agent_row(&row))
+    }
+
+    pub async fn upsert_bootstrap_fill_event(
+        &self,
+        input: &BootstrapFillEventUpsert<'_>,
+    ) -> Result<BootstrapFillEventRecord> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO bootstrap_fill_events (
+                id, market_id, creator, trade_id, source, agent_id, maker_order_id,
+                outcome, side, price, quantity, notional_usdc, occurred_at, raw
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            ON CONFLICT (trade_id, source) DO UPDATE SET
+                market_id = EXCLUDED.market_id,
+                creator = EXCLUDED.creator,
+                agent_id = EXCLUDED.agent_id,
+                maker_order_id = EXCLUDED.maker_order_id,
+                outcome = EXCLUDED.outcome,
+                side = EXCLUDED.side,
+                price = EXCLUDED.price,
+                quantity = EXCLUDED.quantity,
+                notional_usdc = EXCLUDED.notional_usdc,
+                occurred_at = EXCLUDED.occurred_at,
+                raw = EXCLUDED.raw,
+                updated_at = NOW()
+            RETURNING *
+            "#,
+        )
+        .bind(input.id)
+        .bind(input.market_id as i64)
+        .bind(input.creator)
+        .bind(input.trade_id)
+        .bind(input.source)
+        .bind(input.agent_id.map(|value| value as i64))
+        .bind(input.maker_order_id)
+        .bind(input.outcome)
+        .bind(input.side)
+        .bind(input.price)
+        .bind(input.quantity)
+        .bind(input.notional_usdc)
+        .bind(input.occurred_at)
+        .bind(input.raw)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Self::map_bootstrap_fill_event_row(&row))
+    }
+
+    pub async fn list_bootstrap_fill_events_for_creator_market(
+        &self,
+        creator: &str,
+        market_id: u64,
+    ) -> Result<Vec<BootstrapFillEventRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM bootstrap_fill_events WHERE LOWER(creator) = LOWER($1) AND market_id = $2 ORDER BY occurred_at ASC, trade_id ASC",
+        )
+        .bind(creator)
+        .bind(market_id as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(Self::map_bootstrap_fill_event_row)
+            .collect())
+    }
+
+    pub async fn upsert_creator_market_economics_daily(
+        &self,
+        input: &CreatorMarketEconomicsDailyUpsert<'_>,
+    ) -> Result<CreatorMarketEconomicsDailyRecord> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO creator_market_economics_daily (
+                market_id, creator, day, seed_usdc, available_usdc, reserved_usdc,
+                inventory_yes, inventory_no, inventory_mark_value_usdc,
+                cumulative_bootstrap_fills_usdc, net_liquidity_pnl_usdc, subsidy_burn_usdc,
+                roi_bps, realized_resolution_pnl_usdc, organic_depth_ratio, graduated,
+                graduation_retention_24h, graduation_retention_7d, mirror_freshness_seconds,
+                mirror_pending_hedges, mirror_error_count
+            )
+            VALUES (
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21
+            )
+            ON CONFLICT (market_id, creator, day) DO UPDATE SET
+                seed_usdc = EXCLUDED.seed_usdc,
+                available_usdc = EXCLUDED.available_usdc,
+                reserved_usdc = EXCLUDED.reserved_usdc,
+                inventory_yes = EXCLUDED.inventory_yes,
+                inventory_no = EXCLUDED.inventory_no,
+                inventory_mark_value_usdc = EXCLUDED.inventory_mark_value_usdc,
+                cumulative_bootstrap_fills_usdc = EXCLUDED.cumulative_bootstrap_fills_usdc,
+                net_liquidity_pnl_usdc = EXCLUDED.net_liquidity_pnl_usdc,
+                subsidy_burn_usdc = EXCLUDED.subsidy_burn_usdc,
+                roi_bps = EXCLUDED.roi_bps,
+                realized_resolution_pnl_usdc = EXCLUDED.realized_resolution_pnl_usdc,
+                organic_depth_ratio = EXCLUDED.organic_depth_ratio,
+                graduated = EXCLUDED.graduated,
+                graduation_retention_24h = EXCLUDED.graduation_retention_24h,
+                graduation_retention_7d = EXCLUDED.graduation_retention_7d,
+                mirror_freshness_seconds = EXCLUDED.mirror_freshness_seconds,
+                mirror_pending_hedges = EXCLUDED.mirror_pending_hedges,
+                mirror_error_count = EXCLUDED.mirror_error_count
+            RETURNING *
+            "#,
+        )
+        .bind(input.market_id as i64)
+        .bind(input.creator)
+        .bind(input.day)
+        .bind(input.seed_usdc)
+        .bind(input.available_usdc)
+        .bind(input.reserved_usdc)
+        .bind(input.inventory_yes)
+        .bind(input.inventory_no)
+        .bind(input.inventory_mark_value_usdc)
+        .bind(input.cumulative_bootstrap_fills_usdc)
+        .bind(input.net_liquidity_pnl_usdc)
+        .bind(input.subsidy_burn_usdc)
+        .bind(input.roi_bps)
+        .bind(input.realized_resolution_pnl_usdc)
+        .bind(input.organic_depth_ratio)
+        .bind(input.graduated)
+        .bind(input.graduation_retention_24h)
+        .bind(input.graduation_retention_7d)
+        .bind(input.mirror_freshness_seconds.map(|value| value as i64))
+        .bind(input.mirror_pending_hedges as i64)
+        .bind(input.mirror_error_count as i64)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(Self::map_creator_market_economics_daily_row(&row))
+    }
+
+    pub async fn list_creator_market_economics_daily_for_market(
+        &self,
+        creator: &str,
+        market_id: u64,
+        start_day: Option<NaiveDate>,
+        end_day: Option<NaiveDate>,
+    ) -> Result<Vec<CreatorMarketEconomicsDailyRecord>> {
+        let rows = match (start_day, end_day) {
+            (Some(start_day), Some(end_day)) => sqlx::query(
+                "SELECT * FROM creator_market_economics_daily WHERE LOWER(creator) = LOWER($1) AND market_id = $2 AND day >= $3 AND day <= $4 ORDER BY day ASC",
+            )
+            .bind(creator)
+            .bind(market_id as i64)
+            .bind(start_day)
+            .bind(end_day)
+            .fetch_all(&self.pool)
+            .await?,
+            (Some(start_day), None) => sqlx::query(
+                "SELECT * FROM creator_market_economics_daily WHERE LOWER(creator) = LOWER($1) AND market_id = $2 AND day >= $3 ORDER BY day ASC",
+            )
+            .bind(creator)
+            .bind(market_id as i64)
+            .bind(start_day)
+            .fetch_all(&self.pool)
+            .await?,
+            (None, Some(end_day)) => sqlx::query(
+                "SELECT * FROM creator_market_economics_daily WHERE LOWER(creator) = LOWER($1) AND market_id = $2 AND day <= $3 ORDER BY day ASC",
+            )
+            .bind(creator)
+            .bind(market_id as i64)
+            .bind(end_day)
+            .fetch_all(&self.pool)
+            .await?,
+            (None, None) => sqlx::query(
+                "SELECT * FROM creator_market_economics_daily WHERE LOWER(creator) = LOWER($1) AND market_id = $2 ORDER BY day ASC",
+            )
+            .bind(creator)
+            .bind(market_id as i64)
+            .fetch_all(&self.pool)
+            .await?,
+        };
+        Ok(rows
+            .iter()
+            .map(Self::map_creator_market_economics_daily_row)
+            .collect())
+    }
+
+    pub async fn list_creator_market_economics_daily_for_creator(
+        &self,
+        creator: &str,
+    ) -> Result<Vec<CreatorMarketEconomicsDailyRecord>> {
+        let rows = sqlx::query(
+            "SELECT * FROM creator_market_economics_daily WHERE LOWER(creator) = LOWER($1) ORDER BY market_id ASC, day ASC",
+        )
+        .bind(creator)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(Self::map_creator_market_economics_daily_row)
+            .collect())
     }
 
     // ── Oracle market configs ──────────────────────────────────────────

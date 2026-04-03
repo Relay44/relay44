@@ -1,4 +1,6 @@
 import { buildPageMetadata } from '@/lib/seo';
+import { PageShell } from '@/components/layout';
+import { PortfolioNav } from '@/components/portfolio/PortfolioNav';
 
 export const metadata = buildPageMetadata({
   title: 'Portfolio',
@@ -8,5 +10,10 @@ export const metadata = buildPageMetadata({
 });
 
 export default function PortfolioLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <PageShell>
+      <PortfolioNav />
+      {children}
+    </PageShell>
+  );
 }

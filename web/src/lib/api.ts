@@ -40,6 +40,11 @@ import type {
   HackathonRegistration,
   HackathonLeaderboard,
   HackathonSnapshot,
+  CreatorChartRange,
+  CreatorEconomicsOverview,
+  CreatorEconomicsMarketSummary,
+  CreatorEconomicsMarketDetail,
+  CreatorEconomicsPoint,
 } from "@/types";
 import { CURATED_MARKETS_BY_ID } from "@/lib/curatedMarkets";
 import {
@@ -216,6 +221,65 @@ interface BaseTradesResponse {
   chain_id?: number;
   provider_market_ref?: string;
   is_synthetic?: boolean;
+}
+
+interface CreatorEconomicsOverviewResponse {
+  creator?: string;
+  activeSeededMarkets?: number;
+  totalSeedDeployedUsdc?: number;
+  currentCapitalValueUsdc?: number;
+  netLiquidityPnlUsdc?: number;
+  subsidyBurnUsdc?: number;
+  realizedResolutionPnlUsdc?: number;
+  graduationSuccessRate?: number;
+  staleErrorMirrorCount?: number;
+}
+
+interface CreatorEconomicsMarketSummaryResponse {
+  marketId?: string | number;
+  marketQuestion?: string;
+  status?: string;
+  liquidityMode?: string;
+  bootstrapStatus?: string;
+  seedUsdc?: number;
+  availableUsdc?: number;
+  reservedUsdc?: number;
+  inventoryYesUsdc?: number;
+  inventoryNoUsdc?: number;
+  inventoryNetUsdc?: number;
+  currentCapitalValueUsdc?: number;
+  netLiquidityPnlUsdc?: number;
+  subsidyBurnUsdc?: number;
+  roiBps?: number;
+  cumulativeBootstrapFillsUsdc?: number;
+  organicReplacementRatio?: number;
+  graduationState?: string;
+  graduationReason?: string;
+  mirrorFreshnessSeconds?: number;
+  mirrorPendingHedges?: number;
+  mirrorErrorCount?: number;
+  mirrorLinksWithErrors?: number;
+  realizedResolutionPnlUsdc?: number;
+  graduatedAt?: string;
+  lastReconciledAt?: string;
+}
+
+interface CreatorEconomicsPointResponse {
+  day?: string;
+  cumulativeBootstrapFillsUsdc?: number;
+  subsidyBurnUsdc?: number;
+  inventoryMarkValueUsdc?: number;
+  organicReplacementRatio?: number;
+  mirrorFreshnessSeconds?: number;
+  mirrorPendingHedges?: number;
+  mirrorErrorCount?: number;
+  graduationRetention24h?: number;
+  graduationRetention7d?: number;
+}
+
+interface CreatorEconomicsTimeseriesResponse {
+  window?: CreatorChartRange;
+  points?: CreatorEconomicsPointResponse[];
 }
 
 interface SwarmMessageResponse {
@@ -1129,6 +1193,9 @@ function normalizeTransaction(raw: Record<string, unknown>): Transaction {
 }
 
 function normalizeTrade(raw: Record<string, unknown>): Trade {
+  const providerMarketRef = raw.providerMarketRef ?? raw.provider_market_ref;
+  const synthetic = raw.isSynthetic ?? raw.is_synthetic;
+
   return {
     id: String(raw.id ?? ""),
     marketId: String(raw.marketId ?? raw.market_id ?? ""),
@@ -1140,7 +1207,106 @@ function normalizeTrade(raw: Record<string, unknown>): Trade {
     txSignature: String(
       raw.txSignature ?? raw.tx_signature ?? raw.tx_hash ?? "",
     ),
+    provider: raw.provider != null ? String(raw.provider) : undefined,
+    providerMarketRef:
+      providerMarketRef != null ? String(providerMarketRef) : undefined,
+    chainId: toOptionalNumber(raw.chainId ?? raw.chain_id),
+    isSynthetic: synthetic != null ? Boolean(synthetic) : undefined,
+    blockNumber: toOptionalNumber(raw.blockNumber ?? raw.block_number),
     createdAt: toIsoString(raw.createdAt ?? raw.created_at),
+  };
+}
+
+function normalizeCreatorEconomicsOverview(
+  raw: CreatorEconomicsOverviewResponse,
+): CreatorEconomicsOverview {
+  return {
+    creator: String(raw.creator ?? ""),
+    activeSeededMarkets: toNumber(raw.activeSeededMarkets),
+    totalSeedDeployedUsdc: toNumber(raw.totalSeedDeployedUsdc),
+    currentCapitalValueUsdc: toNumber(raw.currentCapitalValueUsdc),
+    netLiquidityPnlUsdc: toNumber(raw.netLiquidityPnlUsdc),
+    subsidyBurnUsdc: toNumber(raw.subsidyBurnUsdc),
+    realizedResolutionPnlUsdc: toNumber(raw.realizedResolutionPnlUsdc),
+    graduationSuccessRate: toNumber(raw.graduationSuccessRate),
+    staleErrorMirrorCount: toNumber(raw.staleErrorMirrorCount),
+  };
+}
+
+function normalizeCreatorEconomicsMarketSummary(
+  raw: CreatorEconomicsMarketSummaryResponse,
+): CreatorEconomicsMarketSummary {
+  return {
+    marketId: String(raw.marketId ?? ""),
+    marketQuestion: String(raw.marketQuestion ?? ""),
+    status: String(raw.status ?? "unknown"),
+    liquidityMode: String(raw.liquidityMode ?? "clob_only"),
+    bootstrapStatus: String(raw.bootstrapStatus ?? "unknown"),
+    seedUsdc: toNumber(raw.seedUsdc),
+    reservedBudgetUsdc: toNumber(raw.reservedUsdc),
+    availableBudgetUsdc: toNumber(raw.availableUsdc),
+    inventoryYesUsdc: toNumber(raw.inventoryYesUsdc),
+    inventoryNoUsdc: toNumber(raw.inventoryNoUsdc),
+    inventoryNetUsdc: toNumber(raw.inventoryNetUsdc),
+    currentCapitalValueUsdc: toNumber(raw.currentCapitalValueUsdc),
+    cumulativeBootstrapFillsUsdc: toNumber(raw.cumulativeBootstrapFillsUsdc),
+    subsidyBurnUsdc: toNumber(raw.subsidyBurnUsdc),
+    netLiquidityPnlUsdc: toNumber(raw.netLiquidityPnlUsdc),
+    roiBps: toNumber(raw.roiBps),
+    organicReplacementRatio: toNumber(raw.organicReplacementRatio),
+    graduationState: String(raw.graduationState ?? raw.bootstrapStatus ?? "unknown"),
+    graduationReason: raw.graduationReason || undefined,
+    mirrorFreshnessSeconds:
+      raw.mirrorFreshnessSeconds == null
+        ? undefined
+        : toNumber(raw.mirrorFreshnessSeconds),
+    mirrorPendingHedges: toNumber(raw.mirrorPendingHedges),
+    mirrorErrorCount: toNumber(raw.mirrorErrorCount),
+    mirrorLinksWithErrors: toNumber(raw.mirrorLinksWithErrors),
+    realizedResolutionPnlUsdc: toNumber(raw.realizedResolutionPnlUsdc),
+    graduatedAt: raw.graduatedAt ? toIsoString(raw.graduatedAt) : undefined,
+    lastReconciledAt: raw.lastReconciledAt
+      ? toIsoString(raw.lastReconciledAt)
+      : undefined,
+  };
+}
+
+function normalizeCreatorEconomicsPoint(
+  raw: CreatorEconomicsPointResponse,
+): CreatorEconomicsPoint {
+  return {
+    day: toIsoString(raw.day),
+    cumulativeBootstrapFillsUsdc: toNumber(raw.cumulativeBootstrapFillsUsdc),
+    subsidyBurnUsdc: toNumber(raw.subsidyBurnUsdc),
+    inventoryMarkValueUsdc: toNumber(raw.inventoryMarkValueUsdc),
+    organicReplacementRatio: toNumber(raw.organicReplacementRatio),
+    mirrorFreshnessSeconds:
+      raw.mirrorFreshnessSeconds == null
+        ? undefined
+        : toNumber(raw.mirrorFreshnessSeconds),
+    mirrorPendingHedges: toNumber(raw.mirrorPendingHedges),
+    mirrorErrorCount: toNumber(raw.mirrorErrorCount),
+    graduationRetention24h:
+      raw.graduationRetention24h == null
+        ? undefined
+        : toNumber(raw.graduationRetention24h),
+    graduationRetention7d:
+      raw.graduationRetention7d == null
+        ? undefined
+        : toNumber(raw.graduationRetention7d),
+  };
+}
+
+function normalizeCreatorEconomicsMarketDetail(
+  raw: CreatorEconomicsMarketSummaryResponse,
+  timeseries: CreatorEconomicsTimeseriesResponse,
+): CreatorEconomicsMarketDetail {
+  return {
+    ...normalizeCreatorEconomicsMarketSummary(raw),
+    window: (timeseries.window as CreatorChartRange | undefined) ?? "30d",
+    points: Array.isArray(timeseries.points)
+      ? timeseries.points.map(normalizeCreatorEconomicsPoint)
+      : [],
   };
 }
 
@@ -1342,7 +1508,13 @@ function normalizeExternalAgentPerformanceResponse(
   };
 }
 
-function mapBaseTradeToTrade(snapshot: BaseTradeSnapshot): Trade {
+function mapBaseTradeToTrade(
+  snapshot: BaseTradeSnapshot,
+  meta?: Pick<
+    BaseTradesResponse,
+    "provider" | "chain_id" | "provider_market_ref" | "is_synthetic"
+  >,
+): Trade {
   return {
     id: snapshot.id,
     marketId: snapshot.market_id,
@@ -1352,6 +1524,11 @@ function mapBaseTradeToTrade(snapshot: BaseTradeSnapshot): Trade {
     buyer: "",
     seller: "",
     txSignature: snapshot.tx_hash,
+    provider: meta?.provider,
+    providerMarketRef: meta?.provider_market_ref,
+    chainId: meta?.chain_id,
+    isSynthetic: meta?.is_synthetic,
+    blockNumber: snapshot.block_number,
     createdAt: snapshot.created_at,
   };
 }
@@ -1766,6 +1943,42 @@ class ApiClient {
     return this.getBaseTrades(marketId, params);
   }
 
+  async getCreatorEconomicsOverview(): Promise<CreatorEconomicsOverview> {
+    const response = await this.request<CreatorEconomicsOverviewResponse>(
+      "/evm/creator/overview",
+    );
+    return normalizeCreatorEconomicsOverview(response);
+  }
+
+  async getCreatorEconomicsMarkets(): Promise<PaginatedResponse<CreatorEconomicsMarketSummary>> {
+    const response = await this.request<CreatorEconomicsMarketSummaryResponse[]>(
+      "/evm/creator/markets",
+    );
+    const data = Array.isArray(response)
+      ? response.map(normalizeCreatorEconomicsMarketSummary)
+      : [];
+    return {
+      data,
+      total: data.length,
+      limit: data.length,
+      offset: 0,
+      hasMore: false,
+    };
+  }
+
+  async getCreatorEconomicsMarket(
+    marketId: string,
+    window: CreatorChartRange = "30d",
+  ): Promise<CreatorEconomicsMarketDetail> {
+    const economics = await this.request<{
+      market: CreatorEconomicsMarketSummaryResponse;
+    }>(`/evm/creator/markets/${encodeURIComponent(marketId)}/economics`);
+    const timeseries = await this.request<CreatorEconomicsTimeseriesResponse>(
+      `/evm/creator/markets/${encodeURIComponent(marketId)}/timeseries?window=${window}`,
+    );
+    return normalizeCreatorEconomicsMarketDetail(economics.market, timeseries);
+  }
+
   // Orders
   async getOrders(filters?: OrderFilters): Promise<PaginatedResponse<Order>> {
     const query = this.buildQuery(filters || {});
@@ -1960,7 +2173,14 @@ class ApiClient {
     const response = await this.requestBaseRead<BaseTradesResponse>(
       `/evm/markets/${encodedMarketId}/trades${query}`,
     );
-    const data = (response.trades ?? []).map(mapBaseTradeToTrade);
+    const data = (response.trades ?? []).map((trade) =>
+      mapBaseTradeToTrade(trade, {
+        provider: response.provider,
+        chain_id: response.chain_id,
+        provider_market_ref: response.provider_market_ref,
+        is_synthetic: response.is_synthetic,
+      }),
+    );
     const total = toNumber(response.total, data.length);
     const limit = toNumber(response.limit, params?.limit ?? data.length);
     const offset = toNumber(response.offset, params?.offset ?? 0);
