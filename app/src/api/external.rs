@@ -346,6 +346,8 @@ pub struct ExternalAgentResponse {
     pub max_daily_spend_usdc: Option<f64>,
     pub max_slippage_bps: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub paper_performance: Option<ExternalAgentPaperPerformance>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub active: bool,
     pub last_executed_at: Option<String>,
@@ -463,6 +465,20 @@ pub struct ExternalAgentPerformancePoint {
     pub realized_pnl_usdc: f64,
     pub unrealized_pnl_usdc: f64,
     pub net_pnl_usdc: f64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentPaperPerformance {
+    pub open_positions: u64,
+    pub closed_positions: u64,
+    pub fills: u64,
+    pub volume_usdc: f64,
+    pub fees_usdc: f64,
+    pub realized_pnl_usdc: f64,
+    pub unrealized_pnl_usdc: f64,
+    pub net_pnl_usdc: f64,
+    pub max_drawdown_usdc: f64,
 }
 
 #[derive(Deserialize)]
@@ -4042,6 +4058,7 @@ fn parse_external_agent(
         max_notional_per_execution: row.try_get("max_notional_per_execution").ok().flatten(),
         max_daily_spend_usdc: row.try_get("max_daily_spend_usdc").ok().flatten(),
         max_slippage_bps: row.try_get("max_slippage_bps").ok().flatten(),
+        paper_performance: None,
         source: source.map(str::to_string),
         active: row
             .try_get("active")
@@ -5215,6 +5232,42 @@ async fn open_paper_position(
         });
     }
 
+    let reference_price = if agent.side == "buy" {
+        best_ask.or(best_bid).unwrap_or(mid)
+    } else {
+        best_bid.or(best_ask).unwrap_or(mid)
+    };
+    if let Err(err) = check_execution_guardrails(
+        state,
+        agent,
+        signal.price,
+        signal.quantity,
+        Some(reference_price),
+    )
+    .await
+    {
+        return skip_agent_for_guardrail(
+            state,
+            agent,
+            now,
+            "paper_skipped",
+            &err,
+            json!({
+                "mode": "paper",
+                "strategy": agent.strategy,
+                "strategyParams": agent.strategy_params,
+                "signal": signal.reason.clone(),
+                "signalMetrics": signal.metadata.clone(),
+                "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
+                "referencePrice": reference_price,
+                "plannedPrice": signal.price,
+                "plannedQuantity": signal.quantity,
+                "midPrice": mid
+            }),
+        )
+        .await;
+    }
+
     let fill = simulate_fill(
         market,
         orderbook,
@@ -5460,7 +5513,6 @@ async fn execute_paper_agent(
     state: &AppState,
     agent: &ExternalAgentRecord,
 ) -> Result<AgentExecutionOutcome, ApiError> {
-    check_execution_guardrails(state, agent, None).await?;
     let now = Utc::now();
     let market_id = ExternalMarketId::parse(agent.market_id.as_str())?;
 
@@ -5701,9 +5753,11 @@ async fn execute_paper_agent(
 async fn check_execution_guardrails(
     state: &AppState,
     agent: &ExternalAgentRecord,
+    order_price: f64,
+    order_quantity: f64,
     reference_price: Option<f64>,
 ) -> Result<(), ApiError> {
-    let notional = agent.price * agent.quantity;
+    let notional = order_price * order_quantity;
 
     // Check per-execution notional limit.
     if let Some(max) = agent.max_notional_per_execution {
@@ -5751,7 +5805,7 @@ async fn check_execution_guardrails(
     if let Some(max_slippage_bps) = agent.max_slippage_bps {
         if let Some(reference_price) = reference_price {
             if reference_price > 0.0 {
-                let slippage_bps = (((agent.price - reference_price).abs() / reference_price)
+                let slippage_bps = (((order_price - reference_price).abs() / reference_price)
                     * 10_000.0)
                     .round() as i32;
                 if slippage_bps > max_slippage_bps {
@@ -5768,6 +5822,55 @@ async fn check_execution_guardrails(
     }
 
     Ok(())
+}
+
+async fn skip_agent_for_guardrail(
+    state: &AppState,
+    agent: &ExternalAgentRecord,
+    now: chrono::DateTime<Utc>,
+    run_status: &str,
+    err: &ApiError,
+    metadata: Value,
+) -> Result<AgentExecutionOutcome, ApiError> {
+    let reason = skip_reason_from_error(err);
+    let next_execution_at = now + Duration::seconds(agent.cadence_seconds.max(1));
+    update_external_agent_schedule(state, agent.id.as_str(), now, next_execution_at).await?;
+    let run_id = Uuid::new_v4().to_string();
+    insert_external_agent_run(
+        state,
+        run_id.as_str(),
+        agent,
+        run_status,
+        None,
+        Some(reason.as_str()),
+        &json!({
+            "mode": agent.execution_mode.as_str(),
+            "reason": reason,
+            "error": {
+                "code": err.code,
+                "message": err.message,
+                "details": err.details
+            },
+            "guardrail": metadata.clone()
+        }),
+    )
+    .await?;
+
+    Ok(AgentExecutionOutcome {
+        executed: false,
+        skip_reason: Some(reason),
+        run_status: run_status.to_string(),
+        run_id,
+        external_order_id: None,
+        provider_order_id: None,
+        next_execution_at,
+        response: json!({
+            "mode": agent.execution_mode.as_str(),
+            "status": "skipped",
+            "reason": "guardrail",
+            "guardrail": metadata
+        }),
+    })
 }
 
 async fn execute_live_agent(
@@ -5904,7 +6007,36 @@ async fn execute_live_agent(
     } else {
         best_bid.or(best_ask).unwrap_or(mid)
     };
-    check_execution_guardrails(state, agent, Some(reference_price)).await?;
+    if let Err(err) = check_execution_guardrails(
+        state,
+        agent,
+        strategy_signal.price,
+        strategy_signal.quantity,
+        Some(reference_price),
+    )
+    .await
+    {
+        return skip_agent_for_guardrail(
+            state,
+            agent,
+            now,
+            "skipped",
+            &err,
+            json!({
+                "mode": "live",
+                "strategy": agent.strategy,
+                "strategyParams": agent.strategy_params,
+                "signal": strategy_signal.reason.clone(),
+                "signalMetrics": strategy_signal.metadata.clone(),
+                "signalId": active_signal.as_ref().map(|item| item.id.as_str()),
+                "referencePrice": reference_price,
+                "plannedPrice": strategy_signal.price,
+                "plannedQuantity": strategy_signal.quantity,
+                "midPrice": mid
+            }),
+        )
+        .await;
+    }
 
     let credential = load_credential(
         state,
@@ -7222,6 +7354,156 @@ fn empty_public_agents_response(limit: i64, offset: i64) -> ExternalAgentsListRe
     }
 }
 
+fn empty_agent_paper_performance() -> ExternalAgentPaperPerformance {
+    ExternalAgentPaperPerformance {
+        open_positions: 0,
+        closed_positions: 0,
+        fills: 0,
+        volume_usdc: 0.0,
+        fees_usdc: 0.0,
+        realized_pnl_usdc: 0.0,
+        unrealized_pnl_usdc: 0.0,
+        net_pnl_usdc: 0.0,
+        max_drawdown_usdc: 0.0,
+    }
+}
+
+async fn load_external_agent_paper_performance_map(
+    state: &AppState,
+    agent_ids: &[String],
+) -> Result<BTreeMap<String, ExternalAgentPaperPerformance>, ApiError> {
+    let mut performance_map = agent_ids
+        .iter()
+        .cloned()
+        .map(|agent_id| (agent_id, empty_agent_paper_performance()))
+        .collect::<BTreeMap<_, _>>();
+    if agent_ids.is_empty() {
+        return Ok(performance_map);
+    }
+
+    let scoped_ids = agent_ids.to_vec();
+    let position_rows = sqlx::query(
+        "SELECT ea.id AS agent_id,
+                COUNT(pp.id) FILTER (WHERE pp.status = 'open') AS open_positions,
+                COUNT(pp.id) FILTER (WHERE pp.status = 'closed') AS closed_positions,
+                COALESCE(SUM(CASE WHEN pp.status = 'open' THEN pp.unrealized_pnl_usdc ELSE 0 END), 0) AS unrealized_pnl_usdc
+         FROM external_agents ea
+         LEFT JOIN paper_positions pp
+           ON pp.agent_id = ea.id
+          AND pp.market_id = ea.market_id
+         WHERE ea.id = ANY($1)
+         GROUP BY ea.id",
+    )
+    .bind(scoped_ids.clone())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    for row in position_rows {
+        let agent_id = row
+            .try_get::<String, _>("agent_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        if let Some(entry) = performance_map.get_mut(agent_id.as_str()) {
+            entry.open_positions =
+                row.try_get::<i64, _>("open_positions").unwrap_or(0).max(0) as u64;
+            entry.closed_positions = row
+                .try_get::<i64, _>("closed_positions")
+                .unwrap_or(0)
+                .max(0) as u64;
+            entry.unrealized_pnl_usdc = row.try_get::<f64, _>("unrealized_pnl_usdc").unwrap_or(0.0);
+        }
+    }
+
+    let fill_rows = sqlx::query(
+        "SELECT ea.id AS agent_id,
+                COUNT(pf.id) AS fills,
+                COALESCE(SUM(pf.notional_usdc), 0) AS volume_usdc,
+                COALESCE(SUM(pf.fee_usdc), 0) AS fees_usdc
+         FROM external_agents ea
+         LEFT JOIN paper_fills pf
+           ON pf.agent_id = ea.id
+          AND pf.market_id = ea.market_id
+         WHERE ea.id = ANY($1)
+         GROUP BY ea.id",
+    )
+    .bind(scoped_ids.clone())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    for row in fill_rows {
+        let agent_id = row
+            .try_get::<String, _>("agent_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        if let Some(entry) = performance_map.get_mut(agent_id.as_str()) {
+            entry.fills = row.try_get::<i64, _>("fills").unwrap_or(0).max(0) as u64;
+            entry.volume_usdc = row.try_get::<f64, _>("volume_usdc").unwrap_or(0.0);
+            entry.fees_usdc = row.try_get::<f64, _>("fees_usdc").unwrap_or(0.0);
+        }
+    }
+
+    let outcome_rows = sqlx::query(
+        "SELECT ea.id AS agent_id,
+                COALESCE(SUM(po.realized_pnl_usdc), 0) AS realized_pnl_usdc
+         FROM external_agents ea
+         LEFT JOIN paper_outcomes po
+           ON po.agent_id = ea.id
+          AND po.market_id = ea.market_id
+         WHERE ea.id = ANY($1)
+         GROUP BY ea.id",
+    )
+    .bind(scoped_ids.clone())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    for row in outcome_rows {
+        let agent_id = row
+            .try_get::<String, _>("agent_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        if let Some(entry) = performance_map.get_mut(agent_id.as_str()) {
+            entry.realized_pnl_usdc = row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0);
+        }
+    }
+
+    let drawdown_rows = sqlx::query(
+        "SELECT ea.id AS agent_id, po.realized_pnl_usdc
+         FROM external_agents ea
+         JOIN paper_outcomes po
+           ON po.agent_id = ea.id
+          AND po.market_id = ea.market_id
+         WHERE ea.id = ANY($1)
+         ORDER BY ea.id ASC, po.closed_at ASC, po.id ASC",
+    )
+    .bind(scoped_ids)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    let mut drawdown_points = BTreeMap::<String, Vec<f64>>::new();
+    for row in drawdown_rows {
+        let agent_id = row
+            .try_get::<String, _>("agent_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        drawdown_points
+            .entry(agent_id)
+            .or_default()
+            .push(row.try_get::<f64, _>("realized_pnl_usdc").unwrap_or(0.0));
+    }
+
+    for (agent_id, points) in drawdown_points {
+        if let Some(entry) = performance_map.get_mut(agent_id.as_str()) {
+            entry.max_drawdown_usdc = calculate_max_drawdown(points.as_slice());
+        }
+    }
+
+    for entry in performance_map.values_mut() {
+        entry.net_pnl_usdc = entry.realized_pnl_usdc + entry.unrealized_pnl_usdc;
+    }
+
+    Ok(performance_map)
+}
+
 fn empty_public_agents_performance(owner: Option<String>) -> ExternalAgentPerformanceResponse {
     ExternalAgentPerformanceResponse {
         scope: "public".to_string(),
@@ -7315,6 +7597,17 @@ pub async fn list_public_external_agents(
     let mut agents = Vec::with_capacity(rows.len());
     for row in rows {
         agents.push(parse_external_agent(row, Some(PUBLIC_PAPER_AGENT_SOURCE))?);
+    }
+
+    let agent_ids = agents
+        .iter()
+        .map(|agent| agent.id.clone())
+        .collect::<Vec<_>>();
+    let performance_map =
+        load_external_agent_paper_performance_map(state.get_ref().as_ref(), agent_ids.as_slice())
+            .await?;
+    for agent in &mut agents {
+        agent.paper_performance = performance_map.get(agent.id.as_str()).cloned();
     }
 
     Ok(HttpResponse::Ok().json(ExternalAgentsListResponse {
