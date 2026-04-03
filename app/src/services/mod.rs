@@ -15,6 +15,7 @@ pub mod market_creator;
 pub mod metrics;
 pub mod orderbook;
 pub mod provider_rails;
+pub mod pyth;
 pub mod redis;
 pub mod websocket;
 pub mod x402;
