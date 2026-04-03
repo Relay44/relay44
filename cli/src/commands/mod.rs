@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod config;
 pub mod doctor;
+pub mod edge_scanner;
 pub mod login;
 pub mod markets;
 pub mod orders;
