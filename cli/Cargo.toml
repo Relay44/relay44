@@ -35,3 +35,8 @@ ctrlc = "3"
 tabled = "0.17"
 rust_decimal = "1"
 rustyline = "15"
+async-recursion = "1"
+shlex = "1"
+
+[dev-dependencies]
+tempfile = "3"

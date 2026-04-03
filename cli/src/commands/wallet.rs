@@ -4,7 +4,7 @@ use clap::Subcommand;
 use crate::client::Client;
 use crate::output::{self, Format};
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum WalletCmd {
     /// Show wallet balance
     #[command(
@@ -14,10 +14,8 @@ pub enum WalletCmd {
     Balance,
 
     /// Show deposit address
-    #[command(
-        long_about = "Show the deposit address for your account.\n\n\
-                      Example:\n  r44 wallet deposit-address"
-    )]
+    #[command(long_about = "Show the deposit address for your account.\n\n\
+                      Example:\n  r44 wallet deposit-address")]
     DepositAddress,
 }
 
@@ -32,11 +30,17 @@ pub async fn run(cmd: WalletCmd, api: &Client, fmt: Format) -> Result<()> {
             match fmt {
                 Format::Json => output::print_json(&data),
                 Format::Table => {
-                    let balance = data["balance"].as_f64().map(output::usdc)
+                    let balance = data["balance"]
+                        .as_f64()
+                        .map(output::usdc)
                         .unwrap_or_else(|| output::str_val(&data, "balance"));
-                    let available = data["available"].as_f64().map(output::usdc)
+                    let available = data["available"]
+                        .as_f64()
+                        .map(output::usdc)
                         .unwrap_or_else(|| "—".into());
-                    let locked = data["locked"].as_f64().map(output::usdc)
+                    let locked = data["locked"]
+                        .as_f64()
+                        .map(output::usdc)
                         .unwrap_or_else(|| "—".into());
                     output::print_detail(&[
                         ("Balance", balance),

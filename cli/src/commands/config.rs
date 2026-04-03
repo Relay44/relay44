@@ -4,112 +4,108 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use crate::config::Config;
-use crate::output;
+use crate::output::{self, Format};
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum ConfigCmd {
-    /// Show current configuration
-    #[command(
-        long_about = "Display the current CLI configuration including auth status.\n\n\
-                      Example:\n  r44 config show"
-    )]
+    /// Show the current configuration
     Show,
-
-    /// Set API URL
-    #[command(
-        long_about = "Override the default API URL. Useful for development or self-hosted instances.\n\n\
-                      Example:\n  r44 config set-url http://localhost:3000/v1"
-    )]
-    SetUrl {
-        /// API base URL (e.g. https://relay44-api.onrender.com/v1)
-        url: String,
-    },
-
-    /// Set access token (escape hatch for external auth)
-    #[command(
-        long_about = "Manually set a JWT access token. Use this if you obtained a token \
-                      outside the CLI (e.g. from the web app).\n\n\
-                      Prefer `r44 login solana` for normal authentication.\n\n\
-                      Example:\n  r44 config set-token eyJhbG..."
-    )]
-    SetToken {
-        /// JWT access token
-        token: String,
-    },
-
-    /// Show config file location
-    #[command(long_about = "Print the path to the config file.\n\n\
-                            Example:\n  r44 config path")]
+    /// Set the API URL for the selected profile
+    SetUrl { url: String },
+    /// Set the access token for the selected profile
+    SetToken { token: String },
+    /// Show the config file location
     Path,
-
-    /// Reset config to defaults
-    #[command(long_about = "Reset all configuration to defaults and clear stored credentials.\n\n\
-                            Example:\n  r44 config reset")]
+    /// Reset the entire config to defaults
     Reset {
-        /// Skip confirmation
         #[arg(long, short = 'y')]
         yes: bool,
     },
 }
 
-pub fn run(cmd: ConfigCmd, config: Arc<Mutex<Config>>) -> Result<()> {
+pub fn run(
+    cmd: ConfigCmd,
+    config: Arc<Mutex<Config>>,
+    profile_name: &str,
+    format: Format,
+) -> Result<()> {
     match cmd {
         ConfigCmd::Show => {
-            let cfg = config.lock().unwrap();
-            output::print_detail(&[
-                ("API URL", cfg.api_url.clone()),
-                (
-                    "Auth",
-                    if cfg.access_token.is_some() {
-                        "authenticated".into()
-                    } else {
-                        "not configured".into()
+            let config = config.lock().unwrap();
+            let profile = config.profile(profile_name).cloned().unwrap_or_default();
+
+            match format {
+                Format::Json => output::print_json(&serde_json::json!({
+                    "activeProfile": config.active_profile,
+                    "selectedProfile": profile_name,
+                    "profile": {
+                        "apiUrl": profile.api_url,
+                        "authenticated": profile.access_token.is_some(),
+                        "wallet": profile.wallet,
+                        "output": profile.output.map(|value| value.to_string()).unwrap_or_else(|| "table".into()),
                     },
-                ),
-                (
-                    "Wallet",
-                    cfg.wallet.clone().unwrap_or_else(|| "-".into()),
-                ),
-                ("Config", config_path()),
-            ]);
+                    "workflows": config.workflows.len(),
+                    "hooks": config.hooks.len(),
+                    "sessionLog": {
+                        "enabled": config.session_log.enabled,
+                        "path": config.session_log_path()?.display().to_string(),
+                    }
+                })),
+                Format::Table => output::print_detail(&[
+                    ("Active profile", config.active_profile.clone()),
+                    ("Selected profile", profile_name.into()),
+                    ("API URL", profile.api_url),
+                    (
+                        "Auth",
+                        if profile.access_token.is_some() {
+                            "configured".into()
+                        } else {
+                            "not configured".into()
+                        },
+                    ),
+                    ("Wallet", profile.wallet.unwrap_or_else(|| "—".into())),
+                    (
+                        "Output",
+                        profile
+                            .output
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "table".into()),
+                    ),
+                    ("Workflows", config.workflows.len().to_string()),
+                    ("Hooks", config.hooks.len().to_string()),
+                    ("Config path", Config::path()?.display().to_string()),
+                ]),
+            }
         }
         ConfigCmd::SetUrl { url } => {
+            let mut config = config.lock().unwrap();
             if !url.starts_with("http://") && !url.starts_with("https://") {
                 output::warn("URL should start with http:// or https://");
             }
-            let mut cfg = config.lock().unwrap();
-            cfg.api_url = url.clone();
-            cfg.save()?;
-            output::success(&format!("API URL → {url}"));
+            config.ensure_profile(profile_name).api_url = url.clone();
+            config.save()?;
+            output::success(&format!("{profile_name} API URL → {url}"));
         }
         ConfigCmd::SetToken { token } => {
-            let mut cfg = config.lock().unwrap();
-            cfg.access_token = Some(token);
-            cfg.save()?;
-            output::success("Access token saved");
+            let mut config = config.lock().unwrap();
+            config.ensure_profile(profile_name).access_token = Some(token);
+            config.save()?;
+            output::success(&format!("access token saved for profile '{profile_name}'"));
         }
         ConfigCmd::Path => {
-            println!("{}", config_path());
+            println!("{}", Config::path()?.display());
         }
         ConfigCmd::Reset { yes } => {
-            if !yes && !output::confirm("Reset all config and clear credentials?") {
+            if !yes && !output::confirm("Reset all CLI config and profiles?") {
                 output::dimmed("cancelled");
                 return Ok(());
             }
             let default = Config::default();
             default.save()?;
             *config.lock().unwrap() = default;
-            output::success("Config reset to defaults");
+            output::success("config reset to defaults");
         }
     }
-    Ok(())
-}
 
-fn config_path() -> String {
-    dirs::config_dir()
-        .unwrap_or_default()
-        .join("r44")
-        .join("config.json")
-        .display()
-        .to_string()
+    Ok(())
 }
