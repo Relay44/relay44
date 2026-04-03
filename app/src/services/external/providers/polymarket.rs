@@ -210,7 +210,7 @@ fn parse_polymarket_market(row: &Value) -> Option<ExternalMarketSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_polymarket_market;
+    use super::{parse_orderbook_levels, parse_polymarket_market, sort_orderbook_levels};
     use serde_json::json;
 
     #[test]
@@ -254,6 +254,34 @@ mod tests {
 
         assert_eq!(market.close_time, 1_785_456_000);
     }
+
+    #[test]
+    fn sorts_orderbook_levels_before_truncating() {
+        let mut bids = parse_orderbook_levels(Some(&json!([
+            {"price": "0.01", "size": "100"},
+            {"price": "0.54", "size": "30"},
+            {"price": "0.53", "size": "20"}
+        ])));
+        let mut asks = parse_orderbook_levels(Some(&json!([
+            {"price": "0.99", "size": "100"},
+            {"price": "0.56", "size": "25"},
+            {"price": "0.55", "size": "40"}
+        ])));
+
+        sort_orderbook_levels("bid", &mut bids);
+        sort_orderbook_levels("ask", &mut asks);
+        bids.truncate(2);
+        asks.truncate(2);
+
+        assert_eq!(
+            bids.iter().map(|level| level.price).collect::<Vec<_>>(),
+            vec![0.54, 0.53]
+        );
+        assert_eq!(
+            asks.iter().map(|level| level.price).collect::<Vec<_>>(),
+            vec![0.55, 0.56]
+        );
+    }
 }
 
 fn parse_orderbook_levels(value: Option<&Value>) -> Vec<ExternalOrderBookLevel> {
@@ -275,6 +303,14 @@ fn parse_orderbook_levels(value: Option<&Value>) -> Vec<ExternalOrderBookLevel> 
             })
         })
         .collect()
+}
+
+fn sort_orderbook_levels(side: &str, levels: &mut [ExternalOrderBookLevel]) {
+    if side.eq_ignore_ascii_case("bid") {
+        levels.sort_by(|a, b| b.price.total_cmp(&a.price));
+    } else {
+        levels.sort_by(|a, b| a.price.total_cmp(&b.price));
+    }
 }
 
 fn token_for_outcome(
@@ -443,6 +479,8 @@ pub async fn fetch_orderbook(
 
     let mut bids = parse_orderbook_levels(payload.get("bids"));
     let mut asks = parse_orderbook_levels(payload.get("asks"));
+    sort_orderbook_levels("bid", &mut bids);
+    sort_orderbook_levels("ask", &mut asks);
     bids.truncate(depth as usize);
     asks.truncate(depth as usize);
 
