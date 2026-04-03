@@ -232,6 +232,9 @@ async fn execute_command(
             commands::positions::run(cmd, client, effective.output).await
         }
         Commands::Agents { cmd } => commands::agents::run(cmd, client, effective.output).await,
+        Commands::EdgeScanner { cmd } => {
+            commands::edge_scanner::run(cmd, client, effective.output).await
+        }
         Commands::Wallet { cmd } => commands::wallet::run(cmd, client, effective.output).await,
         Commands::Config { cmd } => {
             commands::config::run(cmd, config, &effective.profile, effective.output)

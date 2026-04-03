@@ -89,6 +89,13 @@ pub(crate) enum Commands {
         cmd: commands::agents::AgentCmd,
     },
 
+    /// Calibration and time-decay edge signals
+    #[command(name = "edge-scanner")]
+    EdgeScanner {
+        #[command(subcommand)]
+        cmd: commands::edge_scanner::EdgeScannerCmd,
+    },
+
     /// Wallet balance and deposit info
     Wallet {
         #[command(subcommand)]
@@ -134,6 +141,7 @@ impl Cli {
             Commands::Orders { cmd } => format!("orders {}", order_path(cmd)),
             Commands::Positions { cmd } => format!("positions {}", position_path(cmd)),
             Commands::Agents { cmd } => format!("agents {}", agent_path(cmd)),
+            Commands::EdgeScanner { cmd } => format!("edge-scanner {}", edge_scanner_path(cmd)),
             Commands::Wallet { cmd } => format!("wallet {}", wallet_path(cmd)),
             Commands::Config { cmd } => format!("config {}", config_path(cmd)),
             Commands::Profile { cmd } => format!("profile {}", profile_path(cmd)),
@@ -268,5 +276,12 @@ fn session_path(cmd: &commands::session::SessionCmd) -> &'static str {
     match cmd {
         commands::session::SessionCmd::Export { .. } => "export",
         commands::session::SessionCmd::Replay { .. } => "replay",
+    }
+}
+
+fn edge_scanner_path(cmd: &commands::edge_scanner::EdgeScannerCmd) -> &'static str {
+    match cmd {
+        commands::edge_scanner::EdgeScannerCmd::Signals { .. } => "signals",
+        commands::edge_scanner::EdgeScannerCmd::Curve => "curve",
     }
 }
