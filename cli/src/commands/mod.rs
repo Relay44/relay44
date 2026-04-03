@@ -1,9 +1,13 @@
 pub mod agents;
 pub mod config;
+pub mod doctor;
 pub mod login;
 pub mod markets;
 pub mod orders;
 pub mod positions;
+pub mod profile;
+pub mod session;
 pub mod setup;
 pub mod shell;
 pub mod wallet;
+pub mod workflow;

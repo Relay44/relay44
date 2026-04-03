@@ -5,7 +5,7 @@ use tabled::Tabled;
 use crate::client::Client;
 use crate::output::{self, Format};
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum AgentCmd {
     /// List your agents
     #[command(long_about = "List all agents owned by your account.\n\n\
@@ -13,13 +13,17 @@ pub enum AgentCmd {
     List,
 
     /// Get agent details
-    #[command(long_about = "Show full details for a specific agent including strategy config.\n\n\
-                            Example:\n  r44 agents get <AGENT_ID>")]
+    #[command(
+        long_about = "Show full details for a specific agent including strategy config.\n\n\
+                            Example:\n  r44 agents get <AGENT_ID>"
+    )]
     Get { id: String },
 
     /// List public community agents
-    #[command(long_about = "Browse all public agents and their performance. No auth required.\n\n\
-                            Examples:\n  r44 agents public\n  r44 --output json agents public")]
+    #[command(
+        long_about = "Browse all public agents and their performance. No auth required.\n\n\
+                            Examples:\n  r44 agents public\n  r44 --output json agents public"
+    )]
     Public,
 
     /// Create a new agent
@@ -36,8 +40,10 @@ pub enum AgentCmd {
     },
 
     /// Update an existing agent
-    #[command(long_about = "Update agent configuration. Pass fields as a JSON object.\n\n\
-                            Example:\n  r44 agents update <ID> --data '{\"active\":false}'")]
+    #[command(
+        long_about = "Update agent configuration. Pass fields as a JSON object.\n\n\
+                            Example:\n  r44 agents update <ID> --data '{\"active\":false}'"
+    )]
     Update {
         id: String,
         #[arg(long, short)]
@@ -90,8 +96,7 @@ pub async fn run(cmd: AgentCmd, api: &Client, fmt: Format) -> Result<()> {
         }
         AgentCmd::Get { id } => {
             let sp = output::spinner("Fetching agent…");
-            let data: serde_json::Value =
-                api.get_raw(&format!("/external/agents/{id}")).await?;
+            let data: serde_json::Value = api.get_raw(&format!("/external/agents/{id}")).await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
@@ -129,11 +134,15 @@ pub async fn run(cmd: AgentCmd, api: &Client, fmt: Format) -> Result<()> {
             }
         }
         AgentCmd::Update { id, data: data_str } => {
-            let body: serde_json::Value = serde_json::from_str(&data_str)
-                .map_err(|e| anyhow::anyhow!("invalid JSON: {e}\n  hint: wrap in single quotes and use double quotes inside"))?;
+            let body: serde_json::Value = serde_json::from_str(&data_str).map_err(|e| {
+                anyhow::anyhow!(
+                    "invalid JSON: {e}\n  hint: wrap in single quotes and use double quotes inside"
+                )
+            })?;
             let sp = output::spinner("Updating agent…");
-            let data: serde_json::Value =
-                api.patch_raw(&format!("/external/agents/{id}"), &body).await?;
+            let data: serde_json::Value = api
+                .patch_raw(&format!("/external/agents/{id}"), &body)
+                .await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
@@ -143,8 +152,9 @@ pub async fn run(cmd: AgentCmd, api: &Client, fmt: Format) -> Result<()> {
         AgentCmd::Execute { id } => {
             let sp = output::spinner("Executing agent…");
             let body = serde_json::json!({});
-            let data: serde_json::Value =
-                api.post_raw(&format!("/external/agents/{id}/execute"), &body).await?;
+            let data: serde_json::Value = api
+                .post_raw(&format!("/external/agents/{id}/execute"), &body)
+                .await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),

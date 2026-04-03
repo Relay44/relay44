@@ -6,7 +6,7 @@ use tabled::Tabled;
 use crate::client::Client;
 use crate::output::{self, Format};
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum MarketCmd {
     /// List markets
     #[command(
@@ -98,7 +98,12 @@ struct TradeRow {
 
 pub async fn run(cmd: MarketCmd, api: &Client, fmt: Format) -> Result<()> {
     match cmd {
-        MarketCmd::List { status, query, limit, offset } => {
+        MarketCmd::List {
+            status,
+            query,
+            limit,
+            offset,
+        } => {
             let sp = output::spinner("Fetching markets…");
             let mut path = format!("/markets?limit={limit}&offset={offset}");
             if let Some(s) = &status {
@@ -161,8 +166,7 @@ pub async fn run(cmd: MarketCmd, api: &Client, fmt: Format) -> Result<()> {
         }
         MarketCmd::Orderbook { id } => {
             let sp = output::spinner("Fetching orderbook…");
-            let data: serde_json::Value =
-                api.get_raw(&format!("/markets/{id}/orderbook")).await?;
+            let data: serde_json::Value = api.get_raw(&format!("/markets/{id}/orderbook")).await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
@@ -176,8 +180,9 @@ pub async fn run(cmd: MarketCmd, api: &Client, fmt: Format) -> Result<()> {
         }
         MarketCmd::Trades { id, limit } => {
             let sp = output::spinner("Fetching trades…");
-            let data: serde_json::Value =
-                api.get_raw(&format!("/markets/{id}/trades?limit={limit}")).await?;
+            let data: serde_json::Value = api
+                .get_raw(&format!("/markets/{id}/trades?limit={limit}"))
+                .await?;
             sp.finish_and_clear();
             match fmt {
                 Format::Json => output::print_json(&data),
