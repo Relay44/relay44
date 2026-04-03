@@ -398,6 +398,13 @@ function buildPolymarketIndexerFailures(state, env = process.env) {
       }`,
     );
   }
+  if (userStreamStatus === "missing_credentials") {
+    failures.push(
+      `polymarket_indexer_user_stream_failed: ${
+        userStream.error || "builder credentials are not configured"
+      }`,
+    );
+  }
 
   if (state.last_status === "failed" && failures.length === 0) {
     let message = lastErrorMessage || "runner reported failure";
