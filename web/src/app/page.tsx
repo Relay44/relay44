@@ -48,8 +48,7 @@ export default async function HomePage() {
     name: market.question,
     url: absoluteUrl(`/markets/${encodeURIComponent(market.id)}`),
   }));
-  const heroBackgroundImageSrc =
-    HOME_HERO_IMAGE_SRCS[randomInt(0, HOME_HERO_IMAGE_SRCS.length)];
+  const heroInitialIndex = randomInt(0, HOME_HERO_IMAGE_SRCS.length);
 
   return (
     <>
@@ -71,7 +70,8 @@ export default async function HomePage() {
       <HomePageClient
         initialMarkets={initialMarkets}
         initialLiveFeed={initialLiveFeed}
-        heroBackgroundImageSrc={heroBackgroundImageSrc}
+        heroImageSrcs={[...HOME_HERO_IMAGE_SRCS]}
+        heroInitialIndex={heroInitialIndex}
       />
     </>
   );
