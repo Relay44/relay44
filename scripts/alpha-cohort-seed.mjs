@@ -64,7 +64,7 @@ async function fetchTopWallets(token) {
     `/external/research/wallets?marketCategory=${MARKET_CATEGORY}&limit=20`,
     token,
   );
-  const wallets = payload?.wallets || payload?.data || [];
+  const wallets = payload?.items || payload?.wallets || payload?.data || [];
   return wallets
     .filter((w) => (w.composite_score ?? w.compositeScore ?? 0) >= 0.55)
     .slice(0, AGENT_COUNT);
