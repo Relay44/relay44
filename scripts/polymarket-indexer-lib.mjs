@@ -202,6 +202,15 @@ function makeUserStreamFailure(code, message, extra = {}) {
   };
 }
 
+function missingCredentialsState(extra = {}) {
+  return {
+    ok: true,
+    status: 'missing_credentials',
+    error: 'builder credentials are not configured',
+    ...extra,
+  };
+}
+
 export const apiBase = normalizeApiBase(
   process.env.POLYMARKET_INDEXER_API_URL || process.env.API_URL || DEFAULT_API_URL,
 );
@@ -300,12 +309,10 @@ async function fetchRelayerTransactions() {
     path: '/transactions',
   });
   if (!headers) {
-    return {
-      ok: false,
-      status: 'unauthorized',
+    return missingCredentialsState({
       transactions: [],
-      error: 'builder credentials are not configured',
-    };
+      fetched: 0,
+    });
   }
 
   try {
@@ -342,11 +349,11 @@ async function collectUserLifecycleEvents(trackedMarkets) {
     };
   }
   if (!credentials) {
-    return makeUserStreamFailure(
-      'user_stream_credentials_failed',
-      'builder credentials are not configured',
-      { marketCount: trackedMarkets.length },
-    );
+    return missingCredentialsState({
+      events: [],
+      marketCount: trackedMarkets.length,
+      ...parseLifecycleCounts([]),
+    });
   }
 
   const windowMs = parsePositiveInt(
@@ -616,7 +623,12 @@ function normalizeMetadata(health, backfill, userStream, relayer) {
           backfill?.userFillEventsIngested ?? backfill?.user_fill_events_ingested ?? 0,
       },
       reconciliation: {
-        status: relayer?.status === 'failed' ? 'failed' : 'ready',
+        status:
+          relayer?.status === 'failed'
+            ? 'failed'
+            : relayer?.status === 'missing_credentials'
+              ? 'missing_credentials'
+              : 'ready',
         updated: reconciliationUpdated,
         fetchedTransactions: relayer?.fetched ?? 0,
         consecutiveFailures: relayer?.status === 'failed' ? 1 : 0,
