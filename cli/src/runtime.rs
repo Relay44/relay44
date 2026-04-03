@@ -19,6 +19,7 @@ pub struct InvocationDefaults {
     pub output: Option<Format>,
     pub quiet: bool,
     pub verbose: bool,
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,7 +119,7 @@ pub async fn execute(
         source: source_name(source),
     };
 
-    let snapshot = config.lock().unwrap().clone();
+    let snapshot = config.lock().expect("config lock").clone();
     hooks::run_pre_hooks(&snapshot, &hook_context).await?;
 
     let started_at = Instant::now();
@@ -126,6 +127,7 @@ pub async fn execute(
         &effective.api_url,
         config.clone(),
         effective.profile.clone(),
+        effective.timeout_secs,
     )?;
     let result = execute_command(
         cli,
@@ -138,7 +140,7 @@ pub async fn execute(
     .await;
     let exit_status = if result.is_ok() { 0 } else { 1 };
 
-    let snapshot = config.lock().unwrap().clone();
+    let snapshot = config.lock().expect("config lock").clone();
     let post_hook_result = hooks::run_post_hooks(
         &snapshot,
         &hook_context,
@@ -211,6 +213,7 @@ async fn execute_command(
                 output: Some(effective.output),
                 quiet: effective.quiet,
                 verbose: effective.verbose,
+                timeout_secs: Some(effective.timeout_secs),
             };
             commands::shell::run(config, shell_defaults).await
         }
@@ -224,7 +227,14 @@ async fn execute_command(
             .await
         }
         Commands::Login { cmd } => {
-            commands::login::run(cmd, config, &effective.profile, &effective.api_url).await
+            commands::login::run(
+                cmd,
+                config,
+                &effective.profile,
+                &effective.api_url,
+                effective.output,
+            )
+            .await
         }
         Commands::Markets { cmd } => commands::markets::run(cmd, client, effective.output).await,
         Commands::Orders { cmd } => commands::orders::run(cmd, client, effective.output).await,
@@ -257,6 +267,7 @@ pub struct EffectiveInvocation {
     pub output: Format,
     pub quiet: bool,
     pub verbose: bool,
+    pub timeout_secs: u64,
 }
 
 impl EffectiveInvocation {
@@ -265,7 +276,7 @@ impl EffectiveInvocation {
         config: &Arc<Mutex<Config>>,
         defaults: &InvocationDefaults,
     ) -> Result<Self> {
-        let config = config.lock().unwrap();
+        let config = config.lock().expect("config lock");
         let requested_profile = cli
             .profile
             .as_deref()
@@ -295,6 +306,7 @@ impl EffectiveInvocation {
                 .unwrap_or(Format::Table),
             quiet: cli.quiet || defaults.quiet,
             verbose: cli.verbose || defaults.verbose,
+            timeout_secs: defaults.timeout_secs.unwrap_or(cli.timeout),
         })
     }
 }

@@ -75,7 +75,7 @@ fn term_width() -> usize {
 // --- Value extraction from JSON ---
 
 pub fn str_val(val: &serde_json::Value, key: &str) -> String {
-    match &val[key] {
+    match val.get(key).unwrap_or(&serde_json::Value::Null) {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
@@ -85,8 +85,8 @@ pub fn str_val(val: &serde_json::Value, key: &str) -> String {
 }
 
 pub fn price_field(val: &serde_json::Value, key: &str) -> String {
-    match &val[key] {
-        serde_json::Value::Number(n) => {
+    match val.get(key) {
+        Some(serde_json::Value::Number(n)) => {
             if let Some(f) = n.as_f64() {
                 format!("{:.1}¢", f * 100.0)
             } else {
@@ -101,12 +101,6 @@ pub fn price_field(val: &serde_json::Value, key: &str) -> String {
 
 pub fn usdc(lamports: f64) -> String {
     let d = Decimal::from_f64_retain(lamports / 1_000_000.0).unwrap_or_default();
-    format!("${}", format_decimal(d))
-}
-
-#[allow(dead_code)]
-pub fn usdc_raw(amount: f64) -> String {
-    let d = Decimal::from_f64_retain(amount).unwrap_or_default();
     format!("${}", format_decimal(d))
 }
 
@@ -126,7 +120,7 @@ pub fn format_decimal(d: Decimal) -> String {
 }
 
 pub fn format_date(val: &serde_json::Value, key: &str) -> String {
-    match val[key].as_str() {
+    match val.get(key).and_then(|v| v.as_str()) {
         Some(s) => {
             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
                 dt.format("%Y-%m-%d %H:%M UTC").to_string()
@@ -139,7 +133,7 @@ pub fn format_date(val: &serde_json::Value, key: &str) -> String {
 }
 
 pub fn active_status(val: &serde_json::Value) -> String {
-    match val["active"].as_bool() {
+    match val.get("active").and_then(|v| v.as_bool()) {
         Some(true) => "active".into(),
         Some(false) => "inactive".into(),
         None => str_val(val, "status"),
@@ -156,25 +150,10 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-// --- Slug / ID detection ---
-
-#[allow(dead_code)]
-pub fn is_numeric_id(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-}
-
 // --- JSON output ---
 
 pub fn print_json(value: &serde_json::Value) {
     println!("{}", serde_json::to_string_pretty(value).unwrap());
-}
-
-#[allow(dead_code)]
-pub fn print_error_json(msg: &str) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "error": msg })).unwrap()
-    );
 }
 
 // --- Table output (tabled crate) ---
@@ -378,12 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn usdc_converts_lamports() {
-        assert_eq!(usdc(1_000_000.0), "$1.00");
-        assert_eq!(usdc(50_000_000_000.0), "$50.0K");
-    }
-
-    #[test]
     fn str_val_extracts_types() {
         let v = json!({"s": "hello", "n": 42, "b": true, "nil": null});
         assert_eq!(str_val(&v, "s"), "hello");
@@ -413,14 +386,6 @@ mod tests {
     #[test]
     fn truncate_max_one() {
         assert_eq!(truncate("hello", 1), "h");
-    }
-
-    #[test]
-    fn is_numeric_id_valid() {
-        assert!(is_numeric_id("abc-123"));
-        assert!(is_numeric_id("deadbeef"));
-        assert!(!is_numeric_id(""));
-        assert!(!is_numeric_id("hello world"));
     }
 
     #[test]
