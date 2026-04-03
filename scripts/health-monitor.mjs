@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import pg from "pg";
+
 import {
   closeOpsState,
   connectOpsState,
@@ -20,11 +22,17 @@ import {
   shouldRunScheduledSmoke as shouldRunScheduledOrderSmoke,
 } from "./order-smoke.mjs";
 
+const { Client } = pg;
+
 const API_URL = process.env.API_URL || "https://relay44-api.onrender.com/v1";
 const X402_RUNNER_NAME = "x402_smoke";
 const ORDER_SMOKE_RUNNER_NAME = "order_smoke";
 const EXTERNAL_RUNNER_NAME = "external_runner";
 const BOOTSTRAP_RUNNER_NAME = "bootstrap_operator";
+const POLYMARKET_INDEXER_RUNNER_NAME = "polymarket_indexer";
+const CREATOR_ECONOMICS_RUNNER_NAME = "creator_economics_materializer";
+const CREATOR_ECONOMICS_MATERIALIZER_RUNNER_NAME =
+  "creator_economics_materializer";
 
 const healthUrl = API_URL.replace(/\/v1$/, "/health/detailed");
 
@@ -39,10 +47,152 @@ function parseNumber(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function buildDbConfig(connectionString) {
+  const url = new URL(connectionString);
+  const sslmode = (url.searchParams.get("sslmode") || "").trim().toLowerCase();
+  const needsSsl =
+    ["require", "verify-ca", "verify-full", "prefer"].includes(sslmode) ||
+    /\.render\.com$/i.test(url.hostname);
+
+  return needsSsl
+    ? {
+        connectionString,
+        connectionTimeoutMillis: 10_000,
+        keepAlive: true,
+        ssl: { rejectUnauthorized: false },
+      }
+    : {
+        connectionString,
+        connectionTimeoutMillis: 10_000,
+        keepAlive: true,
+      };
+}
+
+async function fetchCreatorEconomicsFreshness(env) {
+  const connectionString = String(env.DATABASE_URL || "").trim();
+  if (!connectionString) {
+    return null;
+  }
+
+  const client = new Client(buildDbConfig(connectionString));
+  await client.connect();
+
+  try {
+    const maxRowAgeMinutes = parseNumber(
+      env.CREATOR_ECONOMICS_MAX_ROW_AGE_MINUTES,
+      180,
+    );
+    const summary = await client.query(
+      `
+        with expected as (
+          select market_id, lower(creator) as creator
+          from base_market_bootstrap_configs
+          where liquidity_mode = 'bootstrap_hybrid'
+            and seed_usdc > 0
+        ),
+        actual as (
+          select market_id, lower(creator) as creator, updated_at
+          from creator_market_economics_daily
+          where day = current_date
+        )
+        select
+          count(*)::bigint as expected_count,
+          count(a.market_id)::bigint as materialized_count,
+          count(*) filter (where a.market_id is null)::bigint as missing_count,
+          count(*) filter (
+            where a.updated_at is not null
+              and a.updated_at < now() - make_interval(mins => $1::int)
+          )::bigint as stale_count
+        from expected e
+        left join actual a
+          on a.market_id = e.market_id
+         and a.creator = e.creator
+      `,
+      [Math.max(1, Math.trunc(maxRowAgeMinutes))],
+    );
+    const preview = await client.query(
+      `
+        with expected as (
+          select market_id, lower(creator) as creator
+          from base_market_bootstrap_configs
+          where liquidity_mode = 'bootstrap_hybrid'
+            and seed_usdc > 0
+        ),
+        actual as (
+          select market_id, lower(creator) as creator, updated_at
+          from creator_market_economics_daily
+          where day = current_date
+        )
+        select
+          e.market_id,
+          e.creator,
+          a.updated_at
+        from expected e
+        left join actual a
+          on a.market_id = e.market_id
+         and a.creator = e.creator
+        where a.market_id is null
+           or (
+             a.updated_at is not null
+             and a.updated_at < now() - make_interval(mins => $1::int)
+           )
+        order by e.market_id asc
+        limit 5
+      `,
+      [Math.max(1, Math.trunc(maxRowAgeMinutes))],
+    );
+
+    return {
+      maxRowAgeMinutes,
+      expectedCount: parseNumber(summary.rows[0]?.expected_count, 0),
+      materializedCount: parseNumber(summary.rows[0]?.materialized_count, 0),
+      missingCount: parseNumber(summary.rows[0]?.missing_count, 0),
+      staleCount: parseNumber(summary.rows[0]?.stale_count, 0),
+      preview: preview.rows.map((row) => ({
+        marketId: parseNumber(row.market_id, 0),
+        creator: row.creator,
+        updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+      })),
+    };
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 async function fetchApiJson(path) {
   const response = await fetch(`${API_URL}${path}`, {
     signal: AbortSignal.timeout(30_000),
     headers: { Accept: "application/json" },
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { raw: text };
+    }
+  }
+  if (!response.ok) {
+    throw new Error(
+      `${path} ${response.status}: ${payload?.message || payload?.error || response.statusText}`,
+    );
+  }
+  return payload;
+}
+
+async function fetchApiJsonAdmin(path) {
+  const adminKey = String(process.env.ADMIN_CONTROL_KEY || "").trim();
+  if (!adminKey) {
+    throw new Error("missing ADMIN_CONTROL_KEY");
+  }
+
+  const response = await fetch(`${API_URL}${path}`, {
+    signal: AbortSignal.timeout(30_000),
+    headers: {
+      Accept: "application/json",
+      "x-admin-key": adminKey,
+    },
   });
   const text = await response.text();
   let payload = null;
@@ -98,6 +248,219 @@ function buildBootstrapStatusFailures(markets) {
   return [
     `bootstrap_markets: ${problematic.length} blocked or paused (${preview})`,
   ];
+}
+
+function asObject(value) {
+  return value && typeof value === "object" ? value : {};
+}
+
+function pickStatus(...values) {
+  for (const value of values) {
+    if (value == null) {
+      continue;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function getPolymarketIndexerSubstate(state, name) {
+  const metadata = asObject(state?.metadata);
+  const substates = asObject(metadata.substates);
+  const camelName = name.replace(/_([a-z])/g, (_, ch) => ch.toUpperCase());
+  const candidates = [
+    substates[name],
+    substates[camelName],
+    metadata[name],
+    metadata[camelName],
+  ];
+
+  if (name === "user_stream" || name === "userStream") {
+    candidates.push(asObject(metadata.credentials)?.userStream);
+  }
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && Object.keys(candidate).length > 0) {
+      return candidate;
+    }
+  }
+
+  return {};
+}
+
+function buildPolymarketIndexerFailures(state, env = process.env) {
+  if (!state) {
+    return [];
+  }
+
+  const metadata = asObject(state.metadata);
+  const failures = [];
+  const lastErrorCode = pickStatus(state.last_error_code, metadata.lastErrorCode);
+  const lastErrorMessage = String(
+    state.last_error_message || metadata.lastErrorMessage || "",
+  ).trim();
+
+  const stream = getPolymarketIndexerSubstate(state, "stream");
+  const streamStatus = pickStatus(stream.status, stream.state);
+  if (streamStatus === "disconnected" || stream.disconnected === true) {
+    failures.push(
+      `polymarket_indexer_stream_disconnected: ${stream.error || "forwarder or stream disconnected"}`,
+    );
+  }
+
+  const cursor = getPolymarketIndexerSubstate(state, "cursor");
+  const cursorStatus = pickStatus(cursor.status, cursor.state);
+  if (cursorStatus === "stalled" || cursor.stalled === true) {
+    const block =
+      cursor.cursorBlock ?? cursor.cursor_block ?? cursor.block ?? null;
+    failures.push(
+      `polymarket_indexer_cursor_stalled: ${
+        block != null ? `cursor stalled at block ${block}` : "cursor stalled"
+      }`,
+    );
+  }
+
+  const backfill = getPolymarketIndexerSubstate(state, "backfill");
+  const backfillStatus = pickStatus(backfill.status, backfill.state);
+  const backfillLagBlocks = Number(
+    backfill.lagBlocks ??
+      backfill.lag_blocks ??
+      metadata.backfillLagBlocks ??
+      metadata.backfill_lag_blocks ??
+      NaN,
+  );
+  const maxBackfillLagBlocks = parseNumber(
+    env.POLYMARKET_INDEXER_MAX_BACKFILL_LAG_BLOCKS,
+    250,
+  );
+  if (
+    backfillStatus === "lagging" ||
+    (Number.isFinite(backfillLagBlocks) && backfillLagBlocks > maxBackfillLagBlocks)
+  ) {
+    failures.push(
+      `polymarket_indexer_backfill_lag: ${
+        Number.isFinite(backfillLagBlocks)
+          ? `${backfillLagBlocks} blocks > ${maxBackfillLagBlocks}`
+          : "backfill lagging"
+      }`,
+    );
+  }
+
+  const reconciliation = getPolymarketIndexerSubstate(state, "reconciliation");
+  const reconciliationStatus = pickStatus(
+    reconciliation.status,
+    reconciliation.state,
+  );
+  const consecutiveFailures = Number(
+    reconciliation.consecutiveFailures ??
+      reconciliation.consecutive_failures ??
+      metadata.consecutiveReconciliationFailures ??
+      metadata.consecutive_reconciliation_failures ??
+      NaN,
+  );
+  const maxReconciliationFailures = parseNumber(
+    env.POLYMARKET_INDEXER_MAX_RECONCILIATION_FAILURES,
+    3,
+  );
+  if (
+    reconciliationStatus === "failed" ||
+    (Number.isFinite(consecutiveFailures) &&
+      consecutiveFailures > maxReconciliationFailures)
+  ) {
+    failures.push(
+      `polymarket_indexer_reconciliation_failed: ${
+        Number.isFinite(consecutiveFailures)
+          ? `${consecutiveFailures} consecutive failures > ${maxReconciliationFailures}`
+          : "reconciliation failed repeatedly"
+      }`,
+    );
+  }
+
+  const userStream = getPolymarketIndexerSubstate(state, "user_stream");
+  const userStreamStatus = pickStatus(
+    userStream.status,
+    userStream.state,
+    metadata.credentials?.userStream?.status,
+  );
+  if (
+    ["failed", "disconnected", "revoked", "expired", "unauthorized"].includes(
+      userStreamStatus,
+    )
+  ) {
+    failures.push(
+      `polymarket_indexer_user_stream_failed: ${
+        userStream.error || "user stream credentials or session failed"
+      }`,
+    );
+  }
+
+  if (state.last_status === "failed" && failures.length === 0) {
+    let message = lastErrorMessage || "runner reported failure";
+    if (lastErrorCode === "stream_disconnected") {
+      message = lastErrorMessage || "forwarder or stream disconnected";
+      failures.push(`polymarket_indexer_stream_disconnected: ${message}`);
+      return failures;
+    }
+    if (lastErrorCode === "cursor_stalled") {
+      message = lastErrorMessage || "cursor stalled";
+      failures.push(`polymarket_indexer_cursor_stalled: ${message}`);
+      return failures;
+    }
+    if (lastErrorCode === "backfill_lag") {
+      message = lastErrorMessage || "backfill lagging";
+      failures.push(`polymarket_indexer_backfill_lag: ${message}`);
+      return failures;
+    }
+    if (lastErrorCode === "reconciliation_failed") {
+      message = lastErrorMessage || "reconciliation failed repeatedly";
+      failures.push(`polymarket_indexer_reconciliation_failed: ${message}`);
+      return failures;
+    }
+    if (lastErrorCode === "user_stream_credentials_failed") {
+      message = lastErrorMessage || "user stream credentials or session failed";
+      failures.push(`polymarket_indexer_user_stream_failed: ${message}`);
+      return failures;
+    }
+    failures.push(
+      `polymarket_indexer_failed: ${lastErrorCode ? `${lastErrorCode}${lastErrorMessage ? ` (${lastErrorMessage})` : ""}` : message}`,
+    );
+  }
+
+  return failures;
+}
+
+function buildCreatorEconomicsMaterializerFailures(health, env = process.env) {
+  if (!health || typeof health !== "object") {
+    return [];
+  }
+
+  const failures = [];
+  const status = pickStatus(health.status);
+  const maxLagDays = parseNumber(
+    env.CREATOR_ECONOMICS_MATERIALIZER_MAX_LAG_DAYS,
+    1,
+  );
+  const staleMarkets = Number(health.staleMarkets ?? health.stale_markets ?? 0);
+  const maxLagObserved = Number(health.maxLagDays ?? health.max_lag_days ?? 0);
+
+  if (status && !["healthy", "idle"].includes(status)) {
+    failures.push(
+      `creator_economics_materializer_health: ${status}${staleMarkets > 0 ? ` (${staleMarkets} stale markets)` : ""}`,
+    );
+  }
+
+  if (Number.isFinite(maxLagObserved) && maxLagObserved > maxLagDays) {
+    failures.push(
+      `creator_economics_materializer_lag: ${maxLagObserved}d > ${maxLagDays}d`,
+    );
+  }
+
+  return failures;
 }
 
 function formatFailureStage(error) {
@@ -336,6 +699,49 @@ if (opsState) {
     }
   }
 
+  const polymarketIndexerEnabled = isEnabled(
+    process.env.POLYMARKET_INDEXER_ENABLED,
+  );
+  if (polymarketIndexerEnabled) {
+    const state = await withOpsState(() =>
+      getRunnerState(opsState, POLYMARKET_INDEXER_RUNNER_NAME),
+    );
+    const overdueMs = parseNumber(
+      process.env.POLYMARKET_INDEXER_OVERDUE_MS,
+      15 * 60_000,
+    );
+    const message = runnerOverdueMessage(
+      "polymarket_indexer",
+      state,
+      overdueMs,
+    );
+    if (message) {
+      failures.push(message);
+    }
+    failures.push(...buildPolymarketIndexerFailures(state, process.env));
+  }
+
+  const creatorMaterializerEnabled = isEnabled(
+    process.env.CREATOR_ECONOMICS_MATERIALIZER_ENABLED,
+  );
+  if (creatorMaterializerEnabled) {
+    const state = await withOpsState(() =>
+      getRunnerState(opsState, CREATOR_ECONOMICS_MATERIALIZER_RUNNER_NAME),
+    );
+    const overdueMs = parseNumber(
+      process.env.CREATOR_ECONOMICS_MATERIALIZER_OVERDUE_MS,
+      6 * 60 * 60_000,
+    );
+    const message = runnerOverdueMessage(
+      "creator_economics_materializer",
+      state,
+      overdueMs,
+    );
+    if (message) {
+      failures.push(message);
+    }
+  }
+
   const bootstrapEnabled = isEnabled(process.env.BASE_AGENT_OPERATOR_ENABLED);
   if (bootstrapEnabled) {
     const state = await withOpsState(() =>
@@ -348,6 +754,55 @@ if (opsState) {
     const message = runnerOverdueMessage("bootstrap_operator", state, overdueMs);
     if (message) {
       failures.push(message);
+    }
+  }
+
+  const creatorEconomicsEnabled = isEnabled(
+    process.env.CREATOR_ECONOMICS_MATERIALIZER_ENABLED,
+  );
+  if (creatorEconomicsEnabled) {
+    const state = await withOpsState(() =>
+      getRunnerState(opsState, CREATOR_ECONOMICS_RUNNER_NAME),
+    );
+    const overdueMs = parseNumber(
+      process.env.CREATOR_ECONOMICS_MATERIALIZER_OVERDUE_MS,
+      6 * 60 * 60_000,
+    );
+    const message = runnerOverdueMessage(
+      "creator_economics_materializer",
+      state,
+      overdueMs,
+    );
+    if (message) {
+      failures.push(message);
+    }
+
+    try {
+      const freshness = await fetchCreatorEconomicsFreshness(process.env);
+      if (freshness) {
+        if (freshness.missingCount > 0) {
+          const preview = freshness.preview
+            .map((entry) => `${entry.marketId}:${entry.creator}`)
+            .join(", ");
+          failures.push(
+            `creator_economics_missing: ${freshness.missingCount}/${freshness.expectedCount} bootstrap creator markets missing today's row${preview ? ` (${preview})` : ""}`,
+          );
+        }
+        if (freshness.staleCount > 0) {
+          const preview = freshness.preview
+            .filter((entry) => entry.updatedAt)
+            .map(
+              (entry) =>
+                `${entry.marketId}:${entry.creator}@${entry.updatedAt}`,
+            )
+            .join(", ");
+          failures.push(
+            `creator_economics_stale: ${freshness.staleCount} rows older than ${freshness.maxRowAgeMinutes}m${preview ? ` (${preview})` : ""}`,
+          );
+        }
+      }
+    } catch (error) {
+      failures.push(`creator_economics_health: ${error.message}`);
     }
   }
 }
@@ -420,6 +875,17 @@ try {
   failures.push(...buildBootstrapStatusFailures(markets?.markets || []));
 } catch (error) {
   failures.push(`bootstrap_markets: ${error.message}`);
+}
+
+if (isEnabled(process.env.CREATOR_ECONOMICS_MATERIALIZER_ENABLED)) {
+  try {
+    const health = await fetchApiJsonAdmin("/evm/creator/materializer/health");
+    failures.push(
+      ...buildCreatorEconomicsMaterializerFailures(health, process.env),
+    );
+  } catch (error) {
+    failures.push(`creator_economics_materializer: ${error.message}`);
+  }
 }
 
 if (failures.length > 0) {

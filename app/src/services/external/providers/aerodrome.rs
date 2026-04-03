@@ -602,6 +602,10 @@ pub async fn fetch_trades(
         chain_id: 8453,
         provider_market_ref: pool_address.to_string(),
         is_synthetic: false,
+        index_status: None,
+        indexed_from: None,
+        indexed_through: None,
+        is_partial_backfill: false,
     })
 }
 

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod compliance;
+pub mod creator;
 pub mod decisions;
 pub mod error;
 pub mod evm;

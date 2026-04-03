@@ -339,6 +339,20 @@ services:
         value: "10"
       - key: X402_SMOKE_RPC_URL
         value: https://mainnet.base.org
+      - key: POLYMARKET_INDEXER_ENABLED
+        value: "true"
+      - key: POLYMARKET_INDEXER_OVERDUE_MS
+        value: "900000"
+      - key: POLYMARKET_INDEXER_MAX_BACKFILL_LAG_BLOCKS
+        value: "250"
+      - key: POLYMARKET_INDEXER_MAX_RECONCILIATION_FAILURES
+        value: "3"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_ENABLED
+        value: "true"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_OVERDUE_MS
+        value: "21600000"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_MAX_LAG_DAYS
+        value: "1"
 
   - type: cron
     name: relay44-paper-cohort-seeder
@@ -504,6 +518,77 @@ services:
         sync: false
       - key: BASE_RPC_FALLBACK_URLS
         sync: false
+      - key: NODE_ENV
+        value: production
+
+  - type: cron
+    name: relay44-polymarket-indexer
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "* * * * *"
+    buildCommand: npm ci
+    startCommand: npm run polymarket-indexer:tick
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: POLYMARKET_INDEXER_ENABLED
+        value: "true"
+      - key: POLYMARKET_INDEXER_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: POLYMARKET_INDEXER_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: POLYMARKET_INDEXER_SIWE_DOMAIN
+        value: relay44.com
+      - key: POLYMARKET_INDEXER_CHAIN_ID
+        value: "8453"
+      - key: POLYMARKET_INDEXER_LIMIT
+        value: "100"
+      - key: POLYMARKET_INDEXER_OVERDUE_MS
+        value: "900000"
+      - key: POLYMARKET_INDEXER_MAX_BACKFILL_LAG_BLOCKS
+        value: "250"
+      - key: POLYMARKET_INDEXER_MAX_RECONCILIATION_FAILURES
+        value: "3"
+      - key: POLYMARKET_INDEXER_FORWARDER_URL
+        fromService:
+          name: relay44-polymarket-forwarder
+          type: web
+          property: url
+      - key: NODE_ENV
+        value: production
+
+  - type: cron
+    name: relay44-creator-economics-materializer
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "15 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run creator-economics:materializer
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_ENABLED
+        value: "true"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: ADMIN_CONTROL_KEY
+        sync: false
+      - key: CREATOR_ECONOMICS_MATERIALIZER_WINDOW_DAYS
+        value: "30"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_LIMIT
+        value: "250"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_OVERDUE_MS
+        value: "21600000"
+      - key: CREATOR_ECONOMICS_MATERIALIZER_MAX_LAG_DAYS
+        value: "1"
       - key: NODE_ENV
         value: production
 

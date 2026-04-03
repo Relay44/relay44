@@ -171,6 +171,29 @@ ADMIN_WALLETS=0x... \
 npm run agents:operator
 ```
 
+### Run the Polymarket indexer scaffold locally
+
+The Polymarket indexer runner follows the same ops-state pattern as the other cron workers. It records a `polymarket_indexer` runner state, checks the configured forwarder if one is present, and exposes structured substate metadata for stream, cursor, backfill, reconciliation, and credential health.
+It falls back to the shared `API_URL`, `BASE_CHAIN_ID`, and `SIWE_DOMAIN` values if the runner-specific overrides are omitted.
+
+```bash
+POLYMARKET_INDEXER_ENABLED=true \
+POLYMARKET_INDEXER_API_URL=http://127.0.0.1:8080/v1 \
+POLYMARKET_INDEXER_SIWE_DOMAIN=localhost:3000 \
+POLYMARKET_INDEXER_ADMIN_PRIVATE_KEY=0x... \
+POLYMARKET_INDEXER_LIMIT=100 \
+POLYMARKET_INDEXER_OVERDUE_MS=900000 \
+POLYMARKET_INDEXER_MAX_BACKFILL_LAG_BLOCKS=250 \
+POLYMARKET_INDEXER_MAX_RECONCILIATION_FAILURES=3 \
+POLYMARKET_INDEXER_FORWARDER_URL=https://relay44-polymarket-forwarder.onrender.com \
+POLYMARKET_BUILDER_API_KEY=... \
+POLYMARKET_BUILDER_API_SECRET=... \
+POLYMARKET_BUILDER_API_PASSPHRASE=... \
+node scripts/polymarket-indexer-run.mjs
+```
+
+When the runner is enabled, `npm run launch:config:prod-strict` also checks the Polymarket indexer env set so malformed URLs or missing operator keys are caught before deployment.
+
 ### Run the x402 production smoke locally
 
 The x402 smoke uses a dedicated low-balance payer, waits for protected routes to return `402`, pays them, and then asserts the paid responses include `PAYMENT-RESPONSE`. The health monitor persists the last smoke result in Postgres so it can alert when the smoke goes overdue or the payer balance drops below the configured threshold.
