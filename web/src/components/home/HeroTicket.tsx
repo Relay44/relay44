@@ -64,12 +64,35 @@ function TicketCanvas({
     const ctx: CanvasRenderingContext2D = context;
     let meshReadySent = false;
 
+    const MOUSE_RADIUS = 200;
+    const MOUSE_MAX_PUSH = 24;
+    const MOUSE_SPRING = 0.03;
+    const MOUSE_PUSH_STRENGTH = 0.012;
+
+    let mouseX = -9999;
+    let mouseY = -9999;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = host.getBoundingClientRect();
+      mouseX = e.clientX - rect.left;
+      mouseY = e.clientY - rect.top;
+    };
+    const onMouseLeave = () => {
+      mouseX = -9999;
+      mouseY = -9999;
+    };
+
+    host.addEventListener('mousemove', onMouseMove);
+    host.addEventListener('mouseleave', onMouseLeave);
+
     let glyphs: Array<{
       char: '0' | '1' | 'o';
       contourX: number;
       contourY: number;
       darkness: number;
       detail: number;
+      displaceX: number;
+      displaceY: number;
       flowScale: number;
       opacityBase: number;
       phase: number;
@@ -233,6 +256,8 @@ function TicketCanvas({
             contourY: info.contourY,
             darkness,
             detail,
+            displaceX: 0,
+            displaceY: 0,
             flowScale: 0.42 + detail * 1.55,
             opacityBase:
               0.058
@@ -295,7 +320,54 @@ function TicketCanvas({
         : 'rgba(255, 255, 255, 0.07)';
       ctx.fillRect(0, 0, rect.width, rect.height);
 
+      const mouseActive = mouseX > -9000;
+
       for (const glyph of glyphs) {
+        if (mouseActive) {
+          const dx = glyph.x - mouseX;
+          const dy = glyph.y - mouseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < MOUSE_RADIUS && dist > 0.1) {
+            const strength = ((MOUSE_RADIUS - dist) / MOUSE_RADIUS) * MOUSE_PUSH_STRENGTH;
+            const radialX = dx / dist;
+            const radialY = dy / dist;
+
+            const edgeWeight = Math.min(1, glyph.detail * 1.6);
+            const dot = radialX * glyph.contourX + radialY * glyph.contourY;
+            const sign = dot >= 0 ? 1 : -1;
+            const contourPushX = glyph.contourX * sign;
+            const contourPushY = glyph.contourY * sign;
+
+            const contourBlend = edgeWeight * 0.92;
+            const pushX = radialX * (1 - contourBlend) + contourPushX * contourBlend;
+            const pushY = radialY * (1 - contourBlend) + contourPushY * contourBlend;
+            const pushLen = Math.sqrt(pushX * pushX + pushY * pushY) || 1;
+
+            const edgeBoost = 1 + edgeWeight * 1.8;
+            let targetX = glyph.displaceX + (pushX / pushLen) * strength * MOUSE_RADIUS * edgeBoost;
+            let targetY = glyph.displaceY + (pushY / pushLen) * strength * MOUSE_RADIUS * edgeBoost;
+            const maxPush = MOUSE_MAX_PUSH * (0.3 + edgeWeight * 0.7);
+            const targetDist = Math.sqrt(targetX * targetX + targetY * targetY);
+            if (targetDist > maxPush) {
+              targetX = (targetX / targetDist) * maxPush;
+              targetY = (targetY / targetDist) * maxPush;
+            }
+            glyph.displaceX = targetX;
+            glyph.displaceY = targetY;
+            if (Math.random() < 0.004 + edgeWeight * 0.018) {
+              const chars: Array<'0' | '1' | 'o'> = ['0', '1', 'o'];
+              glyph.char = chars[Math.floor(Math.random() * 3)];
+              glyph.sprite = getSprite(glyph.char, glyph.pixelSize);
+            }
+          } else {
+            glyph.displaceX *= (1 - MOUSE_SPRING);
+            glyph.displaceY *= (1 - MOUSE_SPRING);
+          }
+        } else {
+          glyph.displaceX *= (1 - MOUSE_SPRING);
+          glyph.displaceY *= (1 - MOUSE_SPRING);
+        }
+
         const shimmer =
           Math.sin(glyph.x * 0.028 + now * 0.62 + glyph.phase) * 0.36
           + Math.cos(glyph.y * 0.024 - now * 0.36 + glyph.phase) * 0.3
@@ -388,12 +460,17 @@ function TicketCanvas({
             + contourDriftY
           ) * (0.85 + breath * 0.35);
 
-        ctx.globalAlpha = opacity;
-        ctx.drawImage(glyph.sprite, glyph.x + driftX, glyph.y + driftY);
-        ctx.globalAlpha = opacity * (0.4 + glyph.detail * 0.18);
-        ctx.drawImage(glyph.sprite, glyph.x + driftX * 1.52, glyph.y + driftY * 1.52);
+        const mx = glyph.displaceX;
+        const my = glyph.displaceY;
+        const disturbance = Math.min(1, Math.sqrt(mx * mx + my * my) / MOUSE_MAX_PUSH);
+        const hoverBoost = 1 + disturbance * 2.4;
+
+        ctx.globalAlpha = Math.min(1, opacity * hoverBoost);
+        ctx.drawImage(glyph.sprite, glyph.x + driftX + mx, glyph.y + driftY + my);
+        ctx.globalAlpha = Math.min(1, opacity * (0.4 + glyph.detail * 0.18) * hoverBoost);
+        ctx.drawImage(glyph.sprite, glyph.x + driftX * 1.52 + mx * 0.7, glyph.y + driftY * 1.52 + my * 0.7);
         ctx.globalAlpha = opacity * 0.3;
-        ctx.drawImage(glyph.sprite, glyph.x - driftX * 0.82, glyph.y - driftY * 0.82);
+        ctx.drawImage(glyph.sprite, glyph.x - driftX * 0.82 + mx * 0.3, glyph.y - driftY * 0.82 + my * 0.3);
       }
       ctx.globalAlpha = 1;
 
@@ -410,6 +487,8 @@ function TicketCanvas({
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', resizeCanvas);
+      host.removeEventListener('mousemove', onMouseMove);
+      host.removeEventListener('mouseleave', onMouseLeave);
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
       }
