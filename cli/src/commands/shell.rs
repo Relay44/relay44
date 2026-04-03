@@ -2,13 +2,106 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::Result;
+use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::{Context, Editor, Helper};
 
 use crate::config::Config;
 use crate::output;
 use crate::runtime::{self, InvocationDefaults, InvocationSource};
 use crate::sessions::SessionLogger;
+
+const COMMANDS: &[(&str, &[&str])] = &[
+    ("setup", &[]),
+    ("shell", &[]),
+    ("doctor", &[]),
+    ("login", &["solana", "siwe", "status", "logout"]),
+    ("markets", &["list", "get", "orderbook", "trades"]),
+    ("orders", &["list", "place", "cancel", "cancel-all", "get"]),
+    ("positions", &["list", "get", "claim"]),
+    ("agents", &["list", "get", "public", "create", "update", "execute"]),
+    ("edge-scanner", &["signals", "curve"]),
+    ("decisions", &["list", "get", "create"]),
+    ("leaderboard", &["top", "rank"]),
+    ("activity", &["list"]),
+    ("wallet", &["balance", "deposit-address"]),
+    ("config", &["show", "set-url", "set-token", "path", "reset"]),
+    ("profile", &["list", "use", "show"]),
+    ("workflow", &["list", "run", "validate"]),
+    ("session", &["export", "replay"]),
+];
+
+struct ShellHelper {
+    aliases: Vec<String>,
+}
+
+impl Completer for ShellHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let input = &line[..pos];
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        let trailing_space = input.ends_with(' ');
+
+        if parts.is_empty() || (parts.len() == 1 && !trailing_space) {
+            let prefix = parts.first().copied().unwrap_or("");
+            let start = input.len() - prefix.len();
+            let mut candidates: Vec<Pair> = COMMANDS
+                .iter()
+                .map(|(cmd, _)| *cmd)
+                .chain(self.aliases.iter().map(|s| s.as_str()))
+                .chain(["help", "exit", "quit"].iter().copied())
+                .filter(|cmd| cmd.starts_with(prefix))
+                .map(|cmd| Pair {
+                    display: cmd.to_string(),
+                    replacement: cmd.to_string(),
+                })
+                .collect();
+            candidates.sort_by(|a, b| a.display.cmp(&b.display));
+            candidates.dedup_by(|a, b| a.display == b.display);
+            return Ok((start, candidates));
+        }
+
+        if parts.len() == 1 && trailing_space || parts.len() == 2 && !trailing_space {
+            let cmd = parts[0];
+            let sub_prefix = if parts.len() == 2 && !trailing_space {
+                parts[1]
+            } else {
+                ""
+            };
+            let start = pos - sub_prefix.len();
+
+            if let Some((_, subs)) = COMMANDS.iter().find(|(c, _)| *c == cmd) {
+                let candidates: Vec<Pair> = subs
+                    .iter()
+                    .filter(|s| s.starts_with(sub_prefix))
+                    .map(|s| Pair {
+                        display: s.to_string(),
+                        replacement: s.to_string(),
+                    })
+                    .collect();
+                return Ok((start, candidates));
+            }
+        }
+
+        Ok((pos, vec![]))
+    }
+}
+
+impl Hinter for ShellHelper {
+    type Hint = String;
+}
+impl Highlighter for ShellHelper {}
+impl Validator for ShellHelper {}
+impl Helper for ShellHelper {}
 
 pub async fn run(config: Arc<Mutex<Config>>, defaults: InvocationDefaults) -> Result<()> {
     output::banner();
@@ -16,10 +109,16 @@ pub async fn run(config: Arc<Mutex<Config>>, defaults: InvocationDefaults) -> Re
     output::dimmed("  type 'help' for command help, 'exit' to quit");
     println!();
 
-    let mut editor = DefaultEditor::new()?;
+    let aliases = {
+        let cfg = config.lock().expect("config lock");
+        cfg.aliases.keys().cloned().collect()
+    };
+    let helper = ShellHelper { aliases };
+    let mut editor = Editor::new()?;
+    editor.set_helper(Some(helper));
     let history_path = Config::history_path()?;
     let logger = {
-        let config = config.lock().unwrap();
+        let config = config.lock().expect("config lock");
         SessionLogger::new(&config)?
     };
 
@@ -60,14 +159,14 @@ pub async fn run(config: Arc<Mutex<Config>>, defaults: InvocationDefaults) -> Re
 
                 let started_at = Instant::now();
                 let command = {
-                    let config = config.lock().unwrap();
+                    let config = config.lock().expect("config lock");
                     runtime::parse_shell_line(line, &config)
                 };
 
                 let result = match command {
                     Ok(cli) => {
                         let profile_name = {
-                            let config = config.lock().unwrap();
+                            let config = config.lock().expect("config lock");
                             config
                                 .selected_profile_name(
                                     cli.profile.as_deref(),
@@ -118,7 +217,7 @@ pub async fn run(config: Arc<Mutex<Config>>, defaults: InvocationDefaults) -> Re
 
 fn shell_prompt(config: &Arc<Mutex<Config>>, defaults: &InvocationDefaults) -> String {
     let profile = {
-        let config = config.lock().unwrap();
+        let config = config.lock().expect("config lock");
         config
             .selected_profile_name(defaults.profile.as_deref(), None)
             .unwrap_or_else(|_| config.active_profile.clone())
