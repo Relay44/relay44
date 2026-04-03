@@ -156,7 +156,7 @@ export default function AgentsPage() {
     () =>
       marketOptions.map((market) => ({
         value: market.id,
-        label: `#${market.id}`,
+        label: `#${market.id} ${market.question.length > 30 ? market.question.slice(0, 30) + '…' : market.question}`,
       })),
     [marketOptions]
   );
@@ -686,7 +686,7 @@ export default function AgentsPage() {
                   onChange={(event) => setFilterMarketId(event.target.value)}
                   options={marketFilterOptions}
                   placeholder="All markets"
-                  className="w-full text-sm sm:w-[11rem]"
+                  className="w-full text-sm sm:w-[20rem]"
                 />
                 <button
                   type="button"
