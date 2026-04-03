@@ -6180,6 +6180,19 @@ async fn record_live_fill(
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
 
+    // Update portfolio risk governor with fill.
+    let notional = filled_quantity * price;
+    if let Err(e) = crate::services::risk_governor::record_fill(
+        state.db.pool(),
+        &agent.owner,
+        notional,
+        0.0, // realized PnL computed on position close, not on fill
+    )
+    .await
+    {
+        log::warn!("risk governor record_fill error for {}: {e}", agent.owner);
+    }
+
     Ok(())
 }
 
@@ -6264,6 +6277,28 @@ async fn record_live_outcome(
     .execute(state.db.pool())
     .await
     .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+    // Update risk governor: close exposure and record realized PnL.
+    let notional_closed = entry_price * quantity;
+    if let Err(e) = crate::services::risk_governor::record_position_close(
+        state.db.pool(),
+        &agent.owner,
+        notional_closed,
+    )
+    .await
+    {
+        log::warn!("risk governor record_position_close error: {e}");
+    }
+    if let Err(e) = crate::services::risk_governor::record_fill(
+        state.db.pool(),
+        &agent.owner,
+        0.0, // no new exposure on close
+        realized,
+    )
+    .await
+    {
+        log::warn!("risk governor record_fill (close) error: {e}");
+    }
 
     Ok(())
 }
@@ -8220,6 +8255,37 @@ async fn execute_live_agent(
                 "plannedPrice": strategy_signal.price,
                 "plannedQuantity": strategy_signal.quantity,
                 "midPrice": mid
+            }),
+        )
+        .await;
+    }
+
+    // Portfolio-level risk governor check.
+    let order_notional = strategy_signal.price * strategy_signal.quantity;
+    let risk_check = crate::services::risk_governor::check_order(
+        state.db.pool(),
+        &agent.owner,
+        order_notional,
+    )
+    .await
+    .map_err(|e| ApiError::internal(&format!("risk governor error: {e}")))?;
+
+    if !risk_check.allowed {
+        let reason = risk_check.reason.unwrap_or_default();
+        let err = ApiError::bad_request("GUARDRAIL_RISK_GOVERNOR", &reason);
+        return skip_agent_for_guardrail(
+            state,
+            agent,
+            now,
+            "skipped",
+            &err,
+            json!({
+                "mode": "live",
+                "strategy": agent.strategy,
+                "guardrail": "risk_governor",
+                "orderNotional": order_notional,
+                "plannedPrice": strategy_signal.price,
+                "plannedQuantity": strategy_signal.quantity
             }),
         )
         .await;
