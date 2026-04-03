@@ -851,12 +851,32 @@ async fn main() -> std::io::Result<()> {
                                 web::get().to(api::external::get_external_market_trades),
                             )
                             .route(
+                                "/polymarket/public-trades",
+                                web::get().to(api::external::get_polymarket_public_trades),
+                            )
+                            .route(
+                                "/polymarket/orderbook-history",
+                                web::get().to(api::external::get_polymarket_orderbook_history),
+                            )
+                            .route(
                                 "/indexers/polymarket/health",
                                 web::get().to(api::external::get_polymarket_indexer_health),
                             )
                             .route(
                                 "/indexers/polymarket/backfill",
                                 web::post().to(api::external::trigger_polymarket_indexer_backfill),
+                            )
+                            .route(
+                                "/research/wallets",
+                                web::get().to(api::external::list_research_wallets),
+                            )
+                            .route(
+                                "/research/replay",
+                                web::post().to(api::external::create_strategy_replay),
+                            )
+                            .route(
+                                "/research/replay/{replay_id}",
+                                web::get().to(api::external::get_strategy_replay),
                             )
                             .route(
                                 "/signals",
