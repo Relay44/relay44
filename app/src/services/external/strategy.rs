@@ -429,7 +429,7 @@ fn evaluate_mean_revert(state: &MarketState) -> TradeSignal {
         }
     }).unwrap_or(1.0);
 
-    let strength = (abs_deviation / 0.05).clamp(0.5, 2.0) * oracle_boost;
+    let strength = ((abs_deviation / 0.05).clamp(0.5, 2.0) * oracle_boost).min(2.0);
     TradeSignal {
         execute: true,
         price: state.agent_price,
