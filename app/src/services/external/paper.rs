@@ -72,11 +72,14 @@ pub fn simulate_fill(
     side: &str,
     requested_quantity: f64,
     fee_bps: u64,
+    limit_price: Option<f64>,
 ) -> PaperFillComputation {
     let sanitized_quantity = requested_quantity.max(0.0);
     let quote = market_quote_price(market, outcome);
     let mark_price = resolve_mark_price(market, orderbook, outcome);
     let levels = sorted_levels(side, orderbook);
+    let limit_price = limit_price.map(clamp_probability);
+    let has_usable_depth = levels.iter().any(|level| level.quantity > 0.0);
 
     if sanitized_quantity <= 0.0 {
         return PaperFillComputation {
@@ -101,13 +104,25 @@ pub fn simulate_fill(
             break;
         }
 
+        let level_price = clamp_probability(level.price);
+        if let Some(limit_price) = limit_price {
+            let marketable = if side.trim().eq_ignore_ascii_case("sell") {
+                level_price >= limit_price
+            } else {
+                level_price <= limit_price
+            };
+            if !marketable {
+                break;
+            }
+        }
+
         let quantity = level.quantity.max(0.0);
         if quantity <= 0.0 {
             continue;
         }
 
         let filled = remaining.min(quantity);
-        notional += filled * clamp_probability(level.price);
+        notional += filled * level_price;
         remaining -= filled;
         used_depth = true;
     }
@@ -124,13 +139,55 @@ pub fn simulate_fill(
                 notional,
             )
         } else {
-            // No orderbook depth available — apply a minimum slippage penalty
-            // to avoid overstating paper P&L. 15bps for small orders, scaling
-            // with quantity to model real-world market impact.
-            // Buy side: price goes up (pay more). Sell side: price goes down (receive less).
+            if has_usable_depth {
+                return PaperFillComputation {
+                    requested_quantity: sanitized_quantity,
+                    filled_quantity: 0.0,
+                    average_price: quote,
+                    mark_price,
+                    notional_usdc: 0.0,
+                    fee_usdc: 0.0,
+                    slippage_bps: 0,
+                    partial_fill: false,
+                    used_orderbook_depth: false,
+                };
+            }
+
+            let limit_crosses_quote = limit_price.is_none_or(|limit| {
+                if side.trim().eq_ignore_ascii_case("sell") {
+                    limit <= quote
+                } else {
+                    limit >= quote
+                }
+            });
+            if !limit_crosses_quote {
+                return PaperFillComputation {
+                    requested_quantity: sanitized_quantity,
+                    filled_quantity: 0.0,
+                    average_price: quote,
+                    mark_price,
+                    notional_usdc: 0.0,
+                    fee_usdc: 0.0,
+                    slippage_bps: 0,
+                    partial_fill: false,
+                    used_orderbook_depth: false,
+                };
+            }
+
+            // No orderbook depth available. Apply a small impact model, but
+            // never violate the order's limit price.
             let impact_bps = 15.0 + (sanitized_quantity * 2.0).min(50.0);
-            let direction = if side.trim().eq_ignore_ascii_case("sell") { -1.0 } else { 1.0 };
-            let average_price = clamp_probability(quote * (1.0 + direction * impact_bps / 10_000.0));
+            let direction = if side.trim().eq_ignore_ascii_case("sell") {
+                -1.0
+            } else {
+                1.0
+            };
+            let impacted_price = clamp_probability(quote * (1.0 + direction * impact_bps / 10_000.0));
+            let average_price = match limit_price {
+                Some(limit) if side.trim().eq_ignore_ascii_case("sell") => impacted_price.max(limit),
+                Some(limit) => impacted_price.min(limit),
+                None => impacted_price,
+            };
             let notional = sanitized_quantity * average_price;
             (average_price, sanitized_quantity, false, false, notional)
         };
@@ -253,7 +310,15 @@ mod tests {
 
     #[test]
     fn simulate_fill_uses_asks_for_buy_orders() {
-        let fill = simulate_fill(&sample_market(), &sample_orderbook(), "yes", "buy", 4.0, 30);
+        let fill = simulate_fill(
+            &sample_market(),
+            &sample_orderbook(),
+            "yes",
+            "buy",
+            4.0,
+            30,
+            None,
+        );
 
         assert_eq!(fill.filled_quantity, 4.0);
         assert!((fill.average_price - 0.6375).abs() < 0.0001);
@@ -269,6 +334,7 @@ mod tests {
             "sell",
             5.0,
             30,
+            None,
         );
 
         assert_eq!(fill.filled_quantity, 5.0);
@@ -282,7 +348,7 @@ mod tests {
         orderbook.asks.clear();
         orderbook.bids.clear();
 
-        let fill = simulate_fill(&sample_market(), &orderbook, "yes", "buy", 2.0, 30);
+        let fill = simulate_fill(&sample_market(), &orderbook, "yes", "buy", 2.0, 30, None);
 
         assert_eq!(fill.filled_quantity, 2.0);
         // With slippage model: impact_bps = 15 + min(2*2, 50) = 19, buy direction = +1
@@ -300,6 +366,7 @@ mod tests {
             "buy",
             20.0,
             30,
+            None,
         );
 
         assert_eq!(fill.filled_quantity, 8.0);
@@ -310,5 +377,37 @@ mod tests {
     fn realized_pnl_respects_side_direction() {
         assert!((realized_pnl("buy", 0.50, 0.60, 10.0, 0.2) - 0.8).abs() < 0.0001);
         assert!((realized_pnl("sell", 0.60, 0.50, 10.0, 0.2) - 0.8).abs() < 0.0001);
+    }
+
+    #[test]
+    fn simulate_fill_respects_non_marketable_buy_limit() {
+        let fill = simulate_fill(
+            &sample_market(),
+            &sample_orderbook(),
+            "yes",
+            "buy",
+            4.0,
+            30,
+            Some(0.61),
+        );
+
+        assert_eq!(fill.filled_quantity, 0.0);
+        assert_eq!(fill.notional_usdc, 0.0);
+    }
+
+    #[test]
+    fn simulate_fill_respects_non_marketable_sell_limit() {
+        let fill = simulate_fill(
+            &sample_market(),
+            &sample_orderbook(),
+            "yes",
+            "sell",
+            4.0,
+            30,
+            Some(0.61),
+        );
+
+        assert_eq!(fill.filled_quantity, 0.0);
+        assert_eq!(fill.notional_usdc, 0.0);
     }
 }
