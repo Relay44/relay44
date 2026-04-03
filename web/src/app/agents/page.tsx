@@ -704,9 +704,25 @@ export default function AgentsPage() {
             </div>
 
             {isLoading ? (
-              <Card>Loading agents...</Card>
+              <Card>
+                <div className="flex items-center gap-3 text-sm text-text-secondary">
+                  <div className="h-4 w-4 animate-spin border-2 border-border border-t-accent" />
+                  Loading agents...
+                </div>
+              </Card>
             ) : agents.length === 0 ? (
-              <Card>No agents found for current filter.</Card>
+              <Card className="text-center py-12">
+                <p className="text-text-secondary">
+                  {filterMarketId || filterActiveOnly
+                    ? 'No agents match the current filter.'
+                    : 'No onchain agents launched yet.'}
+                </p>
+                <p className="mt-2 text-sm text-text-muted">
+                  {filterMarketId || filterActiveOnly
+                    ? 'Try removing filters or switching to a different market.'
+                    : 'Use the launch form above to create your first onchain agent.'}
+                </p>
+              </Card>
             ) : (
               <div className="grid gap-3">
                 {agents.map((agent) => (
@@ -981,9 +997,25 @@ export default function AgentsPage() {
             </div>
 
             {isLoadingExternal ? (
-              <Card>Loading external agents...</Card>
+              <Card>
+                <div className="flex items-center gap-3 text-sm text-text-secondary">
+                  <div className="h-4 w-4 animate-spin border-2 border-border border-t-accent" />
+                  Loading external agents...
+                </div>
+              </Card>
             ) : externalAgents.length === 0 ? (
-              <Card>No external agents found for current filter.</Card>
+              <Card className="text-center py-12">
+                <p className="text-text-secondary">
+                  {filterExternalProvider || filterActiveOnly
+                    ? 'No external agents match the current filter.'
+                    : 'No external agents launched yet.'}
+                </p>
+                <p className="mt-2 text-sm text-text-muted">
+                  {filterExternalProvider || filterActiveOnly
+                    ? 'Try removing filters or switching providers.'
+                    : 'Add venue credentials, then use the launch form above to create one.'}
+                </p>
+              </Card>
             ) : (
               <div className="grid gap-3">
                 {externalAgents.map((agent) => (
