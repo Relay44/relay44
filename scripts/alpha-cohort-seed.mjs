@@ -16,11 +16,43 @@ import {
   apiGet,
   apiPatch,
   apiPost,
+  buildHeaders,
   clampPrice,
+  fetchWithRetry,
   listAgents,
-  loginAdmin,
   probabilityForOutcome,
+  siweDomain,
+  apiOrigin,
+  chainId,
 } from "./paper-cohort-lib.mjs";
+import { privateKeyToAccount } from "viem/accounts";
+
+async function loginAlphaAdmin() {
+  const privateKey =
+    process.env.ALPHA_COHORT_ADMIN_PRIVATE_KEY ||
+    process.env.PAPER_COHORT_ADMIN_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new Error(
+      "ALPHA_COHORT_ADMIN_PRIVATE_KEY or PAPER_COHORT_ADMIN_PRIVATE_KEY required",
+    );
+  }
+  const account = privateKeyToAccount(privateKey);
+  const noncePayload = await fetchWithRetry(`${apiBase}/auth/siwe/nonce`);
+  const nonce = noncePayload?.nonce;
+  if (!nonce) throw new Error("missing SIWE nonce");
+
+  const issuedAt = new Date().toISOString();
+  const message = `${siweDomain} wants you to sign in with your Ethereum account:\n${account.address}\n\nSign in to relay44 alpha cohort\n\nURI: ${apiOrigin}\nVersion: 1\nChain ID: ${chainId}\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
+  const signature = await account.signMessage({ message });
+  const tokens = await fetchWithRetry(`${apiBase}/auth/siwe/login`, {
+    method: "POST",
+    headers: buildHeaders(),
+    body: JSON.stringify({ wallet: account.address, message, signature }),
+  });
+
+  if (!tokens?.access_token) throw new Error("missing access token");
+  return { account, accessToken: tokens.access_token };
+}
 
 const AGENT_COUNT = Number(process.env.ALPHA_AGENT_COUNT || 5);
 const MARKET_CATEGORY = (
@@ -78,8 +110,6 @@ function buildAlphaAgent(wallet, market, index) {
       cooldownSeconds: 300,
       crowdingGate: 0.75,
     },
-    executionMode: "paper",
-    cohort: "private_alpha",
     active: true,
     maxNotionalPerExecution: 25,
     maxDailySpendUsdc: 100,
@@ -92,7 +122,7 @@ async function main() {
     `Seeding ${AGENT_COUNT} wallet_follow_v2 agents (category: ${MARKET_CATEGORY})`,
   );
 
-  const { accessToken } = await loginAdmin();
+  const { accessToken } = await loginAlphaAdmin();
 
   const [wallets, markets] = await Promise.all([
     fetchTopWallets(accessToken),
@@ -146,8 +176,6 @@ async function main() {
       await apiPatch(`/external/agents/${existing.id}`, accessToken, {
         strategy: spec.strategy,
         strategyParams: spec.strategyParams,
-        executionMode: "paper",
-        cohort: "private_alpha",
         active: true,
       });
       console.log(`  Updated ${spec.name}`);
