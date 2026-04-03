@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::{Method, StatusCode};
 
@@ -14,10 +14,15 @@ pub struct Client {
     http: reqwest::Client,
     base_url: String,
     config: Arc<Mutex<Config>>,
+    profile: String,
 }
 
 impl Client {
-    pub fn new(base_url: &str, config: Arc<Mutex<Config>>) -> Result<Self> {
+    pub fn new(
+        base_url: &str,
+        config: Arc<Mutex<Config>>,
+        profile: impl Into<String>,
+    ) -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
@@ -25,19 +30,26 @@ impl Client {
                 .context("failed to build HTTP client")?,
             base_url: base_url.trim_end_matches('/').to_string(),
             config,
+            profile: profile.into(),
         })
     }
 
     pub fn is_authenticated(&self) -> bool {
-        self.config.lock().unwrap().access_token.is_some()
+        std::env::var("R44_ACCESS_TOKEN").ok().is_some()
+            || self
+                .config
+                .lock()
+                .unwrap()
+                .profile(&self.profile)
+                .and_then(|profile| profile.access_token.as_ref())
+                .is_some()
     }
 
     fn auth_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        let cfg = self.config.lock().unwrap();
-        if let Some(ref t) = cfg.access_token {
-            if let Ok(val) = HeaderValue::from_str(&format!("Bearer {t}")) {
-                headers.insert(AUTHORIZATION, val);
+        if let Some(token) = self.access_token() {
+            if let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}")) {
+                headers.insert(AUTHORIZATION, value);
             }
         }
         headers
@@ -50,116 +62,125 @@ impl Client {
         body: Option<&serde_json::Value>,
     ) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, path);
-        let mut last_err = None;
+        let mut last_error = None;
 
         for attempt in 0..=MAX_RETRIES {
             if attempt > 0 {
                 let delay = INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1);
-                output::debug(&format!("retry {attempt}/{MAX_RETRIES} after {delay}ms"));
+                output::debug(&format!(
+                    "retry {attempt}/{MAX_RETRIES} after {delay}ms: {}",
+                    retry_reason(&last_error)
+                ));
                 tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
             }
 
             output::debug(&format!("{method} {url}"));
-
-            let mut req = self.http.request(method.clone(), &url).headers(self.auth_headers());
-            if let Some(b) = body {
-                output::debug(&format!("body: {}", serde_json::to_string(b).unwrap_or_default()));
-                req = req.json(b);
+            let mut request = self
+                .http
+                .request(method.clone(), &url)
+                .headers(self.auth_headers());
+            if let Some(payload) = body {
+                output::debug(&format!(
+                    "body: {}",
+                    serde_json::to_string(payload).unwrap_or_default()
+                ));
+                request = request.json(payload);
             }
 
-            let resp = match req.send().await {
-                Ok(r) => r,
-                Err(e) if e.is_timeout() => {
-                    last_err = Some(anyhow::anyhow!(
-                        "Request timed out ({method} {path}). Check your connection or try --api-url."
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) if error.is_timeout() => {
+                    last_error = Some(anyhow!(
+                        "request timed out ({method} {path}). retrying as a network timeout"
                     ));
                     continue;
                 }
-                Err(e) if e.is_connect() => {
-                    last_err = Some(anyhow::anyhow!(
-                        "Cannot connect to {url}. Is the API running? Try --api-url to use a different server."
+                Err(error) if error.is_connect() => {
+                    last_error = Some(anyhow!(
+                        "cannot connect to {url}. retrying as a network error"
                     ));
                     continue;
                 }
-                Err(e) => return Err(e).with_context(|| format!("{method} {path}")),
+                Err(error) => return Err(error).with_context(|| format!("{method} {path}")),
             };
 
-            let status = resp.status();
+            let status = response.status();
             output::debug(&format!("← {status}"));
 
             if status == StatusCode::UNAUTHORIZED {
                 if self.try_refresh().await {
-                    let mut req2 = self.http.request(method.clone(), &url).headers(self.auth_headers());
-                    if let Some(b) = body {
-                        req2 = req2.json(b);
-                    }
-                    let resp2 = req2.send().await.with_context(|| format!("{method} {path}"))?;
-                    let status2 = resp2.status();
-                    if status2.is_success() {
-                        return resp2.json().await.with_context(|| format!("parse {path}"));
-                    }
-                    return Err(format_api_error(status2, &resp2.text().await.unwrap_or_default(), path));
+                    output::debug("retrying after auth refresh");
+                    continue;
                 }
-                return Err(anyhow::anyhow!(
-                    "Session expired. Run `r44 login solana` to re-authenticate."
+                return Err(anyhow!(
+                    "session expired for profile '{}'. run `r44 login solana` or `r44 login siwe` again",
+                    self.profile
                 ));
             }
 
             if is_retryable(status) {
-                let text = resp.text().await.unwrap_or_default();
-                last_err = Some(format_api_error(status, &text, path));
+                let text = response.text().await.unwrap_or_default();
+                last_error = Some(format_api_error(status, &text, path));
                 continue;
             }
 
             if !status.is_success() {
-                let text = resp.text().await.unwrap_or_default();
+                let text = response.text().await.unwrap_or_default();
                 return Err(format_api_error(status, &text, path));
             }
 
-            return resp.json().await.with_context(|| format!("parse {path}"));
+            return response
+                .json()
+                .await
+                .with_context(|| format!("parse {path}"));
         }
 
-        Err(last_err.unwrap_or_else(|| anyhow::anyhow!("{method} {path}: max retries exceeded")))
+        Err(last_error.unwrap_or_else(|| anyhow!("{method} {path}: max retries exceeded")))
     }
 
     async fn try_refresh(&self) -> bool {
+        if std::env::var("R44_ACCESS_TOKEN").ok().is_some() {
+            return false;
+        }
+
         let refresh_token = {
-            let cfg = self.config.lock().unwrap();
-            cfg.refresh_token.clone()
+            let config = self.config.lock().unwrap();
+            config
+                .profile(&self.profile)
+                .and_then(|profile| profile.refresh_token.clone())
         };
 
         let Some(token) = refresh_token else {
             return false;
         };
 
-        output::debug("refreshing access token…");
+        output::debug("refreshing access token");
 
         let url = format!("{}/auth/refresh", self.base_url);
         let body = serde_json::json!({ "refresh_token": token });
-        let resp = match self.http.post(&url).json(&body).send().await {
-            Ok(r) if r.status().is_success() => r,
+        let response = match self.http.post(&url).json(&body).send().await {
+            Ok(response) if response.status().is_success() => response,
             _ => return false,
         };
 
-        let data: serde_json::Value = match resp.json().await {
-            Ok(d) => d,
+        let data: serde_json::Value = match response.json().await {
+            Ok(data) => data,
             Err(_) => return false,
         };
 
-        let access = data["access_token"].as_str().map(String::from);
-        let refresh = data["refresh_token"].as_str().map(String::from);
-
-        if access.is_none() {
+        let access_token = data["access_token"].as_str().map(String::from);
+        let refresh_token = data["refresh_token"].as_str().map(String::from);
+        let Some(access_token) = access_token else {
             return false;
-        }
+        };
 
-        let mut cfg = self.config.lock().unwrap();
-        cfg.access_token = access;
-        if refresh.is_some() {
-            cfg.refresh_token = refresh;
+        let mut config = self.config.lock().unwrap();
+        let profile = config.ensure_profile(&self.profile);
+        profile.access_token = Some(access_token);
+        if refresh_token.is_some() {
+            profile.refresh_token = refresh_token;
         }
-        let _ = cfg.save();
-        output::debug("token refreshed");
+        let _ = config.save();
         true
     }
 
@@ -186,6 +207,16 @@ impl Client {
     pub async fn delete_raw(&self, path: &str) -> Result<serde_json::Value> {
         self.request(Method::DELETE, path, None).await
     }
+
+    fn access_token(&self) -> Option<String> {
+        std::env::var("R44_ACCESS_TOKEN").ok().or_else(|| {
+            self.config
+                .lock()
+                .unwrap()
+                .profile(&self.profile)
+                .and_then(|profile| profile.access_token.clone())
+        })
+    }
 }
 
 fn is_retryable(status: StatusCode) -> bool {
@@ -198,6 +229,23 @@ fn is_retryable(status: StatusCode) -> bool {
     )
 }
 
+fn retry_reason(last_error: &Option<anyhow::Error>) -> &'static str {
+    let Some(error) = last_error else {
+        return "transient failure";
+    };
+    let message = error.to_string();
+    if message.contains("rate limited") {
+        "rate limit"
+    } else if message.contains("timeout")
+        || message.contains("connect")
+        || message.contains("network")
+    {
+        "network"
+    } else {
+        "server error"
+    }
+}
+
 fn format_api_error(status: StatusCode, body: &str, path: &str) -> anyhow::Error {
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
         let message = json["message"]
@@ -207,16 +255,25 @@ fn format_api_error(status: StatusCode, body: &str, path: &str) -> anyhow::Error
 
         let hint = match status {
             StatusCode::NOT_FOUND => format!("\n  hint: resource not found at {path}"),
-            StatusCode::FORBIDDEN => "\n  hint: you don't have permission. Check your account role.".into(),
-            StatusCode::TOO_MANY_REQUESTS => "\n  hint: rate limited. Wait a moment and retry.".into(),
-            StatusCode::UNPROCESSABLE_ENTITY => "\n  hint: check your input values.".into(),
+            StatusCode::FORBIDDEN => {
+                "\n  hint: you do not have permission for this resource".into()
+            }
+            StatusCode::TOO_MANY_REQUESTS => {
+                "\n  hint: rate limited. wait a moment and retry".into()
+            }
+            StatusCode::UNPROCESSABLE_ENTITY => "\n  hint: check your input values".into(),
+            StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT => {
+                "\n  hint: upstream service is unavailable. retry shortly".into()
+            }
             _ => String::new(),
         };
 
-        anyhow::anyhow!("{message}{hint}")
+        anyhow!("{message}{hint}")
     } else if body.is_empty() {
-        anyhow::anyhow!("{status} on {path}")
+        anyhow!("{status} on {path}")
     } else {
-        anyhow::anyhow!("{status}: {body}")
+        anyhow!("{status}: {body}")
     }
 }

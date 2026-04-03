@@ -430,6 +430,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "async-recursion"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2924,9 +2935,10 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r44"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
+ "async-recursion",
  "base64",
  "bs58",
  "chrono",
@@ -2944,7 +2956,9 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "shlex",
  "tabled",
+ "tempfile",
  "terminal_size",
  "tokio",
 ]

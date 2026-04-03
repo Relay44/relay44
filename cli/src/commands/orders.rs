@@ -5,7 +5,7 @@ use tabled::Tabled;
 use crate::client::Client;
 use crate::output::{self, Format};
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 pub enum OrderCmd {
     /// List your open orders
     #[command(
@@ -21,14 +21,12 @@ pub enum OrderCmd {
     },
 
     /// Place a new order
-    #[command(
-        long_about = "Place a limit order on a prediction market.\n\n\
+    #[command(long_about = "Place a limit order on a prediction market.\n\n\
                       Price is a probability between 0.01 and 0.99.\n\
                       Side is either 'buy' (you think YES) or 'sell' (you think NO).\n\n\
                       Examples:\n  \
                       r44 orders place --market abc123 --side buy --price 0.65 --size 100\n  \
-                      r44 orders place --market abc123 --side sell --price 0.30 --size 50 -y"
-    )]
+                      r44 orders place --market abc123 --side sell --price 0.30 --size 50 -y")]
     Place {
         /// Market ID
         #[arg(long, short)]
@@ -48,11 +46,9 @@ pub enum OrderCmd {
     },
 
     /// Cancel an open order
-    #[command(
-        long_about = "Cancel an open order by ID.\n\n\
+    #[command(long_about = "Cancel an open order by ID.\n\n\
                       Example:\n  r44 orders cancel abc123\n  \
-                      r44 orders cancel abc123 -y"
-    )]
+                      r44 orders cancel abc123 -y")]
     Cancel {
         /// Order ID
         id: String,
@@ -62,10 +58,8 @@ pub enum OrderCmd {
     },
 
     /// Cancel all open orders
-    #[command(
-        long_about = "Cancel all your open orders.\n\n\
-                      Example:\n  r44 orders cancel-all"
-    )]
+    #[command(long_about = "Cancel all your open orders.\n\n\
+                      Example:\n  r44 orders cancel-all")]
     CancelAll {
         /// Skip confirmation prompt
         #[arg(long, short = 'y')]
@@ -73,10 +67,8 @@ pub enum OrderCmd {
     },
 
     /// Get order details
-    #[command(
-        long_about = "Show details for a specific order.\n\n\
-                      Example:\n  r44 orders get abc123"
-    )]
+    #[command(long_about = "Show details for a specific order.\n\n\
+                      Example:\n  r44 orders get abc123")]
     Get {
         /// Order ID
         id: String,
@@ -134,7 +126,13 @@ pub async fn run(cmd: OrderCmd, api: &Client, fmt: Format) -> Result<()> {
                 }
             }
         }
-        OrderCmd::Place { market, side, price, size, yes } => {
+        OrderCmd::Place {
+            market,
+            side,
+            price,
+            size,
+            yes,
+        } => {
             let side_lower = side.to_lowercase();
             if !["buy", "sell"].contains(&side_lower.as_str()) {
                 bail!("Side must be 'buy' or 'sell' (got '{side}')");
