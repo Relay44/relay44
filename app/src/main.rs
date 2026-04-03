@@ -260,7 +260,7 @@ async fn main() -> std::io::Result<()> {
         let ws_state = app_state.clone();
         let mut event_rx = app_state.event_bus.subscribe();
         tokio::spawn(async move {
-            use crate::services::websocket::{TradeUpdate, MarketUpdate};
+            use crate::services::websocket::{MarketUpdate, TradeUpdate};
             loop {
                 match event_rx.recv().await {
                     Ok(event) => {
@@ -627,18 +627,12 @@ async fn main() -> std::io::Result<()> {
                                 "/mirror/links",
                                 web::post().to(api::evm::create_mirror_link),
                             )
-                            .route(
-                                "/mirror/links",
-                                web::get().to(api::evm::list_mirror_links),
-                            )
+                            .route("/mirror/links", web::get().to(api::evm::list_mirror_links))
                             .route(
                                 "/mirror/links/{link_id}",
                                 web::patch().to(api::evm::update_mirror_link),
                             )
-                            .route(
-                                "/mirror/status",
-                                web::get().to(api::evm::get_mirror_status),
-                            )
+                            .route("/mirror/status", web::get().to(api::evm::get_mirror_status))
                             .route(
                                 "/oracle/markets/{market_id}/config",
                                 web::get().to(api::evm::get_oracle_market_config),
@@ -736,13 +730,11 @@ async fn main() -> std::io::Result<()> {
                                     )
                                     .route(
                                         "/oracle/configure",
-                                        web::post()
-                                            .to(api::evm::prepare_configure_oracle_write),
+                                        web::post().to(api::evm::prepare_configure_oracle_write),
                                     )
                                     .route(
                                         "/oracle/resolve",
-                                        web::post()
-                                            .to(api::evm::prepare_oracle_resolve_write),
+                                        web::post().to(api::evm::prepare_oracle_resolve_write),
                                     )
                                     .route(
                                         "/validation/request",
@@ -844,6 +836,22 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/orders",
                                 web::get().to(api::external::list_external_orders),
+                            )
+                            .route(
+                                "/markets/{market_id}",
+                                web::get().to(api::external::get_external_market_snapshot),
+                            )
+                            .route(
+                                "/markets/{market_id}/orderbook",
+                                web::get().to(api::external::get_external_market_orderbook),
+                            )
+                            .route(
+                                "/signals",
+                                web::get().to(api::external::list_external_signals),
+                            )
+                            .route(
+                                "/signals",
+                                web::post().to(api::external::create_external_signal),
                             )
                             .route(
                                 "/agents",
