@@ -6937,7 +6937,7 @@ pub async fn oracle_keeper_tick(
         // For Pyth feeds, pre-validate price against threshold before generating resolve action
         if config.feed_type == "pyth" {
             if let Some(feed_id) = config.feed_address.as_deref() {
-                match fetch_pyth_price_and_check_threshold(feed_id, &config).await {
+                match fetch_pyth_price_and_check_threshold(&state, feed_id, &config).await {
                     Ok(true) => {} // threshold met, proceed to resolve
                     Ok(false) => {
                         let _ = state
@@ -7075,66 +7075,23 @@ fn encode_configure_oracle_calldata(
     ))
 }
 
-const PYTH_HERMES_BASE: &str = "https://hermes.pyth.network";
-
 async fn fetch_pyth_price_and_check_threshold(
+    state: &AppState,
     feed_id: &str,
     config: &crate::services::database::OracleMarketConfigRecord,
 ) -> Result<bool, String> {
-    let id = feed_id.trim_start_matches("0x");
-    let url = format!("{PYTH_HERMES_BASE}/v2/updates/price/latest?ids[]={id}");
-
-    let resp = reqwest::Client::new()
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await
-        .map_err(|e| format!("hermes request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("hermes returned {}", resp.status()));
-    }
-
-    let body: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("hermes response parse error: {e}"))?;
-
-    let price_obj = body["parsed"]
-        .as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|p| p["price"].as_object())
-        .ok_or("no price data in hermes response")?;
-
-    let price_str = price_obj
-        .get("price")
-        .and_then(|v| v.as_str())
-        .ok_or("missing price field")?;
-    let expo = price_obj
-        .get("expo")
-        .and_then(|v| v.as_i64())
-        .ok_or("missing expo field")?;
-
-    let raw_price: f64 = price_str
-        .parse()
-        .map_err(|_| "invalid price value")?;
-    let price = raw_price * 10f64.powi(expo as i32);
-
     let target: f64 = config
         .target_value
         .parse()
         .map_err(|_| "invalid target_value in config")?;
 
-    let met = match config.comparison.as_str() {
-        "gt" => price > target,
-        "gte" => price >= target,
-        "lt" => price < target,
-        "lte" => price <= target,
-        "eq" => (price - target).abs() < f64::EPSILON,
-        _ => return Err(format!("unknown comparison: {}", config.comparison)),
-    };
-
-    Ok(met)
+    crate::services::pyth::check_threshold(
+        &state.redis,
+        feed_id,
+        target,
+        &config.comparison,
+    )
+    .await
 }
 
 async fn matcher_runtime_state(state: &AppState) -> Result<MatcherRuntimeState, ApiError> {
