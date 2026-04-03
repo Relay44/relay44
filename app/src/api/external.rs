@@ -1,7 +1,7 @@
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine as _;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use hmac::{Hmac, Mac as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1006,6 +1006,93 @@ fn ensure_live_strategy_allowed(
             ));
         }
     }
+    Ok(())
+}
+
+fn normalized_strategy_key(strategy: &str) -> String {
+    strategy.trim().to_ascii_lowercase().replace('_', "-")
+}
+
+fn is_event_repricing_v2_strategy(strategy: &str) -> bool {
+    normalized_strategy_key(strategy) == "event-repricing-v2"
+}
+
+fn event_repricing_v2_candidate_ineligibility(
+    signal: &ExternalSignalResponse,
+    market: &ExternalMarketSnapshot,
+    requirements: &crate::services::external::strategy::EventRepricingV2Requirements,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    if signal.signal_type != "scenario_lab" {
+        return Some("event_repricing_v2 requires an active scenario_lab signal".to_string());
+    }
+    if requirements.require_resolution_rules && !signal.resolution_rules_read {
+        return Some("event_repricing_v2: resolution rules not confirmed".to_string());
+    }
+    if signal.sources.len() < requirements.min_signal_sources as usize {
+        return Some(format!(
+            "event_repricing_v2: only {} sources, need {}",
+            signal.sources.len(),
+            requirements.min_signal_sources
+        ));
+    }
+    if requirements.require_live_reference && !signal.has_live_reference {
+        return Some("event_repricing_v2: no canonical live reference attached".to_string());
+    }
+    if signal.resolution_hazards.len() as u64 > requirements.max_resolution_hazards {
+        return Some(format!(
+            "event_repricing_v2: {} unresolved resolution hazards",
+            signal.resolution_hazards.len()
+        ));
+    }
+
+    let close_time = i64::try_from(market.close_time).ok();
+    let Some(close_time) = close_time.filter(|value| *value > 0) else {
+        return Some("event_repricing_v2: market close window unavailable".to_string());
+    };
+
+    let time_to_resolution_seconds = close_time - now.timestamp();
+    if time_to_resolution_seconds < (requirements.min_hours_to_resolution as i64 * 3600) {
+        return Some(format!(
+            "event_repricing_v2: market resolves too soon ({}h required)",
+            requirements.min_hours_to_resolution
+        ));
+    }
+
+    None
+}
+
+async fn ensure_event_repricing_v2_candidate_eligible(
+    state: &AppState,
+    market: &ExternalMarketSnapshot,
+    strategy: &str,
+    strategy_params: &Value,
+    active: bool,
+) -> Result<(), ApiError> {
+    if !active || !is_event_repricing_v2_strategy(strategy) {
+        return Ok(());
+    }
+
+    let requirements =
+        crate::services::external::strategy::event_repricing_v2_requirements(strategy_params)?;
+    let signal = load_active_market_signal(state, market.id.as_str())
+        .await?
+        .ok_or_else(|| {
+            ApiError::bad_request(
+                "EVENT_REPRICING_SIGNAL_REQUIRED",
+                "event_repricing_v2 requires an active scenario_lab signal for the selected market",
+            )
+        })?;
+
+    if let Some(reason) =
+        event_repricing_v2_candidate_ineligibility(&signal, market, &requirements, Utc::now())
+    {
+        return Err(ApiError::bad_request(
+            "EVENT_REPRICING_MARKET_INELIGIBLE",
+            reason.as_str(),
+        ));
+    }
+
     Ok(())
 }
 
@@ -10178,6 +10265,14 @@ pub async fn create_external_agent(
             "market is not executable for external agents",
         ));
     }
+    ensure_event_repricing_v2_candidate_eligible(
+        &state,
+        &market,
+        strategy.as_str(),
+        &strategy_params,
+        body.active.unwrap_or(true),
+    )
+    .await?;
 
     let credential_id =
         if execution_mode == ExternalExecutionMode::Live || body.credential_id.is_some() {
@@ -10396,6 +10491,21 @@ pub async fn update_external_agent(
         next_max_slippage_bps,
     )?;
     ensure_live_strategy_allowed(next_strategy.as_str(), next_execution_mode)?;
+    if next_active && is_event_repricing_v2_strategy(next_strategy.as_str()) {
+        let current_market_id: String = current
+            .try_get("market_id")
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+        let parsed_market_id = ExternalMarketId::parse(current_market_id.as_str())?;
+        let market = external::fetch_market_by_id(&state.config, &parsed_market_id).await?;
+        ensure_event_repricing_v2_candidate_eligible(
+            &state,
+            &market,
+            next_strategy.as_str(),
+            &next_strategy_params,
+            next_active,
+        )
+        .await?;
+    }
 
     let credential_id = if let Some(id) = body.credential_id.as_deref() {
         let credential = load_credential(&state, owner.as_str(), provider, Some(id)).await?;
@@ -12867,6 +12977,41 @@ mod tests {
         }
     }
 
+    fn sample_signal_response(market_id: &str) -> ExternalSignalResponse {
+        ExternalSignalResponse {
+            id: "sig-1".to_string(),
+            publisher: "test".to_string(),
+            provider: "polymarket".to_string(),
+            market_id: market_id.to_string(),
+            signal_type: "scenario_lab".to_string(),
+            direction: "yes".to_string(),
+            confidence_bps: 6200,
+            fair_value_low: 0.58,
+            fair_value_high: 0.66,
+            midpoint_delta_bps: 900,
+            catalyst_summary: "sample".to_string(),
+            invalidators: vec!["invalidator".to_string()],
+            rationale: Some("sample rationale".to_string()),
+            metadata: json!({}),
+            memo_mode: Some("fair_value".to_string()),
+            sources: vec![
+                "https://polymarket.com/event/test".to_string(),
+                "https://example.com/live".to_string(),
+            ],
+            resolution_rules_read: true,
+            resolution_criteria: Some("sample criteria".to_string()),
+            resolution_hazards: Vec::new(),
+            has_live_reference: true,
+            repricing_half_life_minutes: Some(30),
+            confidence_reasoning: Some("sample".to_string()),
+            active: true,
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+            created_at: "2099-01-01T00:00:00Z".to_string(),
+            updated_at: "2099-01-01T00:00:00Z".to_string(),
+            agent_id: None,
+        }
+    }
+
     #[test]
     fn market_is_closed_for_paper_entry_when_resolved() {
         let mut market = sample_market();
@@ -13375,6 +13520,46 @@ mod tests {
         let err =
             ensure_live_strategy_allowed("maker_reward", ExternalExecutionMode::Live).unwrap_err();
         assert_eq!(err.code, "LIVE_STRATEGY_RESTRICTED");
+    }
+
+    #[test]
+    fn event_repricing_v2_candidate_gate_accepts_clean_signal() {
+        let market = sample_polymarket_market("Clean resolution rules.");
+        let signal = sample_signal_response(market.id.as_str());
+        let requirements = crate::services::external::strategy::EventRepricingV2Requirements {
+            min_hours_to_resolution: 24,
+            min_signal_sources: 2,
+            require_resolution_rules: true,
+            require_live_reference: true,
+            max_resolution_hazards: 0,
+        };
+
+        let reason =
+            event_repricing_v2_candidate_ineligibility(&signal, &market, &requirements, Utc::now());
+
+        assert_eq!(reason, None);
+    }
+
+    #[test]
+    fn event_repricing_v2_candidate_gate_rejects_hazardous_signal() {
+        let market = sample_polymarket_market("Hazardous resolution rules.");
+        let mut signal = sample_signal_response(market.id.as_str());
+        signal.resolution_hazards = vec!["relative_event_dependency".to_string()];
+        let requirements = crate::services::external::strategy::EventRepricingV2Requirements {
+            min_hours_to_resolution: 24,
+            min_signal_sources: 2,
+            require_resolution_rules: true,
+            require_live_reference: true,
+            max_resolution_hazards: 0,
+        };
+
+        let reason =
+            event_repricing_v2_candidate_ineligibility(&signal, &market, &requirements, Utc::now());
+
+        assert_eq!(
+            reason,
+            Some("event_repricing_v2: 1 unresolved resolution hazards".to_string())
+        );
     }
 
     #[test]
