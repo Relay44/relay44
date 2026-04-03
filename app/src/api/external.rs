@@ -3027,7 +3027,10 @@ async fn ingest_polymarket_user_trade_event(
                 parse_string_value(payload.get("taker_order_id")),
                 parse_string_value(payload.get("takerOrderId")),
                 parse_string_value(payload.get("takerOrderHash")),
-                refs.provider_order_refs.first().cloned().unwrap_or_default(),
+                refs.provider_order_refs
+                    .first()
+                    .cloned()
+                    .unwrap_or_default(),
             ]
             .into_iter()
             .find(|value| !value.is_empty()),
@@ -3239,7 +3242,13 @@ async fn fetch_polymarket_public_trade_page(
         .await
         .map_err(|err| {
             ApiError::internal(&format!("failed to fetch polymarket public trades: {err}"))
-        })?
+        })?;
+
+    if response.status() == reqwest::StatusCode::BAD_REQUEST {
+        return Ok(Vec::new());
+    }
+
+    let response = response
         .error_for_status()
         .map_err(|err| {
             ApiError::internal(&format!("polymarket public trades response failed: {err}"))
@@ -3769,12 +3778,14 @@ async fn load_polymarket_lane_health(
         };
     }
 
-    let mut status = if failed {
-        "error"
-    } else if lane == external::polymarket_index::PolymarketIndexLane::UserFills
+    let mut status = if lane == external::polymarket_index::PolymarketIndexLane::UserFills
         && !builder_configured
     {
         "missing_credentials"
+    } else if failed && indexed_markets == 0 {
+        "error"
+    } else if failed {
+        "partial"
     } else if indexed_markets == 0 {
         "pending"
     } else if partial || indexed_markets < tracked_market_ids.len() as u64 {
@@ -3845,7 +3856,10 @@ async fn load_polymarket_lane_health(
         .fetch_one(state.db.pool())
         .await
         .ok()
-        .and_then(|row| row.try_get::<Option<chrono::DateTime<Utc>>, _>("last_event_at").ok())
+        .and_then(|row| {
+            row.try_get::<Option<chrono::DateTime<Utc>>, _>("last_event_at")
+                .ok()
+        })
         .flatten()
         .map(|value| value.to_rfc3339());
 

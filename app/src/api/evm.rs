@@ -3058,7 +3058,7 @@ async fn fetch_internal_market_snapshots(
     Ok(markets)
 }
 
-async fn fetch_internal_market_snapshot_by_id(
+pub(crate) async fn fetch_internal_market_snapshot_by_id(
     state: &AppState,
     market_id: u64,
 ) -> Result<BaseMarketSnapshot, ApiError> {
