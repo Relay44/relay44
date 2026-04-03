@@ -357,6 +357,38 @@ pub struct BaseMarketSnapshot {
     pub bootstrap_last_reconciled_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bootstrap_last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_yes_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_no_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_total_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_net_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_link_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_active_link_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_last_mirror_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_last_hedge_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_freshness_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_pending_hedges: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_links_with_errors: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_hedge_errors: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_total_mirrored_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_total_hedged_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_net_exposure_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tradability_score: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -383,6 +415,37 @@ pub struct BaseOrderBookResponse {
     pub bootstrap_depth: f64,
     pub organic_depth: f64,
     pub mirror_depth: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_yes_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_no_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_total_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bootstrap_inventory_net_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_link_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_active_link_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_last_mirror_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_last_hedge_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_freshness_seconds: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_pending_hedges: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_links_with_errors: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_hedge_errors: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_total_mirrored_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_total_hedged_usdc: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_net_exposure_usdc: Option<f64>,
+    pub tradability_score: f64,
 }
 
 #[derive(Serialize)]
@@ -968,6 +1031,29 @@ struct BootstrapDepthSnapshot {
 }
 
 #[derive(Clone, Default)]
+struct BootstrapLiquiditySnapshot {
+    inventory_yes_usdc: Option<f64>,
+    inventory_no_usdc: Option<f64>,
+    inventory_total_usdc: Option<f64>,
+    inventory_net_usdc: Option<f64>,
+}
+
+#[derive(Clone, Default)]
+struct MirrorLiquiditySnapshot {
+    link_count: u64,
+    active_link_count: u64,
+    last_mirror_at: Option<DateTime<Utc>>,
+    last_hedge_at: Option<DateTime<Utc>>,
+    freshness_seconds: Option<u64>,
+    pending_hedges: u64,
+    links_with_errors: u64,
+    hedge_errors: u64,
+    total_mirrored_usdc: f64,
+    total_hedged_usdc: f64,
+    net_exposure_usdc: f64,
+}
+
+#[derive(Clone, Default)]
 struct BootstrapRecentFlow {
     yes_quantity: u64,
     no_quantity: u64,
@@ -1154,7 +1240,7 @@ fn restriction_warning(source: &str, action: ProviderRailAction) -> BaseFeedWarn
 }
 
 fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> BaseMarketSnapshot {
-    BaseMarketSnapshot {
+    let mut market = BaseMarketSnapshot {
         id: snapshot.id,
         question_hash: snapshot.provider_market_ref.clone(),
         question: snapshot.question,
@@ -1209,7 +1295,152 @@ fn from_external_market(snapshot: external::types::ExternalMarketSnapshot) -> Ba
         bootstrap_launch_tx_hash: None,
         bootstrap_last_reconciled_at: None,
         bootstrap_last_error: None,
+        bootstrap_inventory_yes_usdc: None,
+        bootstrap_inventory_no_usdc: None,
+        bootstrap_inventory_total_usdc: None,
+        bootstrap_inventory_net_usdc: None,
+        mirror_link_count: None,
+        mirror_active_link_count: None,
+        mirror_last_mirror_at: None,
+        mirror_last_hedge_at: None,
+        mirror_freshness_seconds: None,
+        mirror_pending_hedges: None,
+        mirror_links_with_errors: None,
+        mirror_hedge_errors: None,
+        mirror_total_mirrored_usdc: None,
+        mirror_total_hedged_usdc: None,
+        mirror_net_exposure_usdc: None,
+        tradability_score: None,
+    };
+    market.tradability_score = Some(compute_tradability_score(&market));
+    market
+}
+
+fn compute_tradability_score(snapshot: &BaseMarketSnapshot) -> f64 {
+    let mut score = snapshot.volume.unwrap_or(0.0) + snapshot.volume.unwrap_or(0.0) * 0.05;
+
+    if snapshot.status != "active" {
+        score -= 100_000.0;
     }
+    if !snapshot.execution_users {
+        score -= 50_000.0;
+    }
+    if !snapshot.execution_agents {
+        score -= 10_000.0;
+    }
+    if snapshot.requires_credentials {
+        score -= 2_500.0;
+    }
+
+    if snapshot
+        .liquidity_mode
+        .as_deref()
+        .is_some_and(|mode| mode == BOOTSTRAP_LIQUIDITY_MODE_HYBRID)
+    {
+        let status = snapshot
+            .bootstrap_status
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if status == "active" {
+            let bootstrap_depth = snapshot
+                .bootstrap_inventory_total_usdc
+                .or(snapshot.bootstrap_reserved_usdc)
+                .unwrap_or(0.0);
+            score += bootstrap_depth * 4.0;
+            score += snapshot.bootstrap_organic_depth_ratio.unwrap_or(0.0) * 2_500.0;
+            score += snapshot.mirror_active_link_count.unwrap_or(0) as f64 * 250.0;
+            score += snapshot.mirror_link_count.unwrap_or(0) as f64 * 25.0;
+
+            if let Some(freshness_seconds) = snapshot.mirror_freshness_seconds {
+                if freshness_seconds <= 60 {
+                    score += 750.0;
+                } else if freshness_seconds <= 300 {
+                    score += 350.0;
+                } else if freshness_seconds <= 900 {
+                    score += 100.0;
+                } else {
+                    score -= 1_000.0;
+                }
+            }
+
+            score += snapshot.mirror_total_mirrored_usdc.unwrap_or(0.0) * 0.5;
+            score -= snapshot.mirror_pending_hedges.unwrap_or(0) as f64 * 75.0;
+            score -= snapshot.mirror_links_with_errors.unwrap_or(0) as f64 * 250.0;
+            score -= snapshot.mirror_hedge_errors.unwrap_or(0) as f64 * 150.0;
+        }
+        if status == "graduated" {
+            score += 5_000.0;
+        }
+        if matches!(
+            status.as_str(),
+            "paused" | "error" | "pending_funding" | "pending_authorization"
+        ) {
+            score -= 20_000.0;
+        }
+    }
+
+    score
+}
+
+fn bootstrap_inventory_snapshot(
+    records: &[BaseMarketBootstrapAgentRecord],
+) -> BootstrapLiquiditySnapshot {
+    let mut yes = 0_u64;
+    let mut no = 0_u64;
+    let mut has_yes = false;
+    let mut has_no = false;
+
+    for record in records {
+        if !record.active {
+            continue;
+        }
+        let Some(size) = record.current_size else {
+            continue;
+        };
+        match record.side.as_str() {
+            "yes" => {
+                yes = yes.saturating_add(size);
+                has_yes = true;
+            }
+            "no" => {
+                no = no.saturating_add(size);
+                has_no = true;
+            }
+            _ => {}
+        }
+    }
+
+    let total = yes.saturating_add(no);
+    let yes_usdc = has_yes.then_some(yes as f64 / 1_000_000.0);
+    let no_usdc = has_no.then_some(no as f64 / 1_000_000.0);
+    let total_usdc = (has_yes || has_no).then_some(total as f64 / 1_000_000.0);
+    let net_usdc = if has_yes || has_no {
+        Some(yes as f64 / 1_000_000.0 - no as f64 / 1_000_000.0)
+    } else {
+        None
+    };
+
+    BootstrapLiquiditySnapshot {
+        inventory_yes_usdc: yes_usdc,
+        inventory_no_usdc: no_usdc,
+        inventory_total_usdc: total_usdc,
+        inventory_net_usdc: net_usdc,
+    }
+}
+
+fn mirror_freshness_seconds(
+    last_mirror_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<u64> {
+    let last_mirror_at = last_mirror_at?;
+    let diff = now.signed_duration_since(last_mirror_at);
+    if diff < ChronoDuration::zero() {
+        return Some(0);
+    }
+
+    diff.to_std().ok().map(|value| value.as_secs())
 }
 
 fn internal_feed_warning(err: &ApiError) -> BaseFeedWarning {
@@ -1672,6 +1903,128 @@ fn bootstrap_depth_snapshot(
 
 fn parse_rfc3339_utc(value: Option<&DateTime<Utc>>) -> Option<String> {
     value.map(DateTime::<Utc>::to_rfc3339)
+}
+
+async fn load_bootstrap_liquidity_snapshot(
+    state: &AppState,
+    market_id: u64,
+) -> Result<BootstrapLiquiditySnapshot, ApiError> {
+    let records = state
+        .db
+        .list_base_market_bootstrap_agents(market_id)
+        .await
+        .map_err(|err| ApiError::internal(&format!("Failed to load bootstrap agents: {err}")))?;
+    let mut snapshot = bootstrap_inventory_snapshot(&records);
+    if snapshot.inventory_total_usdc.is_none() {
+        snapshot.inventory_yes_usdc = None;
+        snapshot.inventory_no_usdc = None;
+        snapshot.inventory_net_usdc = None;
+    }
+
+    Ok(snapshot)
+}
+
+async fn load_mirror_liquidity_snapshot(
+    state: &AppState,
+    market_id: u64,
+    now: DateTime<Utc>,
+) -> Result<MirrorLiquiditySnapshot, ApiError> {
+    use sqlx::Row;
+
+    let row = sqlx::query(
+        "SELECT COUNT(*)::bigint as link_count, \
+         COUNT(*) FILTER (WHERE active)::bigint as active_link_count, \
+         COUNT(*) FILTER (WHERE mirror_error IS NOT NULL)::bigint as mirror_error_count, \
+         COUNT(*) FILTER (WHERE hedge_error IS NOT NULL)::bigint as hedge_error_count, \
+         COALESCE(SUM(total_mirrored_usdc), 0)::text as total_mirrored_text, \
+         COALESCE(SUM(total_hedged_usdc), 0)::text as total_hedged_text, \
+         COALESCE(SUM(net_exposure_usdc), 0)::text as net_exposure_text, \
+         MAX(last_mirror_at) as last_mirror_at, \
+         MAX(last_hedge_at) as last_hedge_at \
+         FROM mirror_market_links \
+         WHERE internal_market_id = $1",
+    )
+    .bind(market_id as i64)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&format!("Failed to load mirror metrics: {err}")))?;
+
+    let last_mirror_at = row
+        .try_get::<Option<DateTime<Utc>>, _>("last_mirror_at")
+        .ok()
+        .flatten();
+    let last_hedge_at = row
+        .try_get::<Option<DateTime<Utc>>, _>("last_hedge_at")
+        .ok()
+        .flatten();
+    let pending_hedges = sqlx::query(
+        "SELECT COUNT(*)::bigint as cnt \
+         FROM mirror_hedge_log log \
+         INNER JOIN mirror_market_links link ON link.id = log.mirror_link_id \
+         WHERE link.internal_market_id = $1 AND log.hedge_status = 'pending'",
+    )
+    .bind(market_id as i64)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|err| ApiError::internal(&format!("Failed to load mirror hedge backlog: {err}")))?;
+
+    let freshness_seconds = mirror_freshness_seconds(last_mirror_at, now);
+
+    Ok(MirrorLiquiditySnapshot {
+        link_count: row.get::<i64, _>("link_count").max(0) as u64,
+        active_link_count: row.get::<i64, _>("active_link_count").max(0) as u64,
+        last_mirror_at,
+        last_hedge_at,
+        freshness_seconds,
+        pending_hedges: pending_hedges.get::<i64, _>("cnt").max(0) as u64,
+        links_with_errors: row.get::<i64, _>("mirror_error_count").max(0) as u64,
+        hedge_errors: row.get::<i64, _>("hedge_error_count").max(0) as u64,
+        total_mirrored_usdc: row
+            .get::<String, _>("total_mirrored_text")
+            .parse::<f64>()
+            .unwrap_or(0.0),
+        total_hedged_usdc: row
+            .get::<String, _>("total_hedged_text")
+            .parse::<f64>()
+            .unwrap_or(0.0),
+        net_exposure_usdc: row
+            .get::<String, _>("net_exposure_text")
+            .parse::<f64>()
+            .unwrap_or(0.0),
+    })
+}
+
+async fn attach_market_liquidity_metrics(
+    state: &AppState,
+    snapshot: &mut BaseMarketSnapshot,
+    bootstrap_config: Option<&BaseMarketBootstrapConfigRecord>,
+) -> Result<(), ApiError> {
+    let market_id = snapshot.id.parse::<u64>().unwrap_or(0);
+    let now = Utc::now();
+
+    if bootstrap_config.is_some() {
+        let bootstrap = load_bootstrap_liquidity_snapshot(state, market_id).await?;
+        snapshot.bootstrap_inventory_yes_usdc = bootstrap.inventory_yes_usdc;
+        snapshot.bootstrap_inventory_no_usdc = bootstrap.inventory_no_usdc;
+        snapshot.bootstrap_inventory_total_usdc = bootstrap.inventory_total_usdc;
+        snapshot.bootstrap_inventory_net_usdc = bootstrap.inventory_net_usdc;
+    }
+
+    let mirror = load_mirror_liquidity_snapshot(state, market_id, now).await?;
+    snapshot.mirror_link_count = Some(mirror.link_count);
+    snapshot.mirror_active_link_count = Some(mirror.active_link_count);
+    snapshot.mirror_last_mirror_at = parse_rfc3339_utc(mirror.last_mirror_at.as_ref());
+    snapshot.mirror_last_hedge_at = parse_rfc3339_utc(mirror.last_hedge_at.as_ref());
+    snapshot.mirror_freshness_seconds = mirror.freshness_seconds;
+    snapshot.mirror_pending_hedges = Some(mirror.pending_hedges);
+    snapshot.mirror_links_with_errors = Some(mirror.links_with_errors);
+    snapshot.mirror_hedge_errors = Some(mirror.hedge_errors);
+    snapshot.mirror_total_mirrored_usdc = Some(mirror.total_mirrored_usdc);
+    snapshot.mirror_total_hedged_usdc = Some(mirror.total_hedged_usdc);
+    snapshot.mirror_net_exposure_usdc = Some(mirror.net_exposure_usdc);
+    snapshot.tradability_score = Some(compute_tradability_score(snapshot));
+
+    Ok(())
 }
 
 fn configured_bootstrap_operator(state: &AppState) -> Result<String, ApiError> {
@@ -2697,6 +3050,8 @@ async fn fetch_internal_market_snapshots(
         snapshot.execution_users = true;
         snapshot.execution_agents = true;
         apply_bootstrap_snapshot(&mut snapshot, bootstrap_configs.get(&index))?;
+        attach_market_liquidity_metrics(&state, &mut snapshot, bootstrap_configs.get(&index))
+            .await?;
         markets.push(snapshot);
     }
 
@@ -2779,6 +3134,7 @@ async fn fetch_internal_market_snapshot_by_id(
     snapshot.execution_agents = true;
     let bootstrap_config = state.db.get_base_market_bootstrap(market_id).await?;
     apply_bootstrap_snapshot(&mut snapshot, bootstrap_config.as_ref())?;
+    attach_market_liquidity_metrics(&state, &mut snapshot, bootstrap_config.as_ref()).await?;
 
     Ok(snapshot)
 }
@@ -2968,7 +3324,12 @@ pub async fn get_base_market(
             to_rail_provider(external_id.provider),
             ProviderRailAction::MarketData,
         )?;
-        let market = external::fetch_market_by_id(&state.config, &external_id).await?;
+        let market = external::fetch_market_by_id_with_rpc(
+            &state.config,
+            &external_id,
+            Some(&state.evm_rpc),
+        )
+        .await?;
         return Ok(HttpResponse::Ok().json(from_external_market(market)));
     }
 
@@ -4554,9 +4915,15 @@ pub async fn get_base_orderbook(
             to_rail_provider(external_id.provider),
             ProviderRailAction::MarketData,
         )?;
-        let snapshot =
-            external::fetch_orderbook(&state.config, &state.redis, &external_id, outcome, depth)
-                .await?;
+        let snapshot = external::fetch_orderbook_with_rpc(
+            &state.config,
+            &state.redis,
+            &external_id,
+            outcome,
+            depth,
+            Some(&state.evm_rpc),
+        )
+        .await?;
 
         let mut response = HttpResponse::Ok();
         x402::append_payment_response_header(&mut response, settlement.as_ref())?;
@@ -4593,6 +4960,22 @@ pub async fn get_base_orderbook(
             bootstrap_depth: 0.0,
             organic_depth: 0.0,
             mirror_depth: 0.0,
+            bootstrap_inventory_yes_usdc: None,
+            bootstrap_inventory_no_usdc: None,
+            bootstrap_inventory_total_usdc: None,
+            bootstrap_inventory_net_usdc: None,
+            mirror_link_count: None,
+            mirror_active_link_count: None,
+            mirror_last_mirror_at: None,
+            mirror_last_hedge_at: None,
+            mirror_freshness_seconds: None,
+            mirror_pending_hedges: None,
+            mirror_links_with_errors: None,
+            mirror_hedge_errors: None,
+            mirror_total_mirrored_usdc: None,
+            mirror_total_hedged_usdc: None,
+            mirror_net_exposure_usdc: None,
+            tradability_score: 0.0,
         }));
     }
 
@@ -4710,22 +5093,43 @@ pub async fn get_base_orderbook(
     let mut mirror_depth: u64 = 0;
     let mut includes_mirror = false;
     if let Some(snapshot) = liquidity_mirror::load_mirror_snapshot(&state, market_id).await {
+        let window_bps = bootstrap_config
+            .as_ref()
+            .map(|config| config.organic_depth_window_bps)
+            .unwrap_or(BOOTSTRAP_DEFAULT_DEPTH_WINDOW_BPS);
+        let yes_mid = market_snapshot
+            .yes_price
+            .map(|price| (price.clamp(0.01, 0.99) * 10_000.0).round() as u64)
+            .unwrap_or(PAR_PRICE_BPS / 2);
+        let no_mid = PAR_PRICE_BPS.saturating_sub(yes_mid);
         let yes_mirror = liquidity_mirror::mirror_to_level_map(&snapshot.yes_bids);
         let no_mirror = liquidity_mirror::mirror_to_level_map(&snapshot.no_bids);
         let yes_mirror_agg: BTreeMap<u64, LevelAggregate> = yes_mirror
             .into_iter()
-            .map(|(p, q)| (p, LevelAggregate { quantity: q, orders: 1 }))
+            .map(|(p, q)| {
+                (
+                    p,
+                    LevelAggregate {
+                        quantity: q,
+                        orders: 1,
+                    },
+                )
+            })
             .collect();
         let no_mirror_agg: BTreeMap<u64, LevelAggregate> = no_mirror
             .into_iter()
-            .map(|(p, q)| (p, LevelAggregate { quantity: q, orders: 1 }))
+            .map(|(p, q)| {
+                (
+                    p,
+                    LevelAggregate {
+                        quantity: q,
+                        orders: 1,
+                    },
+                )
+            })
             .collect();
-        for level in yes_mirror_agg.values() {
-            mirror_depth = mirror_depth.saturating_add(level.quantity);
-        }
-        for level in no_mirror_agg.values() {
-            mirror_depth = mirror_depth.saturating_add(level.quantity);
-        }
+        mirror_depth = sum_depth_near_mid(&yes_mirror_agg, yes_mid, window_bps)
+            .saturating_add(sum_depth_near_mid(&no_mirror_agg, no_mid, window_bps));
         merge_level_maps(&mut yes_bid_levels, &yes_mirror_agg);
         merge_level_maps(&mut no_bid_levels, &no_mirror_agg);
         includes_mirror = mirror_depth > 0;
@@ -4765,6 +5169,22 @@ pub async fn get_base_orderbook(
         bootstrap_depth: bootstrap_depth as f64 / 1_000_000.0,
         organic_depth: organic_depth as f64 / 1_000_000.0,
         mirror_depth: mirror_depth as f64 / 1_000_000.0,
+        bootstrap_inventory_yes_usdc: market_snapshot.bootstrap_inventory_yes_usdc,
+        bootstrap_inventory_no_usdc: market_snapshot.bootstrap_inventory_no_usdc,
+        bootstrap_inventory_total_usdc: market_snapshot.bootstrap_inventory_total_usdc,
+        bootstrap_inventory_net_usdc: market_snapshot.bootstrap_inventory_net_usdc,
+        mirror_link_count: market_snapshot.mirror_link_count,
+        mirror_active_link_count: market_snapshot.mirror_active_link_count,
+        mirror_last_mirror_at: market_snapshot.mirror_last_mirror_at.clone(),
+        mirror_last_hedge_at: market_snapshot.mirror_last_hedge_at.clone(),
+        mirror_freshness_seconds: market_snapshot.mirror_freshness_seconds,
+        mirror_pending_hedges: market_snapshot.mirror_pending_hedges,
+        mirror_links_with_errors: market_snapshot.mirror_links_with_errors,
+        mirror_hedge_errors: market_snapshot.mirror_hedge_errors,
+        mirror_total_mirrored_usdc: market_snapshot.mirror_total_mirrored_usdc,
+        mirror_total_hedged_usdc: market_snapshot.mirror_total_hedged_usdc,
+        mirror_net_exposure_usdc: market_snapshot.mirror_net_exposure_usdc,
+        tradability_score: market_snapshot.tradability_score.unwrap_or(0.0),
     }))
 }
 
@@ -4807,13 +5227,14 @@ pub async fn get_base_trades(
             to_rail_provider(external_id.provider),
             ProviderRailAction::MarketData,
         )?;
-        let snapshot = external::fetch_trades(
+        let snapshot = external::fetch_trades_with_rpc(
             &state.config,
             &state.redis,
             &external_id,
             outcome_raw,
             limit,
             offset,
+            Some(&state.evm_rpc),
         )
         .await?;
 
@@ -6360,11 +6781,12 @@ pub async fn prepare_configure_oracle_write(
         ));
     }
 
-    let target_value_i256 = body
-        .target_value
-        .trim()
-        .parse::<i128>()
-        .map_err(|_| ApiError::bad_request("INVALID_TARGET_VALUE", "targetValue must be a valid integer"))?;
+    let target_value_i256 = body.target_value.trim().parse::<i128>().map_err(|_| {
+        ApiError::bad_request(
+            "INVALID_TARGET_VALUE",
+            "targetValue must be a valid integer",
+        )
+    })?;
 
     let data = encode_configure_oracle_calldata(
         body.market_id,
@@ -6578,9 +7000,7 @@ fn encode_configure_oracle_calldata(
     comparison: u8,
     target_value: i128,
 ) -> Result<String, ApiError> {
-    let addr = feed_address
-        .trim_start_matches("0x")
-        .to_ascii_lowercase();
+    let addr = feed_address.trim_start_matches("0x").to_ascii_lowercase();
 
     // int256 encoding: positive values zero-padded, negative values sign-extended
     let target_hex = if target_value >= 0 {
@@ -6645,9 +7065,15 @@ pub struct CreateMirrorLinkRequest {
     pub hedge_credential_id: Option<String>,
 }
 
-fn default_spread_bps() -> i32 { 50 }
-fn default_max_depth() -> f64 { 5000.0 }
-fn default_hedge_mode() -> String { "auto".to_string() }
+fn default_spread_bps() -> i32 {
+    50
+}
+fn default_max_depth() -> f64 {
+    5000.0
+}
+fn default_hedge_mode() -> String {
+    "auto".to_string()
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -6708,6 +7134,7 @@ pub async fn list_mirror_links(
     state: web::Data<Arc<AppState>>,
 ) -> Result<impl Responder, ApiError> {
     ensure_admin_control(&req, &state)?;
+    let now = Utc::now();
 
     let rows = sqlx::query(
         "SELECT id, internal_market_id, external_market_id, external_provider, \
@@ -6739,6 +7166,8 @@ pub async fn list_mirror_links(
                 "active": r.get::<bool, _>("active"),
                 "lastMirrorAt": r.get::<Option<chrono::DateTime<Utc>>, _>("last_mirror_at"),
                 "lastHedgeAt": r.get::<Option<chrono::DateTime<Utc>>, _>("last_hedge_at"),
+                "freshnessSeconds": r.get::<Option<chrono::DateTime<Utc>>, _>("last_mirror_at")
+                    .and_then(|ts| mirror_freshness_seconds(Some(ts), now.clone())),
                 "mirrorError": r.get::<Option<String>, _>("mirror_error"),
                 "hedgeError": r.get::<Option<String>, _>("hedge_error"),
                 "totalMirroredUsdc": r.get::<String, _>("total_mirrored_text").parse::<f64>().unwrap_or(0.0),
@@ -6780,12 +7209,14 @@ pub async fn update_mirror_link(
         updates.push("maxDepthUsdc".to_string());
     }
     if let Some(ref mode) = body.hedge_mode {
-        sqlx::query("UPDATE mirror_market_links SET hedge_mode = $1, updated_at = NOW() WHERE id = $2")
-            .bind(mode.trim())
-            .bind(link_id)
-            .execute(state.db.pool())
-            .await
-            .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
+        sqlx::query(
+            "UPDATE mirror_market_links SET hedge_mode = $1, updated_at = NOW() WHERE id = $2",
+        )
+        .bind(mode.trim())
+        .bind(link_id)
+        .execute(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&format!("Update failed: {}", e)))?;
         updates.push("hedgeMode".to_string());
     }
     if let Some(ref cred) = body.hedge_credential_id {
@@ -6822,15 +7253,19 @@ pub async fn get_mirror_status(
     state: web::Data<Arc<AppState>>,
 ) -> Result<impl Responder, ApiError> {
     ensure_admin_control(&req, &state)?;
+    let now = Utc::now();
 
     let row = sqlx::query(
         "SELECT \
          COUNT(*)::bigint as total, \
          COUNT(*) FILTER (WHERE active)::bigint as active_count, \
+         MAX(last_mirror_at) as last_mirror_at, \
+         MAX(last_hedge_at) as last_hedge_at, \
          COALESCE(SUM(total_mirrored_usdc), 0)::text as total_mirrored_text, \
          COALESCE(SUM(total_hedged_usdc), 0)::text as total_hedged_text, \
          COALESCE(SUM(net_exposure_usdc), 0)::text as net_exposure_text, \
-         COUNT(*) FILTER (WHERE mirror_error IS NOT NULL)::bigint as error_count \
+         COUNT(*) FILTER (WHERE mirror_error IS NOT NULL)::bigint as error_count, \
+         COUNT(*) FILTER (WHERE hedge_error IS NOT NULL)::bigint as hedge_error_count \
          FROM mirror_market_links",
     )
     .fetch_one(state.db.pool())
@@ -6849,10 +7284,16 @@ pub async fn get_mirror_status(
     Ok(HttpResponse::Ok().json(json!({
         "totalLinks": row.get::<i64, _>("total"),
         "activeLinks": row.get::<i64, _>("active_count"),
+        "lastMirrorAt": row.get::<Option<chrono::DateTime<Utc>>, _>("last_mirror_at"),
+        "lastHedgeAt": row.get::<Option<chrono::DateTime<Utc>>, _>("last_hedge_at"),
+        "freshnessSeconds": row
+            .get::<Option<chrono::DateTime<Utc>>, _>("last_mirror_at")
+            .and_then(|ts| mirror_freshness_seconds(Some(ts), now.clone())),
         "totalMirroredUsdc": row.get::<String, _>("total_mirrored_text").parse::<f64>().unwrap_or(0.0),
         "totalHedgedUsdc": row.get::<String, _>("total_hedged_text").parse::<f64>().unwrap_or(0.0),
         "netExposureUsdc": row.get::<String, _>("net_exposure_text").parse::<f64>().unwrap_or(0.0),
         "linksWithErrors": row.get::<i64, _>("error_count"),
+        "hedgeErrors": row.get::<i64, _>("hedge_error_count"),
         "pendingHedges": hedge_row.get::<i64, _>("cnt"),
     })))
 }
@@ -7445,6 +7886,22 @@ fn decode_market_snapshot(index: u64, slot: &str) -> Result<BaseMarketSnapshot, 
         bootstrap_launch_tx_hash: None,
         bootstrap_last_reconciled_at: None,
         bootstrap_last_error: None,
+        bootstrap_inventory_yes_usdc: None,
+        bootstrap_inventory_no_usdc: None,
+        bootstrap_inventory_total_usdc: None,
+        bootstrap_inventory_net_usdc: None,
+        mirror_link_count: None,
+        mirror_active_link_count: None,
+        mirror_last_mirror_at: None,
+        mirror_last_hedge_at: None,
+        mirror_freshness_seconds: None,
+        mirror_pending_hedges: None,
+        mirror_links_with_errors: None,
+        mirror_hedge_errors: None,
+        mirror_total_mirrored_usdc: None,
+        mirror_total_hedged_usdc: None,
+        mirror_net_exposure_usdc: None,
+        tradability_score: None,
     })
 }
 
@@ -7852,6 +8309,36 @@ mod tests {
     }
 
     #[test]
+    fn test_sum_depth_near_mid_uses_consistent_window() {
+        let levels = BTreeMap::from([
+            (
+                4_900,
+                LevelAggregate {
+                    quantity: 10,
+                    orders: 1,
+                },
+            ),
+            (
+                4_450,
+                LevelAggregate {
+                    quantity: 25,
+                    orders: 1,
+                },
+            ),
+            (
+                4_300,
+                LevelAggregate {
+                    quantity: 40,
+                    orders: 1,
+                },
+            ),
+        ]);
+
+        assert_eq!(sum_depth_near_mid(&levels, 4_800, 400), 35);
+        assert_eq!(sum_depth_near_mid(&levels, 4_800, 200), 10);
+    }
+
+    #[test]
     fn test_bootstrap_side_budget_bps_respects_exposure_cap() {
         let mut config = sample_bootstrap_config();
         config.inventory_skew_bps = -((config.exposure_cap_bps / 2) as i32);
@@ -7904,6 +8391,175 @@ mod tests {
         assert_eq!(
             bootstrap_adaptive_size_multiplier_bps(&signals),
             BOOTSTRAP_SIZE_MIN_BPS
+        );
+    }
+
+    #[test]
+    fn test_tradability_score_rewards_active_bootstrap_over_paused_bootstrap() {
+        let mut snapshot = BaseMarketSnapshot {
+            id: "1".to_string(),
+            question_hash: "0x0".to_string(),
+            question: "Will this market stay tradable?".to_string(),
+            description: String::new(),
+            category: "test".to_string(),
+            resolution_source: String::new(),
+            resolver: String::new(),
+            close_time: 0,
+            resolve_time: 0,
+            resolved: false,
+            outcome: None,
+            status: "active".to_string(),
+            source: "internal".to_string(),
+            provider: "internal".to_string(),
+            is_external: false,
+            external_url: None,
+            chain_id: 8453,
+            requires_credentials: false,
+            execution_users: true,
+            execution_agents: true,
+            outcomes: Vec::new(),
+            yes_price: Some(0.54),
+            no_price: Some(0.46),
+            volume: Some(10_000.0),
+            liquidity_mode: Some(BOOTSTRAP_LIQUIDITY_MODE_HYBRID.to_string()),
+            bootstrap_status: Some("paused".to_string()),
+            bootstrap_active: Some(false),
+            bootstrap_seed_usdc: Some(100.0),
+            bootstrap_manager: None,
+            bootstrap_preset: Some("balanced".to_string()),
+            bootstrap_strategy: Some("ladder_adaptive_v1".to_string()),
+            bootstrap_levels: Some(5),
+            bootstrap_initial_yes_bps: Some(5_400),
+            bootstrap_base_spread_bps: Some(400),
+            bootstrap_step_bps: Some(200),
+            bootstrap_cadence_seconds: Some(60),
+            bootstrap_expiry_seconds: Some(180),
+            bootstrap_pause_reason: Some(BOOTSTRAP_PAUSE_REASON_INSUFFICIENT_FUNDS.to_string()),
+            bootstrap_reserved_usdc: Some(500.0),
+            bootstrap_available_usdc: Some(0.0),
+            bootstrap_active_slots: Some(0),
+            bootstrap_organic_depth_ratio: Some(1.4),
+            bootstrap_consecutive_failures: Some(0),
+            bootstrap_graduated_at: None,
+            bootstrap_launch_tx_hash: None,
+            bootstrap_last_reconciled_at: None,
+            bootstrap_last_error: None,
+            bootstrap_inventory_yes_usdc: None,
+            bootstrap_inventory_no_usdc: None,
+            bootstrap_inventory_total_usdc: None,
+            bootstrap_inventory_net_usdc: None,
+            mirror_link_count: None,
+            mirror_active_link_count: None,
+            mirror_last_mirror_at: None,
+            mirror_last_hedge_at: None,
+            mirror_freshness_seconds: None,
+            mirror_pending_hedges: None,
+            mirror_links_with_errors: None,
+            mirror_hedge_errors: None,
+            mirror_total_mirrored_usdc: None,
+            mirror_total_hedged_usdc: None,
+            mirror_net_exposure_usdc: None,
+            tradability_score: None,
+        };
+
+        let paused_score = compute_tradability_score(&snapshot);
+        snapshot.bootstrap_status = Some("active".to_string());
+        snapshot.bootstrap_active = Some(true);
+        snapshot.bootstrap_pause_reason = None;
+        snapshot.bootstrap_active_slots = Some(5);
+        let active_score = compute_tradability_score(&snapshot);
+
+        assert!(active_score > paused_score);
+    }
+
+    #[test]
+    fn test_bootstrap_inventory_snapshot_counts_active_slots_by_side() {
+        let now = Utc::now();
+        let records = vec![
+            BaseMarketBootstrapAgentRecord {
+                market_id: 42,
+                side: "yes".to_string(),
+                level_index: 0,
+                agent_id: Some(1),
+                desired_price_bps: 4_900,
+                desired_size: 25_000_000,
+                current_price_bps: Some(4_900),
+                current_size: Some(25_000_000),
+                active: true,
+                created_tx_hash: None,
+                updated_tx_hash: None,
+                deactivated_tx_hash: None,
+                last_execute_tx_hash: None,
+                last_executed_at: None,
+                last_reconciled_at: None,
+                last_error: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+            BaseMarketBootstrapAgentRecord {
+                market_id: 42,
+                side: "no".to_string(),
+                level_index: 0,
+                agent_id: Some(2),
+                desired_price_bps: 5_100,
+                desired_size: 10_000_000,
+                current_price_bps: Some(5_100),
+                current_size: Some(10_000_000),
+                active: true,
+                created_tx_hash: None,
+                updated_tx_hash: None,
+                deactivated_tx_hash: None,
+                last_execute_tx_hash: None,
+                last_executed_at: None,
+                last_reconciled_at: None,
+                last_error: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+            BaseMarketBootstrapAgentRecord {
+                market_id: 42,
+                side: "yes".to_string(),
+                level_index: 1,
+                agent_id: Some(3),
+                desired_price_bps: 4_800,
+                desired_size: 9_000_000,
+                current_price_bps: Some(4_800),
+                current_size: Some(9_000_000),
+                active: false,
+                created_tx_hash: None,
+                updated_tx_hash: None,
+                deactivated_tx_hash: None,
+                last_execute_tx_hash: None,
+                last_executed_at: None,
+                last_reconciled_at: None,
+                last_error: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+        ];
+
+        let snapshot = bootstrap_inventory_snapshot(&records);
+
+        assert_eq!(snapshot.inventory_yes_usdc, Some(25.0));
+        assert_eq!(snapshot.inventory_no_usdc, Some(10.0));
+        assert_eq!(snapshot.inventory_total_usdc, Some(35.0));
+        assert_eq!(snapshot.inventory_net_usdc, Some(15.0));
+    }
+
+    #[test]
+    fn test_mirror_freshness_seconds_uses_elapsed_time() {
+        let now = DateTime::<Utc>::from_naive_utc_and_offset(
+            chrono::NaiveDate::from_ymd_opt(2026, 4, 3)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+            Utc,
+        );
+        let last_mirror_at = now - ChronoDuration::seconds(95);
+
+        assert_eq!(
+            mirror_freshness_seconds(Some(last_mirror_at), now),
+            Some(95)
         );
     }
 

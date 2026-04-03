@@ -1,4 +1,5 @@
 pub mod credentials;
+pub mod ledger;
 pub mod paper;
 pub mod providers;
 pub mod strategy;
@@ -97,6 +98,18 @@ fn http_client() -> Result<Client, ApiError> {
         .map_err(|err| {
             ApiError::internal(&format!("failed to build external http client: {}", err))
         })
+}
+
+fn configured_evm_rpc(config: &AppConfig) -> Option<EvmRpcService> {
+    let base_rpc_url = config.base_rpc_url.trim();
+    if !config.evm_enabled || base_rpc_url.is_empty() {
+        return None;
+    }
+
+    Some(EvmRpcService::new(
+        base_rpc_url,
+        &config.base_rpc_fallback_urls,
+    ))
 }
 
 fn include_market(filter: TradableFilter, market: &ExternalMarketSnapshot) -> bool {
@@ -440,7 +453,8 @@ pub async fn fetch_market_by_id(
     config: &AppConfig,
     market_id: &ExternalMarketId,
 ) -> Result<ExternalMarketSnapshot, ApiError> {
-    fetch_market_by_id_with_rpc(config, market_id, None).await
+    let evm_rpc = configured_evm_rpc(config);
+    fetch_market_by_id_with_rpc(config, market_id, evm_rpc.as_ref()).await
 }
 
 pub async fn fetch_market_by_id_with_rpc(
@@ -518,7 +532,8 @@ pub async fn fetch_orderbook(
     outcome: &str,
     depth: u64,
 ) -> Result<ExternalOrderBookSnapshot, ApiError> {
-    fetch_orderbook_with_rpc(config, redis, market_id, outcome, depth, None).await
+    let evm_rpc = configured_evm_rpc(config);
+    fetch_orderbook_with_rpc(config, redis, market_id, outcome, depth, evm_rpc.as_ref()).await
 }
 
 pub async fn fetch_orderbook_with_rpc(
@@ -600,6 +615,28 @@ pub async fn fetch_trades(
     limit: u64,
     offset: u64,
 ) -> Result<ExternalTradesSnapshot, ApiError> {
+    let evm_rpc = configured_evm_rpc(config);
+    fetch_trades_with_rpc(
+        config,
+        redis,
+        market_id,
+        outcome,
+        limit,
+        offset,
+        evm_rpc.as_ref(),
+    )
+    .await
+}
+
+pub async fn fetch_trades_with_rpc(
+    config: &AppConfig,
+    redis: &RedisService,
+    market_id: &ExternalMarketId,
+    outcome: Option<&str>,
+    limit: u64,
+    offset: u64,
+    evm_rpc: Option<&EvmRpcService>,
+) -> Result<ExternalTradesSnapshot, ApiError> {
     if !config.external_markets_enabled {
         return Err(ApiError::bad_request(
             "EXTERNAL_MARKETS_DISABLED",
@@ -648,20 +685,9 @@ pub async fn fetch_trades(
             .await?
         }
         ExternalProvider::Aerodrome => {
-            // Aerodrome trades would come from on-chain swap events.
-            // Return empty for now — trade history requires indexer integration.
-            ExternalTradesSnapshot {
-                trades: Vec::new(),
-                total: 0,
-                limit,
-                offset,
-                has_more: false,
-                source: "external_aerodrome".to_string(),
-                provider: "aerodrome".to_string(),
-                chain_id: 8453,
-                provider_market_ref: market_id.value.clone(),
-                is_synthetic: true,
-            }
+            let rpc =
+                evm_rpc.ok_or_else(|| ApiError::internal("aerodrome requires evm_rpc service"))?;
+            aerodrome::fetch_trades(rpc, market_id.value.as_str(), outcome, limit, offset).await?
         }
     };
 

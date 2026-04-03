@@ -16,6 +16,15 @@ use crate::models::{
     Transaction as ModelTransaction, TransactionType,
 };
 
+#[derive(Debug, Clone)]
+pub struct LocalTradeSettlement {
+    pub trade: Trade,
+    pub buyer_yes_delta: i64,
+    pub buyer_no_delta: i64,
+    pub seller_yes_delta: i64,
+    pub seller_no_delta: i64,
+}
+
 /// Database connection pool configuration
 pub struct PoolConfig {
     /// Maximum number of connections in the pool
@@ -854,12 +863,116 @@ impl DatabaseService {
         Ok(())
     }
 
+    pub async fn persist_local_order_flow(
+        &self,
+        taker: &Order,
+        maker_updates: &[Order],
+        settlements: &[LocalTradeSettlement],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO orders (
+                id, order_id, market_id, owner, side, outcome, order_type,
+                price, price_bps, quantity, filled_quantity, remaining_quantity,
+                status, is_private, tx_signature, created_at, updated_at, expires_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            "#,
+        )
+        .bind(&taker.id)
+        .bind(taker.order_id as i64)
+        .bind(&taker.market_id)
+        .bind(&taker.owner)
+        .bind(taker.side as i16)
+        .bind(taker.outcome as i16)
+        .bind(taker.order_type as i16)
+        .bind(taker.price)
+        .bind(taker.price_bps as i16)
+        .bind(taker.quantity as i64)
+        .bind(taker.filled_quantity as i64)
+        .bind(taker.remaining_quantity as i64)
+        .bind(taker.status as i16)
+        .bind(taker.is_private)
+        .bind(&taker.tx_signature)
+        .bind(taker.created_at)
+        .bind(taker.updated_at)
+        .bind(taker.expires_at)
+        .execute(&mut *tx)
+        .await?;
+
+        upsert_orderbook_entry_tx(&mut tx, taker).await?;
+
+        for maker in maker_updates {
+            sqlx::query(
+                "UPDATE orders SET status = $1, filled_quantity = $2, remaining_quantity = $3, updated_at = $4 WHERE id = $5",
+            )
+            .bind(maker.status as i16)
+            .bind(maker.filled_quantity as i64)
+            .bind(maker.remaining_quantity as i64)
+            .bind(maker.updated_at)
+            .bind(&maker.id)
+            .execute(&mut *tx)
+            .await?;
+
+            upsert_orderbook_entry_tx(&mut tx, maker).await?;
+        }
+
+        for settlement in settlements {
+            sqlx::query(
+                r#"
+                INSERT INTO trades (
+                    id, market_id, buy_order_id, sell_order_id, outcome,
+                    price, price_bps, quantity, collateral_amount,
+                    buyer, seller, tx_signature, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                "#,
+            )
+            .bind(&settlement.trade.id)
+            .bind(&settlement.trade.market_id)
+            .bind(&settlement.trade.buy_order_id)
+            .bind(&settlement.trade.sell_order_id)
+            .bind(settlement.trade.outcome as i16)
+            .bind(settlement.trade.price)
+            .bind(settlement.trade.price_bps as i16)
+            .bind(settlement.trade.quantity as i64)
+            .bind(settlement.trade.collateral_amount as i64)
+            .bind(&settlement.trade.buyer)
+            .bind(&settlement.trade.seller)
+            .bind(&settlement.trade.tx_signature)
+            .bind(settlement.trade.created_at)
+            .execute(&mut *tx)
+            .await?;
+
+            apply_position_delta_tx(
+                &mut tx,
+                settlement.trade.market_id.as_str(),
+                settlement.trade.buyer.as_str(),
+                settlement.buyer_yes_delta,
+                settlement.buyer_no_delta,
+            )
+            .await?;
+            apply_position_delta_tx(
+                &mut tx,
+                settlement.trade.market_id.as_str(),
+                settlement.trade.seller.as_str(),
+                settlement.seller_yes_delta,
+                settlement.seller_no_delta,
+            )
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     // Positions
     pub async fn get_positions(&self, owner: &str) -> Result<Vec<Position>> {
-        let rows = sqlx::query("SELECT * FROM positions WHERE LOWER(owner) = $1 ORDER BY created_at DESC")
-            .bind(owner)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query("SELECT * FROM positions WHERE LOWER(owner) = $1 ORDER BY created_at DESC")
+                .bind(owner)
+                .fetch_all(&self.pool)
+                .await?;
 
         let positions = rows.iter().map(|row| self.row_to_position(row)).collect();
         Ok(positions)
@@ -1466,10 +1579,11 @@ impl DatabaseService {
         let rows = sqlx::query(
             r#"
             SELECT o.id, o.order_id, o.market_id, o.owner, o.outcome, o.side,
-                   o.price_bps, o.remaining_quantity, o.created_at
+                   oe.remaining_quantity, o.price_bps, o.created_at
             FROM orderbook_entries oe
             JOIN orders o ON o.id = oe.order_id
-            WHERE o.status = 0
+            WHERE oe.remaining_quantity > 0
+              AND o.status IN (0, 1)
             ORDER BY o.market_id, o.outcome, o.side, o.price_bps, o.created_at
             "#,
         )
@@ -1861,7 +1975,10 @@ impl DatabaseService {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.iter().map(Self::map_oracle_market_config_row).collect())
+        Ok(rows
+            .iter()
+            .map(Self::map_oracle_market_config_row)
+            .collect())
     }
 
     pub async fn upsert_oracle_market_config(
@@ -1967,12 +2084,7 @@ impl DatabaseService {
         Ok(row.map(|r| r.get::<i16, _>("kyc_tier") as u8).unwrap_or(0))
     }
 
-    pub async fn update_user_kyc_tier(
-        &self,
-        wallet: &str,
-        tier: u8,
-        provider: &str,
-    ) -> Result<()> {
+    pub async fn update_user_kyc_tier(&self, wallet: &str, tier: u8, provider: &str) -> Result<()> {
         sqlx::query(
             "UPDATE users SET kyc_tier = $2, kyc_provider = $3, kyc_verified_at = NOW() WHERE LOWER(wallet) = LOWER($1)",
         )
@@ -2088,7 +2200,10 @@ impl DatabaseService {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.iter().map(|r| r.get::<String, _>("following")).collect())
+        Ok(rows
+            .iter()
+            .map(|r| r.get::<String, _>("following"))
+            .collect())
     }
 
     pub async fn list_followers(
@@ -2106,23 +2221,24 @@ impl DatabaseService {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.iter().map(|r| r.get::<String, _>("follower")).collect())
+        Ok(rows
+            .iter()
+            .map(|r| r.get::<String, _>("follower"))
+            .collect())
     }
 
     pub async fn get_follower_counts(&self, wallet: &str) -> Result<FollowerCounts> {
-        let followers_row = sqlx::query(
-            "SELECT COUNT(*) as cnt FROM trader_follows WHERE following = LOWER($1)",
-        )
-        .bind(wallet)
-        .fetch_one(&self.pool)
-        .await?;
+        let followers_row =
+            sqlx::query("SELECT COUNT(*) as cnt FROM trader_follows WHERE following = LOWER($1)")
+                .bind(wallet)
+                .fetch_one(&self.pool)
+                .await?;
 
-        let following_row = sqlx::query(
-            "SELECT COUNT(*) as cnt FROM trader_follows WHERE follower = LOWER($1)",
-        )
-        .bind(wallet)
-        .fetch_one(&self.pool)
-        .await?;
+        let following_row =
+            sqlx::query("SELECT COUNT(*) as cnt FROM trader_follows WHERE follower = LOWER($1)")
+                .bind(wallet)
+                .fetch_one(&self.pool)
+                .await?;
 
         Ok(FollowerCounts {
             followers: followers_row.get::<i64, _>("cnt") as u64,
@@ -2225,6 +2341,74 @@ impl DatabaseService {
             created_at: row.get("created_at"),
         })
     }
+}
+
+async fn upsert_orderbook_entry_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    order: &Order,
+) -> Result<()> {
+    let should_rest = matches!(
+        order.status,
+        OrderStatus::Open | OrderStatus::PartiallyFilled
+    ) && order.remaining_quantity > 0;
+
+    if should_rest {
+        sqlx::query(
+            r#"
+            INSERT INTO orderbook_entries (market_id, order_id, outcome, side, price_bps, remaining_quantity, owner)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (order_id) DO UPDATE
+            SET remaining_quantity = EXCLUDED.remaining_quantity
+            "#,
+        )
+        .bind(&order.market_id)
+        .bind(&order.id)
+        .bind(order.outcome as i16)
+        .bind(order.side as i16)
+        .bind(order.price_bps as i16)
+        .bind(order.remaining_quantity as i64)
+        .bind(&order.owner)
+        .execute(&mut **tx)
+        .await?;
+    } else {
+        sqlx::query("DELETE FROM orderbook_entries WHERE order_id = $1")
+            .bind(&order.id)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn apply_position_delta_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    market_id: &str,
+    owner: &str,
+    yes_delta: i64,
+    no_delta: i64,
+) -> Result<()> {
+    if yes_delta == 0 && no_delta == 0 {
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO positions (market_id, owner, yes_balance, no_balance, total_trades)
+        VALUES ($1, $2, $3, $4, 1)
+        ON CONFLICT (market_id, owner) DO UPDATE SET
+            yes_balance = positions.yes_balance + $3,
+            no_balance = positions.no_balance + $4,
+            total_trades = positions.total_trades + 1
+        "#,
+    )
+    .bind(market_id)
+    .bind(owner)
+    .bind(yes_delta)
+    .bind(no_delta)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
 }
 
 /// Order book entry for persistence and recovery

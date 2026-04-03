@@ -68,9 +68,15 @@ export function MarketStats({ market }: MarketStatsProps) {
             </div>
           </Card>
           <Card>
-            <div className="text-text-secondary text-xs mb-1">Active Depth</div>
+            <div className="text-text-secondary text-xs mb-1">
+              Bootstrap Inventory
+            </div>
             <div className="text-lg font-semibold">
-              {formatCurrency(market.bootstrapReservedUsdc || 0)}
+              {formatCurrency(
+                market.bootstrapInventoryTotalUsdc ??
+                  market.bootstrapReservedUsdc ??
+                  0,
+              )}
             </div>
           </Card>
           <Card>
@@ -145,8 +151,14 @@ export function MarketInfo({ market }: MarketStatsProps) {
               <span>{market.bootstrapPreset || "balanced"}</span>
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-text-secondary">Active Depth</span>
-              <span>{formatCurrency(market.bootstrapReservedUsdc || 0)}</span>
+              <span className="text-text-secondary">Bootstrap Inventory</span>
+              <span>
+                {formatCurrency(
+                  market.bootstrapInventoryTotalUsdc ??
+                    market.bootstrapReservedUsdc ??
+                    0,
+                )}
+              </span>
             </div>
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <span className="text-text-secondary">Vault Available</span>

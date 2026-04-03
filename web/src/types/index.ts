@@ -73,6 +73,22 @@ export interface Market {
   bootstrapLaunchTxHash?: string;
   bootstrapLastReconciledAt?: string;
   bootstrapLastError?: string;
+  bootstrapInventoryYesUsdc?: number;
+  bootstrapInventoryNoUsdc?: number;
+  bootstrapInventoryTotalUsdc?: number;
+  bootstrapInventoryNetUsdc?: number;
+  mirrorLinkCount?: number;
+  mirrorActiveLinkCount?: number;
+  mirrorLastMirrorAt?: string;
+  mirrorLastHedgeAt?: string;
+  mirrorFreshnessSeconds?: number;
+  mirrorPendingHedges?: number;
+  mirrorLinksWithErrors?: number;
+  mirrorHedgeErrors?: number;
+  mirrorTotalMirroredUsdc?: number;
+  mirrorTotalHedgedUsdc?: number;
+  mirrorNetExposureUsdc?: number;
+  tradabilityScore?: number;
   // Oracle resolver fields
   oracleFeedType?: 'chainlink' | 'manual';
   oracleFeedAddress?: string;
@@ -183,6 +199,22 @@ export interface OrderBook {
   bootstrapDepth?: number;
   organicDepth?: number;
   mirrorDepth?: number;
+  bootstrapInventoryYesUsdc?: number;
+  bootstrapInventoryNoUsdc?: number;
+  bootstrapInventoryTotalUsdc?: number;
+  bootstrapInventoryNetUsdc?: number;
+  mirrorLinkCount?: number;
+  mirrorActiveLinkCount?: number;
+  mirrorLastMirrorAt?: string;
+  mirrorLastHedgeAt?: string;
+  mirrorFreshnessSeconds?: number;
+  mirrorPendingHedges?: number;
+  mirrorLinksWithErrors?: number;
+  mirrorHedgeErrors?: number;
+  mirrorTotalMirroredUsdc?: number;
+  mirrorTotalHedgedUsdc?: number;
+  mirrorNetExposureUsdc?: number;
+  tradabilityScore?: number;
 }
 
 export interface User {
