@@ -77,6 +77,20 @@ function formatPricePercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function formatCompactUsd(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "$0";
+
+  const abs = Math.abs(value);
+  const formatter = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: abs >= 1000 ? "compact" : "standard",
+    maximumFractionDigits: abs >= 100 ? 0 : 2,
+  });
+  const formatted = formatter.format(abs);
+  return value > 0 ? `+${formatted}` : `-${formatted}`;
+}
+
 function formatRelativeTimestamp(value: string): string {
   if (!value) return "schedule n/a";
 
@@ -194,9 +208,12 @@ function toPublicPaperFeedEntry(
 ): LiveAgentFeedEntry {
   const market = marketLookup.get(agent.market_id);
   const displayName = formatPublicPaperAgentName(agent);
+  const performance = agent.paper_performance;
   const scheduleLabel = agent.last_executed_at
     ? formatRelativeTimestamp(agent.last_executed_at)
     : formatRelativeTimestamp(agent.next_execution_at);
+  const fillsLabel = `${performance?.fills ?? 0} fills`;
+  const pnlLabel = formatCompactUsd(performance?.netPnlUsdc ?? 0);
 
   return {
     id: `relay44-${agent.id}`,
@@ -204,8 +221,8 @@ function toPublicPaperFeedEntry(
     label: displayName,
     title: market?.question || agent.market_id,
     subtitle: `${agent.strategy_label} · ${agent.outcome.toUpperCase()} ${agent.side.toUpperCase()} @ ${formatPricePercent(agent.price)} · qty ${formatPaperQuantity(agent.quantity)}`,
-    meta: `cadence ${agent.cadence_seconds}s · ${scheduleLabel}`,
-    summary: `RELAY44 ${displayName.toUpperCase()}`,
+    meta: `${fillsLabel} · ${pnlLabel} · ${scheduleLabel}`,
+    summary: `RELAY44 ${displayName.toUpperCase()} · ${pnlLabel}`,
     scheduleLabel,
     statusLabel: agent.active ? "active" : "inactive",
     sourceLabel: "relay44",
