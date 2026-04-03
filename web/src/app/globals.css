@@ -36,13 +36,13 @@
 
   :root {
     --app-header-offset: 74px;
-    --app-page-offset: var(--app-header-offset);
+    --app-page-offset: calc(var(--app-header-offset) + 24px);
   }
 
   @media (min-width: 640px) {
     :root {
       --app-header-offset: 82px;
-      --app-page-offset: var(--app-header-offset);
+      --app-page-offset: calc(var(--app-header-offset) + 32px);
     }
   }
 
