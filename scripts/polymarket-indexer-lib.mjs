@@ -515,12 +515,6 @@ function buildFailure({ health, userStream, relayer }) {
   if (health.userFills?.status === 'error') {
     return laneFailure('user_fills_failed', health.userFills);
   }
-  if (health.userFills?.status === 'missing_credentials' && health.trackedMarkets > 0) {
-    return {
-      code: 'user_stream_credentials_failed',
-      message: health.userFills?.lastError || 'builder credentials are not configured',
-    };
-  }
 
   return null;
 }
