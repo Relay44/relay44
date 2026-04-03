@@ -315,9 +315,7 @@ function TicketCanvas({
       const now = time * 0.001;
       const breath = Math.sin(now * 0.2) * 0.5 + 0.5;
       ctx.clearRect(0, 0, rect.width, rect.height);
-      ctx.fillStyle = isDarkRef.current
-        ? 'rgba(3, 3, 3, 0.12)'
-        : 'rgba(255, 255, 255, 0.07)';
+      ctx.fillStyle = 'rgba(3, 3, 3, 0.12)';
       ctx.fillRect(0, 0, rect.width, rect.height);
 
       const mouseActive = mouseX > -9000;
@@ -601,7 +599,7 @@ export function HeroTicket({
     >
       <div
         className="relative min-h-[200px] w-full flex-[1_1_50%] overflow-hidden border-b border-border sm:min-h-0 sm:border-b-0 sm:border-r"
-        style={{ backgroundColor: isDark ? '#030303' : '#f4f1ea' }}
+        style={{ backgroundColor: '#030303' }}
       >
         <div
           aria-hidden
