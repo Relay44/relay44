@@ -30,7 +30,7 @@ export default function TermsOfServicePage() {
           ]),
         ]}
       />
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="container mx-auto px-4 pb-8 max-w-4xl">
         <h1 className="text-3xl font-bold text-text-primary mb-8">Terms of Service</h1>
 
         <div className="prose prose-invert max-w-none space-y-6 text-text-secondary">
