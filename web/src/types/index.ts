@@ -179,7 +179,73 @@ export interface Trade {
   buyer: string;
   seller: string;
   txSignature: string;
+  provider?: string;
+  providerMarketRef?: string;
+  chainId?: number;
+  isSynthetic?: boolean;
+  blockNumber?: number;
   createdAt: string;
+}
+
+export type CreatorChartRange = '7d' | '30d' | '90d';
+
+export interface CreatorEconomicsOverview {
+  creator: string;
+  activeSeededMarkets: number;
+  totalSeedDeployedUsdc: number;
+  currentCapitalValueUsdc: number;
+  netLiquidityPnlUsdc: number;
+  subsidyBurnUsdc: number;
+  realizedResolutionPnlUsdc: number;
+  graduationSuccessRate: number;
+  staleErrorMirrorCount: number;
+}
+
+export interface CreatorEconomicsMarketSummary {
+  marketId: string;
+  marketQuestion: string;
+  status: string;
+  liquidityMode: string;
+  bootstrapStatus: string;
+  seedUsdc: number;
+  reservedBudgetUsdc: number;
+  availableBudgetUsdc: number;
+  inventoryYesUsdc: number;
+  inventoryNoUsdc: number;
+  inventoryNetUsdc: number;
+  currentCapitalValueUsdc: number;
+  cumulativeBootstrapFillsUsdc: number;
+  subsidyBurnUsdc: number;
+  netLiquidityPnlUsdc: number;
+  roiBps: number;
+  organicReplacementRatio: number;
+  graduationState: string;
+  graduationReason?: string;
+  mirrorFreshnessSeconds?: number;
+  mirrorPendingHedges: number;
+  mirrorErrorCount: number;
+  mirrorLinksWithErrors: number;
+  realizedResolutionPnlUsdc: number;
+  graduatedAt?: string;
+  lastReconciledAt?: string;
+}
+
+export interface CreatorEconomicsPoint {
+  day: string;
+  cumulativeBootstrapFillsUsdc: number;
+  subsidyBurnUsdc: number;
+  inventoryMarkValueUsdc: number;
+  organicReplacementRatio: number;
+  mirrorFreshnessSeconds?: number;
+  mirrorPendingHedges: number;
+  mirrorErrorCount: number;
+  graduationRetention24h?: number;
+  graduationRetention7d?: number;
+}
+
+export interface CreatorEconomicsMarketDetail extends CreatorEconomicsMarketSummary {
+  points: CreatorEconomicsPoint[];
+  window: CreatorChartRange;
 }
 
 export interface OrderBookLevel {

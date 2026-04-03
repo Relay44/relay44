@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useBaseWallet } from "@/hooks/useBaseWallet";
-import { PageShell } from "@/components/layout";
 import { Card } from "@/components/ui";
 import { PositionList } from "@/components/position";
 import { OrderList } from "@/components/order";
@@ -25,33 +24,31 @@ export default function PortfolioPage() {
 
   if (!isConnected) {
     return (
-      <PageShell>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-          <div className="w-16 h-16 bg-bg-secondary  flex items-center justify-center mb-4">
-            <WalletIcon className="w-8 h-8 text-text-secondary" />
-          </div>
-          <h2 className="text-xl font-semibold mb-2">Connect Your Wallet</h2>
-          <p className="max-w-lg text-text-secondary">
-            Connect your Base wallet from the header, approve the sign-in
-            prompt, and then return here to inspect portfolio value, active
-            positions, and open orders.
-          </p>
-          <div className="mt-5 flex flex-wrap justify-center gap-3">
-            <Link
-              href="/how-it-works"
-              className="inline-flex h-10 items-center border border-accent px-4 text-sm uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
-            >
-              How it works
-            </Link>
-            <Link
-              href="/markets"
-              className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
-            >
-              Browse markets
-            </Link>
-          </div>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+        <div className="w-16 h-16 bg-bg-secondary  flex items-center justify-center mb-4">
+          <WalletIcon className="w-8 h-8 text-text-secondary" />
         </div>
-      </PageShell>
+        <h2 className="text-xl font-semibold mb-2">Connect Your Wallet</h2>
+        <p className="max-w-lg text-text-secondary">
+          Connect your Base wallet from the header, approve the sign-in
+          prompt, and then return here to inspect portfolio value, active
+          positions, and open orders.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-3">
+          <Link
+            href="/how-it-works"
+            className="inline-flex h-10 items-center border border-accent px-4 text-sm uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
+          >
+            How it works
+          </Link>
+          <Link
+            href="/markets"
+            className="inline-flex h-10 items-center border border-border px-4 text-sm uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+          >
+            Browse markets
+          </Link>
+        </div>
+      </div>
     );
   }
 
@@ -66,7 +63,7 @@ export default function PortfolioPage() {
   const totalClaimable = positions.reduce((sum, p) => sum + p.claimable, 0);
 
   return (
-    <PageShell>
+    <>
       <h1 className="text-2xl font-bold mb-6">Portfolio</h1>
 
       <div className="grid grid-cols-2 gap-3 mb-6 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
@@ -149,7 +146,7 @@ export default function PortfolioPage() {
         <h2 className="text-lg font-semibold mb-4">Open Orders</h2>
         <OrderList />
       </section>
-    </PageShell>
+    </>
   );
 }
 
