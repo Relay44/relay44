@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PageShell } from "@/components/layout";
 
 export const metadata: Metadata = {
   title: "Developer Docs | Relay44",
@@ -6,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return <PageShell>{children}</PageShell>;
 }
