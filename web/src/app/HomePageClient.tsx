@@ -15,7 +15,8 @@ import type { Agent, Market, PaginatedResponse } from "@/types";
 interface HomePageClientProps {
   initialMarkets?: PaginatedResponse<Market> | null;
   initialLiveFeed: HomeLiveFeed;
-  heroBackgroundImageSrc: string;
+  heroImageSrcs: string[];
+  heroInitialIndex: number;
 }
 
 const HOME_MARKET_LIMIT = 16;
@@ -463,12 +464,39 @@ function HomeMarketTape({
   );
 }
 
+const HERO_SHUFFLE_MS = 10_000;
+
+function useHeroSlider(srcs: string[], initialIndex: number) {
+  const [index, setIndex] = useState(initialIndex);
+
+  useEffect(() => {
+    if (srcs.length <= 1) return;
+
+    const interval = window.setInterval(() => {
+      setIndex((prev) => (prev + 1) % srcs.length);
+    }, HERO_SHUFFLE_MS);
+
+    return () => window.clearInterval(interval);
+  }, [srcs.length]);
+
+  useEffect(() => {
+    if (srcs.length <= 1) return;
+    const nextSrc = srcs[(index + 1) % srcs.length];
+    const img = new Image();
+    img.src = nextSrc;
+  }, [index, srcs]);
+
+  return srcs[index % srcs.length];
+}
+
 export default function HomePageClient({
   initialMarkets,
   initialLiveFeed,
-  heroBackgroundImageSrc,
+  heroImageSrcs,
+  heroInitialIndex,
 }: HomePageClientProps) {
   const [liveFeed, setLiveFeed] = useState(initialLiveFeed);
+  const heroBackgroundImageSrc = useHeroSlider(heroImageSrcs, heroInitialIndex);
 
   const { data: marketsData, isLoading } = useMarkets(
     {
