@@ -182,9 +182,12 @@ pub fn simulate_fill(
             } else {
                 1.0
             };
-            let impacted_price = clamp_probability(quote * (1.0 + direction * impact_bps / 10_000.0));
+            let impacted_price =
+                clamp_probability(quote * (1.0 + direction * impact_bps / 10_000.0));
             let average_price = match limit_price {
-                Some(limit) if side.trim().eq_ignore_ascii_case("sell") => impacted_price.max(limit),
+                Some(limit) if side.trim().eq_ignore_ascii_case("sell") => {
+                    impacted_price.max(limit)
+                }
                 Some(limit) => impacted_price.min(limit),
                 None => impacted_price,
             };
