@@ -64,6 +64,10 @@ struct EventRepricingParams {
     fee_buffer_bps: i32,
     #[serde(default = "default_slippage_buffer_bps")]
     slippage_buffer_bps: i32,
+    #[serde(default = "default_event_min_size_multiplier")]
+    min_size_multiplier: f64,
+    #[serde(default = "default_event_max_size_multiplier")]
+    max_size_multiplier: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -112,6 +116,14 @@ fn default_fee_buffer_bps() -> i32 {
 
 fn default_slippage_buffer_bps() -> i32 {
     25
+}
+
+fn default_event_min_size_multiplier() -> f64 {
+    0.5
+}
+
+fn default_event_max_size_multiplier() -> f64 {
+    1.0
 }
 
 fn default_wallet_latency_ms() -> i64 {
@@ -405,13 +417,17 @@ fn evaluate_event_repricing(state: &MarketState, raw: &Value) -> TradeSignal {
         );
     }
 
-    let strength = (f64::from(net_edge_bps.max(params.min_edge_bps))
-        / f64::from(params.min_edge_bps))
-    .clamp(1.0, 2.0);
+    let min_size_multiplier = params.min_size_multiplier.clamp(0.1, 1.0);
+    let max_size_multiplier = params.max_size_multiplier.clamp(min_size_multiplier, 1.0);
+    let edge_window_bps = f64::from(params.min_edge_bps.max(1));
+    let normalized_edge =
+        (f64::from((net_edge_bps - params.min_edge_bps).max(0)) / edge_window_bps).clamp(0.0, 1.0);
+    let size_multiplier =
+        min_size_multiplier + normalized_edge * (max_size_multiplier - min_size_multiplier);
     TradeSignal {
         execute: true,
         price: state.agent_price,
-        quantity: state.agent_quantity * strength,
+        quantity: state.agent_quantity * size_multiplier,
         reason: format!(
             "event_repricing: fair {:.4}-{:.4}, mid {:.4}, net edge {}bps",
             fair_low, fair_high, state.mid_price, net_edge_bps
@@ -420,7 +436,8 @@ fn evaluate_event_repricing(state: &MarketState, raw: &Value) -> TradeSignal {
             "fairValueLow": fair_low,
             "fairValueHigh": fair_high,
             "midpointDeltaBps": state.midpoint_delta_bps,
-            "netEdgeBps": net_edge_bps
+            "netEdgeBps": net_edge_bps,
+            "sizeMultiplier": size_multiplier
         }),
     }
 }
@@ -571,7 +588,18 @@ mod tests {
         state.mid_price = 0.60;
         let signal = evaluate_strategy("event_repricing", &state, &json!({}));
         assert!(signal.execute);
-        assert!(signal.quantity > 100.0);
+        assert!((signal.quantity - 93.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn event_repricing_scales_down_at_threshold_edge() {
+        let mut state = base_state();
+        state.fair_value_low = Some(0.64);
+        state.fair_value_high = Some(0.65);
+        state.mid_price = 0.60;
+        let signal = evaluate_strategy("event_repricing", &state, &json!({}));
+        assert!(signal.execute);
+        assert!((signal.quantity - 50.0).abs() < 1e-9);
     }
 
     #[test]

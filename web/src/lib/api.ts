@@ -345,6 +345,7 @@ export interface ExternalAgentRecord {
   cadence_seconds: number;
   strategy: string;
   strategy_label: string;
+  paper_performance?: ExternalAgentPaperPerformance | null;
   execution_mode: "live" | "paper";
   credential_id?: string | null;
   source?: string | null;
@@ -355,6 +356,18 @@ export interface ExternalAgentRecord {
   last_error_code?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ExternalAgentPaperPerformance {
+  openPositions: number;
+  closedPositions: number;
+  fills: number;
+  volumeUsdc: number;
+  feesUsdc: number;
+  realizedPnlUsdc: number;
+  unrealizedPnlUsdc: number;
+  netPnlUsdc: number;
+  maxDrawdownUsdc: number;
 }
 
 interface ExternalAgentsListResponse {
@@ -1166,6 +1179,12 @@ function normalizeExternalOrderRecord(
 function normalizeExternalAgentRecord(
   raw: Record<string, unknown>,
 ): ExternalAgentRecord {
+  const paperPerformanceRaw =
+    raw.paperPerformance && typeof raw.paperPerformance === "object" && !Array.isArray(raw.paperPerformance)
+      ? (raw.paperPerformance as Record<string, unknown>)
+      : raw.paper_performance && typeof raw.paper_performance === "object" && !Array.isArray(raw.paper_performance)
+        ? (raw.paper_performance as Record<string, unknown>)
+        : null;
   return {
     id: String(raw.id ?? ""),
     owner: String(raw.owner ?? ""),
@@ -1183,6 +1202,12 @@ function normalizeExternalAgentRecord(
     strategy_label: String(
       raw.strategyLabel ?? raw.strategy_label ?? raw.strategy ?? "",
     ),
+    paper_performance:
+      raw.paperPerformance === null || raw.paper_performance === null
+        ? null
+        : paperPerformanceRaw
+          ? normalizeExternalAgentPaperPerformance(paperPerformanceRaw)
+          : undefined,
     execution_mode: String(
       raw.executionMode ?? raw.execution_mode ?? "live",
     ) as ExternalAgentRecord["execution_mode"],
@@ -1215,6 +1240,22 @@ function normalizeExternalAgentRecord(
           : undefined,
     created_at: toIsoString(raw.createdAt ?? raw.created_at),
     updated_at: toIsoString(raw.updatedAt ?? raw.updated_at),
+  };
+}
+
+function normalizeExternalAgentPaperPerformance(
+  raw: Record<string, unknown>,
+): ExternalAgentPaperPerformance {
+  return {
+    openPositions: toNumber(raw.openPositions ?? raw.open_positions),
+    closedPositions: toNumber(raw.closedPositions ?? raw.closed_positions),
+    fills: toNumber(raw.fills),
+    volumeUsdc: toNumber(raw.volumeUsdc ?? raw.volume_usdc),
+    feesUsdc: toNumber(raw.feesUsdc ?? raw.fees_usdc),
+    realizedPnlUsdc: toNumber(raw.realizedPnlUsdc ?? raw.realized_pnl_usdc),
+    unrealizedPnlUsdc: toNumber(raw.unrealizedPnlUsdc ?? raw.unrealized_pnl_usdc),
+    netPnlUsdc: toNumber(raw.netPnlUsdc ?? raw.net_pnl_usdc),
+    maxDrawdownUsdc: toNumber(raw.maxDrawdownUsdc ?? raw.max_drawdown_usdc),
   };
 }
 
