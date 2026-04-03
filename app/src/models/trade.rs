@@ -35,8 +35,8 @@ pub struct TradeListResponse {
 /// Internal representation of a matched trade before settlement
 #[derive(Debug, Clone)]
 pub struct MatchedTrade {
-    pub buy_order_id: u64,
-    pub sell_order_id: u64,
+    pub buy_order_id: String,
+    pub sell_order_id: String,
     pub market_id: String,
     pub outcome: Outcome,
     pub fill_price_bps: u16,

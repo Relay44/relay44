@@ -130,6 +130,22 @@ export interface BaseMarketSnapshot {
   bootstrap_launch_tx_hash?: string;
   bootstrap_last_reconciled_at?: string;
   bootstrap_last_error?: string;
+  bootstrap_inventory_yes_usdc?: number;
+  bootstrap_inventory_no_usdc?: number;
+  bootstrap_inventory_total_usdc?: number;
+  bootstrap_inventory_net_usdc?: number;
+  mirror_link_count?: number;
+  mirror_active_link_count?: number;
+  mirror_last_mirror_at?: string;
+  mirror_last_hedge_at?: string;
+  mirror_freshness_seconds?: number;
+  mirror_pending_hedges?: number;
+  mirror_links_with_errors?: number;
+  mirror_hedge_errors?: number;
+  mirror_total_mirrored_usdc?: number;
+  mirror_total_hedged_usdc?: number;
+  mirror_net_exposure_usdc?: number;
+  tradability_score?: number;
 }
 
 export interface BaseMarketsResponse {
@@ -160,6 +176,22 @@ export interface BaseOrderBookResponse {
   bootstrap_depth?: number;
   organic_depth?: number;
   mirror_depth?: number;
+  bootstrap_inventory_yes_usdc?: number;
+  bootstrap_inventory_no_usdc?: number;
+  bootstrap_inventory_total_usdc?: number;
+  bootstrap_inventory_net_usdc?: number;
+  mirror_link_count?: number;
+  mirror_active_link_count?: number;
+  mirror_last_mirror_at?: string | null;
+  mirror_last_hedge_at?: string | null;
+  mirror_freshness_seconds?: number | null;
+  mirror_pending_hedges?: number | null;
+  mirror_links_with_errors?: number | null;
+  mirror_hedge_errors?: number | null;
+  mirror_total_mirrored_usdc?: number | null;
+  mirror_total_hedged_usdc?: number | null;
+  mirror_net_exposure_usdc?: number | null;
+  tradability_score?: number;
 }
 
 interface BaseTradeSnapshot {
@@ -486,56 +518,133 @@ export interface RelayRawTxResponse {
   tx_hash: string;
 }
 
+export interface ProviderRailCapabilities {
+  feed: boolean;
+  marketData: boolean;
+  tradeOpen: boolean;
+  tradeClose: boolean;
+  legacyCloseOnly: boolean;
+}
+
+export interface CompliancePolicy {
+  mode: string;
+  blockedCountries: string[];
+  writesRestricted: boolean;
+  country?: string;
+  regionClass: string;
+  routingMode: string;
+  rails: Record<string, ProviderRailCapabilities>;
+  legacyCloseOnly: boolean;
+}
+
+type ApiErrorPayload =
+  | string
+  | {
+      code?: unknown;
+      message?: unknown;
+      details?: unknown;
+      error?:
+        | string
+        | {
+            code?: unknown;
+            message?: unknown;
+            details?: unknown;
+          };
+    }
+  | null;
+
 export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
+    public details?: unknown,
+    public payload?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-function extractApiErrorMessage(raw: string, fallback: string): string {
+function parseApiErrorPayload(raw: string, fallback: string): {
+  message: string;
+  code?: string;
+  details?: unknown;
+  payload?: unknown;
+} {
   const trimmed = raw.trim();
   if (!trimmed) {
-    return fallback;
+    return { message: fallback };
   }
 
   try {
-    const parsed = JSON.parse(trimmed) as
-      | { message?: unknown; error?: unknown }
-      | string
-      | null;
+    const parsed = JSON.parse(trimmed) as ApiErrorPayload;
 
     if (typeof parsed === "string" && parsed.trim()) {
-      return parsed;
+      return {
+        message: parsed,
+        payload: parsed,
+      };
     }
 
     if (parsed && typeof parsed === "object") {
+      const nestedError =
+        parsed.error && typeof parsed.error === "object" ? parsed.error : null;
+      const code =
+        typeof parsed.code === "string" && parsed.code.trim()
+          ? parsed.code
+          : nestedError && typeof nestedError.code === "string" && nestedError.code.trim()
+            ? nestedError.code
+            : undefined;
+      const details =
+        parsed.details !== undefined
+          ? parsed.details
+          : nestedError?.details !== undefined
+            ? nestedError.details
+            : undefined;
+
       if (typeof parsed.message === "string" && parsed.message.trim()) {
-        return parsed.message;
+        return {
+          message: parsed.message,
+          code,
+          details,
+          payload: parsed,
+        };
       }
 
       if (typeof parsed.error === "string" && parsed.error.trim()) {
-        return parsed.error;
+        return {
+          message: parsed.error,
+          code,
+          details,
+          payload: parsed,
+        };
       }
 
-      if (
-        parsed.error &&
-        typeof parsed.error === "object" &&
-        "message" in parsed.error &&
-        typeof parsed.error.message === "string" &&
-        parsed.error.message.trim()
-      ) {
-        return parsed.error.message;
+      if (nestedError && typeof nestedError.message === "string" && nestedError.message.trim()) {
+        return {
+          message: nestedError.message,
+          code,
+          details,
+          payload: parsed,
+        };
       }
+
+      return {
+        message: fallback,
+        code,
+        details,
+        payload: parsed,
+      };
     }
   } catch {
     // Keep the raw response text below.
   }
 
-  return trimmed || fallback;
+  return {
+    message: trimmed || fallback,
+    payload: trimmed,
+  };
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -573,6 +682,95 @@ function fromUnixSecondsOptional(value: number | undefined): string {
     return "";
   }
   return new Date(value * 1000).toISOString();
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export interface TradingRestrictionNotice {
+  title: string;
+  message: string;
+  actionLabel?: string;
+  actionHref?: string;
+}
+
+export function describeTradingRestriction(error: unknown): TradingRestrictionNotice | null {
+  if (!(error instanceof ApiError)) {
+    return null;
+  }
+
+  if (
+    error.status === 403 &&
+    error.message.toLowerCase() === "this action is unavailable in this environment"
+  ) {
+    return {
+      title: "Read-only runtime",
+      message: "Trading is disabled in this environment. Market data stays live, but writes are blocked.",
+      actionLabel: "Browse markets",
+      actionHref: "/markets",
+    };
+  }
+
+  if (error.status === 401) {
+    return {
+      title: "Wallet sign-in required",
+      message: "Authenticate your wallet session before placing trades or using venue credentials.",
+      actionLabel: "Open wallet",
+      actionHref: "/wallet",
+    };
+  }
+
+  if (error.code === "REGION_PROVIDER_RESTRICTED") {
+    const details = toRecord(error.details);
+    const provider = String(details?.provider || "this provider");
+    const country = details?.country ? ` in ${String(details.country)}` : "";
+    const legacyCloseOnly = Boolean(details?.legacyCloseOnly);
+    const detail = typeof details?.detail === "string" ? details.detail : "";
+
+    if (legacyCloseOnly) {
+      return {
+        title: "Close-only access",
+        message:
+          detail ||
+          `New ${provider} positions are blocked${country}. Closing exposure remains allowed.`,
+      };
+    }
+
+    return {
+      title: "Provider restricted",
+      message:
+        detail ||
+        `${provider} is unavailable for this action${country} under the current routing policy.`,
+    };
+  }
+
+  const lowerMessage = error.message.toLowerCase();
+  if (error.code === "CREDENTIAL_NOT_READY" || lowerMessage.includes("credential")) {
+    return {
+      title: "Credential not ready",
+      message: error.message,
+      actionLabel: "Fix credentials",
+      actionHref: "/settings/credentials",
+    };
+  }
+
+  if (
+    lowerMessage.includes("fund") ||
+    lowerMessage.includes("balance") ||
+    lowerMessage.includes("insufficient")
+  ) {
+    return {
+      title: "Insufficient funding",
+      message: error.message,
+      actionLabel: "Open wallet",
+      actionHref: "/wallet",
+    };
+  }
+
+  return null;
 }
 
 function normalizeMarketStatus(value: unknown): Market["status"] {
@@ -782,6 +980,36 @@ export function mapBaseSnapshotToMarket(snapshot: BaseMarketSnapshot): Market {
       ? toIsoString(snapshot.bootstrap_last_reconciled_at)
       : undefined,
     bootstrapLastError: snapshot.bootstrap_last_error || undefined,
+    bootstrapInventoryYesUsdc: toOptionalNumber(
+      snapshot.bootstrap_inventory_yes_usdc,
+    ),
+    bootstrapInventoryNoUsdc: toOptionalNumber(
+      snapshot.bootstrap_inventory_no_usdc,
+    ),
+    bootstrapInventoryTotalUsdc: toOptionalNumber(
+      snapshot.bootstrap_inventory_total_usdc,
+    ),
+    bootstrapInventoryNetUsdc: toOptionalNumber(
+      snapshot.bootstrap_inventory_net_usdc,
+    ),
+    mirrorLinkCount: toOptionalNumber(snapshot.mirror_link_count),
+    mirrorActiveLinkCount: toOptionalNumber(snapshot.mirror_active_link_count),
+    mirrorLastMirrorAt: snapshot.mirror_last_mirror_at
+      ? toIsoString(snapshot.mirror_last_mirror_at)
+      : undefined,
+    mirrorLastHedgeAt: snapshot.mirror_last_hedge_at
+      ? toIsoString(snapshot.mirror_last_hedge_at)
+      : undefined,
+    mirrorFreshnessSeconds: toOptionalNumber(snapshot.mirror_freshness_seconds),
+    mirrorPendingHedges: toOptionalNumber(snapshot.mirror_pending_hedges),
+    mirrorLinksWithErrors: toOptionalNumber(snapshot.mirror_links_with_errors),
+    mirrorHedgeErrors: toOptionalNumber(snapshot.mirror_hedge_errors),
+    mirrorTotalMirroredUsdc: toOptionalNumber(
+      snapshot.mirror_total_mirrored_usdc,
+    ),
+    mirrorTotalHedgedUsdc: toOptionalNumber(snapshot.mirror_total_hedged_usdc),
+    mirrorNetExposureUsdc: toOptionalNumber(snapshot.mirror_net_exposure_usdc),
+    tradabilityScore: toOptionalNumber(snapshot.tradability_score),
   };
 }
 
@@ -816,6 +1044,36 @@ export function normalizeBaseOrderBookResponse(
     bootstrapDepth: toOptionalNumber(response.bootstrap_depth),
     organicDepth: toOptionalNumber(response.organic_depth),
     mirrorDepth: toOptionalNumber(response.mirror_depth),
+    bootstrapInventoryYesUsdc: toOptionalNumber(
+      response.bootstrap_inventory_yes_usdc,
+    ),
+    bootstrapInventoryNoUsdc: toOptionalNumber(
+      response.bootstrap_inventory_no_usdc,
+    ),
+    bootstrapInventoryTotalUsdc: toOptionalNumber(
+      response.bootstrap_inventory_total_usdc,
+    ),
+    bootstrapInventoryNetUsdc: toOptionalNumber(
+      response.bootstrap_inventory_net_usdc,
+    ),
+    mirrorLinkCount: toOptionalNumber(response.mirror_link_count),
+    mirrorActiveLinkCount: toOptionalNumber(response.mirror_active_link_count),
+    mirrorLastMirrorAt: response.mirror_last_mirror_at
+      ? toIsoString(response.mirror_last_mirror_at)
+      : undefined,
+    mirrorLastHedgeAt: response.mirror_last_hedge_at
+      ? toIsoString(response.mirror_last_hedge_at)
+      : undefined,
+    mirrorFreshnessSeconds: toOptionalNumber(response.mirror_freshness_seconds),
+    mirrorPendingHedges: toOptionalNumber(response.mirror_pending_hedges),
+    mirrorLinksWithErrors: toOptionalNumber(response.mirror_links_with_errors),
+    mirrorHedgeErrors: toOptionalNumber(response.mirror_hedge_errors),
+    mirrorTotalMirroredUsdc: toOptionalNumber(
+      response.mirror_total_mirrored_usdc,
+    ),
+    mirrorTotalHedgedUsdc: toOptionalNumber(response.mirror_total_hedged_usdc),
+    mirrorNetExposureUsdc: toOptionalNumber(response.mirror_net_exposure_usdc),
+    tradabilityScore: toOptionalNumber(response.tradability_score),
   };
 }
 
@@ -1234,9 +1492,13 @@ class ApiClient {
 
     if (!res.ok) {
       const text = await res.text();
+      const parsed = parseApiErrorPayload(text, res.statusText);
       throw new ApiError(
         res.status,
-        extractApiErrorMessage(text, res.statusText),
+        parsed.message,
+        parsed.code,
+        parsed.details,
+        parsed.payload,
       );
     }
 
@@ -1275,9 +1537,13 @@ class ApiClient {
 
     if (!response.ok) {
       const text = await response.text();
+      const parsed = parseApiErrorPayload(text, response.statusText);
       throw new ApiError(
         response.status,
-        extractApiErrorMessage(text, response.statusText),
+        parsed.message,
+        parsed.code,
+        parsed.details,
+        parsed.payload,
       );
     }
 
@@ -1540,6 +1806,65 @@ class ApiClient {
   // Wallet
   async getWalletBalance(): Promise<WalletBalance> {
     return this.request("/wallet/balance");
+  }
+
+  async getCompliancePolicy(): Promise<CompliancePolicy> {
+    const response = await this.request<{
+      mode: string;
+      blockedCountries?: string[];
+      blocked_countries?: string[];
+      writesRestricted?: boolean;
+      writes_restricted?: boolean;
+      country?: string;
+      regionClass?: string;
+      region_class?: string;
+      routingMode?: string;
+      routing_mode?: string;
+      rails?: Record<string, unknown>;
+      legacyCloseOnly?: boolean;
+      legacy_close_only?: boolean;
+    }>("/compliance/policy");
+
+    const rails = Object.fromEntries(
+      Object.entries(response.rails || {}).map(([provider, raw]) => {
+        const value = toRecord(raw) || {};
+        return [
+          provider,
+          {
+            feed: Boolean(value.feed),
+            marketData: Boolean(value.marketData ?? value.market_data),
+            tradeOpen: Boolean(value.tradeOpen ?? value.trade_open),
+            tradeClose: Boolean(value.tradeClose ?? value.trade_close),
+            legacyCloseOnly: Boolean(
+              value.legacyCloseOnly ?? value.legacy_close_only,
+            ),
+          } satisfies ProviderRailCapabilities,
+        ];
+      }),
+    );
+
+    return {
+      mode: String(response.mode || "unknown"),
+      blockedCountries: Array.isArray(response.blockedCountries)
+        ? response.blockedCountries.map(String)
+        : Array.isArray(response.blocked_countries)
+          ? response.blocked_countries.map(String)
+          : [],
+      writesRestricted: Boolean(
+        response.writesRestricted ?? response.writes_restricted,
+      ),
+      country: response.country || undefined,
+      regionClass: String(
+        response.regionClass ?? response.region_class ?? "unknown",
+      ),
+      routingMode: String(
+        response.routingMode ?? response.routing_mode ?? "unknown",
+      ),
+      rails,
+      legacyCloseOnly: Boolean(
+        response.legacyCloseOnly ?? response.legacy_close_only,
+      ),
+    };
   }
 
   async getWeb4Capabilities(): Promise<Web4Capabilities> {

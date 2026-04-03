@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { PageShell } from "@/components/layout";
 import { ReadOnlyNotice } from "@/components/runtime/ReadOnlyNotice";
 import { Button, LoadingScreen, useToast } from "@/components/ui";
 import {
   MarketHeader,
+  MarketLiquidityPanel,
   MarketStats,
   MarketInfo,
   TradingViewChart,
@@ -30,9 +31,42 @@ import {
   useSessionState,
 } from "@/hooks";
 import { isAdminWallet } from "@/lib/admin";
-import { api } from "@/lib/api";
+import { api, type CompliancePolicy } from "@/lib/api";
 import { SITE_URL } from "@/lib/seo";
 import { extractTradingViewReference } from "@/lib/tradingView";
+
+function providerNotice(
+  market: { provider: string; isExternal: boolean },
+  policy: CompliancePolicy | null,
+) {
+  if (!market.isExternal || !policy) {
+    return null;
+  }
+
+  const providerKey =
+    market.provider?.toLowerCase() === "polymarket" ? "polymarket" : "limitless";
+  const rail = policy.rails[providerKey];
+
+  if (!rail) {
+    return null;
+  }
+
+  if (!rail.tradeOpen && rail.tradeClose) {
+    return {
+      title: "Close-only access",
+      body: `${market.provider} is currently close-only${policy.country ? ` in ${policy.country}` : ""}. You can reduce exposure, but opening a new position is blocked.`,
+    };
+  }
+
+  if (!rail.tradeOpen) {
+    return {
+      title: "Provider restricted",
+      body: `${market.provider} is unavailable for this action${policy.country ? ` in ${policy.country}` : ""} under the current routing policy.`,
+    };
+  }
+
+  return null;
+}
 
 export default function MarketDetailPage() {
   const params = useParams();
@@ -45,6 +79,7 @@ export default function MarketDetailPage() {
   const claimWinnings = useClaimWinnings();
   const resolveMarket = useResolveMarket();
   const [adminAction, setAdminAction] = useState<string | null>(null);
+  const [compliancePolicy, setCompliancePolicy] = useState<CompliancePolicy | null>(null);
   const isAdmin = useMemo(() => isAdminWallet(baseWallet.address), [baseWallet.address]);
 
   const { data: market, isLoading, error, refetch } = useMarket(marketId);
@@ -66,6 +101,29 @@ export default function MarketDetailPage() {
   const relatedDecisionCells = (decisionCellsData?.data || []).filter((cell) =>
     cell.linkedMarketRefs.includes(marketId)
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPolicy() {
+      try {
+        const next = await api.getCompliancePolicy();
+        if (!cancelled) {
+          setCompliancePolicy(next);
+        }
+      } catch {
+        if (!cancelled) {
+          setCompliancePolicy(null);
+        }
+      }
+    }
+
+    void loadPolicy();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleClaim = async () => {
     try {
@@ -139,6 +197,7 @@ export default function MarketDetailPage() {
   }
 
   const tradingViewReference = extractTradingViewReference(market.description);
+  const blockedNotice = providerNotice(market, compliancePolicy);
 
   return (
     <PageShell>
@@ -161,6 +220,7 @@ export default function MarketDetailPage() {
         />
       </div>
       <MarketStats market={market} />
+      <MarketLiquidityPanel market={market} />
 
       {tradingViewReference ? (
         <TradingViewChart
@@ -334,10 +394,15 @@ export default function MarketDetailPage() {
             />
           ) : !market.executionUsers ? (
             <div className="card flex items-center justify-center py-12">
-              <p className="text-text-secondary">
-                Trading is unavailable for this market under the current
-                provider policy.
-              </p>
+              <div className="max-w-md text-center">
+                <p className="font-medium text-text-primary">
+                  {blockedNotice?.title || "Trading unavailable"}
+                </p>
+                <p className="mt-2 text-text-secondary">
+                  {blockedNotice?.body ||
+                    "Trading is unavailable for this market under the current provider policy."}
+                </p>
+              </div>
             </div>
           ) : walletConnected ? (
             market.isExternal ? (

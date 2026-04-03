@@ -30,14 +30,9 @@ struct OutcomeOrderBook {
 #[derive(Clone)]
 struct OrderEntry {
     order_id: String,
-    on_chain_id: u64,
     owner: String,
-    #[allow(dead_code)]
     price_bps: u16,
-    #[allow(dead_code)]
-    quantity: u64,
     remaining: u64,
-    #[allow(dead_code)]
     timestamp: i64,
 }
 
@@ -90,18 +85,22 @@ impl OrderBookService {
             Outcome::No => &mut market_book.no,
         };
 
-        let entry = OrderEntry {
+        let mut entry = OrderEntry {
             order_id: order.id.clone(),
-            on_chain_id: order.order_id,
             owner: order.owner.clone(),
             price_bps: order.price_bps,
-            quantity: order.quantity,
             remaining: order.remaining_quantity,
             timestamp: Utc::now().timestamp(),
         };
 
         // Try to match against existing orders
-        let matches = self.match_order(outcome_book, &entry, order.side);
+        let matches = self.match_order(
+            outcome_book,
+            order.market_id.as_str(),
+            order.outcome,
+            &mut entry,
+            order.side,
+        );
 
         // If there's remaining quantity, add to book
         if entry.remaining > 0 {
@@ -130,11 +129,12 @@ impl OrderBookService {
     fn match_order(
         &self,
         book: &mut OutcomeOrderBook,
-        order: &OrderEntry,
+        market_id: &str,
+        outcome: Outcome,
+        order: &mut OrderEntry,
         side: OrderSide,
     ) -> Vec<MatchedTrade> {
         let mut matches = Vec::new();
-        let mut remaining = order.remaining;
 
         match side {
             OrderSide::Buy => {
@@ -147,29 +147,30 @@ impl OrderBookService {
                     .collect();
 
                 for price in matching_prices {
-                    if remaining == 0 {
+                    if order.remaining == 0 {
                         break;
                     }
 
                     if let Some(asks) = book.asks.get_mut(&price) {
+                        asks.sort_by_key(|entry| entry.timestamp);
                         let mut i = 0;
-                        while i < asks.len() && remaining > 0 {
+                        while i < asks.len() && order.remaining > 0 {
                             let ask = &mut asks[i];
-                            let fill_qty = remaining.min(ask.remaining);
+                            let fill_qty = order.remaining.min(ask.remaining);
                             let fill_price = price; // Price-time priority: use maker's price
 
                             matches.push(MatchedTrade {
-                                buy_order_id: order.on_chain_id,
-                                sell_order_id: ask.on_chain_id,
-                                market_id: String::new(), // Would be set by caller
-                                outcome: Outcome::Yes,    // Would be set by caller
+                                buy_order_id: order.order_id.clone(),
+                                sell_order_id: ask.order_id.clone(),
+                                market_id: market_id.to_string(),
+                                outcome,
                                 fill_price_bps: fill_price,
                                 fill_quantity: fill_qty,
                                 buyer: order.owner.clone(),
                                 seller: ask.owner.clone(),
                             });
 
-                            remaining -= fill_qty;
+                            order.remaining -= fill_qty;
                             ask.remaining -= fill_qty;
 
                             if ask.remaining == 0 {
@@ -197,29 +198,30 @@ impl OrderBookService {
                     .collect();
 
                 for price in matching_prices {
-                    if remaining == 0 {
+                    if order.remaining == 0 {
                         break;
                     }
 
                     if let Some(bids) = book.bids.get_mut(&price) {
+                        bids.sort_by_key(|entry| entry.timestamp);
                         let mut i = 0;
-                        while i < bids.len() && remaining > 0 {
+                        while i < bids.len() && order.remaining > 0 {
                             let bid = &mut bids[i];
-                            let fill_qty = remaining.min(bid.remaining);
+                            let fill_qty = order.remaining.min(bid.remaining);
                             let fill_price = price;
 
                             matches.push(MatchedTrade {
-                                buy_order_id: bid.on_chain_id,
-                                sell_order_id: order.on_chain_id,
-                                market_id: String::new(),
-                                outcome: Outcome::Yes,
+                                buy_order_id: bid.order_id.clone(),
+                                sell_order_id: order.order_id.clone(),
+                                market_id: market_id.to_string(),
+                                outcome,
                                 fill_price_bps: fill_price,
                                 fill_quantity: fill_qty,
                                 buyer: bid.owner.clone(),
                                 seller: order.owner.clone(),
                             });
 
-                            remaining -= fill_qty;
+                            order.remaining -= fill_qty;
                             bid.remaining -= fill_qty;
 
                             if bid.remaining == 0 {
@@ -491,13 +493,9 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].fill_quantity, 50);
 
-        // Note: Current implementation adds full order to book since entry.remaining
-        // isn't updated by match_order. This is a known limitation - the actual
-        // remaining tracking happens in the database layer.
         let (bids, asks) = book.get_depth("market1", Outcome::Yes, 10);
         assert_eq!(bids.len(), 1);
-        // Full quantity is added (100), not remaining (50) - see note above
-        assert_eq!(bids[0].quantity, 100);
+        assert_eq!(bids[0].quantity, 50);
         assert!(asks.is_empty());
     }
 
@@ -624,8 +622,8 @@ mod tests {
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].fill_quantity, 100);
-        assert_eq!(matches[0].buy_order_id, 1);
-        assert_eq!(matches[0].sell_order_id, 2);
+        assert_eq!(matches[0].buy_order_id, "buy1");
+        assert_eq!(matches[0].sell_order_id, "sell1");
     }
 
     #[test]
@@ -781,10 +779,50 @@ mod tests {
         assert_eq!(matches.len(), 2);
         // First order filled entirely (time priority)
         assert_eq!(matches[0].fill_quantity, 50);
-        assert_eq!(matches[0].sell_order_id, 1);
+        assert_eq!(matches[0].sell_order_id, "sell1");
         // Second order partial fill
         assert_eq!(matches[1].fill_quantity, 25);
-        assert_eq!(matches[1].sell_order_id, 2);
+        assert_eq!(matches[1].sell_order_id, "sell2");
+    }
+
+    #[test]
+    fn test_no_outcome_match_preserves_outcome_and_ids() {
+        let book = OrderBookService::new();
+
+        let resting_buy = make_order(
+            "buy-no",
+            1,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::No,
+            5200,
+            80,
+        );
+        book.add_order(&resting_buy);
+
+        let taker_sell = make_order(
+            "sell-no",
+            2,
+            "market1",
+            "seller1",
+            OrderSide::Sell,
+            Outcome::No,
+            5200,
+            50,
+        );
+        let matches = book.add_order(&taker_sell);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].outcome, Outcome::No);
+        assert_eq!(matches[0].buy_order_id, "buy-no");
+        assert_eq!(matches[0].sell_order_id, "sell-no");
+        assert_eq!(matches[0].fill_quantity, 50);
+
+        let (bids, asks) = book.get_depth("market1", Outcome::No, 10);
+        assert_eq!(bids.len(), 1);
+        assert_eq!(bids[0].quantity, 30);
+        assert!(asks.is_empty());
     }
 
     #[test]
@@ -886,6 +924,42 @@ mod tests {
         assert_eq!(bids[0].quantity, 100);
         assert_eq!(asks.len(), 1);
         assert_eq!(asks[0].quantity, 50);
+    }
+
+    #[test]
+    fn test_replace_from_entries_clears_stale_state() {
+        let book = OrderBookService::new();
+        let stale = make_order(
+            "stale-order",
+            1,
+            "market1",
+            "buyer1",
+            OrderSide::Buy,
+            Outcome::Yes,
+            5000,
+            100,
+        );
+        book.add_order(&stale);
+
+        book.replace_from_entries(vec![OrderBookEntry {
+            order_id: "fresh-order".to_string(),
+            on_chain_id: 2,
+            market_id: "market2".to_string(),
+            owner: "buyer2".to_string(),
+            outcome: Outcome::No,
+            side: OrderSide::Buy,
+            price_bps: 4200,
+            remaining_quantity: 75,
+        }]);
+
+        let (old_bids, old_asks) = book.get_depth("market1", Outcome::Yes, 10);
+        assert!(old_bids.is_empty());
+        assert!(old_asks.is_empty());
+
+        let (new_bids, new_asks) = book.get_depth("market2", Outcome::No, 10);
+        assert_eq!(new_bids.len(), 1);
+        assert_eq!(new_bids[0].quantity, 75);
+        assert!(new_asks.is_empty());
     }
 
     #[test]
@@ -1022,10 +1096,8 @@ impl OrderBookService {
 
             let order_entry = OrderEntry {
                 order_id: entry.order_id.clone(),
-                on_chain_id: entry.on_chain_id,
                 owner: entry.owner.clone(),
                 price_bps: entry.price_bps,
-                quantity: entry.remaining_quantity,
                 remaining: entry.remaining_quantity,
                 timestamp: Utc::now().timestamp(),
             };
@@ -1063,6 +1135,13 @@ impl OrderBookService {
             books.len(),
             total_orders
         );
+    }
+
+    pub fn replace_from_entries(&self, entries: Vec<OrderBookEntry>) {
+        let mut books = self.write_books();
+        books.clear();
+        drop(books);
+        self.restore_from_entries(entries);
     }
 
     /// Get all open orders for a market (for persistence/sync)
