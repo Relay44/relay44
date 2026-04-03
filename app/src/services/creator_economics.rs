@@ -5,6 +5,7 @@ use sqlx::Row;
 use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 
+use crate::api::evm::fetch_internal_market_snapshot_by_id;
 use crate::api::ApiError;
 use crate::models::MarketStatus;
 use crate::models::Position;
@@ -253,6 +254,15 @@ struct MaterializedMarketRows {
     rows: Vec<CreatorMarketEconomicsDailyRecord>,
 }
 
+#[derive(Debug, Clone)]
+struct CreatorMarketView {
+    question: String,
+    status: String,
+    resolved: bool,
+    yes_price: f64,
+    no_price: f64,
+}
+
 fn normalize_wallet(value: &str) -> Result<String, ApiError> {
     let wallet = value.trim().to_ascii_lowercase();
     if wallet.len() != 42
@@ -299,6 +309,45 @@ fn date_range(start: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
             .unwrap_or(end.succ_opt().unwrap_or(end));
     }
     days
+}
+
+async fn load_creator_market_view(
+    state: &AppState,
+    market_id: u64,
+) -> Result<CreatorMarketView, ApiError> {
+    let market_id_str = market_id_string(market_id);
+    if let Some(market) = state
+        .db
+        .get_market(market_id_str.as_str())
+        .await
+        .map_err(ApiError::from)?
+    {
+        return Ok(CreatorMarketView {
+            question: market.question,
+            status: market_status_label(market.status).to_string(),
+            resolved: market.status == MarketStatus::Resolved,
+            yes_price: market.yes_price,
+            no_price: market.no_price,
+        });
+    }
+
+    let snapshot = fetch_internal_market_snapshot_by_id(state, market_id).await?;
+    let yes_price = snapshot
+        .yes_price
+        .or_else(|| snapshot.outcomes.first().map(|outcome| outcome.probability))
+        .unwrap_or(0.0);
+    let no_price = snapshot
+        .no_price
+        .or_else(|| snapshot.outcomes.get(1).map(|outcome| outcome.probability))
+        .unwrap_or((1.0 - yes_price).clamp(0.0, 1.0));
+
+    Ok(CreatorMarketView {
+        question: snapshot.question,
+        status: snapshot.status,
+        resolved: snapshot.resolved,
+        yes_price,
+        no_price,
+    })
 }
 
 fn compute_capital_value(
@@ -511,16 +560,10 @@ async fn fetch_market_context(
     creator: &str,
     config: &BaseMarketBootstrapConfigRecord,
 ) -> Result<MarketContext, ApiError> {
-    let market_id = market_id_string(config.market_id);
-    let market = state
-        .db
-        .get_market(market_id.as_str())
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::not_found("Market"))?;
+    let market = load_creator_market_view(state, config.market_id).await?;
     let position = state
         .db
-        .get_position(creator, market_id.as_str())
+        .get_position(creator, market_id_string(config.market_id).as_str())
         .await
         .map_err(ApiError::from)?;
 
@@ -538,7 +581,7 @@ async fn fetch_market_context(
         compute_net_liquidity_pnl(config.seed_usdc, current_capital_value_usdc);
     let subsidy_burn_usdc = compute_subsidy_burn(config.seed_usdc, current_capital_value_usdc);
     let roi_bps = compute_roi_bps(config.seed_usdc, net_liquidity_pnl_usdc);
-    let realized_resolution_pnl_usdc = if market.status == MarketStatus::Resolved {
+    let realized_resolution_pnl_usdc = if market.resolved {
         position
             .as_ref()
             .map(|entry| entry.realized_pnl)
@@ -558,7 +601,7 @@ async fn fetch_market_context(
     Ok(MarketContext {
         config: config.clone(),
         market_question: market.question,
-        status: market_status_label(market.status).to_string(),
+        status: market.status,
         available_usdc: config.available_usdc,
         reserved_usdc: config.reserved_usdc,
         inventory_yes_usdc,
@@ -726,16 +769,10 @@ async fn materialize_daily_rows_for_market(
         .await
         .map_err(ApiError::from)?;
 
-    let market_id = market_id_string(config.market_id);
-    let market = state
-        .db
-        .get_market(market_id.as_str())
-        .await
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::not_found("Market"))?;
+    let market = load_creator_market_view(state, config.market_id).await?;
     let position = state
         .db
-        .get_position(creator, market_id.as_str())
+        .get_position(creator, market_id_string(config.market_id).as_str())
         .await
         .map_err(ApiError::from)?;
     let mirror = fetch_mirror_metrics(state, config.market_id).await?;
@@ -771,7 +808,7 @@ async fn materialize_daily_rows_for_market(
             compute_net_liquidity_pnl(config.seed_usdc, current_capital_value_usdc);
         let subsidy_burn_usdc = compute_subsidy_burn(config.seed_usdc, current_capital_value_usdc);
         let roi_bps = compute_roi_bps(config.seed_usdc, net_liquidity_pnl_usdc);
-        let realized_resolution_pnl_usdc = if market.status == MarketStatus::Resolved {
+        let realized_resolution_pnl_usdc = if market.resolved {
             position
                 .as_ref()
                 .map(|entry| entry.realized_pnl)

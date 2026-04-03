@@ -13,6 +13,10 @@ import {
 const DEFAULT_API_URL = 'http://localhost:8080/v1';
 const DEFAULT_CHAIN_ID = 8453;
 const DEFAULT_LIMIT = 25;
+const DEFAULT_BACKFILL_DAYS = 90;
+const DEFAULT_MAX_PAGES_PER_MARKET = 3;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_BACKFILL_TIMEOUT_MS = 180_000;
 const DEFAULT_USER_STREAM_URL = 'wss://ws-subscriptions-clob.polymarket.com/ws/user';
 const DEFAULT_RELAYER_URL = 'https://relayer-v2.polymarket.com/transactions';
 const DEFAULT_USER_STREAM_WINDOW_MS = 4_000;
@@ -70,9 +74,9 @@ function buildHeaders({ accessToken, adminKey, hasBody = false } = {}) {
   return headers;
 }
 
-async function fetchJson(url, init = {}) {
+async function fetchJson(url, init = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
   const response = await fetch(url, {
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(timeoutMs),
     ...init,
   });
   const text = await response.text();
@@ -215,8 +219,26 @@ export const limit = Math.max(
   parsePositiveInt(process.env.POLYMARKET_INDEXER_LIMIT, DEFAULT_LIMIT),
   1,
 );
+export const backfillDays = Math.max(
+  parsePositiveInt(process.env.POLYMARKET_INDEXER_BACKFILL_DAYS, DEFAULT_BACKFILL_DAYS),
+  1,
+);
+export const maxPagesPerMarket = Math.max(
+  parsePositiveInt(
+    process.env.POLYMARKET_INDEXER_MAX_PAGES_PER_MARKET,
+    DEFAULT_MAX_PAGES_PER_MARKET,
+  ),
+  1,
+);
+export const backfillTimeoutMs = Math.max(
+  parsePositiveInt(
+    process.env.POLYMARKET_INDEXER_BACKFILL_TIMEOUT_MS,
+    DEFAULT_BACKFILL_TIMEOUT_MS,
+  ),
+  DEFAULT_REQUEST_TIMEOUT_MS,
+);
 
-async function requestApi(path, { method = 'GET', body, accessToken } = {}) {
+async function requestApi(path, { method = 'GET', body, accessToken, timeoutMs } = {}) {
   const adminKey = String(process.env.ADMIN_CONTROL_KEY || '').trim();
   return fetchJson(`${apiBase}${path}`, {
     method,
@@ -226,7 +248,7 @@ async function requestApi(path, { method = 'GET', body, accessToken } = {}) {
       hasBody: body != null,
     }),
     body: body == null ? undefined : JSON.stringify(body),
-  });
+  }, timeoutMs);
 }
 
 function builderCredentialsFromEnv() {
@@ -547,6 +569,9 @@ function normalizeMetadata(health, backfill, userStream, relayer) {
     apiUrl: apiBase,
     chainId,
     limit,
+    backfillDays,
+    maxPagesPerMarket,
+    backfillTimeoutMs,
     trackedMarkets: health?.trackedMarkets ?? backfill?.trackedMarkets ?? 0,
     trackedMarketDetails:
       health?.trackedMarketDetails ?? backfill?.trackedMarketDetails ?? [],
@@ -672,11 +697,13 @@ export async function triggerIndexerBackfill(
   return requestApi('/external/indexers/polymarket/backfill', {
     method: 'POST',
     accessToken,
+    timeoutMs: backfillTimeoutMs,
     body: {
       maxMarkets: limit,
-      days: 90,
+      days: backfillDays,
       publicTape: true,
       userFills: true,
+      maxPagesPerMarket,
       userEvents,
       relayerTransactions,
     },
