@@ -564,6 +564,37 @@ export default function AgentsPage() {
                       <p className="text-xs text-text-muted">
                         Cadence {agent.cadence_seconds}s · {formatPublicAgentSchedule(agent.last_executed_at, agent.next_execution_at)}
                       </p>
+                      <div className="grid grid-cols-2 gap-2 pt-1 text-xs sm:grid-cols-4">
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Fills</div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {agent.paper_performance?.fills ?? 0}
+                          </div>
+                        </div>
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Open</div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {agent.paper_performance?.openPositions ?? 0}
+                          </div>
+                        </div>
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Net PnL</div>
+                          <div
+                            className={cn(
+                              'mt-1 text-sm',
+                              (agent.paper_performance?.netPnlUsdc ?? 0) >= 0 ? 'text-bid' : 'text-ask'
+                            )}
+                          >
+                            {formatCompactUsd(agent.paper_performance?.netPnlUsdc ?? 0)}
+                          </div>
+                        </div>
+                        <div className="border border-border px-2 py-1">
+                          <div className="font-mono uppercase tracking-[0.12em] text-text-muted">Drawdown</div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {formatCompactUsd(agent.paper_performance?.maxDrawdownUsdc ?? 0)}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <Link
