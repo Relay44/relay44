@@ -2261,13 +2261,55 @@ fn inferred_resolution_hazards(
     hazards
 }
 
+fn inferred_canonical_live_sources(market: &ExternalMarketSnapshot) -> Vec<String> {
+    if !supports_resolution_inference(market) {
+        return Vec::new();
+    }
+
+    let category = normalize_whitespace(market.category.as_str()).to_ascii_lowercase();
+    let question = normalize_whitespace(market.question.as_str()).to_ascii_lowercase();
+    let criteria = normalize_whitespace(market.description.as_str()).to_ascii_lowercase();
+    let haystack = format!("{question} {criteria} {category}");
+    let mut sources = Vec::new();
+
+    if haystack.contains("gta vi") || haystack.contains("grand theft auto vi") {
+        push_unique_string(&mut sources, "https://www.rockstargames.com/newswire");
+    }
+    if category == "crypto" || haystack.contains("bitcoin") || haystack.contains("btc") {
+        push_unique_string(&mut sources, "https://www.coinbase.com/price/bitcoin");
+    }
+    if haystack.contains("ukraine") || haystack.contains("russia") || haystack.contains("ceasefire")
+    {
+        push_unique_string(&mut sources, "https://apnews.com/hub/russia-ukraine");
+    }
+    if haystack.contains("taiwan") || haystack.contains("china") {
+        push_unique_string(&mut sources, "https://apnews.com/hub/china");
+    }
+    if category == "sports"
+        || haystack.contains("nba")
+        || haystack.contains("finals")
+        || haystack.contains("playoff")
+        || haystack.contains("thunder")
+    {
+        push_unique_string(&mut sources, "https://www.nba.com/standings");
+    }
+
+    sources
+}
+
 fn inferred_signal_sources(
     body: &CreateExternalSignalRequest,
     market: &ExternalMarketSnapshot,
 ) -> Vec<String> {
     let mut sources = normalized_string_list(body.sources.as_deref());
+    let should_infer_live_sources = sources.is_empty();
     if !market.external_url.trim().is_empty() {
         push_unique_string(&mut sources, market.external_url.as_str());
+    }
+    if should_infer_live_sources {
+        for source in inferred_canonical_live_sources(market) {
+            push_unique_string(&mut sources, source.as_str());
+        }
     }
     sources
 }
@@ -13369,9 +13411,13 @@ mod tests {
         );
         assert_eq!(
             metadata_string_list(&metadata, "sources"),
-            vec![market.external_url.clone()]
+            vec![
+                market.external_url.clone(),
+                "https://www.rockstargames.com/newswire".to_string(),
+                "https://apnews.com/hub/china".to_string(),
+            ]
         );
-        assert_eq!(metadata_bool(&metadata, "hasLiveReference"), Some(false));
+        assert_eq!(metadata_bool(&metadata, "hasLiveReference"), Some(true));
 
         let hazards = metadata_string_list(&metadata, "resolutionHazards");
         assert!(hazards.contains(&"fallback_split_resolution".to_string()));
@@ -13379,6 +13425,51 @@ mod tests {
         assert!(hazards.contains(&"narrow_qualification_clauses".to_string()));
         assert!(hazards.contains(&"credible_reporting_discretion".to_string()));
         assert!(hazards.contains(&"official_source_dependency".to_string()));
+    }
+
+    #[test]
+    fn merge_signal_metadata_infers_nba_live_sources() {
+        let body = sample_signal_request();
+        let market = external::types::ExternalMarketSnapshot {
+            id: "polymarket:553856".to_string(),
+            question: "Will the Thunder reach the NBA Finals before GTA VI?".to_string(),
+            description: "This market resolves to Yes if the Oklahoma City Thunder qualify for the NBA Finals before Grand Theft Auto VI is officially released in the US.".to_string(),
+            category: "sports".to_string(),
+            status: "active".to_string(),
+            close_time: 1_785_499_200,
+            resolved: false,
+            outcome: None,
+            yes_price: 0.38,
+            no_price: 0.62,
+            volume: 250_000.0,
+            source: "external_polymarket".to_string(),
+            provider: "polymarket".to_string(),
+            is_external: true,
+            external_url: "https://polymarket.com/event/will-the-thunder-reach-the-nba-finals-before-gta-vi".to_string(),
+            chain_id: 137,
+            requires_credentials: true,
+            execution_users: true,
+            execution_agents: true,
+            outcomes: vec![
+                ExternalOutcome {
+                    label: "Yes".to_string(),
+                    probability: 0.38,
+                },
+                ExternalOutcome {
+                    label: "No".to_string(),
+                    probability: 0.62,
+                },
+            ],
+            provider_market_ref: "553856".to_string(),
+        };
+
+        let metadata = merge_signal_metadata(&body, &market);
+        let sources = metadata_string_list(&metadata, "sources");
+
+        assert!(sources.contains(&market.external_url));
+        assert!(sources.contains(&"https://www.nba.com/standings".to_string()));
+        assert!(sources.contains(&"https://www.rockstargames.com/newswire".to_string()));
+        assert_eq!(metadata_bool(&metadata, "hasLiveReference"), Some(true));
     }
 
     #[test]
@@ -13411,5 +13502,6 @@ mod tests {
         assert!(sources.contains(&"https://example.com/live-feed".to_string()));
         assert!(sources.contains(&"https://example.com/research".to_string()));
         assert!(sources.contains(&market.external_url));
+        assert_eq!(sources.len(), 3);
     }
 }
