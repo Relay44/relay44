@@ -477,8 +477,10 @@ export function HeroTicket({
 }: HeroTicketProps) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
+  const [activeSrc, setActiveSrc] = useState(backgroundImageSrc);
   const [isMeshReady, setIsMeshReady] = useState(false);
   const [isImageVisible, setIsImageVisible] = useState(false);
+  const isFirstMount = useRef(true);
 
   const dataGrid: React.CSSProperties = {
     display: 'grid',
@@ -487,22 +489,30 @@ export function HeroTicket({
   };
 
   useEffect(() => {
-    setIsMeshReady(false);
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    if (backgroundImageSrc === activeSrc) return;
+
     setIsImageVisible(false);
+
+    const timeout = window.setTimeout(() => {
+      setIsMeshReady(false);
+      setActiveSrc(backgroundImageSrc);
+    }, 460);
+
+    return () => window.clearTimeout(timeout);
   }, [backgroundImageSrc]);
 
   useEffect(() => {
-    if (!isMeshReady) {
-      return;
-    }
+    if (!isMeshReady) return;
 
     const timeout = window.setTimeout(() => {
       setIsImageVisible(true);
     }, 140);
 
-    return () => {
-      window.clearTimeout(timeout);
-    };
+    return () => window.clearTimeout(timeout);
   }, [isMeshReady]);
 
   return (
@@ -519,7 +529,7 @@ export function HeroTicket({
           style={{
             position: 'absolute',
             inset: 0,
-            backgroundImage: `url('${backgroundImageSrc}')`,
+            backgroundImage: `url('${activeSrc}')`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             opacity: isImageVisible ? 1 : 0,
@@ -528,7 +538,7 @@ export function HeroTicket({
           }}
         />
         <TicketCanvas
-          backgroundImageSrc={backgroundImageSrc}
+          backgroundImageSrc={activeSrc}
           isDark={isDark}
           onMeshReady={() => setIsMeshReady(true)}
         />
