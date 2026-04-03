@@ -1396,11 +1396,12 @@ fn round5(value: f64) -> f64 {
 
 fn polymarket_fee_rate(category: Option<&str>) -> f64 {
     match normalize_category(category).as_deref() {
-        Some("crypto") => 0.072,
-        Some("sports") => 0.03,
-        Some("finance") | Some("politics") | Some("mentions") | Some("tech") => 0.04,
+        Some("crypto") => 0.0072,
+        Some("sports") => 0.003,
+        Some("finance") | Some("politics") | Some("mentions") | Some("tech") => 0.004,
+        Some("economics") | Some("culture") | Some("weather") => 0.005,
         Some("geopolitics") => 0.0,
-        _ => 0.05,
+        _ => 0.005,
     }
 }
 
