@@ -3705,16 +3705,61 @@ async fn load_polymarket_tracked_market(
         token_outcomes.insert(token_id.clone(), outcome);
     }
 
+    // Category lives on the parent event, not the market itself.
+    // Look it up via negRiskMarketID → events endpoint.
+    let mut market_category = response
+        .get("category")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase());
+
+    if market_category.is_none() {
+        let neg_risk_id = parse_string_value(response.get("negRiskMarketID"));
+        let slug = parse_string_value(response.get("slug"));
+
+        let event_query = if !neg_risk_id.is_empty() {
+            format!(
+                "{}/events?negRiskMarketID={}&limit=1",
+                config.polymarket_gamma_api_base.trim_end_matches('/'),
+                neg_risk_id
+            )
+        } else if !slug.is_empty() {
+            format!(
+                "{}/events?slug={}&limit=1",
+                config.polymarket_gamma_api_base.trim_end_matches('/'),
+                slug
+            )
+        } else {
+            String::new()
+        };
+
+        if !event_query.is_empty() {
+            if let Ok(events) = client
+                .get(&event_query)
+                .send()
+                .await
+                .and_then(|r| Ok(r.error_for_status()?))
+            {
+                if let Ok(events) = events.json::<Value>().await {
+                    market_category = events
+                        .as_array()
+                        .and_then(|arr| arr.first())
+                        .and_then(|ev| ev.get("category"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(|v| v.to_ascii_lowercase());
+                }
+            }
+        }
+    }
+
     Ok(PolymarketTrackedMarket {
         market_id: format!("polymarket:{}", provider_market_ref.trim()),
         provider_market_ref: provider_market_ref.trim().to_string(),
         condition_id,
-        market_category: response
-            .get("category")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_ascii_lowercase()),
+        market_category,
         token_outcomes,
     })
 }
