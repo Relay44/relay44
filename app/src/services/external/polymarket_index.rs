@@ -1822,11 +1822,14 @@ pub async fn compute_wallet_scores(
                 .sum::<f64>()
                 / acc.markets.len() as f64
         };
+        // activity_score: log-scaled trade count, 0→0, 10→0.5, 100→0.75, 1000→1.0
+        let activity_score = ((acc.trade_count as f64).ln_1p() / 1000_f64.ln_1p()).clamp(0.0, 1.0);
         let edge_persistence_score = 0.5;
-        let composite_score = (0.30 * recency_score
-            + 0.25 * consistency_score
-            + 0.20 * specialization_score
-            + 0.25 * edge_persistence_score
+        let composite_score = (0.25 * recency_score
+            + 0.20 * consistency_score
+            + 0.15 * specialization_score
+            + 0.10 * edge_persistence_score
+            + 0.30 * activity_score
             - 0.15 * crowding_penalty)
             .clamp(0.0, 1.0);
 
