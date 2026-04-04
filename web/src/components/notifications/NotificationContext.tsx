@@ -10,6 +10,7 @@ import {
   ReactNode,
 } from 'react';
 import { useRuntimeMode, useSessionState } from '@/hooks';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { api } from '@/lib/api';
 import type { Notification } from '@/types';
 
@@ -116,6 +117,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }
   }, [notifications, readOnly, unreadCount]);
 
+  const { subscribe: wsSubscribe, isConnected: wsConnected } = useWebSocket();
+
   useEffect(() => {
     isMountedRef.current = true;
     if (!sessionRestored) {
@@ -134,6 +137,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       abortControllerRef.current?.abort();
     };
   }, [fetchNotifications, sessionRestored]);
+
+  useEffect(() => {
+    if (!wsConnected || !hasSession) return;
+    return wsSubscribe('notification', () => {
+      fetchNotifications();
+    });
+  }, [wsConnected, hasSession, wsSubscribe, fetchNotifications]);
 
   return (
     <NotificationContext.Provider

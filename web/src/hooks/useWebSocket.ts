@@ -1,8 +1,10 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Outcome } from '@/types';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
+const RECONNECT_MS = 3000;
+const HEARTBEAT_MS = 25000;
 
 type MessageHandler = (data: unknown) => void;
 
@@ -11,120 +13,157 @@ interface WebSocketMessage {
   data: unknown;
 }
 
-export function useWebSocket() {
-  const wsRef = useRef<WebSocket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const handlersRef = useRef<Map<string, Set<MessageHandler>>>(new Map());
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+let sharedSocket: WebSocket | null = null;
+let sharedConnected = false;
+let refCount = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+const handlers = new Map<string, Set<MessageHandler>>();
+const listeners = new Set<() => void>();
 
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+function notify() {
+  listeners.forEach((fn) => fn());
+}
 
-    try {
-      wsRef.current = new WebSocket(WS_URL);
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatTimer = setInterval(() => {
+    if (sharedSocket?.readyState === WebSocket.OPEN) {
+      sharedSocket.send(JSON.stringify({ type: 'ping' }));
+    }
+  }, HEARTBEAT_MS);
+}
 
-      wsRef.current.onopen = () => {
-        setIsConnected(true);
-        setError(null);
-      };
+function stopHeartbeat() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
 
-      wsRef.current.onclose = () => {
-        setIsConnected(false);
-        // Reconnect after 3 seconds
-        reconnectTimeoutRef.current = setTimeout(connect, 3000);
-      };
+function connect() {
+  if (sharedSocket?.readyState === WebSocket.OPEN || sharedSocket?.readyState === WebSocket.CONNECTING) return;
 
-      wsRef.current.onerror = () => {
-        setError('WebSocket connection failed');
-      };
+  try {
+    sharedSocket = new WebSocket(WS_URL);
 
-      wsRef.current.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-          const handlers = handlersRef.current.get(message.type);
-          if (handlers) {
-            handlers.forEach((handler) => handler(message.data));
-          }
-        } catch {
-          console.error('Failed to parse WebSocket message');
+    sharedSocket.onopen = () => {
+      sharedConnected = true;
+      startHeartbeat();
+      notify();
+    };
+
+    sharedSocket.onclose = () => {
+      sharedConnected = false;
+      stopHeartbeat();
+      notify();
+      if (refCount > 0) {
+        reconnectTimer = setTimeout(connect, RECONNECT_MS);
+      }
+    };
+
+    sharedSocket.onerror = () => {
+      sharedConnected = false;
+      notify();
+    };
+
+    sharedSocket.onmessage = (event) => {
+      try {
+        const message: WebSocketMessage = JSON.parse(event.data);
+        const set = handlers.get(message.type);
+        if (set) {
+          set.forEach((handler) => handler(message.data));
         }
-      };
-    } catch {
-      setError('Failed to connect to WebSocket');
-    }
-  }, []);
+      } catch {}
+    };
+  } catch {}
+}
 
-  const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-    wsRef.current?.close();
-    wsRef.current = null;
-    setIsConnected(false);
-  }, []);
+function disconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  stopHeartbeat();
+  sharedSocket?.close();
+  sharedSocket = null;
+  sharedConnected = false;
+  notify();
+}
 
-  const subscribe = useCallback((type: string, handler: MessageHandler) => {
-    if (!handlersRef.current.has(type)) {
-      handlersRef.current.set(type, new Set());
-    }
-    handlersRef.current.get(type)!.add(handler);
+function subscribe(type: string, handler: MessageHandler) {
+  if (!handlers.has(type)) {
+    handlers.set(type, new Set());
+  }
+  handlers.get(type)!.add(handler);
+  return () => {
+    handlers.get(type)?.delete(handler);
+  };
+}
 
+function send(type: string, data: unknown) {
+  if (sharedSocket?.readyState === WebSocket.OPEN) {
+    sharedSocket.send(JSON.stringify({ type, data }));
+  }
+}
+
+function getSnapshot() {
+  return sharedConnected;
+}
+
+function subscribeToConnection(callback: () => void) {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+
+export function useWebSocket() {
+  const isConnected = useSyncExternalStore(subscribeToConnection, getSnapshot, () => false);
+
+  useEffect(() => {
+    refCount++;
+    if (refCount === 1) connect();
     return () => {
-      handlersRef.current.get(type)?.delete(handler);
+      refCount--;
+      if (refCount === 0) disconnect();
     };
   }, []);
 
-  const send = useCallback((type: string, data: unknown) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type, data }));
-    }
-  }, []);
-
-  useEffect(() => {
-    connect();
-    return disconnect;
-  }, [connect, disconnect]);
-
-  return { isConnected, error, subscribe, send, connect, disconnect };
+  return { isConnected, subscribe, send };
 }
 
 export function useOrderBookSubscription(marketId: string, outcome: Outcome) {
   const queryClient = useQueryClient();
-  const { subscribe, send, isConnected } = useWebSocket();
+  const { subscribe: sub, send: wsSend, isConnected } = useWebSocket();
 
   useEffect(() => {
     if (!isConnected || !marketId) return;
 
-    // Subscribe to order book updates
-    send('subscribe', { channel: 'orderbook', marketId, outcome });
+    wsSend('subscribe', { channel: 'orderbook', marketId, outcome });
 
-    const unsubscribe = subscribe('orderbook_update', (data) => {
+    const unsubscribe = sub('orderbook_update', (data) => {
       const update = data as { marketId: string; outcome: Outcome };
       if (update.marketId === marketId && update.outcome === outcome) {
-        queryClient.invalidateQueries({
-          queryKey: ['orderbook', marketId, outcome],
-        });
+        queryClient.invalidateQueries({ queryKey: ['orderbook', marketId, outcome] });
       }
     });
 
     return () => {
-      send('unsubscribe', { channel: 'orderbook', marketId, outcome });
+      wsSend('unsubscribe', { channel: 'orderbook', marketId, outcome });
       unsubscribe();
     };
-  }, [isConnected, marketId, outcome, subscribe, send, queryClient]);
+  }, [isConnected, marketId, outcome, sub, wsSend, queryClient]);
 }
 
 export function useTradeSubscription(marketId: string) {
   const queryClient = useQueryClient();
-  const { subscribe, send, isConnected } = useWebSocket();
+  const { subscribe: sub, send: wsSend, isConnected } = useWebSocket();
 
   useEffect(() => {
     if (!isConnected || !marketId) return;
 
-    send('subscribe', { channel: 'trades', marketId });
+    wsSend('subscribe', { channel: 'trades', marketId });
 
-    const unsubscribe = subscribe('trade', (data) => {
+    const unsubscribe = sub('trade', (data) => {
       const trade = data as { marketId: string };
       if (trade.marketId === marketId) {
         queryClient.invalidateQueries({ queryKey: ['trades', marketId] });
@@ -133,22 +172,22 @@ export function useTradeSubscription(marketId: string) {
     });
 
     return () => {
-      send('unsubscribe', { channel: 'trades', marketId });
+      wsSend('unsubscribe', { channel: 'trades', marketId });
       unsubscribe();
     };
-  }, [isConnected, marketId, subscribe, send, queryClient]);
+  }, [isConnected, marketId, sub, wsSend, queryClient]);
 }
 
 export function usePriceSubscription(marketId: string) {
   const queryClient = useQueryClient();
-  const { subscribe, send, isConnected } = useWebSocket();
+  const { subscribe: sub, send: wsSend, isConnected } = useWebSocket();
 
   useEffect(() => {
     if (!isConnected || !marketId) return;
 
-    send('subscribe', { channel: 'prices', marketId });
+    wsSend('subscribe', { channel: 'prices', marketId });
 
-    const unsubscribe = subscribe('price_update', (data) => {
+    const unsubscribe = sub('price_update', (data) => {
       const update = data as { marketId: string };
       if (update.marketId === marketId) {
         queryClient.invalidateQueries({ queryKey: ['market', marketId] });
@@ -156,8 +195,14 @@ export function usePriceSubscription(marketId: string) {
     });
 
     return () => {
-      send('unsubscribe', { channel: 'prices', marketId });
+      wsSend('unsubscribe', { channel: 'prices', marketId });
       unsubscribe();
     };
-  }, [isConnected, marketId, subscribe, send, queryClient]);
+  }, [isConnected, marketId, sub, wsSend, queryClient]);
+}
+
+export function useMarketLiveData(marketId: string, outcome: Outcome = 'yes') {
+  useOrderBookSubscription(marketId, outcome);
+  useTradeSubscription(marketId);
+  usePriceSubscription(marketId);
 }

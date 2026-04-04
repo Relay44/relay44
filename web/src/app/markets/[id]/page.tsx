@@ -19,6 +19,7 @@ import {
   OrderForm,
   OrderBookDisplay,
   OrderList,
+  MobileTradeSheet,
 } from "@/components/order";
 import { ShareCastButton } from "@/components/farcaster";
 import {
@@ -30,6 +31,7 @@ import {
   useRuntimeMode,
   useSessionState,
 } from "@/hooks";
+import { useMarketLiveData, useWebSocket } from "@/hooks/useWebSocket";
 import { isAdminWallet } from "@/lib/admin";
 import { api, type CompliancePolicy } from "@/lib/api";
 import { SITE_URL } from "@/lib/seo";
@@ -83,6 +85,8 @@ export default function MarketDetailPage() {
   const isAdmin = useMemo(() => isAdminWallet(baseWallet.address), [baseWallet.address]);
 
   const { data: market, isLoading, error, refetch } = useMarket(marketId);
+  const { isConnected: wsConnected } = useWebSocket();
+  useMarketLiveData(marketId);
   const { data: positionsData } = usePositions();
   const { data: decisionCellsData } = useDecisionCells({
     limit: 50,
@@ -210,10 +214,18 @@ export default function MarketDetailPage() {
       </Link>
 
       <div className="flex items-center justify-between mb-2">
-        <MarketHeader
-          market={market}
-          suppressTradingViewLinks={Boolean(tradingViewReference)}
-        />
+        <div className="flex items-center gap-3">
+          <MarketHeader
+            market={market}
+            suppressTradingViewLinks={Boolean(tradingViewReference)}
+          />
+          {wsConnected && (
+            <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-text-muted font-mono shrink-0">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              live
+            </span>
+          )}
+        </div>
         <ShareCastButton
           text={`${market.question}\n\nYES ${Math.round(market.yesPrice * 100)}% | NO ${Math.round(market.noPrice * 100)}%`}
           embedUrl={`${SITE_URL}/markets/${encodeURIComponent(market.id)}`}
@@ -405,11 +417,13 @@ export default function MarketDetailPage() {
               </div>
             </div>
           ) : walletConnected ? (
-            market.isExternal ? (
-              <ExternalOrderForm market={market} />
-            ) : (
-              <OrderForm market={market} />
-            )
+            <div className="hidden md:block">
+              {market.isExternal ? (
+                <ExternalOrderForm market={market} />
+              ) : (
+                <OrderForm market={market} />
+              )}
+            </div>
           ) : (
             <div className="card flex flex-col items-center justify-center gap-3 py-12 text-center">
               <p className="text-lg font-medium text-text-primary">
@@ -452,6 +466,11 @@ export default function MarketDetailPage() {
       )}
 
       <MarketInfo market={market} />
+
+      {market.status === "active" &&
+        !readOnly &&
+        market.executionUsers &&
+        walletConnected && <MobileTradeSheet market={market} />}
     </PageShell>
   );
 }
