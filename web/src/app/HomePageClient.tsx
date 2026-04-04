@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Header, BottomNav } from "@/components/layout";
 import { HeroTicket, type HeroTicketRow } from "@/components/home/HeroTicket";
+import { OnboardingBanner } from "@/components/home/OnboardingBanner";
 import { FeaturedSlider } from "@/components/market";
+import { LeaderboardMini } from "@/components/leaderboard";
 import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
 import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
 import { cn } from "@/lib/utils";
@@ -581,7 +583,7 @@ export default function HomePageClient({
     <div className="h-screen flex flex-col overflow-hidden">
       <Header />
 
-      <div className="pt-page flex flex-1 overflow-hidden">
+      <div className="pt-header flex flex-1 overflow-hidden">
         <AgentPanel
           agents={liveAgents}
           isLoading={isLoadingLiveAgents}
@@ -590,6 +592,7 @@ export default function HomePageClient({
         />
 
         <main className="flex-1 overflow-y-auto md:pb-10">
+          <OnboardingBanner />
           <section className="border-b border-border h-[280px] sm:h-[320px]">
             <HeroTicket
               accessValue="PUBLIC WEB"
@@ -603,6 +606,10 @@ export default function HomePageClient({
 
           <section className="py-5 border-b border-border">
             <FeaturedSlider markets={featuredMarkets} title="Signal Relay" />
+          </section>
+
+          <section className="border-b border-border px-4 py-4 sm:px-6">
+            <LeaderboardMini title="Top Traders This Week" limit={5} />
           </section>
 
           <section className="border-b border-border px-4 py-4 sm:px-6">
