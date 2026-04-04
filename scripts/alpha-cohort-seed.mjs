@@ -63,8 +63,13 @@ async function fetchTopWallets(token) {
     : "limit=20";
   const payload = await apiGet(`/external/research/wallets?${qs}`, token);
   const wallets = payload?.items || payload?.wallets || payload?.data || [];
+  const MIN_TRADES = Number(process.env.ALPHA_MIN_TRADES || 20);
   return wallets
-    .filter((w) => (w.composite_score ?? w.compositeScore ?? 0) >= 0.55)
+    .filter(
+      (w) =>
+        (w.composite_score ?? w.compositeScore ?? 0) >= 0.55 &&
+        (w.trade_count ?? w.tradeCount ?? 0) >= MIN_TRADES,
+    )
     .slice(0, AGENT_COUNT);
 }
 
