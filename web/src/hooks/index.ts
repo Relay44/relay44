@@ -48,4 +48,5 @@ export {
   useOrderBookSubscription,
   useTradeSubscription,
   usePriceSubscription,
+  useMarketLiveData,
 } from './useWebSocket';

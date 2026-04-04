@@ -21,6 +21,7 @@ const primaryLinks = [
   { href: "/decisions", label: "Decisions" },
   { href: "/agents", label: "Swarm" },
   { href: "/identity", label: "Identity" },
+  { href: "/insights", label: "Insights" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/portfolio", label: "Portfolio" },
 ];
@@ -251,10 +252,10 @@ export function Header() {
           })}
         </nav>
 
-        <div className="hidden lg:flex min-w-0 flex-1 justify-center px-8">
+        <div className="hidden lg:flex min-w-0 flex-1 justify-center px-6">
           <form
             onSubmit={handleSearchSubmit}
-            className="relative w-full max-w-[420px]"
+            className="relative w-full max-w-[540px]"
           >
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
             <input
