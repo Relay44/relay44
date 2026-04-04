@@ -83,6 +83,7 @@ const nextConfig = {
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
       '@react-native-async-storage/async-storage': false,
+      '@worldcoin/idkit': path.resolve(__dirname, 'node_modules/@worldcoin/idkit/build/index.js'),
     };
     config.resolve.fallback = {
       ...config.resolve.fallback,
