@@ -2520,28 +2520,46 @@ class ApiClient {
     limit?: number;
     offset?: number;
   }): Promise<ExternalAgentsListResponse> {
-    const query = this.buildQuery(params || {});
-    const response = await this.request<ExternalAgentsListResponse>(
-      `/external/agents/public${query}`,
-    );
-    const agents = Array.isArray(response.agents) ? response.agents : [];
-    return {
-      agents: agents.map((entry) =>
-        normalizeExternalAgentRecord(
-          entry as unknown as Record<string, unknown>,
+    try {
+      const query = this.buildQuery(params || {});
+      const response = await this.request<ExternalAgentsListResponse>(
+        `/external/agents/public${query}`,
+      );
+      const agents = Array.isArray(response.agents) ? response.agents : [];
+      return {
+        agents: agents.map((entry) =>
+          normalizeExternalAgentRecord(
+            entry as unknown as Record<string, unknown>,
+          ),
         ),
-      ),
-      total: toNumber(response.total),
-      limit: toNumber(response.limit),
-      offset: toNumber(response.offset),
-    };
+        total: toNumber(response.total),
+        limit: toNumber(response.limit),
+        offset: toNumber(response.offset),
+      };
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockPublicExternalAgents } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /external/agents/public");
+        return getMockPublicExternalAgents(params);
+      }
+      throw err;
+    }
   }
 
   async getPublicExternalAgentsPerformance(): Promise<ExternalAgentPerformanceResponse> {
-    const response = await this.request<Record<string, unknown>>(
-      "/external/agents/public/performance",
-    );
-    return normalizeExternalAgentPerformanceResponse(response);
+    try {
+      const response = await this.request<Record<string, unknown>>(
+        "/external/agents/public/performance",
+      );
+      return normalizeExternalAgentPerformanceResponse(response);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockPublicExternalAgentsPerformance } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /external/agents/public/performance");
+        return getMockPublicExternalAgentsPerformance();
+      }
+      throw err;
+    }
   }
 
   async createExternalAgent(data: {
@@ -3253,9 +3271,18 @@ class ApiClient {
     metric: LeaderboardMetric = "pnl",
     limit = 100,
   ): Promise<Leaderboard> {
-    return this.request(
-      `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
-    );
+    try {
+      return await this.request(
+        `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockLeaderboard } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /leaderboard");
+        return getMockLeaderboard(period, metric, limit);
+      }
+      throw err;
+    }
   }
 
   async getUserRank(
@@ -3263,22 +3290,49 @@ class ApiClient {
     period: LeaderboardPeriod = "weekly",
     metric: LeaderboardMetric = "pnl",
   ): Promise<{ rank: number; value: number }> {
-    return this.request(
-      `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
-    );
+    try {
+      return await this.request(
+        `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockUserRank } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /leaderboard/rank");
+        return getMockUserRank(wallet, period, metric);
+      }
+      throw err;
+    }
   }
 
   // Public profiles
   async getPublicProfile(wallet: string): Promise<PublicProfile> {
-    return this.request(`/profiles/${wallet}`);
+    try {
+      return await this.request(`/profiles/${wallet}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockPublicProfile } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /profiles");
+        return getMockPublicProfile(wallet);
+      }
+      throw err;
+    }
   }
 
   async getProfileActivity(
     wallet: string,
     params?: { limit?: number; offset?: number },
   ): Promise<PaginatedResponse<ProfileActivity>> {
-    const query = this.buildQuery(params || {});
-    return this.request(`/profiles/${wallet}/activity${query}`);
+    try {
+      const query = this.buildQuery(params || {});
+      return await this.request(`/profiles/${wallet}/activity${query}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockProfileActivity } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /profiles/activity");
+        return getMockProfileActivity(wallet, params?.limit, params?.offset);
+      }
+      throw err;
+    }
   }
 
   async getProfilePositions(
