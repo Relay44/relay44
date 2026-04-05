@@ -317,6 +317,8 @@ async fn main() -> std::io::Result<()> {
 
     // Auto-hedge engine
     services::hedge_engine::spawn_hedge_engine(app_state.clone());
+    services::smart_router::spawn_arb_scanner(app_state.clone());
+    services::portfolio_snapshot::spawn_portfolio_snapshotter(app_state.clone());
 
     // Market auto-creation pipeline
     services::market_creator::spawn_market_creator(app_state.clone());
@@ -815,6 +817,10 @@ async fn main() -> std::io::Result<()> {
                                 web::delete().to(api::external::delete_external_credentials),
                             )
                             .route(
+                                "/credentials/{credential_id}/rotate",
+                                web::post().to(api::external::rotate_external_credential),
+                            )
+                            .route(
                                 "/orders/intent",
                                 web::post().to(api::external::create_external_order_intent),
                             )
@@ -946,6 +952,124 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/agents/{agent_id}/execute",
                                 web::post().to(api::external::execute_external_agent),
+                            ),
+                    )
+                    .service(
+                        web::scope("/risk")
+                            .route(
+                                "/portfolio",
+                                web::get().to(api::risk_console::get_portfolio),
+                            )
+                            .route(
+                                "/history",
+                                web::get().to(api::risk_console::get_portfolio_history),
+                            )
+                            .route(
+                                "/drawdown",
+                                web::get().to(api::risk_console::get_drawdown),
+                            )
+                            .route(
+                                "/compliance/export",
+                                web::get().to(api::risk_console::export_compliance),
+                            ),
+                    )
+                    .service(
+                        web::scope("/parlays")
+                            .route(
+                                "",
+                                web::post().to(api::parlays::create_parlay),
+                            )
+                            .route(
+                                "",
+                                web::get().to(api::parlays::list_parlays),
+                            )
+                            .route(
+                                "/{parlay_id}",
+                                web::get().to(api::parlays::get_parlay),
+                            )
+                            .route(
+                                "/{parlay_id}/resolve",
+                                web::post().to(api::parlays::resolve_leg),
+                            ),
+                    )
+                    .service(
+                        web::scope("/creator")
+                            .route(
+                                "/tiers",
+                                web::get().to(api::creator_tiers::list_tiers),
+                            )
+                            .route(
+                                "/profile",
+                                web::get().to(api::creator_tiers::get_profile),
+                            )
+                            .route(
+                                "/upgrade",
+                                web::post().to(api::creator_tiers::upgrade_tier),
+                            )
+                            .route(
+                                "/fees",
+                                web::get().to(api::creator_tiers::list_fees),
+                            ),
+                    )
+                    .service(
+                        web::scope("/agents")
+                            .route(
+                                "/templates",
+                                web::get().to(api::agent_service::list_templates),
+                            )
+                            .route(
+                                "/deploy",
+                                web::post().to(api::agent_service::deploy_agent),
+                            )
+                            .route(
+                                "/managed",
+                                web::get().to(api::agent_service::list_managed_agents),
+                            )
+                            .route(
+                                "/managed/{agent_id}",
+                                web::patch().to(api::agent_service::update_managed_agent),
+                            )
+                            .route(
+                                "/managed/{agent_id}/trades",
+                                web::get().to(api::agent_service::get_agent_trades),
+                            ),
+                    )
+                    .service(
+                        web::scope("/signals")
+                            .route(
+                                "/providers",
+                                web::post().to(api::signals::create_provider),
+                            )
+                            .route(
+                                "/providers",
+                                web::get().to(api::signals::list_providers),
+                            )
+                            .route(
+                                "/emit",
+                                web::post().to(api::signals::emit_signal),
+                            )
+                            .route(
+                                "/market/{market_slug}",
+                                web::get().to(api::signals::get_market_signals),
+                            )
+                            .route(
+                                "/score",
+                                web::post().to(api::signals::score_market),
+                            ),
+                    )
+                    .service(
+                        web::scope("/routing")
+                            .route(
+                                "/quote",
+                                web::post().to(api::routing::route_order),
+                            )
+                            .route(
+                                "/arbitrage",
+                                web::get().to(api::routing::list_arbitrage),
+                            )
+                            .route(
+                                "/venues",
+                                web::post().to(api::routing::upsert_venue_link),
                             ),
                     )
                     .service(
