@@ -204,6 +204,41 @@ pub fn mispricing_pct(implied_prob: f64, actual_win_rate: f64) -> f64 {
     ((actual_win_rate - implied_prob) / implied_prob) * 100.0
 }
 
+/// Convenience: compute Kelly-sized quantity for a strategy.
+///
+/// Given the agent's base quantity, bankroll, probability estimate, and market
+/// price, return the optimal quantity to trade. Returns `None` if Kelly says
+/// to skip (no edge).
+pub fn kelly_sized_quantity(
+    agent_quantity: f64,
+    bankroll_usdc: f64,
+    estimated_prob: f64,
+    market_price: f64,
+    kelly_fraction: f64,
+    max_position_pct: f64,
+    is_correlated: bool,
+    drawdown_from_peak_pct: f64,
+) -> Option<(f64, KellyResult)> {
+    let input = KellyInput {
+        bankroll_usdc,
+        estimated_prob,
+        market_price,
+        kelly_fraction,
+        max_position_pct,
+        is_correlated,
+        drawdown_from_peak_pct,
+    };
+    let result = calculate_kelly(&input);
+    if result.side == KellySide::Skip || result.contracts == 0 {
+        return None;
+    }
+    // Use the fraction of bankroll as a scaling factor on agent_quantity.
+    // This maps the Kelly-optimal fraction to the agent's declared quantity.
+    let scale = (result.adjusted_frac / max_position_pct).clamp(0.1, 1.0);
+    let sized = agent_quantity * scale;
+    Some((sized, result))
+}
+
 /// Bayesian update: compute posterior probability given new evidence.
 pub fn bayesian_update(prior: f64, likelihood_if_true: f64, likelihood_if_false: f64) -> f64 {
     let numerator = likelihood_if_true * prior;
