@@ -67,6 +67,7 @@ interface SignalCapabilities {
   runtime: {
     limitless_enabled: boolean;
     polymarket_enabled: boolean;
+    aerodrome_enabled: boolean;
   };
   launch?: {
     beta: boolean;
@@ -289,6 +290,7 @@ async function fetchSignalSnapshot(): Promise<SignalSnapshot> {
   const expectedProviders = [
     capabilities?.runtime.limitless_enabled !== false ? 'limitless' : null,
     capabilities?.runtime.polymarket_enabled !== false ? 'polymarket' : null,
+    capabilities?.runtime.aerodrome_enabled !== false ? 'aerodrome' : null,
   ].filter((provider): provider is string => Boolean(provider));
   const liveProviders = expectedProviders.filter((provider) =>
     providers.includes(provider)
