@@ -264,6 +264,134 @@ fn default_crowding_gate() -> f64 {
     0.75
 }
 
+// ── Polymarket Alpha strategies ──
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct LongshotHarvestParams {
+    #[serde(default = "default_longshot_max_price")]
+    max_implied_prob: f64,
+    #[serde(default = "default_longshot_min_mispricing")]
+    min_mispricing_pct: f64,
+    #[serde(default)]
+    historical_win_rate: f64,
+    #[serde(default = "default_kelly_fraction")]
+    kelly_fraction: f64,
+    #[serde(default = "default_longshot_max_position")]
+    max_position_pct: f64,
+    #[serde(default = "default_longshot_max_category_exposure")]
+    max_category_exposure_pct: f64,
+    #[serde(default)]
+    current_category_exposure_pct: f64,
+    #[serde(default)]
+    stop_loss_multiplier: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SpreadCaptureParams {
+    #[serde(default = "default_spread_max_total_cost")]
+    max_total_cost: f64,
+    #[serde(default = "default_spread_min_profit_bps")]
+    min_profit_bps: f64,
+    #[serde(default = "default_spread_max_duration")]
+    max_duration_minutes: u64,
+    #[serde(default = "default_spread_refresh")]
+    order_refresh_seconds: u64,
+    #[serde(default)]
+    inventory_limit: f64,
+    #[serde(default)]
+    current_yes_inventory: f64,
+    #[serde(default)]
+    current_no_inventory: f64,
+    #[serde(default)]
+    counterpart_best_bid: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct NearCertaintyParams {
+    #[serde(default = "default_near_cert_min_price")]
+    min_price: f64,
+    #[serde(default = "default_near_cert_min_edge")]
+    min_edge_bps: i32,
+    #[serde(default)]
+    max_hours_to_resolution: u64,
+    #[serde(default = "default_kelly_fraction")]
+    kelly_fraction: f64,
+    #[serde(default = "default_near_cert_max_position")]
+    max_position_pct: f64,
+    #[serde(default)]
+    signal_count: u64,
+    #[serde(default = "default_near_cert_min_signals")]
+    min_signal_count: u64,
+    #[serde(default)]
+    calibrated_probability: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct CorrelationArbParams {
+    #[serde(default)]
+    related_market_id: String,
+    #[serde(default)]
+    related_market_price: f64,
+    #[serde(default)]
+    logical_constraint: String,
+    #[serde(default = "default_arb_min_profit")]
+    min_arb_profit_bps: f64,
+    #[serde(default)]
+    combined_cost: f64,
+    #[serde(default = "default_arb_max_combined_cost")]
+    max_combined_cost: f64,
+}
+
+fn default_longshot_max_price() -> f64 {
+    0.10
+}
+fn default_longshot_min_mispricing() -> f64 {
+    10.0
+}
+fn default_longshot_max_position() -> f64 {
+    0.02
+}
+fn default_longshot_max_category_exposure() -> f64 {
+    0.15
+}
+fn default_kelly_fraction() -> f64 {
+    0.25
+}
+fn default_spread_max_total_cost() -> f64 {
+    0.98
+}
+fn default_spread_min_profit_bps() -> f64 {
+    200.0
+}
+fn default_spread_max_duration() -> u64 {
+    60
+}
+fn default_spread_refresh() -> u64 {
+    15
+}
+fn default_near_cert_min_price() -> f64 {
+    0.90
+}
+fn default_near_cert_min_edge() -> i32 {
+    100
+}
+fn default_near_cert_max_position() -> f64 {
+    0.03
+}
+fn default_near_cert_min_signals() -> u64 {
+    1
+}
+fn default_arb_min_profit() -> f64 {
+    25.0
+}
+fn default_arb_max_combined_cost() -> f64 {
+    0.99
+}
+
 fn normalized_strategy(strategy: &str) -> String {
     strategy.trim().to_ascii_lowercase().replace('_', "-")
 }
@@ -308,6 +436,19 @@ pub fn validate_strategy_params(strategy: &str, raw: &Value) -> Result<Value, Ap
             }
             serde_json::to_value(parsed)
         }
+        "longshot-harvest" => serde_json::to_value(parse_params::<LongshotHarvestParams>(raw)?),
+        "spread-capture" => serde_json::to_value(parse_params::<SpreadCaptureParams>(raw)?),
+        "near-certainty" => serde_json::to_value(parse_params::<NearCertaintyParams>(raw)?),
+        "correlation-arb" => {
+            let parsed = parse_params::<CorrelationArbParams>(raw)?;
+            if parsed.related_market_id.trim().is_empty() {
+                return Err(ApiError::bad_request(
+                    "INVALID_STRATEGY_PARAMS",
+                    "correlation_arb requires relatedMarketId",
+                ));
+            }
+            serde_json::to_value(parsed)
+        }
         "momentum" | "mean-revert" | "default" | "" => Ok(json!({})),
         _ => Ok(raw.clone()),
     }
@@ -343,6 +484,10 @@ pub fn evaluate_strategy(
         "event-repricing-v2" => evaluate_event_repricing_v2(state, strategy_params),
         "wallet-follow" => evaluate_wallet_follow(state, strategy_params),
         "wallet-follow-v2" => evaluate_wallet_follow_v2(state, strategy_params),
+        "longshot-harvest" => evaluate_longshot_harvest(state, strategy_params),
+        "spread-capture" => evaluate_spread_capture(state, strategy_params),
+        "near-certainty" => evaluate_near_certainty(state, strategy_params),
+        "correlation-arb" => evaluate_correlation_arb(state, strategy_params),
         _ => evaluate_default(state),
     }
 }
@@ -868,6 +1013,341 @@ fn evaluate_wallet_follow_v2(state: &MarketState, raw: &Value) -> TradeSignal {
     }
 }
 
+// ── Polymarket Alpha strategy evaluators ──
+
+fn evaluate_longshot_harvest(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = parse_params::<LongshotHarvestParams>(raw).unwrap_or_default();
+
+    // Only trade longshots (low implied probability)
+    let implied_prob = if state.agent_outcome == "yes" {
+        state.yes_price
+    } else {
+        state.no_price
+    };
+
+    if implied_prob > params.max_implied_prob {
+        return skip_signal(
+            state,
+            format!(
+                "longshot_harvest: implied prob {:.1}% above threshold {:.1}%",
+                implied_prob * 100.0,
+                params.max_implied_prob * 100.0
+            ),
+        );
+    }
+
+    // Check category exposure limit
+    if params.current_category_exposure_pct >= params.max_category_exposure_pct {
+        return skip_signal(
+            state,
+            format!(
+                "longshot_harvest: category exposure {:.1}% at limit {:.1}%",
+                params.current_category_exposure_pct * 100.0,
+                params.max_category_exposure_pct * 100.0
+            ),
+        );
+    }
+
+    // Calculate mispricing using historical calibration
+    let actual_win_rate = if params.historical_win_rate > 0.0 {
+        params.historical_win_rate
+    } else {
+        // Default calibration from Becker research: 5c contracts win ~4.18%
+        implied_prob * 0.836 // ~16.4% overpriced on average for longshots
+    };
+
+    let mispricing = if implied_prob > 0.0 {
+        ((implied_prob - actual_win_rate) / implied_prob) * 100.0
+    } else {
+        0.0
+    };
+
+    if mispricing < params.min_mispricing_pct {
+        return skip_signal(
+            state,
+            format!(
+                "longshot_harvest: mispricing {:.1}% below threshold {:.1}%",
+                mispricing, params.min_mispricing_pct
+            ),
+        );
+    }
+
+    // Direction: SELL YES (be the house against optimistic longshot buyers)
+    // The agent should be configured with side="sell", outcome="yes"
+    // If the agent is configured to buy NO, that also works
+
+    // Size using Kelly-inspired logic: more mispricing = bigger position
+    let edge_factor = (mispricing / params.min_mispricing_pct).clamp(1.0, 3.0);
+    let base_frac = params.kelly_fraction * params.max_position_pct;
+    let size_frac = (base_frac * edge_factor).min(params.max_position_pct);
+
+    TradeSignal {
+        execute: true,
+        price: state.agent_price,
+        quantity: state.agent_quantity * size_frac.clamp(0.1, 1.0),
+        reason: format!(
+            "longshot_harvest: implied {:.1}%, actual {:.1}%, mispricing {:.1}%",
+            implied_prob * 100.0,
+            actual_win_rate * 100.0,
+            mispricing
+        ),
+        metadata: json!({
+            "impliedProb": implied_prob,
+            "historicalWinRate": actual_win_rate,
+            "mispricingPct": mispricing,
+            "sizeFraction": size_frac,
+            "categoryExposure": params.current_category_exposure_pct
+        }),
+    }
+}
+
+fn evaluate_spread_capture(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = parse_params::<SpreadCaptureParams>(raw).unwrap_or_default();
+
+    // We need both sides' best bids to calculate total cost
+    // The counterpart_best_bid is the best bid on the OTHER side (NO if we're looking at YES)
+    let our_price = state.agent_price;
+    let counterpart_bid = params.counterpart_best_bid;
+
+    if counterpart_bid <= 0.0 {
+        return skip_signal(
+            state,
+            "spread_capture: counterpart bid not available".to_string(),
+        );
+    }
+
+    let total_cost = our_price + counterpart_bid;
+    let guaranteed_profit = 1.0 - total_cost;
+    let profit_bps = (guaranteed_profit / total_cost * 10_000.0).round();
+
+    if total_cost >= params.max_total_cost {
+        return skip_signal(
+            state,
+            format!(
+                "spread_capture: total cost {:.4} exceeds max {:.4}",
+                total_cost, params.max_total_cost
+            ),
+        );
+    }
+
+    if profit_bps < params.min_profit_bps {
+        return skip_signal(
+            state,
+            format!(
+                "spread_capture: profit {:.0}bps below threshold {:.0}bps",
+                profit_bps, params.min_profit_bps
+            ),
+        );
+    }
+
+    // Check duration constraint
+    if let Some(ttl) = state.time_to_resolution_seconds {
+        let duration_minutes = ttl as u64 / 60;
+        if params.max_duration_minutes > 0 && duration_minutes > params.max_duration_minutes {
+            return skip_signal(
+                state,
+                format!(
+                    "spread_capture: duration {}min exceeds max {}min",
+                    duration_minutes, params.max_duration_minutes
+                ),
+            );
+        }
+    }
+
+    // Check inventory imbalance
+    if params.inventory_limit > 0.0 {
+        let imbalance = (params.current_yes_inventory - params.current_no_inventory).abs();
+        if imbalance > params.inventory_limit {
+            return skip_signal(
+                state,
+                format!(
+                    "spread_capture: inventory imbalance {:.2} above limit {:.2}",
+                    imbalance, params.inventory_limit
+                ),
+            );
+        }
+    }
+
+    TradeSignal {
+        execute: true,
+        price: state.agent_price,
+        quantity: state.agent_quantity,
+        reason: format!(
+            "spread_capture: buy {}@{:.4} + counterpart@{:.4} = {:.4}, profit {:.0}bps",
+            state.agent_outcome, our_price, counterpart_bid, total_cost, profit_bps
+        ),
+        metadata: json!({
+            "totalCost": total_cost,
+            "guaranteedProfit": guaranteed_profit,
+            "profitBps": profit_bps,
+            "counterpartBid": counterpart_bid,
+            "yesInventory": params.current_yes_inventory,
+            "noInventory": params.current_no_inventory
+        }),
+    }
+}
+
+fn evaluate_near_certainty(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = parse_params::<NearCertaintyParams>(raw).unwrap_or_default();
+
+    let price = if state.agent_outcome == "yes" {
+        state.yes_price
+    } else {
+        state.no_price
+    };
+
+    if price < params.min_price {
+        return skip_signal(
+            state,
+            format!(
+                "near_certainty: price {:.2} below threshold {:.2}",
+                price, params.min_price
+            ),
+        );
+    }
+
+    // Check signal count if required
+    if params.signal_count < params.min_signal_count {
+        return skip_signal(
+            state,
+            format!(
+                "near_certainty: only {} signals, need {}",
+                params.signal_count, params.min_signal_count
+            ),
+        );
+    }
+
+    // Use calibrated probability if available, otherwise estimate from research
+    let calibrated = if params.calibrated_probability > 0.0 {
+        params.calibrated_probability
+    } else {
+        // From research: 95c contracts actually win ~96.5% of the time
+        price + (1.0 - price) * 0.3 // ~30% of remaining probability is edge
+    };
+
+    let edge_bps = ((calibrated - price) * 10_000.0).round() as i32;
+    if edge_bps < params.min_edge_bps {
+        return skip_signal(
+            state,
+            format!(
+                "near_certainty: edge {}bps below threshold {}bps",
+                edge_bps, params.min_edge_bps
+            ),
+        );
+    }
+
+    // Check time constraint
+    if let Some(ttl) = state.time_to_resolution_seconds {
+        let hours = ttl as u64 / 3600;
+        if params.max_hours_to_resolution > 0 && hours > params.max_hours_to_resolution {
+            return skip_signal(
+                state,
+                format!(
+                    "near_certainty: {}h to resolution exceeds max {}h",
+                    hours, params.max_hours_to_resolution
+                ),
+            );
+        }
+    }
+
+    // Size: smaller positions since tail risk is high per-position
+    let size_frac = params.max_position_pct.min(0.03);
+
+    TradeSignal {
+        execute: true,
+        price: state.agent_price,
+        quantity: state.agent_quantity * (size_frac / params.max_position_pct).clamp(0.1, 1.0),
+        reason: format!(
+            "near_certainty: price {:.2}, calibrated {:.4}, edge {}bps",
+            price, calibrated, edge_bps
+        ),
+        metadata: json!({
+            "price": price,
+            "calibratedProb": calibrated,
+            "edgeBps": edge_bps,
+            "signalCount": params.signal_count,
+            "sizeFraction": size_frac
+        }),
+    }
+}
+
+fn evaluate_correlation_arb(state: &MarketState, raw: &Value) -> TradeSignal {
+    let params = match parse_params::<CorrelationArbParams>(raw) {
+        Ok(value) => value,
+        Err(_) => {
+            return skip_signal(
+                state,
+                "correlation_arb: invalid strategy params".to_string(),
+            );
+        }
+    };
+
+    if params.related_market_id.trim().is_empty() {
+        return skip_signal(
+            state,
+            "correlation_arb: related market ID missing".to_string(),
+        );
+    }
+
+    if params.related_market_price <= 0.0 || params.related_market_price >= 1.0 {
+        return skip_signal(
+            state,
+            "correlation_arb: related market price unavailable".to_string(),
+        );
+    }
+
+    // Calculate combined cost for the arb trade
+    // For implication arbs: if A implies B, then P(A) <= P(B)
+    // If P(A) > P(B), buy NO on A + YES on B (or vice versa)
+    let combined = params.combined_cost;
+    if combined <= 0.0 {
+        return skip_signal(
+            state,
+            "correlation_arb: combined cost not computed".to_string(),
+        );
+    }
+
+    if combined >= params.max_combined_cost {
+        return skip_signal(
+            state,
+            format!(
+                "correlation_arb: combined cost {:.4} too high (max {:.4})",
+                combined, params.max_combined_cost
+            ),
+        );
+    }
+
+    let profit = 1.0 - combined;
+    let profit_bps = (profit / combined * 10_000.0).round();
+
+    if profit_bps < params.min_arb_profit_bps {
+        return skip_signal(
+            state,
+            format!(
+                "correlation_arb: profit {:.0}bps below threshold {:.0}bps",
+                profit_bps, params.min_arb_profit_bps
+            ),
+        );
+    }
+
+    TradeSignal {
+        execute: true,
+        price: state.agent_price,
+        quantity: state.agent_quantity,
+        reason: format!(
+            "correlation_arb: {} vs {}, combined {:.4}, profit {:.0}bps",
+            state.agent_outcome, params.logical_constraint, combined, profit_bps
+        ),
+        metadata: json!({
+            "relatedMarketId": params.related_market_id,
+            "relatedMarketPrice": params.related_market_price,
+            "logicalConstraint": params.logical_constraint,
+            "combinedCost": combined,
+            "profitBps": profit_bps
+        }),
+    }
+}
+
 fn book_spread_bps(state: &MarketState) -> f64 {
     match (state.best_bid, state.best_ask) {
         (Some(bid), Some(ask)) if bid > 0.0 && ask > 0.0 && ask >= bid => {
@@ -1063,6 +1543,150 @@ mod tests {
     #[test]
     fn validate_wallet_follow_v2_requires_target_wallet() {
         let err = validate_strategy_params("wallet_follow_v2", &json!({})).unwrap_err();
+        assert_eq!(err.code, "INVALID_STRATEGY_PARAMS");
+    }
+
+    // ── Polymarket Alpha strategy tests ──
+
+    #[test]
+    fn longshot_harvest_sells_overpriced_longshots() {
+        let mut state = base_state();
+        state.yes_price = 0.05;
+        state.no_price = 0.95;
+        state.agent_outcome = "yes".to_string();
+        state.agent_side = "sell".to_string();
+        let signal = evaluate_strategy(
+            "longshot_harvest",
+            &state,
+            &json!({
+                "maxImpliedProb": 0.10,
+                "minMispricingPct": 10.0,
+                "historicalWinRate": 0.0418
+            }),
+        );
+        assert!(signal.execute);
+        assert!(signal.reason.contains("longshot_harvest"));
+    }
+
+    #[test]
+    fn longshot_harvest_skips_expensive_contracts() {
+        let state = base_state(); // yes_price = 0.6 = too high for longshot
+        let signal = evaluate_strategy(
+            "longshot_harvest",
+            &state,
+            &json!({ "maxImpliedProb": 0.10 }),
+        );
+        assert!(!signal.execute);
+    }
+
+    #[test]
+    fn longshot_harvest_skips_low_mispricing() {
+        let mut state = base_state();
+        state.yes_price = 0.05;
+        state.agent_outcome = "yes".to_string();
+        let signal = evaluate_strategy(
+            "longshot_harvest",
+            &state,
+            &json!({
+                "maxImpliedProb": 0.10,
+                "minMispricingPct": 50.0,
+                "historicalWinRate": 0.048
+            }),
+        );
+        assert!(!signal.execute);
+    }
+
+    #[test]
+    fn spread_capture_executes_on_profitable_spread() {
+        let mut state = base_state();
+        state.agent_price = 0.47;
+        state.agent_outcome = "yes".to_string();
+        state.time_to_resolution_seconds = Some(10 * 60); // 10 minutes
+        let signal = evaluate_strategy(
+            "spread_capture",
+            &state,
+            &json!({
+                "maxTotalCost": 0.98,
+                "minProfitBps": 200.0,
+                "counterpartBestBid": 0.48,
+                "maxDurationMinutes": 60
+            }),
+        );
+        assert!(signal.execute);
+        assert!(signal.reason.contains("spread_capture"));
+    }
+
+    #[test]
+    fn spread_capture_skips_when_too_expensive() {
+        let mut state = base_state();
+        state.agent_price = 0.52;
+        state.time_to_resolution_seconds = Some(10 * 60);
+        let signal = evaluate_strategy(
+            "spread_capture",
+            &state,
+            &json!({
+                "maxTotalCost": 0.98,
+                "minProfitBps": 200.0,
+                "counterpartBestBid": 0.50,
+                "maxDurationMinutes": 60
+            }),
+        );
+        assert!(!signal.execute); // 0.52 + 0.50 = 1.02 > 0.98
+    }
+
+    #[test]
+    fn near_certainty_buys_high_probability() {
+        let mut state = base_state();
+        state.yes_price = 0.93;
+        state.no_price = 0.07;
+        state.agent_outcome = "yes".to_string();
+        state.agent_side = "buy".to_string();
+        let signal = evaluate_strategy(
+            "near_certainty",
+            &state,
+            &json!({
+                "minPrice": 0.90,
+                "minEdgeBps": 100,
+                "calibratedProbability": 0.955,
+                "signalCount": 2,
+                "minSignalCount": 1
+            }),
+        );
+        assert!(signal.execute);
+    }
+
+    #[test]
+    fn near_certainty_skips_low_probability() {
+        let state = base_state(); // yes_price = 0.6 = not near certainty
+        let signal = evaluate_strategy(
+            "near_certainty",
+            &state,
+            &json!({ "minPrice": 0.90 }),
+        );
+        assert!(!signal.execute);
+    }
+
+    #[test]
+    fn correlation_arb_executes_on_mispricing() {
+        let state = base_state();
+        let signal = evaluate_strategy(
+            "correlation_arb",
+            &state,
+            &json!({
+                "relatedMarketId": "polymarket:0xabc",
+                "relatedMarketPrice": 0.40,
+                "logicalConstraint": "A_implies_B",
+                "combinedCost": 0.92,
+                "maxCombinedCost": 0.99,
+                "minArbProfitBps": 25.0
+            }),
+        );
+        assert!(signal.execute);
+    }
+
+    #[test]
+    fn correlation_arb_requires_related_market() {
+        let err = validate_strategy_params("correlation_arb", &json!({})).unwrap_err();
         assert_eq!(err.code, "INVALID_STRATEGY_PARAMS");
     }
 }
