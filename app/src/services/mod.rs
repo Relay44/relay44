@@ -18,6 +18,8 @@ pub mod provider_rails;
 pub mod pyth;
 pub mod redis;
 pub mod risk_governor;
+pub mod portfolio_snapshot;
+pub mod smart_router;
 pub mod websocket;
 pub mod x402;
 pub mod xmtp_swarm;

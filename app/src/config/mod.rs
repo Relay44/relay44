@@ -157,6 +157,12 @@ pub struct AppConfig {
     pub indexer_confirmations: u64,
     pub oracle_resolver_address: String,
     pub oracle_keeper_enabled: bool,
+    pub routing_enabled: bool,
+    pub signals_enabled: bool,
+    pub parlays_enabled: bool,
+    pub agent_service_enabled: bool,
+    pub creator_tiers_enabled: bool,
+    pub risk_console_enabled: bool,
 }
 
 impl AppConfig {
@@ -616,6 +622,30 @@ impl AppConfig {
                 .trim()
                 .to_string(),
             oracle_keeper_enabled: env::var("ORACLE_KEEPER_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            routing_enabled: env::var("ROUTING_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            signals_enabled: env::var("SIGNALS_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            parlays_enabled: env::var("PARLAYS_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            agent_service_enabled: env::var("AGENT_SERVICE_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            creator_tiers_enabled: env::var("CREATOR_TIERS_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            risk_console_enabled: env::var("RISK_CONSOLE_ENABLED")
                 .unwrap_or_else(|_| "false".to_string())
                 .to_lowercase()
                 == "true",

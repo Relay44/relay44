@@ -122,6 +122,8 @@ const BOOTSTRAP_SPREAD_TIGHTEN_BPS: u64 = 8_500;
 const BOOTSTRAP_SPREAD_CAP_BPS: u64 = 30_000;
 const BOOTSTRAP_SIZE_REDUCED_BPS: u64 = 7_500;
 const BOOTSTRAP_SIZE_MIN_BPS: u64 = 5_000;
+const BOOTSTRAP_VOLATILITY_HIGH_BPS: u64 = 500;
+const BOOTSTRAP_VOLATILITY_EXTREME_BPS: u64 = 1_000;
 const COLLATERAL_AVAILABLE_SELECTOR: &str = "0xa0821be3";
 const BOOTSTRAP_RUNNER_ACTION_LAUNCH: &str = "launch";
 const BOOTSTRAP_RUNNER_ACTION_UPDATE: &str = "update";
@@ -1065,6 +1067,9 @@ struct BootstrapPlannerSignals {
     one_sided_flow_ratio: f64,
     one_sided_inventory_ratio: f64,
     inventory_cap_hit: bool,
+    /// Parkinson volatility estimate from recent fills (in bps).
+    /// High volatility → widen spreads to protect seed capital.
+    volatility_bps: u64,
 }
 
 #[derive(Clone)]
@@ -1716,11 +1721,38 @@ fn bootstrap_inventory_ratio(
     crowded as f64 / seed as f64
 }
 
+/// Parkinson volatility estimator: uses high-low range of fill prices per window.
+/// Returns volatility in basis points. Minimum 2 fills required.
+fn bootstrap_parkinson_volatility_bps(fill_prices: &[f64]) -> u64 {
+    if fill_prices.len() < 2 {
+        return 0;
+    }
+    let hi = fill_prices.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let lo = fill_prices.iter().cloned().fold(f64::INFINITY, f64::min);
+    if lo <= 0.0 {
+        return 0;
+    }
+    // Parkinson: σ² = (1 / 4·ln2) · (ln(H/L))²
+    let ln_ratio = (hi / lo).ln();
+    let variance = ln_ratio * ln_ratio / (4.0 * std::f64::consts::LN_2);
+    (variance.sqrt() * 10_000.0).round() as u64
+}
+
 fn bootstrap_planner_signals(
     config: &BaseMarketBootstrapConfigRecord,
     position: &BasePositionSnapshot,
     depth: &BootstrapDepthSnapshot,
     flow: &BootstrapRecentFlow,
+) -> BootstrapPlannerSignals {
+    bootstrap_planner_signals_with_volatility(config, position, depth, flow, &[])
+}
+
+fn bootstrap_planner_signals_with_volatility(
+    config: &BaseMarketBootstrapConfigRecord,
+    position: &BasePositionSnapshot,
+    depth: &BootstrapDepthSnapshot,
+    flow: &BootstrapRecentFlow,
+    recent_fill_prices: &[f64],
 ) -> BootstrapPlannerSignals {
     let inventory_ratio = bootstrap_inventory_ratio(config, position);
     let exposure_cap_ratio = (config.exposure_cap_bps as f64) / (PAR_PRICE_BPS as f64);
@@ -1730,6 +1762,7 @@ fn bootstrap_planner_signals(
         one_sided_flow_ratio: bootstrap_flow_ratio(flow),
         one_sided_inventory_ratio: inventory_ratio,
         inventory_cap_hit: inventory_ratio >= exposure_cap_ratio,
+        volatility_bps: bootstrap_parkinson_volatility_bps(recent_fill_prices),
     }
 }
 
@@ -1739,9 +1772,12 @@ fn bootstrap_adaptive_spread_multiplier_bps(signals: &BootstrapPlannerSignals) -
         signals.one_sided_flow_ratio > (BOOTSTRAP_FLOW_ONE_SIDED_THRESHOLD_BPS as f64 / 10_000.0);
     let inventory_hit = signals.one_sided_inventory_ratio
         > (BOOTSTRAP_INVENTORY_ONE_SIDED_THRESHOLD_BPS as f64 / 10_000.0);
+    let vol_high = signals.volatility_bps >= BOOTSTRAP_VOLATILITY_HIGH_BPS;
+    let vol_extreme = signals.volatility_bps >= BOOTSTRAP_VOLATILITY_EXTREME_BPS;
 
     if !organic_short
         && !flow_hit
+        && !vol_high
         && signals.organic_depth_ratio >= 1.0
         && signals.one_sided_inventory_ratio
             < (BOOTSTRAP_INVENTORY_TIGHTEN_THRESHOLD_BPS as f64 / 10_000.0)
@@ -1758,6 +1794,12 @@ fn bootstrap_adaptive_spread_multiplier_bps(signals: &BootstrapPlannerSignals) -
     }
     if inventory_hit {
         multiplier = bootstrap_scale_bps(multiplier, BOOTSTRAP_SPREAD_WIDEN_STEP_BPS);
+    }
+    if vol_extreme {
+        multiplier = bootstrap_scale_bps(multiplier, BOOTSTRAP_SPREAD_WIDEN_STEP_BPS);
+    } else if vol_high {
+        // Moderate volatility: half-step widen
+        multiplier = bootstrap_scale_bps(multiplier, BOOTSTRAP_SPREAD_WIDEN_STEP_BPS / 2);
     }
 
     multiplier.min(BOOTSTRAP_SPREAD_CAP_BPS)
@@ -8426,6 +8468,7 @@ mod tests {
             one_sided_flow_ratio: 0.85,
             one_sided_inventory_ratio: 0.4,
             inventory_cap_hit: false,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -8441,6 +8484,7 @@ mod tests {
             one_sided_flow_ratio: 0.4,
             one_sided_inventory_ratio: 0.1,
             inventory_cap_hit: false,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -8456,6 +8500,7 @@ mod tests {
             one_sided_flow_ratio: 0.9,
             one_sided_inventory_ratio: 0.45,
             inventory_cap_hit: false,
+            ..Default::default()
         };
 
         assert_eq!(
@@ -8662,6 +8707,7 @@ mod tests {
             one_sided_flow_ratio: 0.8,
             one_sided_inventory_ratio: 0.41,
             inventory_cap_hit: true,
+            ..Default::default()
         };
 
         let assessment =

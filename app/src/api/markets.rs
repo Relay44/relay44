@@ -109,6 +109,29 @@ pub async fn create_market(
         ));
     }
 
+    // Enforce creator tier market limit if enabled.
+    if state.config.creator_tiers_enabled {
+        let tier_limit: Option<(i32, i32)> = sqlx::query_as(
+            "SELECT t.max_markets, COALESCE(p.markets_created, 0) \
+             FROM creator_tiers t \
+             JOIN creator_profiles p ON p.tier_id = t.id \
+             WHERE p.owner = $1",
+        )
+        .bind(&user.wallet_address)
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+        if let Some((max_markets, created)) = tier_limit {
+            if created >= max_markets {
+                return Err(ApiError::bad_request(
+                    "TIER_MARKET_LIMIT",
+                    &format!("your tier allows max {} markets", max_markets),
+                ));
+            }
+        }
+    }
+
     // SECURITY: Per-user rate limit (1 market/hour)
     check_market_create_rate_limit(&user.wallet_address, &state.redis).await?;
 
