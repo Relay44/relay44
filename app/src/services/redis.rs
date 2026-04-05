@@ -12,11 +12,17 @@ impl RedisService {
         info!("Connecting to Redis...");
         let client = Client::open(redis_url)?;
 
-        // Test connection
-        let mut conn = client.get_multiplexed_async_connection().await?;
-        let _: () = redis::cmd("PING").query_async(&mut conn).await?;
+        // Test connection — non-fatal since Redis is a cache layer
+        match client.get_multiplexed_async_connection().await {
+            Ok(mut conn) => {
+                match redis::cmd("PING").query_async::<()>(&mut conn).await {
+                    Ok(()) => info!("Redis connected successfully"),
+                    Err(e) => log::warn!("Redis PING failed (will retry on use): {}", e),
+                }
+            }
+            Err(e) => log::warn!("Redis connection deferred (will retry on use): {}", e),
+        }
 
-        info!("Redis connected successfully");
         Ok(Self { client })
     }
 
