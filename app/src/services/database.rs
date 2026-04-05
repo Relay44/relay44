@@ -43,8 +43,8 @@ impl Default for PoolConfig {
     fn default() -> Self {
         Self {
             max_connections: 20,
-            min_connections: 5,
-            acquire_timeout: Duration::from_secs(30),
+            min_connections: 1,
+            acquire_timeout: Duration::from_secs(60),
             idle_timeout: Duration::from_secs(600),
             max_lifetime: Duration::from_secs(1800),
         }
@@ -62,12 +62,12 @@ impl PoolConfig {
             min_connections: env::var("DB_MIN_CONNECTIONS")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(5),
+                .unwrap_or(1),
             acquire_timeout: Duration::from_secs(
                 env::var("DB_ACQUIRE_TIMEOUT_SECS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(30),
+                    .unwrap_or(60),
             ),
             idle_timeout: Duration::from_secs(
                 env::var("DB_IDLE_TIMEOUT_SECS")
@@ -2809,8 +2809,8 @@ mod tests {
     fn test_pool_config_default() {
         let config = PoolConfig::default();
         assert_eq!(config.max_connections, 20);
-        assert_eq!(config.min_connections, 5);
-        assert_eq!(config.acquire_timeout, Duration::from_secs(30));
+        assert_eq!(config.min_connections, 1);
+        assert_eq!(config.acquire_timeout, Duration::from_secs(60));
         assert_eq!(config.idle_timeout, Duration::from_secs(600));
         assert_eq!(config.max_lifetime, Duration::from_secs(1800));
     }
