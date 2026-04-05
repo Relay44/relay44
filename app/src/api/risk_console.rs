@@ -92,11 +92,11 @@ pub async fn get_portfolio_history(
          open_positions, gross_exposure_usdc, var_95_usdc, \
          drawdown_from_peak_pct, snapshot_at::text \
          FROM portfolio_snapshots \
-         WHERE owner = $1 AND snapshot_at >= NOW() - ($2 || ' days')::interval \
+         WHERE owner = $1 AND snapshot_at >= NOW() - make_interval(days => $2) \
          ORDER BY snapshot_at DESC LIMIT $3",
     )
     .bind(user.wallet_address.as_str())
-    .bind(format!("{}", days))
+    .bind(days as i32)
     .bind(limit)
     .fetch_all(state.db.pool())
     .await
@@ -167,6 +167,10 @@ pub async fn export_compliance(
     let user = extract_authenticated_user(&req, &state).await?;
     let limit = query.limit.unwrap_or(500).min(5000);
 
+    // Build dynamic WHERE clause for optional filters.
+    let from_ts = query.from.as_deref().unwrap_or("1970-01-01");
+    let to_ts = query.to.as_deref().unwrap_or("2100-01-01");
+
     let rows: Vec<(
         i32, String, Option<i64>, Option<String>, Option<String>,
         Option<f64>, Option<String>, Option<String>, Option<String>,
@@ -177,10 +181,13 @@ pub async fn export_compliance(
              counterparty, provider, tx_hash, metadata, created_at::text \
              FROM compliance_events \
              WHERE owner = $1 AND event_type = $2 \
-             ORDER BY created_at DESC LIMIT $3",
+               AND created_at >= $3::timestamptz AND created_at <= $4::timestamptz \
+             ORDER BY created_at DESC LIMIT $5",
         )
         .bind(user.wallet_address.as_str())
         .bind(event_type)
+        .bind(from_ts)
+        .bind(to_ts)
         .bind(limit)
         .fetch_all(state.db.pool())
         .await
@@ -191,9 +198,12 @@ pub async fn export_compliance(
              counterparty, provider, tx_hash, metadata, created_at::text \
              FROM compliance_events \
              WHERE owner = $1 \
-             ORDER BY created_at DESC LIMIT $2",
+               AND created_at >= $2::timestamptz AND created_at <= $3::timestamptz \
+             ORDER BY created_at DESC LIMIT $4",
         )
         .bind(user.wallet_address.as_str())
+        .bind(from_ts)
+        .bind(to_ts)
         .bind(limit)
         .fetch_all(state.db.pool())
         .await

@@ -4,10 +4,9 @@
 //! selects the best execution venue. Also runs a background arbitrage
 //! scanner that detects cross-venue price discrepancies.
 
-use chrono::Utc;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -291,6 +290,11 @@ async fn log_arb_opportunity(state: &AppState, opp: &ArbitrageOpportunity) {
 
 /// Spawn the arbitrage scanner background loop.
 pub fn spawn_arb_scanner(state: Arc<AppState>) {
+    if !state.config.routing_enabled {
+        info!("Arb scanner disabled (ROUTING_ENABLED=false)");
+        return;
+    }
+
     let enabled = std::env::var("ARB_SCANNER_ENABLED")
         .ok()
         .and_then(|v| v.parse::<bool>().ok())

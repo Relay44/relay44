@@ -53,18 +53,33 @@ pub async fn get_profile(
     ensure_creator_tiers_enabled(&state)?;
     let user = extract_authenticated_user(&req, &state).await?;
 
-    // Upsert creator profile.
-    let row: (String, f64, f64, f64, i32, i32, f64, String) = sqlx::query_as(
-        "INSERT INTO creator_profiles (owner) VALUES ($1) \
-         ON CONFLICT (owner) DO UPDATE SET updated_at = NOW() \
-         RETURNING tier_id, total_seed_deployed, total_pnl_usdc, \
+    // Get or lazily create creator profile.
+    let row: Option<(String, f64, f64, f64, i32, i32, f64, String)> = sqlx::query_as(
+        "SELECT tier_id, total_seed_deployed, total_pnl_usdc, \
          total_platform_fees_usdc, markets_created, markets_graduated, \
-         staking_amount_usdc, updated_at::text",
+         staking_amount_usdc, updated_at::text \
+         FROM creator_profiles WHERE owner = $1",
     )
     .bind(user.wallet_address.as_str())
-    .fetch_one(state.db.pool())
+    .fetch_optional(state.db.pool())
     .await
     .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let row = match row {
+        Some(r) => r,
+        None => {
+            sqlx::query_as(
+                "INSERT INTO creator_profiles (owner) VALUES ($1) \
+                 RETURNING tier_id, total_seed_deployed, total_pnl_usdc, \
+                 total_platform_fees_usdc, markets_created, markets_graduated, \
+                 staking_amount_usdc, updated_at::text",
+            )
+            .bind(user.wallet_address.as_str())
+            .fetch_one(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&e.to_string()))?
+        }
+    };
 
     // Get tier details.
     let tier: Option<(String, f64, i32, i32, bool)> = sqlx::query_as(

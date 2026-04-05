@@ -187,6 +187,17 @@ pub async fn create_market(
         .await
         .map_err(ApiError::from)?;
 
+    // Increment creator tier market counter if enabled.
+    if state.config.creator_tiers_enabled {
+        let _ = sqlx::query(
+            "UPDATE creator_profiles SET markets_created = markets_created + 1, updated_at = NOW() \
+             WHERE owner = $1",
+        )
+        .bind(&user.wallet_address)
+        .execute(state.db.pool())
+        .await;
+    }
+
     Ok(HttpResponse::Created().json(market))
 }
 
