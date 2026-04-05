@@ -420,6 +420,8 @@ async fn execute_limitless_hedge(
     let wallet_address = evm_signer::address_from_private_key(&private_key)
         .map_err(|e| format!("Invalid private key: {}", e))?;
 
+    check_hedge_balance(state, &wallet_address, quantity, "Limitless").await?;
+
     // Fetch raw Limitless market data (needed for exchange contract + token IDs).
     let ext_id = crate::services::external::types::ExternalMarketId::parse(external_market_id)
         .map_err(|e| format!("Invalid market id: {}", e))?;
@@ -581,8 +583,8 @@ async fn execute_aerodrome_hedge(
     state: &AppState,
     external_market_id: &str,
     credential_id: Option<&str>,
-    outcome: &str,
-    price: f64,
+    _outcome: &str,
+    _price: f64,
     quantity: f64,
 ) -> Result<HedgeResult, String> {
     let credential = load_hedge_credential(state, "aerodrome", credential_id).await?;
@@ -596,6 +598,8 @@ async fn execute_aerodrome_hedge(
 
     let wallet_address = evm_signer::address_from_private_key(&private_key)
         .map_err(|e| format!("Invalid private key: {}", e))?;
+
+    check_hedge_balance(state, &wallet_address, quantity, "Aerodrome").await?;
 
     // Oracle pre-check: verify Pyth oracle price is available and sane.
     // The actual slippage protection is handled by amount_out_min (5%),
@@ -622,6 +626,23 @@ async fn execute_aerodrome_hedge(
     }
 
     // For Aerodrome, the external_market_id contains the token address to swap into.
+    // Look up the pool's tick_spacing from the DB rather than hardcoding.
+    let usdc = state.config.usdc_mint.to_ascii_lowercase();
+    let token_out = external_market_id.to_ascii_lowercase();
+    let tick_spacing: i32 = sqlx::query_scalar(
+        "SELECT tick_spacing FROM aerodrome_pools \
+         WHERE active = true \
+           AND ((LOWER(token0) = $1 AND LOWER(token1) = $2) \
+             OR (LOWER(token0) = $2 AND LOWER(token1) = $1)) \
+         LIMIT 1",
+    )
+    .bind(&usdc)
+    .bind(&token_out)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|e| format!("Query pool tick_spacing: {}", e))?
+    .unwrap_or(200); // fallback to 200 if pool not in registry
+
     let amount_in = (quantity * 1_000_000.0).round() as u128; // USDC in 6 decimals
     let amount_out_min = (amount_in * 95) / 100; // 5% slippage tolerance
     let deadline = (Utc::now().timestamp() as u64) + 300; // 5 min
@@ -632,8 +653,8 @@ async fn execute_aerodrome_hedge(
     let swap_router = &state.config.aerodrome_swap_router_address;
     let calldata = crate::services::aerodrome::encode_swap_exact_input_single(
         &state.config.usdc_mint,
-        external_market_id, // token_out address
-        200,                // tick_spacing (default for Aerodrome CL)
+        external_market_id,
+        tick_spacing,
         &wallet_address,
         deadline,
         amount_in,
@@ -695,6 +716,63 @@ async fn load_hedge_credential(
         &row.0,
     )
     .map_err(|e| format!("Decrypt credential: {} {}", e.code, e.message))
+}
+
+/// Query on-chain USDC balance for a wallet. Returns balance in USDC (6 decimals → f64).
+async fn fetch_usdc_balance(state: &AppState, wallet_address: &str) -> Result<f64, String> {
+    let addr_clean = wallet_address.trim_start_matches("0x");
+    // balanceOf(address) selector = 0x70a08231
+    let calldata = format!("0x70a08231000000000000000000000000{}", addr_clean);
+
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [{
+            "to": state.config.usdc_mint,
+            "data": calldata,
+        }, "latest"]
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&state.config.base_rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("RPC balanceOf: {}", e))?;
+
+    let result: Value = resp.json().await.map_err(|e| format!("Parse balance: {}", e))?;
+    let hex = result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or("No balance result")?;
+
+    let trimmed = hex.trim_start_matches("0x").trim_start_matches('0');
+    let raw = if trimmed.is_empty() {
+        0u128
+    } else {
+        u128::from_str_radix(trimmed, 16).map_err(|e| format!("Parse balance hex: {}", e))?
+    };
+
+    Ok(raw as f64 / 1_000_000.0)
+}
+
+/// Verify the hedge wallet has sufficient USDC for the trade.
+async fn check_hedge_balance(
+    state: &AppState,
+    wallet_address: &str,
+    required_usdc: f64,
+    provider: &str,
+) -> Result<(), String> {
+    let balance = fetch_usdc_balance(state, wallet_address).await?;
+    if balance < required_usdc {
+        return Err(format!(
+            "{} hedge wallet {} has {:.2} USDC, need {:.2}",
+            provider, wallet_address, balance, required_usdc,
+        ));
+    }
+    Ok(())
 }
 
 /// Look up the Pyth price feed ID for a token address via Redis config.
@@ -768,7 +846,6 @@ fn u256_from_decimal_str(s: &str) -> Result<[u8; 32], String> {
 }
 
 async fn fetch_nonce(state: &AppState, address: &str) -> Result<u64, String> {
-    let params = json!(["latest"]);
     let body = json!({
         "jsonrpc": "2.0",
         "id": 1,

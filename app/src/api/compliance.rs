@@ -36,6 +36,11 @@ pub struct ComplianceDecisionRequest {
     pub metadata: serde_json::Value,
 }
 
+/// Verify the request includes a valid admin control key via `x-admin-key` header.
+pub fn ensure_admin_public(req: &HttpRequest, state: &AppState) -> Result<(), ApiError> {
+    ensure_admin(req, state)
+}
+
 fn ensure_admin(req: &HttpRequest, state: &AppState) -> Result<(), ApiError> {
     let expected = state.config.admin_control_key.trim();
     if expected.is_empty() {
