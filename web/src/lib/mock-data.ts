@@ -16,6 +16,7 @@ import type {
   PublicProfileStats,
   ProfileBadge,
   ProfileActivity,
+  Position,
   PaginatedResponse,
 } from "@/types";
 
@@ -497,6 +498,84 @@ export function getMockPublicExternalAgents(params?: {
 
   return { agents: sliced, total, limit, offset };
 }
+
+// ---------------------------------------------------------------------------
+// Profile positions
+// ---------------------------------------------------------------------------
+
+export function getMockProfilePositions(
+  wallet: string,
+): PaginatedResponse<Position> {
+  const seed = hashString(`positions-${wallet}`);
+  const rand = seededRandom(seed);
+  const count = 2 + Math.round(rand() * 4); // 2-6 positions
+
+  const data: Position[] = [];
+  for (let i = 0; i < count; i++) {
+    const mIdx = Math.floor(rand() * MARKET_QUESTIONS.length);
+    const yesBalance = Math.round(rand() * 200);
+    const noBalance = Math.round(rand() * 200);
+    const avgYesCost = Number((0.3 + rand() * 0.4).toFixed(4));
+    const avgNoCost = Number((1 - avgYesCost).toFixed(4));
+    const currentYesPrice = Number((0.25 + rand() * 0.5).toFixed(4));
+    const currentNoPrice = Number((1 - currentYesPrice).toFixed(4));
+    const unrealizedPnl = Number(
+      ((currentYesPrice - avgYesCost) * yesBalance + (currentNoPrice - avgNoCost) * noBalance).toFixed(2),
+    );
+
+    data.push({
+      marketId: `market-${mIdx + 1}`,
+      marketQuestion: MARKET_QUESTIONS[mIdx],
+      owner: wallet,
+      yesBalance,
+      noBalance,
+      claimable: 0,
+      avgYesCost,
+      avgNoCost,
+      currentYesPrice,
+      currentNoPrice,
+      unrealizedPnl,
+      realizedPnl: Number((rand() * 300 - 80).toFixed(2)),
+      totalDeposited: Number((50 + rand() * 500).toFixed(2)),
+      totalWithdrawn: Number((rand() * 100).toFixed(2)),
+      openOrderCount: Math.round(rand() * 3),
+      totalTrades: 2 + Math.round(rand() * 15),
+      createdAt: daysAgo(Math.round(3 + rand() * 18)),
+    });
+  }
+
+  return {
+    data,
+    total: count,
+    limit: 50,
+    offset: 0,
+    hasMore: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Platform stats (for home page)
+// ---------------------------------------------------------------------------
+
+export interface PlatformStats {
+  totalTraders: number;
+  totalMarkets: number;
+  totalVolume: number;
+  activeAgents: number;
+}
+
+export function getMockPlatformStats(): PlatformStats {
+  return {
+    totalTraders: 247,
+    totalMarkets: 34,
+    totalVolume: 128_450,
+    activeAgents: 6,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// External agents performance
+// ---------------------------------------------------------------------------
 
 export function getMockPublicExternalAgentsPerformance(): ExternalAgentPerformanceResponse {
   return {

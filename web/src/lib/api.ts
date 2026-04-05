@@ -3338,7 +3338,16 @@ class ApiClient {
   async getProfilePositions(
     wallet: string,
   ): Promise<PaginatedResponse<Position>> {
-    return this.request(`/profiles/${wallet}/positions`);
+    try {
+      return await this.request(`/profiles/${wallet}/positions`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        const { getMockProfilePositions } = await import("./mock-data");
+        console.warn("[relay44] Using mock data for /profiles/positions");
+        return getMockProfilePositions(wallet);
+      }
+      throw err;
+    }
   }
 
   // Hackathons
