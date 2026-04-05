@@ -288,9 +288,9 @@ async function fetchSignalSnapshot(): Promise<SignalSnapshot> {
     ),
   ];
   const expectedProviders = [
-    capabilities?.runtime.limitless_enabled !== false ? 'limitless' : null,
-    capabilities?.runtime.polymarket_enabled !== false ? 'polymarket' : null,
-    capabilities?.runtime.aerodrome_enabled !== false ? 'aerodrome' : null,
+    capabilities?.runtime.limitless_enabled === true ? 'limitless' : null,
+    capabilities?.runtime.polymarket_enabled === true ? 'polymarket' : null,
+    capabilities?.runtime.aerodrome_enabled === true ? 'aerodrome' : null,
   ].filter((provider): provider is string => Boolean(provider));
   const liveProviders = expectedProviders.filter((provider) =>
     providers.includes(provider)
