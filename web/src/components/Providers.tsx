@@ -2,10 +2,8 @@
 
 import { FC, ReactNode, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider, createConfig, http } from 'wagmi';
-import { base, baseSepolia } from 'wagmi/chains';
-import { injected } from '@wagmi/core';
-import { coinbaseWallet } from 'wagmi/connectors';
+import { WagmiProvider } from 'wagmi';
+import { AppKitProvider } from '@reown/appkit/react';
 
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ThemeProvider } from '@/components/ThemeProvider';
@@ -13,26 +11,7 @@ import { NotificationProvider } from '@/components/notifications';
 import { ToastProvider } from '@/components/ui';
 import { FarcasterProvider } from '@/components/farcaster';
 import { MiniKitWrapper } from '@/components/minikit';
-import {
-  BASE_CHAIN_ID,
-  BASE_RPC_ENDPOINT,
-} from '@/lib/constants';
-
-const wagmiConfig = createConfig({
-  chains: [base, baseSepolia],
-  connectors: [
-    coinbaseWallet({
-      appName: 'Relay44',
-      preference: { options: 'all' },
-    }),
-    injected(),
-  ],
-  transports: {
-    [base.id]: http(BASE_CHAIN_ID === base.id ? BASE_RPC_ENDPOINT : undefined),
-    [baseSepolia.id]: http(BASE_CHAIN_ID === baseSepolia.id ? BASE_RPC_ENDPOINT : undefined),
-  },
-  ssr: true,
-});
+import { config, appKitConfig } from '@/lib/wagmi';
 
 interface ProvidersProps {
   children: ReactNode;
@@ -79,17 +58,29 @@ export const Providers: FC<ProvidersProps> = ({ children }) => {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <QueryClientProvider client={queryClient}>
-          <WagmiProvider config={wagmiConfig}>
-            <MiniKitWrapper>
-              <FarcasterProvider>
-                <NotificationProvider>
-                  <ToastProvider>{children}</ToastProvider>
-                </NotificationProvider>
-              </FarcasterProvider>
-            </MiniKitWrapper>
-          </WagmiProvider>
-        </QueryClientProvider>
+        <WagmiProvider config={config}>
+          <QueryClientProvider client={queryClient}>
+            {appKitConfig ? (
+              <AppKitProvider {...appKitConfig}>
+                <MiniKitWrapper>
+                  <FarcasterProvider>
+                    <NotificationProvider>
+                      <ToastProvider>{children}</ToastProvider>
+                    </NotificationProvider>
+                  </FarcasterProvider>
+                </MiniKitWrapper>
+              </AppKitProvider>
+            ) : (
+              <MiniKitWrapper>
+                <FarcasterProvider>
+                  <NotificationProvider>
+                    <ToastProvider>{children}</ToastProvider>
+                  </NotificationProvider>
+                </FarcasterProvider>
+              </MiniKitWrapper>
+            )}
+          </QueryClientProvider>
+        </WagmiProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );
