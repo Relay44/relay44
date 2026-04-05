@@ -592,6 +592,31 @@ services:
       - key: NODE_ENV
         value: production
 
+  - type: cron
+    name: relay44-leaderboard-compute
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "*/30 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run leaderboard:compute
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: ADMIN_PRIVATE_KEY
+        sync: false
+      - key: SIWE_DOMAIN
+        value: relay44.com
+      - key: BASE_CHAIN_ID
+        value: "8453"
+      - key: NODE_ENV
+        value: production
+
 databases:
   - name: relay44-db
     plan: starter
