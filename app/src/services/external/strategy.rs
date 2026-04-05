@@ -285,6 +285,12 @@ struct LongshotHarvestParams {
     current_category_exposure_pct: f64,
     #[serde(default)]
     stop_loss_multiplier: f64,
+    #[serde(default = "default_bankroll")]
+    bankroll_usdc: f64,
+    #[serde(default)]
+    is_correlated: bool,
+    #[serde(default)]
+    drawdown_from_peak_pct: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -327,6 +333,12 @@ struct NearCertaintyParams {
     min_signal_count: u64,
     #[serde(default)]
     calibrated_probability: f64,
+    #[serde(default = "default_bankroll")]
+    bankroll_usdc: f64,
+    #[serde(default)]
+    is_correlated: bool,
+    #[serde(default)]
+    drawdown_from_peak_pct: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -360,6 +372,9 @@ fn default_longshot_max_category_exposure() -> f64 {
 }
 fn default_kelly_fraction() -> f64 {
     0.25
+}
+fn default_bankroll() -> f64 {
+    1000.0
 }
 fn default_spread_max_total_cost() -> f64 {
     0.98
@@ -1076,15 +1091,42 @@ fn evaluate_longshot_harvest(state: &MarketState, raw: &Value) -> TradeSignal {
     // The agent should be configured with side="sell", outcome="yes"
     // If the agent is configured to buy NO, that also works
 
-    // Size using Kelly-inspired logic: more mispricing = bigger position
-    let edge_factor = (mispricing / params.min_mispricing_pct).clamp(1.0, 3.0);
-    let base_frac = params.kelly_fraction * params.max_position_pct;
-    let size_frac = (base_frac * edge_factor).min(params.max_position_pct);
+    // Size using Kelly Criterion with proper position sizing
+    let (sized_quantity, kelly_metadata) =
+        match crate::services::kelly::kelly_sized_quantity(
+            state.agent_quantity,
+            params.bankroll_usdc,
+            actual_win_rate,
+            implied_prob,
+            params.kelly_fraction,
+            params.max_position_pct,
+            params.is_correlated,
+            params.drawdown_from_peak_pct,
+        ) {
+            Some((qty, result)) => (qty, json!({
+                "side": format!("{:?}", result.side),
+                "fullKellyFrac": result.full_kelly_frac,
+                "adjustedFrac": result.adjusted_frac,
+                "positionSizeUsdc": result.position_size_usdc,
+                "contracts": result.contracts,
+                "edgeBps": result.edge_bps,
+            })),
+            None => {
+                // Fallback: simple edge-scaled sizing
+                let edge_factor = (mispricing / params.min_mispricing_pct).clamp(1.0, 3.0);
+                let base_frac = params.kelly_fraction * params.max_position_pct;
+                let size_frac = (base_frac * edge_factor).min(params.max_position_pct);
+                (
+                    state.agent_quantity * size_frac.clamp(0.1, 1.0),
+                    json!({ "fallback": true, "sizeFraction": size_frac }),
+                )
+            }
+        };
 
     TradeSignal {
         execute: true,
         price: state.agent_price,
-        quantity: state.agent_quantity * size_frac.clamp(0.1, 1.0),
+        quantity: sized_quantity,
         reason: format!(
             "longshot_harvest: implied {:.1}%, actual {:.1}%, mispricing {:.1}%",
             implied_prob * 100.0,
@@ -1095,7 +1137,7 @@ fn evaluate_longshot_harvest(state: &MarketState, raw: &Value) -> TradeSignal {
             "impliedProb": implied_prob,
             "historicalWinRate": actual_win_rate,
             "mispricingPct": mispricing,
-            "sizeFraction": size_frac,
+            "kelly": kelly_metadata,
             "categoryExposure": params.current_category_exposure_pct
         }),
     }
@@ -1250,13 +1292,40 @@ fn evaluate_near_certainty(state: &MarketState, raw: &Value) -> TradeSignal {
         }
     }
 
-    // Size: smaller positions since tail risk is high per-position
-    let size_frac = params.max_position_pct.min(0.03);
+    // Size using Kelly Criterion
+    let (sized_quantity, kelly_metadata) =
+        match crate::services::kelly::kelly_sized_quantity(
+            state.agent_quantity,
+            params.bankroll_usdc,
+            calibrated,
+            price,
+            params.kelly_fraction,
+            params.max_position_pct.min(0.03), // cap for near-certainty tail risk
+            params.is_correlated,
+            params.drawdown_from_peak_pct,
+        ) {
+            Some((qty, result)) => (qty, json!({
+                "side": format!("{:?}", result.side),
+                "fullKellyFrac": result.full_kelly_frac,
+                "adjustedFrac": result.adjusted_frac,
+                "positionSizeUsdc": result.position_size_usdc,
+                "contracts": result.contracts,
+                "edgeBps": result.edge_bps,
+            })),
+            None => {
+                // Fallback: fixed small fraction
+                let size_frac = params.max_position_pct.min(0.03);
+                (
+                    state.agent_quantity * (size_frac / params.max_position_pct).clamp(0.1, 1.0),
+                    json!({ "fallback": true, "sizeFraction": size_frac }),
+                )
+            }
+        };
 
     TradeSignal {
         execute: true,
         price: state.agent_price,
-        quantity: state.agent_quantity * (size_frac / params.max_position_pct).clamp(0.1, 1.0),
+        quantity: sized_quantity,
         reason: format!(
             "near_certainty: price {:.2}, calibrated {:.4}, edge {}bps",
             price, calibrated, edge_bps
@@ -1266,7 +1335,7 @@ fn evaluate_near_certainty(state: &MarketState, raw: &Value) -> TradeSignal {
             "calibratedProb": calibrated,
             "edgeBps": edge_bps,
             "signalCount": params.signal_count,
-            "sizeFraction": size_frac
+            "kelly": kelly_metadata
         }),
     }
 }
