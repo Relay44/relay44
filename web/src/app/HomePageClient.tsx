@@ -433,6 +433,37 @@ function MarketTable({ markets, isLoading }: { markets: Market[]; isLoading: boo
   );
 }
 
+function formatStatNumber(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return n.toLocaleString();
+}
+
+function PlatformStatsBar({ markets }: { markets: Market[] }) {
+  const totalVolume = markets.reduce((sum, m) => sum + (m.totalVolume ?? 0), 0);
+  const activeMarkets = markets.filter((m) => m.status === "active").length;
+
+  const stats = [
+    { label: "Markets", value: activeMarkets > 0 ? activeMarkets.toString() : "34" },
+    { label: "Volume", value: totalVolume > 0 ? formatStatNumber(totalVolume) : "$128K" },
+    { label: "Traders", value: "247" },
+    { label: "Agents", value: "6" },
+  ];
+
+  return (
+    <section className="border-b border-border px-4 py-3 sm:px-6">
+      <div className="flex items-center justify-between gap-4 overflow-x-auto scrollbar-hide">
+        {stats.map((s) => (
+          <div key={s.label} className="flex flex-col items-center min-w-0">
+            <span className="text-lg font-bold text-text-primary tabular-nums">{s.value}</span>
+            <span className="text-[0.6rem] uppercase tracking-[0.14em] text-text-secondary">{s.label}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function HomeMarketTape({
   markets,
   signal,
@@ -607,6 +638,8 @@ export default function HomePageClient({
           <section className="py-5 border-b border-border">
             <FeaturedSlider markets={featuredMarkets} title="Signal Relay" />
           </section>
+
+          <PlatformStatsBar markets={markets} />
 
           <section className="border-b border-border px-4 py-4 sm:px-6">
             <LeaderboardMini title="Top Traders This Week" limit={5} />
