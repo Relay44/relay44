@@ -109,6 +109,12 @@ pub struct UpsertExternalCredentialRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RotateExternalCredentialRequest {
+    pub credentials: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BindLimitlessWalletRequest {
     pub credential_id: String,
     pub base_wallet: String,
@@ -8895,6 +8901,115 @@ pub async fn delete_external_credentials(
     }
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
+}
+
+/// Rotate a credential: create a new version with fresh keys, revoke the old one,
+/// and update all references (mirror links, agents) atomically.
+pub async fn rotate_external_credential(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    credential_id: web::Path<String>,
+    body: web::Json<RotateExternalCredentialRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_external_features_enabled(&state)?;
+    let user = extract_authenticated_user(&req, &state).await?;
+
+    if !body.credentials.is_object() {
+        return Err(ApiError::bad_request(
+            "INVALID_CREDENTIALS",
+            "credentials must be an object",
+        ));
+    }
+
+    let encrypted_payload = encrypt_json(
+        state.config.external_credentials_master_key.as_str(),
+        state.config.external_credentials_key_id.as_str(),
+        &body.credentials,
+    )?;
+
+    let new_id = Uuid::new_v4().to_string();
+
+    let mut tx = state
+        .db
+        .pool()
+        .begin()
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    // Lock the credential row to prevent concurrent rotations.
+    let old = sqlx::query_as::<_, (String, String, String, i32)>(
+        "SELECT id, provider, label, version FROM external_credentials \
+         WHERE id = $1 AND owner = $2 AND revoked_at IS NULL \
+         FOR UPDATE",
+    )
+    .bind(credential_id.as_str())
+    .bind(user.wallet_address.as_str())
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?
+    .ok_or_else(|| ApiError::not_found("External credential"))?;
+
+    let (old_id, provider, label, old_version) = old;
+    let new_version = old_version + 1;
+
+    sqlx::query(
+        "INSERT INTO external_credentials \
+         (id, owner, provider, label, encrypted_payload, key_id, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())",
+    )
+    .bind(&new_id)
+    .bind(user.wallet_address.as_str())
+    .bind(&provider)
+    .bind(&label)
+    .bind(&encrypted_payload)
+    .bind(state.config.external_credentials_key_id.as_str())
+    .bind(new_version)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    sqlx::query(
+        "UPDATE external_credentials \
+         SET revoked_at = NOW(), replaced_by = $1, updated_at = NOW() \
+         WHERE id = $2",
+    )
+    .bind(&new_id)
+    .bind(&old_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    // Update all references pointing to the old credential.
+    sqlx::query(
+        "UPDATE mirror_market_links SET hedge_credential_id = $1, updated_at = NOW() \
+         WHERE hedge_credential_id = $2",
+    )
+    .bind(&new_id)
+    .bind(&old_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    sqlx::query(
+        "UPDATE external_agents SET credential_id = $1, updated_at = NOW() \
+         WHERE credential_id = $2",
+    )
+    .bind(&new_id)
+    .bind(&old_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    tx.commit()
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "ok": true,
+        "old_credential_id": old_id,
+        "new_credential_id": new_id,
+        "version": new_version,
+    })))
 }
 
 pub async fn create_external_order_intent(
