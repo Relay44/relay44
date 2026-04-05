@@ -78,7 +78,32 @@ async fn main() -> std::io::Result<()> {
 
     let db = DatabaseService::new(&config.database_url)
         .await
-        .expect("Failed to connect to database");
+        .expect("Failed to create database pool");
+
+    // Run migrations in the background so the HTTP port binds immediately.
+    // Render's health check requires a bound port within ~5 minutes.
+    let migration_db = db.clone();
+    tokio::spawn(async move {
+        for attempt in 1..=10u32 {
+            match migration_db.run_migrations().await {
+                Ok(()) => return,
+                Err(e) => {
+                    if attempt == 10 {
+                        log::error!("Failed to run migrations after 10 attempts: {}", e);
+                        std::process::exit(1);
+                    }
+                    let delay = std::time::Duration::from_secs(
+                        std::cmp::min(2u64.pow(attempt), 30),
+                    );
+                    log::warn!(
+                        "Migration attempt {}/10 failed: {}. Retrying in {:?}...",
+                        attempt, e, delay
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    });
 
     let redis = RedisService::new(&config.redis_url)
         .await
