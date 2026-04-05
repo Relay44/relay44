@@ -15,7 +15,8 @@ COPY app ./app
 COPY cli ./cli
 COPY programs ./programs
 
-# Build release binary
+# Build release binary (limit parallelism to avoid OOM on CI)
+ENV CARGO_BUILD_JOBS=2
 RUN cargo build --release --package relay44-backend
 
 # Runtime stage
