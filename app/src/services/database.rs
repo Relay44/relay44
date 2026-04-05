@@ -604,54 +604,33 @@ impl DatabaseService {
         info!("  idle_timeout: {:?}", config.idle_timeout);
         info!("  max_lifetime: {:?}", config.max_lifetime);
 
-        let max_retries: u32 = 5;
-        let mut pool = None;
-        for attempt in 1..=max_retries {
-            match PgPoolOptions::new()
-                .max_connections(config.max_connections)
-                .min_connections(config.min_connections)
-                .acquire_timeout(config.acquire_timeout)
-                .idle_timeout(config.idle_timeout)
-                .max_lifetime(config.max_lifetime)
-                .connect(database_url)
-                .await
-            {
-                Ok(p) => {
-                    pool = Some(p);
-                    break;
-                }
-                Err(e) => {
-                    if attempt == max_retries {
-                        return Err(e.into());
-                    }
-                    let delay = std::time::Duration::from_secs(2u64.pow(attempt));
-                    log::warn!(
-                        "Database connection attempt {}/{} failed: {}. Retrying in {:?}...",
-                        attempt, max_retries, e, delay
-                    );
-                    tokio::time::sleep(delay).await;
-                }
-            }
-        }
-        let pool = pool.unwrap();
+        let pool = PgPoolOptions::new()
+            .max_connections(config.max_connections)
+            .min_connections(0)
+            .acquire_timeout(config.acquire_timeout)
+            .idle_timeout(config.idle_timeout)
+            .max_lifetime(config.max_lifetime)
+            .connect_lazy(database_url)?;
 
-        info!("Database connected successfully");
+        info!("Database pool created (lazy — connections open on first query)");
 
-        // Run migrations automatically
+        Ok(Self { pool })
+    }
+
+    pub async fn run_migrations(&self) -> Result<()> {
         info!("Running database migrations...");
         let migrations_path = Self::migrations_path();
         sqlx::migrate::Migrator::new(migrations_path.as_path())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to load migrations: {}", e))?
-            .run(&pool)
+            .run(&self.pool)
             .await
             .map_err(|e| {
                 log::error!("Migration failed: {}", e);
                 anyhow::anyhow!("Database migration failed: {}", e)
             })?;
         info!("Database migrations completed");
-
-        Ok(Self { pool })
+        Ok(())
     }
 
     /// Get pool statistics for monitoring
