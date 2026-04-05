@@ -1681,7 +1681,8 @@ pub async fn get_web4_capabilities(state: web::Data<Arc<AppState>>) -> impl Resp
             "external_trading_enabled": state.config.external_trading_enabled,
             "external_agents_enabled": state.config.external_agents_enabled,
             "limitless_enabled": state.config.limitless_enabled,
-            "polymarket_enabled": state.config.polymarket_enabled
+            "polymarket_enabled": state.config.polymarket_enabled,
+            "aerodrome_enabled": state.config.aerodrome_enabled
         },
         "wallet": {
             "read_enabled": (state.config.evm_enabled && state.config.evm_reads_enabled)
