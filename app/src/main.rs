@@ -84,22 +84,12 @@ async fn main() -> std::io::Result<()> {
     // Render's health check requires a bound port within ~5 minutes.
     let migration_db = db.clone();
     tokio::spawn(async move {
-        for attempt in 1..=10u32 {
+        loop {
             match migration_db.run_migrations().await {
                 Ok(()) => return,
                 Err(e) => {
-                    if attempt == 10 {
-                        log::error!("Failed to run migrations after 10 attempts: {}", e);
-                        std::process::exit(1);
-                    }
-                    let delay = std::time::Duration::from_secs(
-                        std::cmp::min(2u64.pow(attempt), 30),
-                    );
-                    log::warn!(
-                        "Migration attempt {}/10 failed: {}. Retrying in {:?}...",
-                        attempt, e, delay
-                    );
-                    tokio::time::sleep(delay).await;
+                    log::warn!("Migration failed: {}. Retrying in 30s...", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 }
             }
         }
