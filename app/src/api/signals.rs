@@ -278,6 +278,13 @@ pub async fn score_market(
 ) -> Result<impl Responder, ApiError> {
     ensure_signals_enabled(&state)?;
     crate::api::compliance::ensure_admin_public(&req, &state)?;
+
+    if body.actual_outcome != "yes" && body.actual_outcome != "no" {
+        return Err(ApiError::bad_request(
+            "INVALID_OUTCOME",
+            "actual_outcome must be 'yes' or 'no'",
+        ));
+    }
     let actual = if body.actual_outcome == "yes" {
         1.0_f64
     } else {

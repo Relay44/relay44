@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS parlays (
     chain_parlay_id BIGINT,
     tx_hash         VARCHAR(66),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     settled_at      TIMESTAMPTZ
 );
 

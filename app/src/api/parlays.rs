@@ -50,12 +50,23 @@ pub async fn create_parlay(
         return Err(ApiError::bad_request("INVALID_STAKE", "stake must be positive"));
     }
 
+    // Reject duplicate markets within the same parlay.
+    let mut seen_slugs = std::collections::HashSet::new();
+    for leg in &body.legs {
+        if !seen_slugs.insert(&leg.market_slug) {
+            return Err(ApiError::bad_request(
+                "DUPLICATE_MARKET",
+                "each leg must reference a different market",
+            ));
+        }
+    }
+
     // Validate odds and compute potential payout.
     for leg in &body.legs {
-        if leg.odds_bps < 10000 {
+        if leg.odds_bps < 10000 || leg.odds_bps > 1_000_000 {
             return Err(ApiError::bad_request(
                 "INVALID_ODDS",
-                "odds_bps must be >= 10000 (1x)",
+                "odds_bps must be between 10000 (1x) and 1000000 (100x)",
             ));
         }
     }
@@ -224,6 +235,10 @@ pub async fn resolve_leg(
 ) -> Result<impl Responder, ApiError> {
     ensure_parlays_enabled(&state)?;
     crate::api::compliance::ensure_admin_public(&req, &state)?;
+
+    if body.leg_index < 0 {
+        return Err(ApiError::bad_request("INVALID_LEG_INDEX", "leg_index must be non-negative"));
+    }
 
     let mut tx = state
         .db
