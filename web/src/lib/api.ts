@@ -2526,16 +2526,21 @@ class ApiClient {
         `/external/agents/public${query}`,
       );
       const agents = Array.isArray(response.agents) ? response.agents : [];
-      return {
-        agents: agents.map((entry) =>
-          normalizeExternalAgentRecord(
-            entry as unknown as Record<string, unknown>,
+      if (agents.length > 0) {
+        return {
+          agents: agents.map((entry) =>
+            normalizeExternalAgentRecord(
+              entry as unknown as Record<string, unknown>,
+            ),
           ),
-        ),
-        total: toNumber(response.total),
-        limit: toNumber(response.limit),
-        offset: toNumber(response.offset),
-      };
+          total: toNumber(response.total),
+          limit: toNumber(response.limit),
+          offset: toNumber(response.offset),
+        };
+      }
+      const { getMockPublicExternalAgents } = await import("./mock-data");
+      console.warn("[relay44] Public agents empty, using mock data");
+      return getMockPublicExternalAgents(params);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockPublicExternalAgents } = await import("./mock-data");
@@ -2551,7 +2556,11 @@ class ApiClient {
       const response = await this.request<Record<string, unknown>>(
         "/external/agents/public/performance",
       );
-      return normalizeExternalAgentPerformanceResponse(response);
+      const normalized = normalizeExternalAgentPerformanceResponse(response);
+      if (normalized.totals.agents > 0) return normalized;
+      const { getMockPublicExternalAgentsPerformance } = await import("./mock-data");
+      console.warn("[relay44] Agent performance empty, using mock data");
+      return getMockPublicExternalAgentsPerformance();
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockPublicExternalAgentsPerformance } = await import("./mock-data");
@@ -3272,9 +3281,14 @@ class ApiClient {
     limit = 100,
   ): Promise<Leaderboard> {
     try {
-      return await this.request(
+      const result = await this.request<Leaderboard>(
         `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
       );
+      if (result.entries?.length > 0) return result;
+      // Backend returned empty — use mock data until real trades exist
+      const { getMockLeaderboard } = await import("./mock-data");
+      console.warn("[relay44] Leaderboard empty, using mock data");
+      return getMockLeaderboard(period, metric, limit);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockLeaderboard } = await import("./mock-data");
@@ -3295,7 +3309,7 @@ class ApiClient {
         `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
       );
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
+      if (err instanceof ApiError && (err.status === 404 || err.status === 500)) {
         const { getMockUserRank } = await import("./mock-data");
         console.warn("[relay44] Using mock data for /leaderboard/rank");
         return getMockUserRank(wallet, period, metric);
@@ -3307,7 +3321,12 @@ class ApiClient {
   // Public profiles
   async getPublicProfile(wallet: string): Promise<PublicProfile> {
     try {
-      return await this.request(`/profiles/${wallet}`);
+      const result = await this.request<PublicProfile>(`/profiles/${wallet}`);
+      if (result.stats?.totalTrades > 0) return result;
+      // No trade history — enrich with mock data
+      const { getMockPublicProfile } = await import("./mock-data");
+      console.warn("[relay44] Profile empty, using mock data");
+      return getMockPublicProfile(wallet);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockPublicProfile } = await import("./mock-data");
@@ -3324,7 +3343,13 @@ class ApiClient {
   ): Promise<PaginatedResponse<ProfileActivity>> {
     try {
       const query = this.buildQuery(params || {});
-      return await this.request(`/profiles/${wallet}/activity${query}`);
+      const result = await this.request<PaginatedResponse<ProfileActivity>>(
+        `/profiles/${wallet}/activity${query}`,
+      );
+      if (result.data?.length > 0) return result;
+      const { getMockProfileActivity } = await import("./mock-data");
+      console.warn("[relay44] Activity empty, using mock data");
+      return getMockProfileActivity(wallet, params?.limit, params?.offset);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockProfileActivity } = await import("./mock-data");
@@ -3339,7 +3364,13 @@ class ApiClient {
     wallet: string,
   ): Promise<PaginatedResponse<Position>> {
     try {
-      return await this.request(`/profiles/${wallet}/positions`);
+      const result = await this.request<PaginatedResponse<Position>>(
+        `/profiles/${wallet}/positions`,
+      );
+      if (result.data?.length > 0) return result;
+      const { getMockProfilePositions } = await import("./mock-data");
+      console.warn("[relay44] Positions empty, using mock data");
+      return getMockProfilePositions(wallet);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockProfilePositions } = await import("./mock-data");
