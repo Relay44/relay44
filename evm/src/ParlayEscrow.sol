@@ -47,6 +47,7 @@ contract ParlayEscrow is AccessControl, ReentrancyGuard {
     error InvalidLegCount();
     error InvalidStake();
     error InvalidOdds();
+    error LegIndexOutOfBounds();
     error AlreadySettled();
     error NotFullyResolved();
     error LegAlreadyResolved();
@@ -113,6 +114,7 @@ contract ParlayEscrow is AccessControl, ReentrancyGuard {
     ) external onlyRole(OPERATOR_ROLE) {
         Parlay storage p = parlays[parlayId];
         if (p.settled) revert AlreadySettled();
+        if (legIndex >= p.legCount) revert LegIndexOutOfBounds();
 
         Leg storage leg = parlayLegs[parlayId][legIndex];
         if (leg.resolved) revert LegAlreadyResolved();

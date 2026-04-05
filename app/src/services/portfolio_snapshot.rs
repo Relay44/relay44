@@ -118,7 +118,7 @@ async fn snapshot_user_portfolio(state: &AppState, owner: &str) -> Result<(), St
     };
 
     // Get peak from previous snapshots.
-    let prev_peak: Option<(f64,)> = sqlx::query_as(
+    let prev_peak: Option<(Option<f64>,)> = sqlx::query_as(
         "SELECT MAX(peak_value_usdc) FROM portfolio_snapshots WHERE owner = $1",
     )
     .bind(owner)
@@ -127,7 +127,8 @@ async fn snapshot_user_portfolio(state: &AppState, owner: &str) -> Result<(), St
     .map_err(|e| format!("Query peak: {}", e))?;
 
     let peak = prev_peak
-        .and_then(|r| if r.0 > 0.0 { Some(r.0) } else { None })
+        .and_then(|r| r.0)
+        .filter(|&v| v > 0.0)
         .unwrap_or(total_value)
         .max(total_value);
 
