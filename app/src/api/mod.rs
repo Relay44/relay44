@@ -16,6 +16,7 @@ pub mod markets;
 pub mod notifications;
 pub mod orders;
 pub mod parlays;
+pub mod pm_scanner;
 pub mod payments;
 pub mod positions;
 pub mod profiles;

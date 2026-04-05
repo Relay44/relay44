@@ -334,6 +334,7 @@ async fn main() -> std::io::Result<()> {
     services::hedge_engine::spawn_hedge_engine(app_state.clone());
     services::smart_router::spawn_arb_scanner(app_state.clone());
     services::portfolio_snapshot::spawn_portfolio_snapshotter(app_state.clone());
+    services::polymarket_scanner::spawn_scanner(app_state.clone());
 
     // Market auto-creation pipeline
     services::market_creator::spawn_market_creator(app_state.clone());
@@ -1085,6 +1086,25 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/venues",
                                 web::post().to(api::routing::upsert_venue_link),
+                            ),
+                    )
+                    .service(
+                        web::scope("/pm-scanner")
+                            .route(
+                                "/opportunities",
+                                web::get().to(api::pm_scanner::list_opportunities),
+                            )
+                            .route(
+                                "/scan",
+                                web::post().to(api::pm_scanner::trigger_scan),
+                            )
+                            .route(
+                                "/calibration",
+                                web::get().to(api::pm_scanner::get_calibration),
+                            )
+                            .route(
+                                "/runs",
+                                web::get().to(api::pm_scanner::list_scan_runs),
                             ),
                     )
                     .service(
