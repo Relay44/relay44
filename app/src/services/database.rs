@@ -604,14 +604,36 @@ impl DatabaseService {
         info!("  idle_timeout: {:?}", config.idle_timeout);
         info!("  max_lifetime: {:?}", config.max_lifetime);
 
-        let pool = PgPoolOptions::new()
-            .max_connections(config.max_connections)
-            .min_connections(config.min_connections)
-            .acquire_timeout(config.acquire_timeout)
-            .idle_timeout(config.idle_timeout)
-            .max_lifetime(config.max_lifetime)
-            .connect(database_url)
-            .await?;
+        let max_retries: u32 = 5;
+        let mut pool = None;
+        for attempt in 1..=max_retries {
+            match PgPoolOptions::new()
+                .max_connections(config.max_connections)
+                .min_connections(config.min_connections)
+                .acquire_timeout(config.acquire_timeout)
+                .idle_timeout(config.idle_timeout)
+                .max_lifetime(config.max_lifetime)
+                .connect(database_url)
+                .await
+            {
+                Ok(p) => {
+                    pool = Some(p);
+                    break;
+                }
+                Err(e) => {
+                    if attempt == max_retries {
+                        return Err(e.into());
+                    }
+                    let delay = std::time::Duration::from_secs(2u64.pow(attempt));
+                    log::warn!(
+                        "Database connection attempt {}/{} failed: {}. Retrying in {:?}...",
+                        attempt, max_retries, e, delay
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+        let pool = pool.unwrap();
 
         info!("Database connected successfully");
 
