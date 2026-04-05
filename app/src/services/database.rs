@@ -604,13 +604,20 @@ impl DatabaseService {
         info!("  idle_timeout: {:?}", config.idle_timeout);
         info!("  max_lifetime: {:?}", config.max_lifetime);
 
+        let url = if database_url.contains("sslmode=") {
+            database_url.to_string()
+        } else {
+            let sep = if database_url.contains('?') { "&" } else { "?" };
+            format!("{}{}sslmode=require", database_url, sep)
+        };
+
         let pool = PgPoolOptions::new()
             .max_connections(config.max_connections)
             .min_connections(0)
             .acquire_timeout(config.acquire_timeout)
             .idle_timeout(config.idle_timeout)
             .max_lifetime(config.max_lifetime)
-            .connect_lazy(database_url)?;
+            .connect_lazy(&url)?;
 
         info!("Database pool created (lazy — connections open on first query)");
 
