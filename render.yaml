@@ -14,7 +14,6 @@ services:
     region: singapore
     plan: starter
     healthCheckPath: /health
-    dockerCache: standard
     envVars:
       - key: DATABASE_URL
         fromDatabase:
