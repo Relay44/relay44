@@ -71,6 +71,10 @@ function hoursAgo(n: number): string {
  *
  * Uses a fixed anchor so every viewer on the same day sees the same numbers,
  * but tomorrow's numbers are slightly higher than today's.
+ *
+ * NOTE: Update this anchor when resetting mock data baselines (e.g. after a
+ * rebrand or major feature launch). The cap ensures numbers stay sane even
+ * if this is forgotten — at 3.0× growth stops (~375 days from anchor).
  */
 const MOCK_ANCHOR = new Date("2026-04-01T00:00:00Z").getTime();
 function growthMultiplier(): number {
