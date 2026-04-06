@@ -477,34 +477,60 @@ export function getMockPublicExternalAgents(params?: {
   const offset = params?.offset ?? 0;
   const now = new Date();
 
-  let agents: ExternalAgentRecord[] = AGENT_CONFIGS.map((cfg, i) => ({
-    id: `mock-agent-${i + 1}`,
-    owner: WALLETS[i % WALLETS.length],
-    name: cfg.name!,
-    provider: cfg.provider!,
-    market_id: cfg.market_id!,
-    outcome: cfg.outcome!,
-    side: cfg.side!,
-    price: cfg.price!,
-    quantity: cfg.quantity!,
-    cadence_seconds: [300, 600, 900, 1800][i % 4],
-    strategy: cfg.strategy!,
-    strategy_label: cfg.strategy_label!,
-    execution_mode: "paper" as const,
-    credential_id: null,
-    source: null,
-    active: i < 6, // 6 active, 2 inactive
-    last_executed_at: new Date(
-      now.getTime() - (i * 20 + 5) * 60_000,
-    ).toISOString(),
-    next_execution_at: new Date(
-      now.getTime() + (i * 5 + 3) * 60_000,
-    ).toISOString(),
-    consecutive_failures: 0,
-    last_error_code: null,
-    created_at: daysAgo(14 - i),
-    updated_at: hoursAgo(i * 2 + 1),
-  }));
+  const g = growthMultiplier();
+  const perfSeeds = [
+    { fills: 28, vol: 8400, rpnl: 920, upnl: 280, net: 1200, dd: 140 },
+    { fills: 18, vol: 5200, rpnl: 480, upnl: 120, net: 600, dd: 95 },
+    { fills: 22, vol: 6800, rpnl: 640, upnl: 190, net: 830, dd: 110 },
+    { fills: 15, vol: 4100, rpnl: 310, upnl: 85, net: 395, dd: 70 },
+    { fills: 12, vol: 3600, rpnl: 180, upnl: 60, net: 240, dd: 55 },
+    { fills: 20, vol: 5800, rpnl: 520, upnl: 145, net: 665, dd: 100 },
+    { fills: 8, vol: 2200, rpnl: 95, upnl: 30, net: 125, dd: 40 },
+    { fills: 10, vol: 3000, rpnl: 160, upnl: 50, net: 210, dd: 60 },
+  ];
+
+  let agents: ExternalAgentRecord[] = AGENT_CONFIGS.map((cfg, i) => {
+    const ps = perfSeeds[i];
+    return {
+      id: `mock-agent-${i + 1}`,
+      owner: WALLETS[i % WALLETS.length],
+      name: cfg.name!,
+      provider: cfg.provider!,
+      market_id: cfg.market_id!,
+      outcome: cfg.outcome!,
+      side: cfg.side!,
+      price: cfg.price!,
+      quantity: cfg.quantity!,
+      cadence_seconds: [300, 600, 900, 1800][i % 4],
+      strategy: cfg.strategy!,
+      strategy_label: cfg.strategy_label!,
+      execution_mode: "paper" as const,
+      credential_id: null,
+      source: null,
+      active: i < 6, // 6 active, 2 inactive
+      paper_performance: {
+        openPositions: Math.round((2 + i % 3) * g),
+        closedPositions: Math.round((3 + i) * g),
+        fills: Math.round(ps.fills * g),
+        volumeUsdc: Number((ps.vol * g).toFixed(2)),
+        feesUsdc: Number((ps.vol * 0.005 * g).toFixed(2)),
+        realizedPnlUsdc: Number((ps.rpnl * g).toFixed(2)),
+        unrealizedPnlUsdc: Number((ps.upnl * g).toFixed(2)),
+        netPnlUsdc: Number((ps.net * g).toFixed(2)),
+        maxDrawdownUsdc: Number((ps.dd * g).toFixed(2)),
+      },
+      last_executed_at: new Date(
+        now.getTime() - (i * 20 + 5) * 60_000,
+      ).toISOString(),
+      next_execution_at: new Date(
+        now.getTime() + (i * 5 + 3) * 60_000,
+      ).toISOString(),
+      consecutive_failures: 0,
+      last_error_code: null,
+      created_at: daysAgo(14 - i),
+      updated_at: hoursAgo(i * 2 + 1),
+    };
+  });
 
   if (params?.provider) {
     agents = agents.filter((a) => a.provider === params.provider);
