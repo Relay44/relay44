@@ -1,0 +1,30 @@
+{
+  "name": "relay44-context-graph",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --loader tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dkg.js": "^8.2.4",
+    "express": "^4.21.0",
+    "better-sqlite3": "^11.7.0",
+    "zod": "^3.24.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "dotenv": "^16.4.7",
+    "crypto-js": "^4.2.0",
+    "@anthropic-ai/sdk": "^0.39.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
