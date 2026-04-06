@@ -256,7 +256,26 @@ pub async fn compute_leaderboard(
 
         let time_clause = time_filter.unwrap_or("");
 
+        let paper_time_filter = match *period {
+            "daily" => Some("AND p.created_at >= NOW() - INTERVAL '1 day'"),
+            "weekly" => Some("AND p.created_at >= NOW() - INTERVAL '7 days'"),
+            "monthly" => Some("AND p.created_at >= NOW() - INTERVAL '30 days'"),
+            "all_time" => None,
+            _ => None,
+        };
+        let paper_time_clause = paper_time_filter.unwrap_or("");
+
+        let outcome_time_filter = match *period {
+            "daily" => Some("AND o.closed_at >= NOW() - INTERVAL '1 day'"),
+            "weekly" => Some("AND o.closed_at >= NOW() - INTERVAL '7 days'"),
+            "monthly" => Some("AND o.closed_at >= NOW() - INTERVAL '30 days'"),
+            "all_time" => None,
+            _ => None,
+        };
+        let outcome_time_clause = outcome_time_filter.unwrap_or("");
+
         // --- PnL ---
+        // Combines on-chain trades with paper outcome realized PnL
         let pnl_entries = compute_metric_from_trades(
             pool, period, "pnl", &now, time_clause,
             &format!(
@@ -268,10 +287,17 @@ pub async fn compute_leaderboard(
                     SELECT seller AS wallet,
                            CAST(price AS DOUBLE PRECISION) * CAST(quantity AS DOUBLE PRECISION) AS pnl
                     FROM trades t WHERE 1=1 {time_clause}
+                    UNION ALL
+                    SELECT o.owner AS wallet, o.realized_pnl_usdc AS pnl
+                    FROM paper_outcomes o WHERE 1=1 {outcome_time_clause}
+                    UNION ALL
+                    SELECT o.owner AS wallet, o.realized_pnl_usdc AS pnl
+                    FROM external_outcomes o WHERE 1=1 {outcome_time_clause}
                 ) sub
                 GROUP BY wallet
                 ORDER BY value DESC",
                 time_clause = time_clause,
+                outcome_time_clause = outcome_time_clause,
             ),
         ).await?;
         total_entries += pnl_entries;
@@ -288,10 +314,17 @@ pub async fn compute_leaderboard(
                     SELECT seller AS wallet,
                            CAST(price AS DOUBLE PRECISION) * CAST(quantity AS DOUBLE PRECISION) AS vol
                     FROM trades t WHERE 1=1 {time_clause}
+                    UNION ALL
+                    SELECT p.owner AS wallet, p.notional_usdc AS vol
+                    FROM paper_fills p WHERE 1=1 {paper_time_clause}
+                    UNION ALL
+                    SELECT p.owner AS wallet, p.notional_usdc AS vol
+                    FROM external_fills p WHERE 1=1 {paper_time_clause}
                 ) sub
                 GROUP BY wallet
                 ORDER BY value DESC",
                 time_clause = time_clause,
+                paper_time_clause = paper_time_clause,
             ),
         ).await?;
         total_entries += volume_entries;
@@ -304,19 +337,21 @@ pub async fn compute_leaderboard(
                     SELECT buyer AS wallet FROM trades t WHERE 1=1 {time_clause}
                     UNION ALL
                     SELECT seller AS wallet FROM trades t WHERE 1=1 {time_clause}
+                    UNION ALL
+                    SELECT p.owner AS wallet FROM paper_fills p WHERE 1=1 {paper_time_clause}
+                    UNION ALL
+                    SELECT p.owner AS wallet FROM external_fills p WHERE 1=1 {paper_time_clause}
                 ) sub
                 GROUP BY wallet
                 ORDER BY value DESC",
                 time_clause = time_clause,
+                paper_time_clause = paper_time_clause,
             ),
         ).await?;
         total_entries += trades_entries;
 
         // --- Win Rate ---
-        // Win rate = fraction of buy trades where price < 0.5 (bought cheap)
-        // plus sell trades where price > 0.5 (sold expensive)
-        // This is a simplified heuristic; proper resolution-based win tracking
-        // would require position close data.
+        // Uses closed outcomes: win = positive gross PnL
         let win_rate_entries = compute_metric_from_trades(
             pool, period, "win_rate", &now, time_clause,
             &format!(
@@ -332,11 +367,18 @@ pub async fn compute_leaderboard(
                     SELECT seller AS wallet,
                            (CAST(price AS DOUBLE PRECISION) >= 0.5) AS is_win
                     FROM trades t WHERE 1=1 {time_clause}
+                    UNION ALL
+                    SELECT o.owner AS wallet, (o.gross_pnl_usdc > 0) AS is_win
+                    FROM paper_outcomes o WHERE 1=1 {outcome_time_clause}
+                    UNION ALL
+                    SELECT o.owner AS wallet, (o.gross_pnl_usdc > 0) AS is_win
+                    FROM external_outcomes o WHERE 1=1 {outcome_time_clause}
                 ) sub
                 GROUP BY wallet
                 HAVING COUNT(*) >= 5
                 ORDER BY value DESC",
                 time_clause = time_clause,
+                outcome_time_clause = outcome_time_clause,
             ),
         ).await?;
         total_entries += win_rate_entries;
