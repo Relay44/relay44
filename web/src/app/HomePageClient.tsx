@@ -444,7 +444,7 @@ function formatStatNumber(n: number): string {
   return n.toLocaleString();
 }
 
-function PlatformStatsBar({ markets }: { markets: Market[] }) {
+function PlatformStatsBar({ markets, agentCount }: { markets: Market[]; agentCount: number }) {
   const totalVolume = markets.reduce((sum, m) => sum + (m.totalVolume ?? 0), 0);
   const activeMarkets = markets.filter((m) => m.status === "active").length;
   const mockStats = getMockPlatformStats();
@@ -453,7 +453,7 @@ function PlatformStatsBar({ markets }: { markets: Market[] }) {
     { label: "Markets", value: activeMarkets > 0 ? activeMarkets.toString() : mockStats.totalMarkets.toString() },
     { label: "Volume", value: totalVolume > 0 ? formatStatNumber(totalVolume) : formatStatNumber(mockStats.totalVolume) },
     { label: "Traders", value: mockStats.totalTraders.toLocaleString() },
-    { label: "Agents", value: mockStats.activeAgents.toString() },
+    { label: "Agents", value: agentCount > 0 ? agentCount.toString() : mockStats.activeAgents.toString() },
   ];
 
   return (
@@ -645,7 +645,7 @@ export default function HomePageClient({
             <FeaturedSlider markets={featuredMarkets} title="Signal Relay" />
           </section>
 
-          <PlatformStatsBar markets={markets} />
+          <PlatformStatsBar markets={markets} agentCount={liveAgents.length} />
 
           <section className="border-b border-border px-4 py-4 sm:px-6">
             <LeaderboardMini title="Top Traders This Week" limit={5} />
