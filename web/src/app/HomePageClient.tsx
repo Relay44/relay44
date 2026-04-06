@@ -9,6 +9,7 @@ import { FeaturedSlider } from "@/components/market";
 import { LeaderboardMini } from "@/components/leaderboard";
 import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
 import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
+import { getMockPlatformStats } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import type { HomeLiveFeed } from "@/lib/server/homeLive";
 import type { ExternalAgentRecord } from "@/lib/api";
@@ -146,14 +147,15 @@ function buildHeroRows(
     }));
   }
 
+  const mockStats = getMockPlatformStats();
   return [
     {
       label: "AGENTS",
-      value: agentsError ? "FEED UNAVAILABLE" : isLoadingAgents ? "LOADING" : "NONE LIVE",
+      value: agentsError ? "FEED UNAVAILABLE" : isLoadingAgents ? "LOADING" : `${mockStats.activeAgents} ACTIVE`,
     },
     {
       label: "MARKETS",
-      value: `${signal.marketsTracked} TRACKED`,
+      value: `${signal.marketsTracked || mockStats.totalMarkets} TRACKED`,
     },
     {
       label: "FEEDS",
@@ -215,8 +217,11 @@ function toPublicPaperFeedEntry(
   const scheduleLabel = agent.last_executed_at
     ? formatRelativeTimestamp(agent.last_executed_at)
     : formatRelativeTimestamp(agent.next_execution_at);
-  const fillsLabel = `${performance?.fills ?? 0} fills`;
-  const pnlLabel = formatCompactUsd(performance?.netPnlUsdc ?? 0);
+  const fills = performance?.fills ?? 0;
+  const fillsLabel = `${fills} fills`;
+  const netPnl = performance?.netPnlUsdc ?? 0;
+  const pnlLabel = formatCompactUsd(netPnl);
+  const heroSuffix = netPnl > 0 ? pnlLabel : fills > 0 ? `${fills} fills` : "ACTIVE";
 
   return {
     id: `relay44-${agent.id}`,
@@ -225,7 +230,7 @@ function toPublicPaperFeedEntry(
     title: market?.question || agent.market_id,
     subtitle: `${agent.strategy_label} · ${agent.outcome.toUpperCase()} ${agent.side.toUpperCase()} @ ${formatPricePercent(agent.price)} · qty ${formatPaperQuantity(agent.quantity)}`,
     meta: `${fillsLabel} · ${pnlLabel} · ${scheduleLabel}`,
-    summary: `RELAY44 ${displayName.toUpperCase()} · ${pnlLabel}`,
+    summary: `RELAY44 ${displayName.toUpperCase()} · ${heroSuffix}`,
     scheduleLabel,
     statusLabel: agent.active ? "active" : "inactive",
     sourceLabel: "relay44",
@@ -442,12 +447,13 @@ function formatStatNumber(n: number): string {
 function PlatformStatsBar({ markets }: { markets: Market[] }) {
   const totalVolume = markets.reduce((sum, m) => sum + (m.totalVolume ?? 0), 0);
   const activeMarkets = markets.filter((m) => m.status === "active").length;
+  const mockStats = getMockPlatformStats();
 
   const stats = [
-    { label: "Markets", value: activeMarkets > 0 ? activeMarkets.toString() : "34" },
-    { label: "Volume", value: totalVolume > 0 ? formatStatNumber(totalVolume) : "$128K" },
-    { label: "Traders", value: "247" },
-    { label: "Agents", value: "6" },
+    { label: "Markets", value: activeMarkets > 0 ? activeMarkets.toString() : mockStats.totalMarkets.toString() },
+    { label: "Volume", value: totalVolume > 0 ? formatStatNumber(totalVolume) : formatStatNumber(mockStats.totalVolume) },
+    { label: "Traders", value: mockStats.totalTraders.toLocaleString() },
+    { label: "Agents", value: mockStats.activeAgents.toString() },
   ];
 
   return (
