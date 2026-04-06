@@ -64,12 +64,16 @@ export function createRouter(
         return;
       }
 
-      // Check cache first
-      const cacheId = conditionId || slug || marketUrl || '';
-      const cached = store.getCached(cacheId);
-      if (cached && depth !== 'full') {
-        res.json({ cached: true, ...cached });
-        return;
+      // Check cache — try conditionId first, then slug, then URL
+      const cacheKeys = [conditionId, slug, marketUrl].filter(Boolean) as string[];
+      if (depth !== 'full') {
+        for (const key of cacheKeys) {
+          const cached = store.getCached(key);
+          if (cached) {
+            res.json({ cached: true, ...cached });
+            return;
+          }
+        }
       }
 
       // Concurrency limit
@@ -86,19 +90,25 @@ export function createRouter(
           'Market analysis',
         );
 
-        const analysisConditionId = result.nodes.find((n) => n.type === 'market')?.data?.conditionId as string || cacheId;
+        const resolvedConditionId = result.nodes.find((n) => n.type === 'market')?.data?.conditionId as string || '';
         const marketQuestion = result.nodes.find((n) => n.type === 'market')?.label || 'Unknown';
-        store.save(analysisConditionId, marketQuestion, result);
+        store.save(resolvedConditionId, marketQuestion, result);
+
+        // Also cache under the original input key (slug/URL) for lookup consistency
+        const inputKey = slug || marketUrl || '';
+        if (inputKey && inputKey !== resolvedConditionId) {
+          store.save(inputKey, marketQuestion, result);
+        }
 
         store.saveNarrativeSnapshot(
-          analysisConditionId,
+          resolvedConditionId,
           result.score.overall,
           result.metadata.claimCount,
           result.metadata.sourceCount,
           result.score.summary,
         );
 
-        res.json({ cached: false, conditionId: analysisConditionId, ...result });
+        res.json({ cached: false, conditionId: resolvedConditionId, ...result });
       } finally {
         activeAnalyses--;
       }
