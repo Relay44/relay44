@@ -38,7 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_pm_scan_condition ON polymarket_scanned_markets(c
 
 -- Kelly position sizing state per agent
 CREATE TABLE IF NOT EXISTS kelly_position_state (
-    agent_id UUID PRIMARY KEY REFERENCES external_agents(id) ON DELETE CASCADE,
+    agent_id VARCHAR(64) PRIMARY KEY REFERENCES external_agents(id) ON DELETE CASCADE,
     bankroll_usdc NUMERIC(20,2) NOT NULL,
     estimated_prob NUMERIC(8,6) NOT NULL,
     market_price NUMERIC(8,6) NOT NULL,
