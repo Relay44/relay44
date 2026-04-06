@@ -149,24 +149,24 @@ function generateLeaderboardEntries(
 
     switch (metric) {
       case "pnl":
-        // Top trader ~$2,400 all-time, tapering down, some negative
-        value = (2400 - i * 110 + rand() * 200 - 100) * mult;
-        if (i > 18) value = -(rand() * 180 + 20) * mult;
+        // Top trader ~$18K all-time, tapering down, few slightly negative
+        value = (18_000 - i * 720 + rand() * 1400 - 400) * mult;
+        if (i > 20) value = -(rand() * 300 + 40) * mult;
         break;
       case "volume":
-        // $45K down to $500
-        value = (45000 - i * 1800 + rand() * 1000) * mult;
-        if (value < 100) value = 100 + rand() * 400;
+        // $320K down to $2K
+        value = (320_000 - i * 13_000 + rand() * 6000) * mult;
+        if (value < 800) value = 800 + rand() * 1200;
         break;
       case "trades":
-        value = Math.round((150 - i * 6 + rand() * 10) * mult);
-        if (value < 2) value = 2;
+        value = Math.round((480 - i * 18 + rand() * 30) * mult);
+        if (value < 5) value = 5;
         break;
       case "win_rate":
-        // 0.72 down to 0.35
-        value = 0.72 - i * 0.015 + rand() * 0.03 - 0.015;
-        if (value < 0.3) value = 0.3 + rand() * 0.05;
-        if (value > 0.78) value = 0.78;
+        // 0.76 down to 0.40
+        value = 0.76 - i * 0.014 + rand() * 0.03 - 0.015;
+        if (value < 0.35) value = 0.35 + rand() * 0.05;
+        if (value > 0.82) value = 0.82;
         break;
     }
 
@@ -230,16 +230,16 @@ export function getMockPublicProfile(wallet: string): PublicProfile {
   const rand = seededRandom(seed);
 
   const stats: PublicProfileStats = {
-    totalTrades: 15 + Math.round(rand() * 120),
-    totalVolume: Number((800 + rand() * 25000).toFixed(2)),
-    winRate: Number((0.38 + rand() * 0.35).toFixed(2)),
-    pnl30d: Number((rand() * 1200 - 200).toFixed(2)),
-    pnlAllTime: Number((rand() * 2800 - 400).toFixed(2)),
-    marketsTraded: 3 + Math.round(rand() * 18),
-    bestTrade: Number((50 + rand() * 600).toFixed(2)),
-    worstTrade: Number((-(20 + rand() * 300)).toFixed(2)),
-    currentStreak: Math.round(rand() * 6),
-    longestStreak: 2 + Math.round(rand() * 8),
+    totalTrades: 45 + Math.round(rand() * 380),
+    totalVolume: Number((4200 + rand() * 180000).toFixed(2)),
+    winRate: Number((0.42 + rand() * 0.36).toFixed(2)),
+    pnl30d: Number((rand() * 8500 - 800).toFixed(2)),
+    pnlAllTime: Number((rand() * 22000 - 1500).toFixed(2)),
+    marketsTraded: 8 + Math.round(rand() * 45),
+    bestTrade: Number((200 + rand() * 4800).toFixed(2)),
+    worstTrade: Number((-(80 + rand() * 1200)).toFixed(2)),
+    currentStreak: Math.round(rand() * 9),
+    longestStreak: 3 + Math.round(rand() * 12),
   };
 
   const badges: ProfileBadge[] = [
@@ -329,10 +329,10 @@ export function getMockProfileActivity(
       marketId: `market-${mIdx + 1}`,
       marketQuestion: MARKET_QUESTIONS[mIdx],
       outcome: rand() > 0.5 ? "yes" : "no",
-      amount: Number((10 + rand() * 500).toFixed(2)),
+      amount: Number((80 + rand() * 3500).toFixed(2)),
       pnl:
         type === "position_closed" || type === "market_resolved"
-          ? Number((rand() * 400 - 100).toFixed(2))
+          ? Number((rand() * 2800 - 400).toFixed(2))
           : undefined,
       createdAt: hoursAgo(Math.round((offset + i) * 4 + rand() * 12)),
     });
@@ -508,13 +508,13 @@ export function getMockProfilePositions(
 ): PaginatedResponse<Position> {
   const seed = hashString(`positions-${wallet}`);
   const rand = seededRandom(seed);
-  const count = 2 + Math.round(rand() * 4); // 2-6 positions
+  const count = 3 + Math.round(rand() * 6); // 3-9 positions
 
   const data: Position[] = [];
   for (let i = 0; i < count; i++) {
     const mIdx = Math.floor(rand() * MARKET_QUESTIONS.length);
-    const yesBalance = Math.round(rand() * 200);
-    const noBalance = Math.round(rand() * 200);
+    const yesBalance = Math.round(rand() * 1400);
+    const noBalance = Math.round(rand() * 1400);
     const avgYesCost = Number((0.3 + rand() * 0.4).toFixed(4));
     const avgNoCost = Number((1 - avgYesCost).toFixed(4));
     const currentYesPrice = Number((0.25 + rand() * 0.5).toFixed(4));
@@ -535,9 +535,9 @@ export function getMockProfilePositions(
       currentYesPrice,
       currentNoPrice,
       unrealizedPnl,
-      realizedPnl: Number((rand() * 300 - 80).toFixed(2)),
-      totalDeposited: Number((50 + rand() * 500).toFixed(2)),
-      totalWithdrawn: Number((rand() * 100).toFixed(2)),
+      realizedPnl: Number((rand() * 2400 - 300).toFixed(2)),
+      totalDeposited: Number((400 + rand() * 5000).toFixed(2)),
+      totalWithdrawn: Number((rand() * 800).toFixed(2)),
       openOrderCount: Math.round(rand() * 3),
       totalTrades: 2 + Math.round(rand() * 15),
       createdAt: daysAgo(Math.round(3 + rand() * 18)),
@@ -566,10 +566,10 @@ export interface PlatformStats {
 
 export function getMockPlatformStats(): PlatformStats {
   return {
-    totalTraders: 247,
-    totalMarkets: 34,
-    totalVolume: 128_450,
-    activeAgents: 6,
+    totalTraders: 1_842,
+    totalMarkets: 127,
+    totalVolume: 2_847_300,
+    activeAgents: 38,
   };
 }
 
@@ -582,87 +582,89 @@ export function getMockPublicExternalAgentsPerformance(): ExternalAgentPerforman
     scope: "public",
     owner: null,
     totals: {
-      agents: 8,
-      activeAgents: 6,
-      openPositions: 14,
-      closedPositions: 9,
-      fills: 47,
-      volumeUsdc: 12_340.5,
-      feesUsdc: 61.7,
-      realizedPnlUsdc: 285.4,
-      unrealizedPnlUsdc: 142.8,
-      netPnlUsdc: 428.2,
+      agents: 12,
+      activeAgents: 9,
+      openPositions: 34,
+      closedPositions: 87,
+      fills: 312,
+      volumeUsdc: 184_620.0,
+      feesUsdc: 922.4,
+      realizedPnlUsdc: 14_285.6,
+      unrealizedPnlUsdc: 3_840.2,
+      netPnlUsdc: 18_125.8,
     },
     strategies: [
       {
         strategy: "momentum",
-        agents: 3,
-        activeAgents: 3,
-        openPositions: 6,
-        closedPositions: 4,
-        fills: 22,
-        volumeUsdc: 5_820.0,
-        feesUsdc: 29.1,
-        realizedPnlUsdc: 195.3,
-        unrealizedPnlUsdc: 88.5,
-        netPnlUsdc: 283.8,
-        winRate: 0.64,
+        agents: 4,
+        activeAgents: 4,
+        openPositions: 12,
+        closedPositions: 38,
+        fills: 142,
+        volumeUsdc: 82_400.0,
+        feesUsdc: 412.0,
+        realizedPnlUsdc: 8_340.5,
+        unrealizedPnlUsdc: 2_180.0,
+        netPnlUsdc: 10_520.5,
+        winRate: 0.71,
       },
       {
         strategy: "mean_reversion",
-        agents: 2,
-        activeAgents: 1,
-        openPositions: 3,
-        closedPositions: 2,
-        fills: 11,
-        volumeUsdc: 2_750.0,
-        feesUsdc: 13.75,
-        realizedPnlUsdc: 48.2,
-        unrealizedPnlUsdc: 32.1,
-        netPnlUsdc: 80.3,
-        winRate: 0.55,
+        agents: 3,
+        activeAgents: 2,
+        openPositions: 8,
+        closedPositions: 22,
+        fills: 78,
+        volumeUsdc: 42_800.0,
+        feesUsdc: 214.0,
+        realizedPnlUsdc: 3_120.8,
+        unrealizedPnlUsdc: 940.5,
+        netPnlUsdc: 4_061.3,
+        winRate: 0.63,
       },
       {
         strategy: "sentiment",
-        agents: 2,
-        activeAgents: 1,
-        openPositions: 4,
-        closedPositions: 2,
-        fills: 9,
-        volumeUsdc: 2_580.5,
-        feesUsdc: 12.9,
-        realizedPnlUsdc: 35.9,
-        unrealizedPnlUsdc: 18.2,
-        netPnlUsdc: 54.1,
-        winRate: 0.5,
+        agents: 3,
+        activeAgents: 2,
+        openPositions: 10,
+        closedPositions: 18,
+        fills: 62,
+        volumeUsdc: 38_420.0,
+        feesUsdc: 192.1,
+        realizedPnlUsdc: 2_180.3,
+        unrealizedPnlUsdc: 580.7,
+        netPnlUsdc: 2_761.0,
+        winRate: 0.59,
       },
       {
         strategy: "arbitrage",
-        agents: 1,
+        agents: 2,
         activeAgents: 1,
-        openPositions: 1,
-        closedPositions: 1,
-        fills: 5,
-        volumeUsdc: 1_190.0,
-        feesUsdc: 5.95,
-        realizedPnlUsdc: 6.0,
-        unrealizedPnlUsdc: 4.0,
-        netPnlUsdc: 10.0,
-        winRate: 0.6,
+        openPositions: 4,
+        closedPositions: 9,
+        fills: 30,
+        volumeUsdc: 21_000.0,
+        feesUsdc: 104.3,
+        realizedPnlUsdc: 644.0,
+        unrealizedPnlUsdc: 139.0,
+        netPnlUsdc: 783.0,
+        winRate: 0.67,
       },
     ],
-    timeline: Array.from({ length: 14 }, (_, i) => {
+    timeline: Array.from({ length: 30 }, (_, i) => {
       const d = new Date();
-      d.setDate(d.getDate() - (13 - i));
+      d.setDate(d.getDate() - (29 - i));
       const rand = seededRandom(i * 7919);
-      const dailyVol = 400 + rand() * 600;
-      const dailyPnl = rand() * 80 - 20;
+      // Upward trend — early days modest, recent days stronger
+      const trendMult = 0.5 + (i / 29) * 1.2;
+      const dailyVol = (3200 + rand() * 4800) * trendMult;
+      const dailyPnl = (rand() * 800 - 120) * trendMult;
       return {
         bucket: d.toISOString().split("T")[0],
         volumeUsdc: Number(dailyVol.toFixed(2)),
         realizedPnlUsdc: Number(dailyPnl.toFixed(2)),
-        unrealizedPnlUsdc: Number((rand() * 30 - 5).toFixed(2)),
-        netPnlUsdc: Number((dailyPnl + rand() * 20 - 5).toFixed(2)),
+        unrealizedPnlUsdc: Number(((rand() * 200 - 30) * trendMult).toFixed(2)),
+        netPnlUsdc: Number((dailyPnl + (rand() * 150 - 20) * trendMult).toFixed(2)),
       };
     }),
     updatedAt: hoursAgo(0),
