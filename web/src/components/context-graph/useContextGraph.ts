@@ -3,7 +3,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ContextGraphResult, NarrativeSnapshot } from './types';
 
-const API_BASE = process.env.NEXT_PUBLIC_CONTEXT_GRAPH_URL || '/api/context-graph';
+// Routes through Next.js API proxy which injects the shared secret server-side
+const API_BASE = '/api/context-graph';
 
 interface AnalyzeInput {
   marketUrl?: string;
