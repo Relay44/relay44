@@ -4,8 +4,6 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
-import { FeatureNotice } from '@/components/runtime/FeatureNotice';
-import { ApiError } from '@/lib/api';
 import type { Leaderboard, LeaderboardEntry, LeaderboardPeriod, LeaderboardMetric } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -103,7 +101,6 @@ export function LeaderboardTable({
   const [leaderboard, setLeaderboard] = useState<Leaderboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -112,19 +109,13 @@ export function LeaderboardTable({
       try {
         setLoading(true);
         setError(null);
-        setUnavailable(false);
         const data = await api.getLeaderboard(period, metric, Math.min(limit, 100));
         if (!cancelled) {
           setLeaderboard(data);
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
-          if (err instanceof ApiError && err.status === 404) {
-            setUnavailable(true);
-            setLeaderboard(null);
-          } else {
-            setError('Failed to load leaderboard');
-          }
+          setError('Failed to load leaderboard');
         }
       } finally {
         if (!cancelled) {
@@ -149,17 +140,6 @@ export function LeaderboardTable({
           <div className="animate-pulse text-text-secondary">Loading leaderboard...</div>
         </CardContent>
       </Card>
-    );
-  }
-
-  if (unavailable) {
-    return (
-      <FeatureNotice
-        title="Leaderboard is not live yet"
-        body="Public trader rankings are still gated for launch. Market discovery and trading surfaces remain available."
-        actionHref="/markets"
-        actionLabel="Browse markets"
-      />
     );
   }
 

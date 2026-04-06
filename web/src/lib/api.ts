@@ -3305,9 +3305,13 @@ class ApiClient {
     metric: LeaderboardMetric = "pnl",
   ): Promise<{ rank: number; value: number }> {
     try {
-      return await this.request(
+      const result = await this.request<{ rank: number; value: number }>(
         `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
       );
+      if (result?.rank > 0) return result;
+      const { getMockUserRank } = await import("./mock-data");
+      console.warn("[relay44] Rank empty, using mock data");
+      return getMockUserRank(wallet, period, metric);
     } catch (err) {
       if (err instanceof ApiError && (err.status === 404 || err.status === 500)) {
         const { getMockUserRank } = await import("./mock-data");
@@ -3322,7 +3326,7 @@ class ApiClient {
   async getPublicProfile(wallet: string): Promise<PublicProfile> {
     try {
       const result = await this.request<PublicProfile>(`/profiles/${wallet}`);
-      if (result.stats?.totalTrades > 0) return result;
+      if (result?.stats?.totalTrades > 0) return result;
       // No trade history — enrich with mock data
       const { getMockPublicProfile } = await import("./mock-data");
       console.warn("[relay44] Profile empty, using mock data");
