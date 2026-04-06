@@ -64,6 +64,23 @@ function hoursAgo(n: number): string {
   return d.toISOString();
 }
 
+/**
+ * Time-based growth multiplier. Returns a value that starts at 1.0 on the
+ * anchor date and grows ~0.8% per day, so numbers drift upward naturally.
+ * Capped at 3.0× to stay believable until real data takes over.
+ *
+ * Uses a fixed anchor so every viewer on the same day sees the same numbers,
+ * but tomorrow's numbers are slightly higher than today's.
+ */
+const MOCK_ANCHOR = new Date("2026-04-01T00:00:00Z").getTime();
+function growthMultiplier(): number {
+  const daysSinceAnchor = Math.max(
+    0,
+    (Date.now() - MOCK_ANCHOR) / 86_400_000,
+  );
+  return Math.min(3.0, 1.0 + daysSinceAnchor * 0.008);
+}
+
 // ---------------------------------------------------------------------------
 // Static data pools
 // ---------------------------------------------------------------------------
@@ -147,26 +164,28 @@ function generateLeaderboardEntries(
     const wallet = WALLETS[i];
     let value: number;
 
+    const g = growthMultiplier();
+
     switch (metric) {
       case "pnl":
-        // Top trader ~$18K all-time, tapering down, few slightly negative
-        value = (18_000 - i * 720 + rand() * 1400 - 400) * mult;
-        if (i > 20) value = -(rand() * 300 + 40) * mult;
+        // Top trader ~$4.8K all-time, tapering down, few slightly negative
+        value = (4_800 - i * 200 + rand() * 400 - 100) * mult * g;
+        if (i > 18) value = -(rand() * 120 + 15) * mult;
         break;
       case "volume":
-        // $320K down to $2K
-        value = (320_000 - i * 13_000 + rand() * 6000) * mult;
-        if (value < 800) value = 800 + rand() * 1200;
+        // ~$85K down to ~$1.5K
+        value = (85_000 - i * 3_400 + rand() * 2000) * mult * g;
+        if (value < 400) value = 400 + rand() * 600;
         break;
       case "trades":
-        value = Math.round((480 - i * 18 + rand() * 30) * mult);
-        if (value < 5) value = 5;
+        value = Math.round((180 - i * 7 + rand() * 12) * mult * g);
+        if (value < 3) value = 3;
         break;
       case "win_rate":
-        // 0.76 down to 0.40
-        value = 0.76 - i * 0.014 + rand() * 0.03 - 0.015;
-        if (value < 0.35) value = 0.35 + rand() * 0.05;
-        if (value > 0.82) value = 0.82;
+        // 0.73 down to 0.38 — win rate doesn't grow with time
+        value = 0.73 - i * 0.014 + rand() * 0.03 - 0.015;
+        if (value < 0.33) value = 0.33 + rand() * 0.05;
+        if (value > 0.78) value = 0.78;
         break;
     }
 
@@ -229,17 +248,18 @@ export function getMockPublicProfile(wallet: string): PublicProfile {
   const seed = hashString(wallet);
   const rand = seededRandom(seed);
 
+  const g = growthMultiplier();
   const stats: PublicProfileStats = {
-    totalTrades: 45 + Math.round(rand() * 380),
-    totalVolume: Number((4200 + rand() * 180000).toFixed(2)),
-    winRate: Number((0.42 + rand() * 0.36).toFixed(2)),
-    pnl30d: Number((rand() * 8500 - 800).toFixed(2)),
-    pnlAllTime: Number((rand() * 22000 - 1500).toFixed(2)),
-    marketsTraded: 8 + Math.round(rand() * 45),
-    bestTrade: Number((200 + rand() * 4800).toFixed(2)),
-    worstTrade: Number((-(80 + rand() * 1200)).toFixed(2)),
-    currentStreak: Math.round(rand() * 9),
-    longestStreak: 3 + Math.round(rand() * 12),
+    totalTrades: Math.round((20 + rand() * 140) * g),
+    totalVolume: Number(((1500 + rand() * 42000) * g).toFixed(2)),
+    winRate: Number((0.40 + rand() * 0.34).toFixed(2)),
+    pnl30d: Number(((rand() * 2200 - 300) * g).toFixed(2)),
+    pnlAllTime: Number(((rand() * 5800 - 500) * g).toFixed(2)),
+    marketsTraded: Math.round((4 + rand() * 22) * Math.min(g, 2)),
+    bestTrade: Number(((80 + rand() * 1200) * g).toFixed(2)),
+    worstTrade: Number((-(30 + rand() * 400)).toFixed(2)),
+    currentStreak: Math.round(rand() * 7),
+    longestStreak: 2 + Math.round(rand() * 9),
   };
 
   const badges: ProfileBadge[] = [
@@ -329,10 +349,10 @@ export function getMockProfileActivity(
       marketId: `market-${mIdx + 1}`,
       marketQuestion: MARKET_QUESTIONS[mIdx],
       outcome: rand() > 0.5 ? "yes" : "no",
-      amount: Number((80 + rand() * 3500).toFixed(2)),
+      amount: Number((25 + rand() * 800).toFixed(2)),
       pnl:
         type === "position_closed" || type === "market_resolved"
-          ? Number((rand() * 2800 - 400).toFixed(2))
+          ? Number((rand() * 600 - 100).toFixed(2))
           : undefined,
       createdAt: hoursAgo(Math.round((offset + i) * 4 + rand() * 12)),
     });
@@ -508,13 +528,14 @@ export function getMockProfilePositions(
 ): PaginatedResponse<Position> {
   const seed = hashString(`positions-${wallet}`);
   const rand = seededRandom(seed);
-  const count = 3 + Math.round(rand() * 6); // 3-9 positions
+  const count = 2 + Math.round(rand() * 5); // 2-7 positions
 
   const data: Position[] = [];
   for (let i = 0; i < count; i++) {
     const mIdx = Math.floor(rand() * MARKET_QUESTIONS.length);
-    const yesBalance = Math.round(rand() * 1400);
-    const noBalance = Math.round(rand() * 1400);
+    const g = growthMultiplier();
+    const yesBalance = Math.round(rand() * 400 * g);
+    const noBalance = Math.round(rand() * 400 * g);
     const avgYesCost = Number((0.3 + rand() * 0.4).toFixed(4));
     const avgNoCost = Number((1 - avgYesCost).toFixed(4));
     const currentYesPrice = Number((0.25 + rand() * 0.5).toFixed(4));
@@ -535,9 +556,9 @@ export function getMockProfilePositions(
       currentYesPrice,
       currentNoPrice,
       unrealizedPnl,
-      realizedPnl: Number((rand() * 2400 - 300).toFixed(2)),
-      totalDeposited: Number((400 + rand() * 5000).toFixed(2)),
-      totalWithdrawn: Number((rand() * 800).toFixed(2)),
+      realizedPnl: Number(((rand() * 500 - 60) * g).toFixed(2)),
+      totalDeposited: Number(((100 + rand() * 1200) * g).toFixed(2)),
+      totalWithdrawn: Number((rand() * 200).toFixed(2)),
       openOrderCount: Math.round(rand() * 3),
       totalTrades: 2 + Math.round(rand() * 15),
       createdAt: daysAgo(Math.round(3 + rand() * 18)),
@@ -565,11 +586,12 @@ export interface PlatformStats {
 }
 
 export function getMockPlatformStats(): PlatformStats {
+  const g = growthMultiplier();
   return {
-    totalTraders: 1_842,
-    totalMarkets: 127,
-    totalVolume: 2_847_300,
-    activeAgents: 38,
+    totalTraders: Math.round(340 * g),
+    totalMarkets: Math.round(42 * g),
+    totalVolume: Math.round(285_000 * g),
+    activeAgents: Math.round(12 * g),
   };
 }
 
@@ -578,93 +600,94 @@ export function getMockPlatformStats(): PlatformStats {
 // ---------------------------------------------------------------------------
 
 export function getMockPublicExternalAgentsPerformance(): ExternalAgentPerformanceResponse {
+  const g = growthMultiplier();
   return {
     scope: "public",
     owner: null,
     totals: {
-      agents: 12,
-      activeAgents: 9,
-      openPositions: 34,
-      closedPositions: 87,
-      fills: 312,
-      volumeUsdc: 184_620.0,
-      feesUsdc: 922.4,
-      realizedPnlUsdc: 14_285.6,
-      unrealizedPnlUsdc: 3_840.2,
-      netPnlUsdc: 18_125.8,
+      agents: Math.round(8 * Math.min(g, 2)),
+      activeAgents: Math.round(6 * Math.min(g, 2)),
+      openPositions: Math.round(18 * g),
+      closedPositions: Math.round(32 * g),
+      fills: Math.round(124 * g),
+      volumeUsdc: Number((48_200 * g).toFixed(2)),
+      feesUsdc: Number((241 * g).toFixed(2)),
+      realizedPnlUsdc: Number((3_640 * g).toFixed(2)),
+      unrealizedPnlUsdc: Number((980 * g).toFixed(2)),
+      netPnlUsdc: Number((4_620 * g).toFixed(2)),
     },
     strategies: [
       {
         strategy: "momentum",
-        agents: 4,
-        activeAgents: 4,
-        openPositions: 12,
-        closedPositions: 38,
-        fills: 142,
-        volumeUsdc: 82_400.0,
-        feesUsdc: 412.0,
-        realizedPnlUsdc: 8_340.5,
-        unrealizedPnlUsdc: 2_180.0,
-        netPnlUsdc: 10_520.5,
-        winRate: 0.71,
+        agents: 3,
+        activeAgents: 3,
+        openPositions: Math.round(7 * g),
+        closedPositions: Math.round(14 * g),
+        fills: Math.round(56 * g),
+        volumeUsdc: Number((21_400 * g).toFixed(2)),
+        feesUsdc: Number((107 * g).toFixed(2)),
+        realizedPnlUsdc: Number((2_120 * g).toFixed(2)),
+        unrealizedPnlUsdc: Number((560 * g).toFixed(2)),
+        netPnlUsdc: Number((2_680 * g).toFixed(2)),
+        winRate: 0.68,
       },
       {
         strategy: "mean_reversion",
-        agents: 3,
-        activeAgents: 2,
-        openPositions: 8,
-        closedPositions: 22,
-        fills: 78,
-        volumeUsdc: 42_800.0,
-        feesUsdc: 214.0,
-        realizedPnlUsdc: 3_120.8,
-        unrealizedPnlUsdc: 940.5,
-        netPnlUsdc: 4_061.3,
-        winRate: 0.63,
+        agents: 2,
+        activeAgents: 1,
+        openPositions: Math.round(4 * g),
+        closedPositions: Math.round(8 * g),
+        fills: Math.round(30 * g),
+        volumeUsdc: Number((11_600 * g).toFixed(2)),
+        feesUsdc: Number((58 * g).toFixed(2)),
+        realizedPnlUsdc: Number((840 * g).toFixed(2)),
+        unrealizedPnlUsdc: Number((240 * g).toFixed(2)),
+        netPnlUsdc: Number((1_080 * g).toFixed(2)),
+        winRate: 0.58,
       },
       {
         strategy: "sentiment",
-        agents: 3,
-        activeAgents: 2,
-        openPositions: 10,
-        closedPositions: 18,
-        fills: 62,
-        volumeUsdc: 38_420.0,
-        feesUsdc: 192.1,
-        realizedPnlUsdc: 2_180.3,
-        unrealizedPnlUsdc: 580.7,
-        netPnlUsdc: 2_761.0,
-        winRate: 0.59,
+        agents: 2,
+        activeAgents: 1,
+        openPositions: Math.round(5 * g),
+        closedPositions: Math.round(7 * g),
+        fills: Math.round(26 * g),
+        volumeUsdc: Number((10_200 * g).toFixed(2)),
+        feesUsdc: Number((51 * g).toFixed(2)),
+        realizedPnlUsdc: Number((520 * g).toFixed(2)),
+        unrealizedPnlUsdc: Number((140 * g).toFixed(2)),
+        netPnlUsdc: Number((660 * g).toFixed(2)),
+        winRate: 0.54,
       },
       {
         strategy: "arbitrage",
-        agents: 2,
+        agents: 1,
         activeAgents: 1,
-        openPositions: 4,
-        closedPositions: 9,
-        fills: 30,
-        volumeUsdc: 21_000.0,
-        feesUsdc: 104.3,
-        realizedPnlUsdc: 644.0,
-        unrealizedPnlUsdc: 139.0,
-        netPnlUsdc: 783.0,
-        winRate: 0.67,
+        openPositions: Math.round(2 * g),
+        closedPositions: Math.round(3 * g),
+        fills: Math.round(12 * g),
+        volumeUsdc: Number((5_000 * g).toFixed(2)),
+        feesUsdc: Number((25 * g).toFixed(2)),
+        realizedPnlUsdc: Number((160 * g).toFixed(2)),
+        unrealizedPnlUsdc: Number((40 * g).toFixed(2)),
+        netPnlUsdc: Number((200 * g).toFixed(2)),
+        winRate: 0.62,
       },
     ],
-    timeline: Array.from({ length: 30 }, (_, i) => {
+    timeline: Array.from({ length: 21 }, (_, i) => {
       const d = new Date();
-      d.setDate(d.getDate() - (29 - i));
+      d.setDate(d.getDate() - (20 - i));
       const rand = seededRandom(i * 7919);
-      // Upward trend — early days modest, recent days stronger
-      const trendMult = 0.5 + (i / 29) * 1.2;
-      const dailyVol = (3200 + rand() * 4800) * trendMult;
-      const dailyPnl = (rand() * 800 - 120) * trendMult;
+      // Gentle upward trend — early days modest, recent days stronger
+      const trendMult = (0.5 + (i / 20) * 1.0) * g;
+      const dailyVol = (1200 + rand() * 2000) * trendMult;
+      const dailyPnl = (rand() * 320 - 50) * trendMult;
       return {
         bucket: d.toISOString().split("T")[0],
         volumeUsdc: Number(dailyVol.toFixed(2)),
         realizedPnlUsdc: Number(dailyPnl.toFixed(2)),
-        unrealizedPnlUsdc: Number(((rand() * 200 - 30) * trendMult).toFixed(2)),
-        netPnlUsdc: Number((dailyPnl + (rand() * 150 - 20) * trendMult).toFixed(2)),
+        unrealizedPnlUsdc: Number(((rand() * 80 - 10) * trendMult).toFixed(2)),
+        netPnlUsdc: Number((dailyPnl + (rand() * 60 - 8) * trendMult).toFixed(2)),
       };
     }),
     updatedAt: hoursAgo(0),
