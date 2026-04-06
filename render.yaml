@@ -18,10 +18,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: REDIS_URL
-        fromService:
-          name: relay44-redis
-          type: keyvalue
-          property: connectionString
+        sync: false
       - key: ENVIRONMENT
         value: production
       - key: RUST_LOG
