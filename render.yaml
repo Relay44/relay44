@@ -244,7 +244,7 @@ services:
       - key: CONTEXT_GRAPH_PORT
         value: "3010"
       - key: CONTEXT_GRAPH_DATA_DIR
-        value: /var/data/context-graph
+        value: /tmp/context-graph
       - key: CONTEXT_GRAPH_SHARED_SECRET
         generateValue: true
       - key: CONTEXT_GRAPH_DKG_ENABLED
