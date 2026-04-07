@@ -197,6 +197,20 @@ function buildClient(config: BaseConfig) {
   });
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function formatMarketStatus(closeTime: bigint, resolved: boolean): string {
   if (resolved) return 'resolved';
   return Number(closeTime) <= nowUnix() ? 'closed' : 'active';
@@ -302,11 +316,15 @@ export async function readDetailedHealth() {
   try {
     const config = getBaseConfig();
     const client = buildClient(config);
-    const marketCount = (await client.readContract({
-      address: config.marketCore,
-      abi: MARKET_CORE_ABI,
-      functionName: 'marketCount',
-    })) as bigint;
+    const marketCount = (await withTimeout(
+      client.readContract({
+        address: config.marketCore,
+        abi: MARKET_CORE_ABI,
+        functionName: 'marketCount',
+      }) as Promise<bigint>,
+      5_000,
+      'Base RPC request timed out'
+    )) as bigint;
 
     checks.base = {
       status: 'healthy',
