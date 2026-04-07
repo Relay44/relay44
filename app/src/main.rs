@@ -336,6 +336,7 @@ async fn main() -> std::io::Result<()> {
     services::portfolio_snapshot::spawn_portfolio_snapshotter(app_state.clone());
     services::polymarket_scanner::spawn_scanner(app_state.clone());
     services::limitless_scanner::spawn_limitless_scanner(app_state.clone());
+    services::aerodrome_scanner::spawn_aerodrome_scanner(app_state.clone());
 
     // Market auto-creation pipeline
     services::market_creator::spawn_market_creator(app_state.clone());

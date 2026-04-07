@@ -935,7 +935,7 @@ async fn mark_hedge_complete(
     tx_hash: Option<&str>,
     pnl_usdc: Option<f64>,
 ) {
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE mirror_hedge_log SET hedge_status = $1, hedge_provider_order_id = $2, \
          hedge_tx_hash = $3, pnl_usdc = $4::NUMERIC WHERE id = $5",
     )
@@ -945,33 +945,45 @@ async fn mark_hedge_complete(
     .bind(pnl_usdc.map(|p| format!("{}", p)))
     .bind(hedge_id)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("CRITICAL: failed to mark hedge {} complete: {}", hedge_id, e);
+    }
 
     // Update the mirror link's totals.
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE mirror_market_links SET last_hedge_at = NOW(), hedge_error = NULL, updated_at = NOW() \
          WHERE id = (SELECT mirror_link_id FROM mirror_hedge_log WHERE id = $1)",
     )
     .bind(hedge_id)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to update mirror link after hedge {}: {}", hedge_id, e);
+    }
 }
 
 async fn mark_hedge_failed(state: &AppState, hedge_id: i32, error: &str) {
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE mirror_hedge_log SET hedge_status = 'failed', error_message = $1 WHERE id = $2",
     )
     .bind(error)
     .bind(hedge_id)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("CRITICAL: failed to mark hedge {} as failed: {}", hedge_id, e);
+    }
 
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE mirror_market_links SET hedge_error = $1, updated_at = NOW() \
          WHERE id = (SELECT mirror_link_id FROM mirror_hedge_log WHERE id = $2)",
     )
     .bind(error)
     .bind(hedge_id)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to update mirror link error for hedge {}: {}", hedge_id, e);
+    }
 }
