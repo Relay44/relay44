@@ -6,7 +6,7 @@
       "chainId": 8453,
       "contracts": {
         "marketCore": "0xc9259a18696Ecbf7636C1a01F40Bc9d47e249AE8",
-        "orderBook": "0xD84a495398c2Fec40a03B3D60D78A251058fE66b",
+        "orderBook": "0xFe8aA303Ab953037023b12326D354f6d2484D4ce",
         "collateralVault": "0x4420dd803e6E363e6af079e6b77CA03B93f8dAe0",
         "agentRuntime": "0xC44d686548513FF2a921201fa0811B1f30AA1a65",
         "collateralToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
