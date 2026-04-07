@@ -1,7 +1,9 @@
 use actix_web::{web, HttpResponse, Responder};
 use serde::Serialize;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::time::{timeout, Duration};
 
 use crate::services::{ComponentHealth, HealthChecks, HealthStatus, SystemHealth};
 use crate::AppState;
@@ -24,10 +26,18 @@ pub async fn health_check() -> impl Responder {
 pub async fn health_detailed(state: web::Data<Arc<AppState>>) -> impl Responder {
     let uptime = state.metrics.get_metrics().uptime_seconds;
 
-    let db_health = check_database_health(&state).await;
-    let redis_health = check_redis_health(&state).await;
-    let base_health = check_base_health(&state).await;
-    let solana_health = check_solana_health(&state).await;
+    let db_health = run_health_check(
+        check_database_health(&state),
+        "Database health check timed out",
+    )
+    .await;
+    let redis_health = run_health_check(check_redis_health(&state), "Redis health check timed out").await;
+    let base_health = run_health_check(check_base_health(&state), "Base RPC health check timed out").await;
+    let solana_health = run_health_check(
+        check_solana_health(&state),
+        "Solana RPC health check timed out",
+    )
+    .await;
 
     let overall_status = determine_overall_status(
         &db_health,
@@ -67,6 +77,16 @@ pub async fn get_metrics_prometheus(state: web::Data<Arc<AppState>>) -> impl Res
     HttpResponse::Ok()
         .content_type("text/plain; version=0.0.4")
         .body(prometheus_output)
+}
+
+async fn run_health_check<F>(future: F, timeout_message: &str) -> ComponentHealth
+where
+    F: Future<Output = ComponentHealth>,
+{
+    match timeout(Duration::from_secs(5), future).await {
+        Ok(health) => health,
+        Err(_) => ComponentHealth::unhealthy(timeout_message),
+    }
 }
 
 async fn check_database_health(state: &web::Data<Arc<AppState>>) -> ComponentHealth {
