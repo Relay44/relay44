@@ -693,6 +693,26 @@ services:
       - key: NODE_ENV
         value: production
 
+  - type: cron
+    name: relay44-reward-keeper
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "0 */6 * * *"
+    buildCommand: npm ci
+    startCommand: node scripts/reward-keeper-tick.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: BASE_RPC_URL
+        sync: false
+      - key: REWARD_KEEPER_PRIVATE_KEY
+        sync: false
+      - key: REWARD_DISTRIBUTOR_ADDRESS
+        value: "0x3c4c0A74F9d108F966908a835a9b4b8D946bBce3"
+      - key: NODE_ENV
+        value: production
+
 databases:
   - name: relay44-db
     plan: starter
