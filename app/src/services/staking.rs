@@ -1,7 +1,6 @@
 use crate::services::evm_rpc::EvmRpcService;
 
-// RelayStaking.getTier(address) → uint256
-// keccak256("getTier(address)") = 0xbdab9109... first 4 bytes
+// keccak256("getTier(address)")[:4] = 0xb45aae52
 const GET_TIER_SELECTOR: &str = "0xb45aae52";
 
 pub async fn get_staking_tier(
