@@ -117,18 +117,8 @@ const WALLETS = [
   "0xA042FA0CB4c6D8eAF2a4B6c8D0e2F4a6B8c0D2e4",
 ];
 
-const USERNAMES: Record<string, string> = {
-  [WALLETS[0]]: "sigma_trader",
-  [WALLETS[1]]: "base_maxi",
-  [WALLETS[3]]: "degen_sarah",
-  [WALLETS[5]]: "polymarket_pete",
-  [WALLETS[7]]: "onchain_oracle",
-  [WALLETS[9]]: "alpha_seeker",
-  [WALLETS[12]]: "market_monk",
-  [WALLETS[15]]: "prediction_pro",
-  [WALLETS[18]]: "eth_whale_jr",
-  [WALLETS[21]]: "based_trader",
-};
+// No usernames — leaderboard shows truncated wallet addresses only.
+// When real users set display names via their profile, those will appear instead.
 
 const MARKET_QUESTIONS = [
   "Will ETH hit $5,000 by June 2026?",
@@ -205,7 +195,7 @@ function generateLeaderboardEntries(
     return {
       rank: idx + 1,
       wallet: r.wallet,
-      username: USERNAMES[r.wallet],
+      username: undefined,
       value: metric === "trades" ? Math.round(r.value) : Number(r.value.toFixed(2)),
       change,
       previousRank: idx + 1 - change,
@@ -308,18 +298,8 @@ export function getMockPublicProfile(wallet: string): PublicProfile {
 
   return {
     wallet,
-    username: USERNAMES[wallet],
-    bio: USERNAMES[wallet]
-      ? pick(
-          [
-            "Prediction markets enthusiast. Onchain since 2021.",
-            "Data-driven trader. DMs open for alpha.",
-            "Building on Base. Trading the future.",
-            "Full-time degen, part-time analyst.",
-          ],
-          rand,
-        )
-      : undefined,
+    username: undefined,
+    bio: undefined,
     joinedAt: daysAgo(Math.round(7 + rand() * 21)),
     stats,
     badges,
