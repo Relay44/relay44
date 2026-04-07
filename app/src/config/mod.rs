@@ -78,7 +78,7 @@ pub struct AppConfig {
     pub base_ws_url: String,
     pub base_chain_id: u64,
     pub siwe_domain: String,
-    pub r44_token_address: String,
+    pub relay_token_address: String,
     pub market_core_address: String,
     pub order_book_address: String,
     pub agent_runtime_address: String,
@@ -438,7 +438,7 @@ impl AppConfig {
                 .parse()
                 .expect("BASE_CHAIN_ID must be a number"),
             siwe_domain: env::var("SIWE_DOMAIN").unwrap_or_else(|_| "localhost:3000".to_string()),
-            r44_token_address: env::var("R44_TOKEN_ADDRESS").unwrap_or_else(|_| "".to_string()),
+            relay_token_address: env::var("RELAY_TOKEN_ADDRESS").unwrap_or_else(|_| "".to_string()),
             market_core_address: env::var("MARKET_CORE_ADDRESS").unwrap_or_else(|_| "".to_string()),
             order_book_address: env::var("ORDER_BOOK_ADDRESS").unwrap_or_else(|_| "".to_string()),
             agent_runtime_address: env::var("AGENT_RUNTIME_ADDRESS")

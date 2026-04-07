@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { useSessionState } from '@/hooks/useSessionState';
 
-const DISMISSED_KEY = 'r44:onboarding-dismissed';
+const DISMISSED_KEY = 'relay:onboarding-dismissed';
 
 type Step = 'connect' | 'deposit' | 'trade';
 

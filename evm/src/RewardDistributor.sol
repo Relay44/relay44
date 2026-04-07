@@ -6,12 +6,12 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
-interface IR44Staking {
+interface IRelayStaking {
     function depositRewards(uint256 amount) external;
 }
 
 /// @title RewardDistributor - Routes Clanker LP fee revenue to platform participants
-/// @notice Receives R44 from Clanker fee recipients and distributes across:
+/// @notice Receives RELAY from Clanker fee recipients and distributes across:
 ///         - Staking rewards
 ///         - Agent performance rewards (claimable by top agents)
 ///         - Market creator rewards
@@ -21,8 +21,8 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
 
     bytes32 public constant KEEPER_ROLE = keccak256("KEEPER_ROLE");
 
-    IERC20 public immutable r44Token;
-    IR44Staking public stakingPool;
+    IERC20 public immutable relayToken;
+    IRelayStaking public stakingPool;
     address public treasury;
 
     // Reward allocation in BPS (must sum to 10_000)
@@ -62,11 +62,11 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
 
     constructor(
         address admin,
-        address r44TokenAddress,
+        address relayTokenAddress,
         address _treasury,
         uint256 _epochDuration
     ) {
-        r44Token = IERC20(r44TokenAddress);
+        relayToken = IERC20(relayTokenAddress);
         treasury = _treasury;
         epochDuration = _epochDuration;
         lastDistributionAt = block.timestamp;
@@ -82,7 +82,7 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
     }
 
     function setStakingPool(address _stakingPool) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        stakingPool = IR44Staking(_stakingPool);
+        stakingPool = IRelayStaking(_stakingPool);
     }
 
     function setTreasury(address _treasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -101,11 +101,11 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
         emit SharesUpdated(_staking, _agents, _creators, _treasury);
     }
 
-    /// @notice Distribute accumulated R44 balance across recipients for current epoch
+    /// @notice Distribute accumulated RELAY balance across recipients for current epoch
     function distribute() external onlyRole(KEEPER_ROLE) nonReentrant {
         if (block.timestamp < lastDistributionAt + epochDuration) revert EpochNotReady();
 
-        uint256 balance = r44Token.balanceOf(address(this));
+        uint256 balance = relayToken.balanceOf(address(this));
         if (balance == 0) revert NothingToClaim();
 
         currentEpoch++;
@@ -118,7 +118,7 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
 
         // Send staking rewards
         if (stakingAmount > 0 && address(stakingPool) != address(0)) {
-            r44Token.safeIncreaseAllowance(address(stakingPool), stakingAmount);
+            relayToken.safeIncreaseAllowance(address(stakingPool), stakingAmount);
             stakingPool.depositRewards(stakingAmount);
         }
 
@@ -128,7 +128,7 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
 
         // Send treasury share
         if (treasuryAmount > 0 && treasury != address(0)) {
-            r44Token.safeTransfer(treasury, treasuryAmount);
+            relayToken.safeTransfer(treasury, treasuryAmount);
         }
 
         emit EpochDistributed(currentEpoch, balance, stakingAmount, agentAmount, creatorAmount, treasuryAmount);
@@ -177,7 +177,7 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
         if (amount == 0) revert NothingToClaim();
 
         agentRewardClaimed[epoch][msg.sender] = true;
-        r44Token.safeTransfer(msg.sender, amount);
+        relayToken.safeTransfer(msg.sender, amount);
 
         emit AgentRewardClaimed(epoch, msg.sender, amount);
     }
@@ -189,7 +189,7 @@ contract RewardDistributor is AccessControl, ReentrancyGuard {
         if (amount == 0) revert NothingToClaim();
 
         creatorRewardClaimed[epoch][msg.sender] = true;
-        r44Token.safeTransfer(msg.sender, amount);
+        relayToken.safeTransfer(msg.sender, amount);
 
         emit CreatorRewardClaimed(epoch, msg.sender, amount);
     }
