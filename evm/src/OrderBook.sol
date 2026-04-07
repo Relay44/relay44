@@ -27,6 +27,10 @@ interface ICollateralVault {
     function transferAvailable(address from, address to, uint256 amount) external;
 }
 
+interface IRelayStakingRead {
+    function getTier(address user) external view returns (uint256);
+}
+
 contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant AGENT_RUNTIME_ROLE = keccak256("AGENT_RUNTIME_ROLE");
@@ -76,6 +80,7 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
     uint256 public feeBps;         // Protocol fee in basis points
     address public feeRecipient;   // Where fees are sent
     uint256 public accruedFees;    // Fees accumulated in the vault
+    IRelayStakingRead public stakingContract;
 
     error ZeroAddress();
     error InvalidPrice();
@@ -150,12 +155,25 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
         emit FeesWithdrawn(feeRecipient, amount);
     }
 
+    function setStakingContract(address _staking) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        stakingContract = IRelayStakingRead(_staking);
+    }
+
     function getDiscountBps(address user) public view returns (uint256) {
+        // Prefer staking tiers if staking contract is set
+        if (address(stakingContract) != address(0)) {
+            uint256 tier = stakingContract.getTier(user);
+            if (tier >= 3) return 7_500; // Diamond 75%
+            if (tier >= 2) return 5_000; // Gold 50%
+            if (tier >= 1) return 2_500; // Silver 25%
+            return 0;
+        }
+        // Fallback: balance-based discounts
         if (address(relayToken) == address(0)) return 0;
         uint256 balance = relayToken.balanceOf(user);
-        if (balance >= TIER3_THRESHOLD) return 7_500; // 75%
-        if (balance >= TIER2_THRESHOLD) return 5_000; // 50%
-        if (balance >= TIER1_THRESHOLD) return 2_500; // 25%
+        if (balance >= TIER3_THRESHOLD) return 7_500;
+        if (balance >= TIER2_THRESHOLD) return 5_000;
+        if (balance >= TIER1_THRESHOLD) return 2_500;
         return 0;
     }
 
