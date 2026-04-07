@@ -37,13 +37,14 @@ const navLinks = [
   { href: "/context-graph", label: "Context Graph", note: "Misinformation detection via OriginTrail DKG" },
   { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
   { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
+  { href: "/staking", label: "Staking", note: "Stake $RELAY for rewards and fee discounts" },
   { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
   { href: "/docs", label: "Docs", note: "Guides, API reference, and developer resources" },
 ];
 
 const externalLinks = [
   {
-    href: "https://x.com/relay44",
+    href: "https://x.com/Relay44BASE",
     label: "X",
     note: "Updates and announcements",
     icon: XIcon,

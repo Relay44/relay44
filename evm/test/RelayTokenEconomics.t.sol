@@ -2,26 +2,26 @@
 pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {R44Token} from "../src/R44Token.sol";
+import {RelayToken} from "../src/RelayToken.sol";
 import {MarketCore} from "../src/MarketCore.sol";
 import {OrderBook} from "../src/OrderBook.sol";
 import {CollateralVault} from "../src/CollateralVault.sol";
 import {AgentRuntime} from "../src/AgentRuntime.sol";
 import {AgentIdentityRegistry} from "../src/AgentIdentityRegistry.sol";
-import {R44Staking} from "../src/R44Staking.sol";
+import {RelayStaking} from "../src/RelayStaking.sol";
 import {RewardDistributor} from "../src/RewardDistributor.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
-contract R44TokenBurnTest is Test {
+contract RelayTokenBurnTest is Test {
     address internal admin = makeAddr("admin");
     address internal treasury = makeAddr("treasury");
     address internal user = makeAddr("user");
     address internal burner = makeAddr("burner");
 
-    R44Token internal token;
+    RelayToken internal token;
 
     function setUp() external {
-        token = new R44Token("Relay44", "R44", 1_000_000e18, admin, treasury, 200_000e18);
+        token = new RelayToken("Relay", "RELAY", 1_000_000e18, admin, treasury, 200_000e18);
     }
 
     function test_userCanBurnOwnTokens() external {
@@ -73,12 +73,12 @@ contract OrderBookFeeTest is Test {
     OrderBook internal orderBook;
     CollateralVault internal collateralVault;
     MockERC20 internal usdc;
-    R44Token internal r44;
+    RelayToken internal r44;
 
     function setUp() external {
         vm.startPrank(admin);
         marketCore = new MarketCore(admin);
-        r44 = new R44Token("Relay44", "R44", 1_000_000e18, admin, admin, 500_000e18);
+        r44 = new RelayToken("Relay", "RELAY", 1_000_000e18, admin, admin, 500_000e18);
         vm.stopPrank();
 
         usdc = new MockERC20("USD Coin", "USDC");
@@ -137,7 +137,7 @@ contract OrderBookFeeTest is Test {
     }
 
     function test_r44HolderGetsDiscount() external {
-        // Give yesTrader 10K R44 for Tier 2 (50% discount)
+        // Give yesTrader 10K RELAYfor Tier 2 (50% discount)
         vm.startPrank(admin);
         r44.mint(yesTrader, 10_000e18);
         vm.stopPrank();
@@ -218,7 +218,7 @@ contract AgentRuntimeBurnTest is Test {
     address internal alice = makeAddr("alice");
     address internal executor = makeAddr("executor");
 
-    R44Token internal r44;
+    RelayToken internal r44;
     MarketCore internal marketCore;
     MockERC20 internal usdc;
     CollateralVault internal collateralVault;
@@ -229,7 +229,7 @@ contract AgentRuntimeBurnTest is Test {
 
     function setUp() external {
         vm.startPrank(admin);
-        r44 = new R44Token("Relay44", "R44", 1_000_000e18, admin, admin, 500_000e18);
+        r44 = new RelayToken("Relay", "RELAY", 1_000_000e18, admin, admin, 500_000e18);
         marketCore = new MarketCore(admin);
         vm.stopPrank();
 
@@ -247,12 +247,12 @@ contract AgentRuntimeBurnTest is Test {
         identityRegistry.grantRole(identityRegistry.REGISTRAR_ROLE(), address(agentRuntime));
         agentRuntime.setIdentityRegistry(address(identityRegistry));
 
-        // Wire R44 burn
+        // Wire RELAYburn
         r44.grantRole(r44.BURNER_ROLE(), address(agentRuntime));
-        agentRuntime.setR44Token(address(r44));
-        agentRuntime.setExecutionFee(1e15); // 0.001 R44
+        agentRuntime.setRelayToken(address(r44));
+        agentRuntime.setExecutionFee(1e15); // 0.001 RELAY
 
-        // Fund alice with R44
+        // Fund alice with RELAY
         r44.transfer(alice, 10e18);
         vm.stopPrank();
 
@@ -282,18 +282,18 @@ contract AgentRuntimeBurnTest is Test {
     }
 
     function test_executionFailsWithoutR44() external {
-        // Create agent first while alice still has R44
+        // Create agent first while alice still has RELAY
         vm.prank(alice);
         uint256 agentId = agentRuntime.createAgent(marketId, true, 5_200, 25e6, 60, 3_600, "no-r44");
 
-        // Now drain alice's R44
+        // Now drain alice's RELAY
         uint256 aliceBalance = r44.balanceOf(alice);
         vm.prank(alice);
         r44.transfer(admin, aliceBalance);
         assertEq(r44.balanceOf(alice), 0);
 
         vm.prank(executor);
-        vm.expectRevert(AgentRuntime.InsufficientR44ForExecution.selector);
+        vm.expectRevert(AgentRuntime.InsufficientRelayForExecution.selector);
         agentRuntime.executeAgent(agentId);
     }
 
@@ -319,16 +319,16 @@ contract MarketCreationDepositTest is Test {
     address internal creator = makeAddr("creator");
     address internal slashWallet = makeAddr("slash-wallet");
 
-    R44Token internal r44;
+    RelayToken internal r44;
     MarketCore internal marketCore;
 
     function setUp() external {
         vm.startPrank(admin);
-        r44 = new R44Token("Relay44", "R44", 1_000_000e18, admin, admin, 500_000e18);
+        r44 = new RelayToken("Relay", "RELAY", 1_000_000e18, admin, admin, 500_000e18);
         marketCore = new MarketCore(admin);
 
         marketCore.grantRole(marketCore.RESOLVER_ROLE(), resolver);
-        marketCore.setR44Token(address(r44));
+        marketCore.setRelayToken(address(r44));
         marketCore.setCreationDeposit(100e18, slashWallet);
 
         r44.transfer(creator, 1_000e18);
@@ -401,19 +401,19 @@ contract MarketCreationDepositTest is Test {
     }
 }
 
-contract R44StakingTest is Test {
+contract RelayStakingTest is Test {
     address internal admin = makeAddr("admin");
     address internal alice = makeAddr("alice");
     address internal bob = makeAddr("bob");
     address internal distributor = makeAddr("distributor");
 
-    R44Token internal r44;
-    R44Staking internal staking;
+    RelayToken internal r44;
+    RelayStaking internal staking;
 
     function setUp() external {
         vm.startPrank(admin);
-        r44 = new R44Token("Relay44", "R44", 1_000_000e18, admin, admin, 500_000e18);
-        staking = new R44Staking(admin, address(r44));
+        r44 = new RelayToken("Relay", "RELAY", 1_000_000e18, admin, admin, 500_000e18);
+        staking = new RelayStaking(admin, address(r44));
 
         staking.grantRole(staking.DISTRIBUTOR_ROLE(), distributor);
 
@@ -441,7 +441,7 @@ contract R44StakingTest is Test {
 
         // Cannot unstake early
         vm.prank(alice);
-        vm.expectRevert(R44Staking.StakeStillLocked.selector);
+        vm.expectRevert(RelayStaking.StakeStillLocked.selector);
         staking.unstake();
 
         vm.warp(block.timestamp + 7 days);
@@ -475,11 +475,11 @@ contract R44StakingTest is Test {
         vm.prank(bob);
         staking.stake(10_000e18, uint64(30 days));
 
-        // Distribute 1000 R44 rewards
+        // Distribute 1000 RELAYrewards
         vm.prank(distributor);
         staking.depositRewards(1_000e18);
 
-        // Each should get 500 R44
+        // Each should get 500 RELAY
         assertEq(staking.pendingRewardOf(alice), 500e18);
         assertEq(staking.pendingRewardOf(bob), 500e18);
 
@@ -493,7 +493,7 @@ contract R44StakingTest is Test {
         staking.stake(5_000e18, uint64(7 days));
 
         vm.prank(alice);
-        vm.expectRevert(R44Staking.AlreadyStaked.selector);
+        vm.expectRevert(RelayStaking.AlreadyStaked.selector);
         staking.stake(5_000e18, uint64(7 days));
     }
 
@@ -518,21 +518,21 @@ contract RewardDistributorTest is Test {
     address internal agent2 = makeAddr("agent2");
     address internal creator1 = makeAddr("creator1");
 
-    R44Token internal r44;
-    R44Staking internal staking;
+    RelayToken internal r44;
+    RelayStaking internal staking;
     RewardDistributor internal distributor;
 
     function setUp() external {
         vm.startPrank(admin);
-        r44 = new R44Token("Relay44", "R44", 1_000_000e18, admin, admin, 500_000e18);
-        staking = new R44Staking(admin, address(r44));
+        r44 = new RelayToken("Relay", "RELAY", 1_000_000e18, admin, admin, 500_000e18);
+        staking = new RelayStaking(admin, address(r44));
         distributor = new RewardDistributor(admin, address(r44), treasury, 7 days);
 
         distributor.grantRole(distributor.KEEPER_ROLE(), keeper);
         staking.grantRole(staking.DISTRIBUTOR_ROLE(), address(distributor));
         distributor.setStakingPool(address(staking));
 
-        // Fund distributor with R44 (simulating Clanker fee income)
+        // Fund distributor with RELAY(simulating Clanker fee income)
         r44.transfer(address(distributor), 10_000e18);
         vm.stopPrank();
     }
