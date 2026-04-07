@@ -1,6 +1,6 @@
 # Relay44 EVM Contracts (Base)
 
-This workspace contains the first Base-native contract set for the Solana -> Base pivot.
+This workspace contains the Base-native contract set for Relay44.
 
 ## Contracts
 - `RelayToken.sol`: ERC-20 token with cap, mint role, and pause controls.

@@ -192,6 +192,31 @@ export const MARKET_CREATED_EVENT_ABI = [
   },
 ] as const;
 
+export const RELAY_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_RELAY_TOKEN_ADDRESS || '';
+export const RELAY_STAKING_ADDRESS = process.env.NEXT_PUBLIC_RELAY_STAKING_ADDRESS || '';
+
+export const ERC20_ABI = [
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] },
+  { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint8' }] },
+  { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'string' }] },
+  { type: 'function', name: 'totalSupply', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+] as const;
+
+export const RELAY_STAKING_ABI = [
+  { type: 'function', name: 'stake', stateMutability: 'nonpayable', inputs: [{ name: 'amount', type: 'uint256' }, { name: 'lockDuration', type: 'uint64' }], outputs: [] },
+  { type: 'function', name: 'unstake', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'claimRewards', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { type: 'function', name: 'extendLock', stateMutability: 'nonpayable', inputs: [{ name: 'newUnlockAt', type: 'uint64' }], outputs: [] },
+  { type: 'function', name: 'stakes', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: 'amount', type: 'uint256' }, { name: 'lockedAt', type: 'uint64' }, { name: 'unlockAt', type: 'uint64' }, { name: 'rewardDebt', type: 'uint256' }] },
+  { type: 'function', name: 'stakeOf', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: 'amount', type: 'uint256' }, { name: 'unlockAt', type: 'uint64' }] },
+  { type: 'function', name: 'getTier', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'pendingRewardOf', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'totalStaked', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'accRewardPerShare', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+] as const;
+
 export function assertContractAddress(address: string, envName: string): `0x${string}` {
   if (!address || !isAddress(address)) {
     throw new Error(`${envName} is not configured as a valid Base address`);
