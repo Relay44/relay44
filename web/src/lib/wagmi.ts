@@ -7,9 +7,12 @@ import { BASE_CHAIN_ID, BASE_RPC_ENDPOINT } from '@/lib/constants';
 
 const isTestnet = BASE_CHAIN_ID === baseSepolia.id;
 
-const walletConnectors = [
+// Manual connectors — only used as fallback when AppKit is not configured.
+// When AppKit IS configured, it handles wallet discovery and modal display
+// automatically via WalletConnect + injected provider detection.
+const fallbackConnectors = [
   metaMask(),
-  coinbaseWallet({ appName: 'Relay44', preference: { options: 'all' } }),
+  coinbaseWallet({ appName: 'Relay44' }),
   injected({ shimDisconnect: false, target: 'phantom' }),
   injected({ shimDisconnect: false, target: 'rabby' }),
   injected({ shimDisconnect: true }),
@@ -29,10 +32,11 @@ export const appKitMetadata = {
   icons: [`${siteUrl}/favicon.ico`],
 };
 
+// Let AppKit handle wallet discovery — do NOT pass manual connectors here.
+// Passing coinbaseWallet/metaMask connectors causes them to race with AppKit's
+// modal, resulting in Coinbase auto-opening instead of showing wallet choices.
 export const wagmiAdapter = reownProjectId
   ? new WagmiAdapter({
-      connectors: walletConnectors,
-      multiInjectedProviderDiscovery: false,
       projectId: reownProjectId,
       networks: appKitNetworks,
       ssr: true,
@@ -49,6 +53,7 @@ export const appKitConfig = wagmiAdapter
       metadata: appKitMetadata,
       networks: appKitNetworks,
       themeMode: 'dark' as const,
+      coinbasePreference: 'all' as const,
       features: {
         analytics: true,
         email: false,
@@ -61,7 +66,7 @@ export const config =
   wagmiAdapter?.wagmiConfig ??
   createConfig({
     chains: [base, baseSepolia],
-    connectors: walletConnectors,
+    connectors: fallbackConnectors,
     multiInjectedProviderDiscovery: false,
     ssr: true,
     transports: {
