@@ -92,7 +92,7 @@ pub struct AppConfig {
     pub evm_enabled: bool,
     pub evm_reads_enabled: bool,
     pub evm_writes_enabled: bool,
-    pub blindfold_webhook_secret: String,
+    pub relay_webhook_secret: String,
     pub program_vault_address: String,
     pub collateral_vault_address: String,
     pub usdc_mint: String,
@@ -465,12 +465,12 @@ impl AppConfig {
                 .unwrap_or_else(|_| if evm_enabled { "true" } else { "false" }.to_string())
                 .to_lowercase()
                 == "true",
-            blindfold_webhook_secret: env::var("BLINDFOLD_WEBHOOK_SECRET").unwrap_or_else(|_| {
+            relay_webhook_secret: env::var("RELAY_WEBHOOK_SECRET").unwrap_or_else(|_| {
                 if is_development {
-                    warn!("SECURITY WARNING: Using default BLINDFOLD_WEBHOOK_SECRET");
-                    "dev-blindfold-secret".to_string()
+                    warn!("SECURITY WARNING: Using default RELAY_WEBHOOK_SECRET");
+                    "dev-relay-webhook-secret".to_string()
                 } else {
-                    panic!("SECURITY ERROR: BLINDFOLD_WEBHOOK_SECRET must be set in production");
+                    panic!("SECURITY ERROR: RELAY_WEBHOOK_SECRET must be set in production");
                 }
             }),
             program_vault_address: env::var("PROGRAM_VAULT_ADDRESS")

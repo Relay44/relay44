@@ -595,7 +595,7 @@ pub async fn blindfold_webhook(
 ) -> Result<impl Responder, ApiError> {
     ensure_wallet_write_mode(&state)?;
 
-    let expected_sig = compute_blindfold_signature(&body, &state.config.blindfold_webhook_secret);
+    let expected_sig = compute_blindfold_signature(&body, &state.config.relay_webhook_secret);
     if body.signature != expected_sig {
         return Err(ApiError::unauthorized("Invalid webhook signature"));
     }
