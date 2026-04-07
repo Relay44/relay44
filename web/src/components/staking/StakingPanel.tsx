@@ -45,9 +45,9 @@ export function StakingPanel() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const [relayBalance, setRelayBalance] = useState<bigint>(0n);
+  const [relayBalance, setRelayBalance] = useState<bigint>(BigInt(0));
   const [stakeInfo, setStakeInfo] = useState<StakeInfo | null>(null);
-  const [totalStaked, setTotalStaked] = useState<bigint>(0n);
+  const [totalStaked, setTotalStaked] = useState<bigint>(BigInt(0));
 
   const tokenAddr = RELAY_TOKEN_ADDRESS
     ? assertContractAddress(RELAY_TOKEN_ADDRESS, 'NEXT_PUBLIC_RELAY_TOKEN_ADDRESS')
@@ -103,7 +103,7 @@ export function StakingPanel() {
     if (!walletClient) return;
 
     const parsed = parseEther(amount);
-    if (parsed <= 0n) { setError('Enter a valid amount'); return; }
+    if (parsed <= BigInt(0)) { setError('Enter a valid amount'); return; }
 
     setLoading(true);
     setError(null);
@@ -184,9 +184,9 @@ export function StakingPanel() {
     }
   };
 
-  const hasStake = stakeInfo && stakeInfo.amount > 0n;
+  const hasStake = stakeInfo && stakeInfo.amount > BigInt(0);
   const isLocked = hasStake && BigInt(Math.floor(Date.now() / 1000)) < stakeInfo.unlockAt;
-  const hasPendingRewards = stakeInfo && stakeInfo.pendingReward > 0n;
+  const hasPendingRewards = stakeInfo && stakeInfo.pendingReward > BigInt(0);
 
   return (
     <div className="space-y-6">
