@@ -65,104 +65,13 @@ fn base_indexer_backoff_seconds(rate_limit_streak: u32) -> u64 {
     }
 }
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    dotenv().ok();
-    services::logging::init();
-
-    info!("Starting relay44 backend API...");
-
-    let config = AppConfig::from_env();
-    let bind_addr = format!("{}:{}", config.host, config.port);
-
-    info!("Initializing services...");
-
-    let db = DatabaseService::new(&config.database_url)
-        .await
-        .expect("Failed to create database pool");
-
-    // Run migrations in the background so the HTTP port binds immediately.
-    // Render's health check requires a bound port within ~5 minutes.
-    let migration_db = db.clone();
-    tokio::spawn(async move {
-        loop {
-            match migration_db.run_migrations().await {
-                Ok(()) => return,
-                Err(e) => {
-                    log::warn!("Migration failed: {}. Retrying in 30s...", e);
-                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                }
-            }
-        }
-    });
-
-    let redis = RedisService::new(&config.redis_url)
-        .await
-        .expect("Failed to connect to Redis");
-    let evm_rpc = EvmRpcService::new(&config.base_rpc_url, &config.base_rpc_fallback_urls);
-    let evm_indexer_rpc = config
-        .base_indexer_rpc_url
-        .as_ref()
-        .map(|url| {
-            let mut fallbacks = vec![config.base_rpc_url.clone()];
-            fallbacks.extend(config.base_rpc_fallback_urls.clone());
-            EvmRpcService::new(url, &fallbacks)
-        })
-        .unwrap_or_else(|| evm_rpc.clone());
-    let evm_indexer = EvmIndexerService::new(evm_indexer_rpc, 20_000);
-
-    info!(
-        "Base read RPC endpoints configured: {} (dedicated indexer RPC: {})",
-        config.base_rpc_fallback_urls.len() + 1,
-        config.base_indexer_rpc_url.is_some()
-    );
-
-    let orderbook = OrderBookService::new();
-
-    match db.load_orderbook_entries().await {
-        Ok(entries) => {
-            let count = entries.len();
-            orderbook.restore_from_entries(entries);
-            if count > 0 {
-                info!("Restored {} order book entries from database", count);
-            }
-        }
-        Err(e) => {
-            warn!(
-                "Failed to restore order book (table may not exist yet): {}",
-                e
-            );
-        }
-    }
-
-    let jwt = JwtService::new(&config.jwt_secret);
-    let metrics = MetricsService::new();
-    let ws_hub = WebSocketHub::new();
-    let event_bus = EventBus::new();
-
-    let kyc = services::kyc::KycService::new(services::kyc::KycConfig::from_env());
-    let limitless_partner = services::limitless_partner::LimitlessPartnerConfig::from_config(&config);
-
-    let app_state = Arc::new(AppState {
-        config: config.clone(),
-        db,
-        evm_rpc,
-        evm_indexer: evm_indexer.clone(),
-        orderbook,
-        redis,
-        jwt,
-        metrics,
-        ws_hub,
-        event_bus,
-        kyc,
-        limitless_partner,
-        is_shutting_down: Arc::new(AtomicBool::new(false)),
-    });
+fn spawn_background_services(app_state: Arc<AppState>) {
+    let config = app_state.config.clone();
 
     if config.evm_enabled && config.evm_reads_enabled {
         let market_core = config.market_core_address.clone();
         let order_book = config.order_book_address.clone();
-        let indexer = evm_indexer.clone();
+        let indexer = app_state.evm_indexer.clone();
         let db = app_state.db.clone();
         let rpc = app_state.evm_rpc.clone();
         let lookback_blocks = config.indexer_lookback_blocks;
@@ -173,27 +82,27 @@ async fn main() -> std::io::Result<()> {
                 "Skipping EVM indexer start: MARKET_CORE_ADDRESS or ORDER_BOOK_ADDRESS is missing"
             );
         } else {
-            match db.get_chain_sync_cursor("evm_indexer_main").await {
-                Ok(Some(cursor)) => {
-                    indexer.set_last_synced_block(cursor.last_block).await;
-                    info!(
-                        "Restored EVM indexer cursor from DB at block {}",
-                        cursor.last_block
-                    );
-                }
-                Ok(None) => {}
-                Err(err) => warn!("Failed to restore EVM indexer cursor: {}", err),
-            }
-
-            info!("Starting EVM log indexer background loop");
             tokio::spawn(async move {
+                match db.get_chain_sync_cursor("evm_indexer_main").await {
+                    Ok(Some(cursor)) => {
+                        indexer.set_last_synced_block(cursor.last_block).await;
+                        info!(
+                            "Restored EVM indexer cursor from DB at block {}",
+                            cursor.last_block
+                        );
+                    }
+                    Ok(None) => {}
+                    Err(err) => warn!("Failed to restore EVM indexer cursor: {}", err),
+                }
+
+                info!("Starting EVM log indexer background loop");
                 const TOPICS: [&str; 6] = [
-                    "0x550857481380e1875f94e5eac6470eff69ecd368405067d9d5dfdf645d3d1f8e", // MarketCreated
-                    "0xbc7c1013df472d2b00db2b9da4c476dbf8f0bc22116913d78750cf21d2c80fc2", // MarketResolved
-                    "0xac1c16fb14f9a45ec49f65d268ff0d0f1945c504b82df54a9c6ad9f01b059be5", // OrderPlaced
-                    "0x9384174c8517f5537b08e79211fc039e8a098571a3a2b4cb21dfa6f3237e8de1", // OrderCanceled
-                    "0x5aac01386940f75e601757cfe5dc1d4ab2bac84f98d30664486114a8abb38a45", // OrderFilled
-                    "0x93c1c30a0fa404e7a08a9f6a9d68323786a7e120f3adc0c16eb8855922e35dfa", // Claimed
+                    "0x550857481380e1875f94e5eac6470eff69ecd368405067d9d5dfdf645d3d1f8e",
+                    "0xbc7c1013df472d2b00db2b9da4c476dbf8f0bc22116913d78750cf21d2c80fc2",
+                    "0xac1c16fb14f9a45ec49f65d268ff0d0f1945c504b82df54a9c6ad9f01b059be5",
+                    "0x9384174c8517f5537b08e79211fc039e8a098571a3a2b4cb21dfa6f3237e8de1",
+                    "0x5aac01386940f75e601757cfe5dc1d4ab2bac84f98d30664486114a8abb38a45",
+                    "0x93c1c30a0fa404e7a08a9f6a9d68323786a7e120f3adc0c16eb8855922e35dfa",
                 ];
                 let mut rate_limit_streak = 0_u32;
 
@@ -262,6 +171,7 @@ async fn main() -> std::io::Result<()> {
                             warn!("EVM indexer sync failed: {}", err);
                         }
                     }
+
                     tokio::time::sleep(tokio::time::Duration::from_secs(
                         base_indexer_backoff_seconds(0),
                     ))
@@ -273,7 +183,6 @@ async fn main() -> std::io::Result<()> {
         info!("EVM indexer disabled by config toggles");
     }
 
-    // Bridge: EventBus → WebSocketHub (real-time push to connected clients)
     {
         let ws_state = app_state.clone();
         let mut event_rx = app_state.event_bus.subscribe();
@@ -313,7 +222,7 @@ async fn main() -> std::io::Result<()> {
                             }
                             _ => {}
                         }
-                        // Also push raw event JSON to global WS channel
+
                         if let Ok(json_str) = serde_json::to_string(&event) {
                             let _ = ws_state.ws_hub.broadcast_raw_global(json_str).await;
                         }
@@ -327,22 +236,113 @@ async fn main() -> std::io::Result<()> {
         });
     }
 
-    // Internal agent scheduler (replaces external-tick-only dependency)
     services::agent_scheduler::spawn_agent_scheduler(app_state.clone());
-
-    // Cross-venue liquidity mirror
     services::liquidity_mirror::spawn_liquidity_mirror(app_state.clone());
-
-    // Auto-hedge engine
     services::hedge_engine::spawn_hedge_engine(app_state.clone());
     services::smart_router::spawn_arb_scanner(app_state.clone());
     services::portfolio_snapshot::spawn_portfolio_snapshotter(app_state.clone());
     services::polymarket_scanner::spawn_scanner(app_state.clone());
     services::limitless_scanner::spawn_limitless_scanner(app_state.clone());
     services::aerodrome_scanner::spawn_aerodrome_scanner(app_state.clone());
+    services::market_creator::spawn_market_creator(app_state);
+}
 
-    // Market auto-creation pipeline
-    services::market_creator::spawn_market_creator(app_state.clone());
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    dotenv().ok();
+    services::logging::init();
+
+    info!("Starting relay44 backend API...");
+
+    let config = AppConfig::from_env();
+    let bind_addr = format!("{}:{}", config.host, config.port);
+
+    info!("Initializing services...");
+
+    let db = DatabaseService::new(&config.database_url)
+        .await
+        .expect("Failed to create database pool");
+
+    let redis = RedisService::new(&config.redis_url)
+        .await
+        .expect("Failed to connect to Redis");
+    let evm_rpc = EvmRpcService::new(&config.base_rpc_url, &config.base_rpc_fallback_urls);
+    let evm_indexer_rpc = config
+        .base_indexer_rpc_url
+        .as_ref()
+        .map(|url| {
+            let mut fallbacks = vec![config.base_rpc_url.clone()];
+            fallbacks.extend(config.base_rpc_fallback_urls.clone());
+            EvmRpcService::new(url, &fallbacks)
+        })
+        .unwrap_or_else(|| evm_rpc.clone());
+    let evm_indexer = EvmIndexerService::new(evm_indexer_rpc, 20_000);
+
+    info!(
+        "Base read RPC endpoints configured: {} (dedicated indexer RPC: {})",
+        config.base_rpc_fallback_urls.len() + 1,
+        config.base_indexer_rpc_url.is_some()
+    );
+
+    let orderbook = OrderBookService::new();
+
+    match db.load_orderbook_entries().await {
+        Ok(entries) => {
+            let count = entries.len();
+            orderbook.restore_from_entries(entries);
+            if count > 0 {
+                info!("Restored {} order book entries from database", count);
+            }
+        }
+        Err(e) => {
+            warn!(
+                "Failed to restore order book (table may not exist yet): {}",
+                e
+            );
+        }
+    }
+
+    let jwt = JwtService::new(&config.jwt_secret);
+    let metrics = MetricsService::new();
+    let ws_hub = WebSocketHub::new();
+    let event_bus = EventBus::new();
+
+    let kyc = services::kyc::KycService::new(services::kyc::KycConfig::from_env());
+    let limitless_partner = services::limitless_partner::LimitlessPartnerConfig::from_config(&config);
+
+    let app_state = Arc::new(AppState {
+        config: config.clone(),
+        db,
+        evm_rpc,
+        evm_indexer: evm_indexer.clone(),
+        orderbook,
+        redis,
+        jwt,
+        metrics,
+        ws_hub,
+        event_bus,
+        kyc,
+        limitless_partner,
+        is_shutting_down: Arc::new(AtomicBool::new(false)),
+    });
+
+    let migration_db = app_state.db.clone();
+    let background_state = app_state.clone();
+    tokio::spawn(async move {
+        loop {
+            match migration_db.run_migrations().await {
+                Ok(()) => {
+                    info!("Database migrations completed; starting background services");
+                    spawn_background_services(background_state);
+                    return;
+                }
+                Err(e) => {
+                    warn!("Migration failed: {}. Retrying in 30s...", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
+            }
+        }
+    });
 
     let shutdown_state = app_state.clone();
     tokio::spawn(async move {
