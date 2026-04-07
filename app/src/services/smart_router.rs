@@ -126,7 +126,7 @@ pub async fn route_order(
     };
 
     // Log the routing decision to DB.
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO routing_decisions \
          (market_slug, outcome, side, quantity, chosen_provider, chosen_price, alternatives, savings_bps) \
          VALUES ($1, $2, $3, $4::NUMERIC, $5, $6::NUMERIC, $7, $8)",
@@ -147,7 +147,10 @@ pub async fn route_order(
     .bind(json!(&quotes))
     .bind(savings_bps)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to log routing decision: {}", e);
+    }
 
     Ok(RoutingDecision {
         chosen,
@@ -269,7 +272,7 @@ async fn log_arb_opportunity(state: &AppState, opp: &ArbitrageOpportunity) {
         opp.spread_bps,
         opp.max_size_usdc,
     );
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO arbitrage_opportunities \
          (market_slug, outcome, buy_provider, buy_price, sell_provider, sell_price, spread_bps, max_size_usdc) \
          VALUES ($1, $2, $3, $4::NUMERIC, $5, $6::NUMERIC, $7, $8::NUMERIC)",
@@ -283,7 +286,10 @@ async fn log_arb_opportunity(state: &AppState, opp: &ArbitrageOpportunity) {
     .bind(opp.spread_bps)
     .bind(format!("{}", opp.max_size_usdc))
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to log arb opportunity: {}", e);
+    }
 }
 
 // ---- Background scanner ----
