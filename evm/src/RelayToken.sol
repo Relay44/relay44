@@ -7,7 +7,7 @@ import {ERC20Capped} from "openzeppelin-contracts/contracts/token/ERC20/extensio
 import {ERC20Pausable} from "openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import {ERC20Permit} from "openzeppelin-contracts/contracts/token/ERC20/extensions/ERC20Permit.sol";
 
-contract R44Token is ERC20, ERC20Capped, ERC20Pausable, ERC20Permit, AccessControl {
+contract RelayToken is ERC20, ERC20Capped, ERC20Pausable, ERC20Permit, AccessControl {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");

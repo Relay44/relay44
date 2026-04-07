@@ -15,7 +15,7 @@ interface IAgentIdentityRegistry {
     function registerFor(address owner, string calldata agentURI) external returns (uint256 agentId);
 }
 
-interface IR44Burnable {
+interface IRelayBurnable {
     function burnFrom(address account, uint256 amount) external;
     function balanceOf(address account) external view returns (uint256);
 }
@@ -65,8 +65,8 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
 
     IOrderBookAgent public immutable orderBook;
     IAgentIdentityRegistry public identityRegistry;
-    IR44Burnable public r44Token;
-    uint256 public executionFee; // R44 burned per agent execution
+    IRelayBurnable public relayToken;
+    uint256 public executionFee; // RELAY burned per agent execution
 
     error ZeroAddress();
     error NotOwner();
@@ -78,7 +78,7 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
     error IdentityRegistryNotConfigured();
     error IdentityAlreadyRegistered();
     error ManagerNotApproved();
-    error InsufficientR44ForExecution();
+    error InsufficientRelayForExecution();
 
     event AgentCreated(
         uint256 indexed agentId,
@@ -111,7 +111,7 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
     event AgentIdentityLinked(uint256 indexed agentId, uint256 indexed identityId, address indexed owner);
     event ManagerApprovalSet(address indexed owner, address indexed manager, bool approved);
     event ExecutionFeeUpdated(uint256 newFee);
-    event R44TokenSet(address indexed token);
+    event RelayTokenSet(address indexed token);
     event ExecutionFeeBurned(uint256 indexed agentId, address indexed owner, uint256 amount);
 
     constructor(address admin, address orderBookAddress) {
@@ -254,9 +254,9 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
         emit IdentityRegistrySet(registry);
     }
 
-    function setR44Token(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        r44Token = IR44Burnable(token); // address(0) disables burn
-        emit R44TokenSet(token);
+    function setRelayToken(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        relayToken = IRelayBurnable(token); // address(0) disables burn
+        emit RelayTokenSet(token);
     }
 
     function setExecutionFee(uint256 fee) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -292,12 +292,12 @@ contract AgentRuntime is AccessControl, Pausable, ReentrancyGuard {
             revert ExecutionTooEarly();
         }
 
-        // Burn R44 execution fee from agent owner
-        if (executionFee > 0 && address(r44Token) != address(0)) {
-            if (r44Token.balanceOf(agent.owner) < executionFee) {
-                revert InsufficientR44ForExecution();
+        // Burn RELAY execution fee from agent owner
+        if (executionFee > 0 && address(relayToken) != address(0)) {
+            if (relayToken.balanceOf(agent.owner) < executionFee) {
+                revert InsufficientRelayForExecution();
             }
-            r44Token.burnFrom(agent.owner, executionFee);
+            relayToken.burnFrom(agent.owner, executionFee);
             emit ExecutionFeeBurned(agentId, agent.owner, executionFee);
         }
 

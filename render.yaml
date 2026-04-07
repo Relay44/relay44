@@ -97,7 +97,7 @@ services:
         sync: false
       - key: BASE_CHAIN_ID
         value: "8453"
-      - key: R44_TOKEN_ADDRESS
+      - key: RELAY_TOKEN_ADDRESS
         sync: false
       - key: MARKET_CORE_ADDRESS
         sync: false
@@ -198,7 +198,7 @@ services:
         sync: false
       - key: FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE
         sync: false
-      - key: NEXT_PUBLIC_R44_TOKEN_ADDRESS
+      - key: NEXT_PUBLIC_RELAY_TOKEN_ADDRESS
         sync: false
       - key: NEXT_PUBLIC_MARKET_CORE_ADDRESS
         sync: false

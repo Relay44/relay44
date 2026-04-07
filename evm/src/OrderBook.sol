@@ -36,7 +36,7 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
     uint256 public constant PAR_PRICE_BPS = 10_000;
     uint256 public constant MAX_FEE_BPS = 1_000; // 10% max fee
 
-    // R44 holder discount tiers
+    // RELAY holder discount tiers
     uint256 public constant TIER1_THRESHOLD = 1_000e18;   // 25% fee discount
     uint256 public constant TIER2_THRESHOLD = 10_000e18;  // 50% fee discount
     uint256 public constant TIER3_THRESHOLD = 100_000e18; // 75% fee discount
@@ -71,7 +71,7 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
 
     IMarketCoreRead public immutable marketCore;
     ICollateralVault public immutable collateralVault;
-    IERC20 public immutable r44Token;
+    IERC20 public immutable relayToken;
 
     uint256 public feeBps;         // Protocol fee in basis points
     address public feeRecipient;   // Where fees are sent
@@ -121,14 +121,14 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
     event FeeConfigUpdated(uint256 feeBps, address feeRecipient);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
 
-    constructor(address admin, address marketCoreAddress, address collateralVaultAddress, address r44TokenAddress) {
+    constructor(address admin, address marketCoreAddress, address collateralVaultAddress, address relayTokenAddress) {
         if (admin == address(0) || marketCoreAddress == address(0) || collateralVaultAddress == address(0)) {
             revert ZeroAddress();
         }
 
         marketCore = IMarketCoreRead(marketCoreAddress);
         collateralVault = ICollateralVault(collateralVaultAddress);
-        r44Token = IERC20(r44TokenAddress); // address(0) disables discounts
+        relayToken = IERC20(relayTokenAddress); // address(0) disables discounts
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
         _grantRole(AGENT_RUNTIME_ROLE, admin);
@@ -151,8 +151,8 @@ contract OrderBook is AccessControl, Pausable, ReentrancyGuard {
     }
 
     function getDiscountBps(address user) public view returns (uint256) {
-        if (address(r44Token) == address(0)) return 0;
-        uint256 balance = r44Token.balanceOf(user);
+        if (address(relayToken) == address(0)) return 0;
+        uint256 balance = relayToken.balanceOf(user);
         if (balance >= TIER3_THRESHOLD) return 7_500; // 75%
         if (balance >= TIER2_THRESHOLD) return 5_000; // 50%
         if (balance >= TIER1_THRESHOLD) return 2_500; // 25%

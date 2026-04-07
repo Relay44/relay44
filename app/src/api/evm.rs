@@ -1132,7 +1132,7 @@ struct PendingTrade {
     created_at: String,
 }
 
-pub async fn get_r44_token_state(
+pub async fn get_relay_token_state(
     state: web::Data<Arc<AppState>>,
 ) -> Result<impl Responder, ApiError> {
     if !state.config.evm_enabled || !state.config.evm_reads_enabled {
@@ -1142,17 +1142,17 @@ pub async fn get_r44_token_state(
         ));
     }
 
-    let token_address = state.config.r44_token_address.trim();
+    let token_address = state.config.relay_token_address.trim();
     if token_address.is_empty() {
         return Err(ApiError::bad_request(
             "TOKEN_ADDRESS_NOT_CONFIGURED",
-            "R44_TOKEN_ADDRESS is not configured",
+            "RELAY_TOKEN_ADDRESS is not configured",
         ));
     }
     if !is_valid_evm_address(token_address) {
         return Err(ApiError::bad_request(
             "INVALID_TOKEN_ADDRESS",
-            "R44_TOKEN_ADDRESS must be a valid 0x EVM address",
+            "RELAY_TOKEN_ADDRESS must be a valid 0x EVM address",
         ));
     }
 

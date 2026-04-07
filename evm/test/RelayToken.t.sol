@@ -2,9 +2,9 @@
 pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {R44Token} from "../src/R44Token.sol";
+import {RelayToken} from "../src/RelayToken.sol";
 
-contract R44TokenTest is Test {
+contract RelayTokenTest is Test {
     address internal admin = makeAddr("admin");
     address internal treasury = makeAddr("treasury");
     address internal user = makeAddr("user");
@@ -12,10 +12,10 @@ contract R44TokenTest is Test {
     uint256 internal constant CAP = 1_000_000e18;
     uint256 internal constant INITIAL_SUPPLY = 200_000e18;
 
-    R44Token internal token;
+    RelayToken internal token;
 
     function setUp() external {
-        token = new R44Token("Relay44", "R44", CAP, admin, treasury, INITIAL_SUPPLY);
+        token = new RelayToken("Relay", "RELAY", CAP, admin, treasury, INITIAL_SUPPLY);
     }
 
     function test_initialConfig() external view {
@@ -60,7 +60,7 @@ contract R44TokenTest is Test {
     }
 
     function test_initialSupplyCannotExceedCap() external {
-        vm.expectRevert(R44Token.InitialSupplyExceedsCap.selector);
-        new R44Token("Relay44", "R44", CAP, admin, treasury, CAP + 1);
+        vm.expectRevert(RelayToken.InitialSupplyExceedsCap.selector);
+        new RelayToken("Relay", "RELAY", CAP, admin, treasury, CAP + 1);
     }
 }

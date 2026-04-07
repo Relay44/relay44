@@ -36,8 +36,8 @@ contract MarketCore is AccessControl, Pausable {
     mapping(uint256 => address) public marketCreators;
     mapping(uint256 => MarketMetadata) private marketMetadata;
 
-    IERC20 public r44Token;
-    uint256 public creationDeposit;    // R44 required to create a market
+    IERC20 public relayToken;
+    uint256 public creationDeposit;    // RELAY required to create a market
     address public slashRecipient;     // Where slashed deposits go
     mapping(uint256 => bool) public depositRefunded; // Track refund status
 
@@ -72,8 +72,8 @@ contract MarketCore is AccessControl, Pausable {
         _grantRole(PAUSER_ROLE, admin);
     }
 
-    function setR44Token(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        r44Token = IERC20(token);
+    function setRelayToken(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        relayToken = IERC20(token);
     }
 
     function setCreationDeposit(uint256 deposit, address _slashRecipient) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -93,8 +93,8 @@ contract MarketCore is AccessControl, Pausable {
         if (msg.sender != creator && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) revert NotMarketCreator();
 
         depositRefunded[marketId] = true;
-        if (creationDeposit > 0 && address(r44Token) != address(0)) {
-            r44Token.safeTransfer(creator, creationDeposit);
+        if (creationDeposit > 0 && address(relayToken) != address(0)) {
+            relayToken.safeTransfer(creator, creationDeposit);
         }
         emit DepositRefunded(marketId, creator, creationDeposit);
     }
@@ -106,8 +106,8 @@ contract MarketCore is AccessControl, Pausable {
         if (creator == address(0)) revert MarketNotFound();
 
         depositRefunded[marketId] = true;
-        if (creationDeposit > 0 && address(r44Token) != address(0) && slashRecipient != address(0)) {
-            r44Token.safeTransfer(slashRecipient, creationDeposit);
+        if (creationDeposit > 0 && address(relayToken) != address(0) && slashRecipient != address(0)) {
+            relayToken.safeTransfer(slashRecipient, creationDeposit);
         }
         emit DepositSlashed(marketId, creator, creationDeposit);
     }
@@ -196,9 +196,9 @@ contract MarketCore is AccessControl, Pausable {
         if (closeTime <= block.timestamp) revert InvalidCloseTime();
         if (!hasRole(DEFAULT_ADMIN_ROLE, creator) && resolver != creator) revert UnauthorizedResolver();
 
-        // Collect R44 deposit if configured
-        if (creationDeposit > 0 && address(r44Token) != address(0)) {
-            r44Token.safeTransferFrom(creator, address(this), creationDeposit);
+        // Collect RELAY deposit if configured
+        if (creationDeposit > 0 && address(relayToken) != address(0)) {
+            relayToken.safeTransferFrom(creator, address(this), creationDeposit);
         }
 
         marketId = ++marketCount;

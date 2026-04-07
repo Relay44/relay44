@@ -614,12 +614,12 @@ export async function readBaseTokenState() {
   const chainId = parseChainId();
   const rpcUrl = resolveRpcUrl(chainId);
   const tokenAddressRaw =
-    process.env.NEXT_PUBLIC_R44_TOKEN_ADDRESS ||
-    process.env.R44_TOKEN_ADDRESS ||
+    process.env.NEXT_PUBLIC_RELAY_TOKEN_ADDRESS ||
+    process.env.RELAY_TOKEN_ADDRESS ||
     process.env.NEXT_PUBLIC_COLLATERAL_TOKEN_ADDRESS ||
     '';
 
-  const tokenAddress = parseAddress('R44_TOKEN_ADDRESS', tokenAddressRaw);
+  const tokenAddress = parseAddress('RELAY_TOKEN_ADDRESS', tokenAddressRaw);
   const client = createPublicClient({
     chain: chainId === 8453 ? base : baseSepolia,
     transport: http(rpcUrl, { timeout: 15_000 }),
