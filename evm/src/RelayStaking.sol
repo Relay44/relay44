@@ -7,10 +7,10 @@ import {ReentrancyGuard} from "openzeppelin-contracts/contracts/utils/Reentrancy
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/// @title R44Staking - Stake R44 for tier benefits and reward distribution
-/// @notice Users lock R44 to gain platform benefits (fee discounts, agent tiers, governance weight).
+/// @title RelayStaking - Stake RELAY for tier benefits and reward distribution
+/// @notice Users lock RELAY to gain platform benefits (fee discounts, agent tiers, governance weight).
 ///         Rewards are distributed per-epoch by the RewardDistributor.
-contract R44Staking is AccessControl, Pausable, ReentrancyGuard {
+contract RelayStaking is AccessControl, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
@@ -26,7 +26,7 @@ contract R44Staking is AccessControl, Pausable, ReentrancyGuard {
         uint256 rewardDebt; // For per-share reward accounting
     }
 
-    IERC20 public immutable r44Token;
+    IERC20 public immutable relayToken;
 
     mapping(address => Stake) public stakes;
     uint256 public totalStaked;
@@ -47,21 +47,21 @@ contract R44Staking is AccessControl, Pausable, ReentrancyGuard {
     event RewardsDeposited(uint256 amount, uint256 newAccRewardPerShare);
     event StakeExtended(address indexed user, uint64 newUnlockAt);
 
-    constructor(address admin, address r44TokenAddress) {
-        if (admin == address(0) || r44TokenAddress == address(0)) revert InvalidAmount();
+    constructor(address admin, address relayTokenAddress) {
+        if (admin == address(0) || relayTokenAddress == address(0)) revert InvalidAmount();
 
-        r44Token = IERC20(r44TokenAddress);
+        relayToken = IERC20(relayTokenAddress);
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
     }
 
-    /// @notice Stake R44 tokens with a lock duration
+    /// @notice Stake RELAY tokens with a lock duration
     function stake(uint256 amount, uint64 lockDuration) external nonReentrant whenNotPaused {
         if (amount == 0) revert InvalidAmount();
         if (lockDuration < MIN_LOCK_DURATION || lockDuration > MAX_LOCK_DURATION) revert InvalidDuration();
         if (stakes[msg.sender].amount > 0) revert AlreadyStaked();
 
-        r44Token.safeTransferFrom(msg.sender, address(this), amount);
+        relayToken.safeTransferFrom(msg.sender, address(this), amount);
 
         uint64 unlockAt = uint64(block.timestamp) + lockDuration;
         stakes[msg.sender] = Stake({
@@ -87,9 +87,9 @@ contract R44Staking is AccessControl, Pausable, ReentrancyGuard {
         totalStaked -= amount;
         delete stakes[msg.sender];
 
-        r44Token.safeTransfer(msg.sender, amount);
+        relayToken.safeTransfer(msg.sender, amount);
         if (reward > 0) {
-            r44Token.safeTransfer(msg.sender, reward);
+            relayToken.safeTransfer(msg.sender, reward);
             emit RewardsClaimed(msg.sender, reward);
         }
 
@@ -105,7 +105,7 @@ contract R44Staking is AccessControl, Pausable, ReentrancyGuard {
         if (reward == 0) revert InvalidAmount();
 
         s.rewardDebt = (s.amount * accRewardPerShare) / 1e18;
-        r44Token.safeTransfer(msg.sender, reward);
+        relayToken.safeTransfer(msg.sender, reward);
 
         emit RewardsClaimed(msg.sender, reward);
     }
@@ -129,7 +129,7 @@ contract R44Staking is AccessControl, Pausable, ReentrancyGuard {
             return;
         }
 
-        r44Token.safeTransferFrom(msg.sender, address(this), amount);
+        relayToken.safeTransferFrom(msg.sender, address(this), amount);
 
         uint256 totalToDistribute = amount + pendingRewards;
         pendingRewards = 0;

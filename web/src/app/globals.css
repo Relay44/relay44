@@ -71,6 +71,10 @@
     background: var(--color-accent-muted);
     color: var(--color-text-primary);
   }
+
+  wui-ux-by-reown {
+    display: none !important;
+  }
 }
 
 @layer components {

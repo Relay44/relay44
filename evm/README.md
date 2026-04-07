@@ -3,7 +3,7 @@
 This workspace contains the first Base-native contract set for the Solana -> Base pivot.
 
 ## Contracts
-- `R44Token.sol`: ERC-20 token with cap, mint role, and pause controls.
+- `RelayToken.sol`: ERC-20 token with cap, mint role, and pause controls.
 - `MarketCore.sol`: market lifecycle skeleton (create, resolve, pause).
 - `OrderBook.sol`: Base order lifecycle skeleton (place, cancel, partial fill).
 - `CollateralVault.sol`: collateral custody primitives (deposit, withdraw, lock, unlock, settle).
@@ -20,9 +20,9 @@ Set these variables before deploy:
 - `BASESCAN_API_KEY`
 - `BASE_ADMIN`
 - `BASE_TREASURY`
-- `R44_CAP_WEI`
-- `R44_INITIAL_SUPPLY_WEI`
-- `COLLATERAL_TOKEN_ADDRESS` (optional; if omitted, deploy script uses `R44Token` as collateral)
+- `RELAY_CAP_WEI`
+- `RELAY_INITIAL_SUPPLY_WEI`
+- `COLLATERAL_TOKEN_ADDRESS` (optional; if omitted, deploy script uses `RelayToken` as collateral)
 
 ## Build and Test
 ```bash

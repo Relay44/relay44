@@ -75,7 +75,7 @@ contract DeployProgramsScript is Script {
             cfg.bootstrapAdmin,
             address(marketCore),
             address(collateralVault),
-            vm.envOr("R44_TOKEN_ADDRESS", address(0))
+            vm.envOr("RELAY_TOKEN_ADDRESS", address(0))
         );
         AgentRuntime agentRuntime = new AgentRuntime(cfg.bootstrapAdmin, address(orderBook));
         AgentIdentityRegistry identityRegistry = new AgentIdentityRegistry(cfg.bootstrapAdmin);

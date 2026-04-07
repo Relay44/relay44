@@ -26,7 +26,7 @@ BLOCKED_FILES=(
   "docs/production-audit-launch.md"
   "docs/SECURITY_ASSESSMENT.md"
   "docs/OPEN_PERMISSIONLESS_WEB4_LAUNCH_CLOSURE_STATUS.md"
-  "docs/BASE_NATIVE_TOKEN_LAUNCH_PLAN.md"
+  "docs/relay-token-integration-plan.md"
 )
 
 ALLOWED_EDGE_PATHS=(
