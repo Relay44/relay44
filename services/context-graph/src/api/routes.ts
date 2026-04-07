@@ -4,6 +4,7 @@ import type { ServiceConfig } from '../types/index.js';
 import type { MarketInput } from '../types/polymarket.js';
 import { ContextGraphPipeline } from '../pipeline/orchestrator.js';
 import { AnalysisStore } from '../db/queries.js';
+import type { TickAnalyzer } from '../workers/tick-analyzer.js';
 import type Database from 'better-sqlite3';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -36,6 +37,7 @@ export function createRouter(
   dkg: DKGClientInterface,
   db: Database.Database,
   config: ServiceConfig,
+  tickAnalyzer?: TickAnalyzer,
 ): Router {
   const router = Router();
   const pipeline = new ContextGraphPipeline(dkg, config);
@@ -232,6 +234,35 @@ export function createRouter(
       const msg = error instanceof Error ? error.message : 'Verification failed';
       res.status(500).json({ error: msg });
     }
+  });
+
+  // Track a market for automated re-analysis (auth-protected)
+  router.post('/track', auth, (req: Request, res: Response) => {
+    if (!tickAnalyzer) {
+      res.status(503).json({ error: 'Tick analyzer not available' });
+      return;
+    }
+    const { conditionId, odds } = req.body;
+    if (!conditionId || typeof conditionId !== 'string') {
+      res.status(400).json({ error: 'conditionId is required' });
+      return;
+    }
+    const sanitized = sanitizeId(conditionId);
+    if (!sanitized) { res.status(400).json({ error: 'Invalid conditionId' }); return; }
+    tickAnalyzer.trackMarket(sanitized, odds || {});
+    res.json({ tracked: true, conditionId: sanitized });
+  });
+
+  router.post('/untrack', auth, (req: Request, res: Response) => {
+    if (!tickAnalyzer) {
+      res.status(503).json({ error: 'Tick analyzer not available' });
+      return;
+    }
+    const { conditionId } = req.body;
+    const sanitized = sanitizeId(conditionId);
+    if (!sanitized) { res.status(400).json({ error: 'Invalid conditionId' }); return; }
+    tickAnalyzer.untrackMarket(sanitized);
+    res.json({ untracked: true, conditionId: sanitized });
   });
 
   return router;
