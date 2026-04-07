@@ -6,7 +6,6 @@ import { Header, BottomNav } from "@/components/layout";
 import { HeroTicket, type HeroTicketRow } from "@/components/home/HeroTicket";
 import { OnboardingBanner } from "@/components/home/OnboardingBanner";
 import { FeaturedSlider } from "@/components/market";
-import { LeaderboardMini } from "@/components/leaderboard";
 import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
 import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
 import { getMockPlatformStats } from "@/lib/mock-data";
@@ -646,10 +645,6 @@ export default function HomePageClient({
           </section>
 
           <PlatformStatsBar markets={markets} agentCount={liveAgents.length} />
-
-          <section className="border-b border-border px-4 py-4 sm:px-6">
-            <LeaderboardMini title="Top Traders This Week" limit={5} />
-          </section>
 
           <section className="border-b border-border px-4 py-4 sm:px-6">
             <div className="flex flex-wrap gap-3">
