@@ -59,6 +59,12 @@ const swapRouterAbi = parseAbi([
   'function exactInputSingle((address tokenIn, address tokenOut, int24 tickSpacing, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut)',
 ]);
 
+const quoterAbi = parseAbi([
+  'function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, int24 tickSpacing, uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)',
+]);
+
+const AERO_QUOTER = process.env.AERODROME_QUOTER || '0x254cF9E1E6e233aa1AC962CB9B05b2cfeAaE15b0';
+
 const transport = http(RPC_URL, { timeout: 30_000 });
 const chain = { ...base, id: Number(process.env.BASE_CHAIN_ID || 8453) };
 const account = privateKeyToAccount(PRIVATE_KEY);
@@ -120,6 +126,22 @@ async function tick() {
     await publicClient.waitForTransactionReceipt({ hash: approveHash });
   }
 
+  // Get quote for slippage protection
+  const { result: quoteResult } = await publicClient.simulateContract({
+    address: AERO_QUOTER,
+    abi: quoterAbi,
+    functionName: 'quoteExactInputSingle',
+    args: [{
+      tokenIn: USDC,
+      tokenOut: RELAY,
+      amountIn: usdcBalance,
+      tickSpacing: POOL_TICK_SPACING,
+      sqrtPriceLimitX96: BigInt(0),
+    }],
+  });
+  const expectedOut = quoteResult[0];
+  const amountOutMinimum = expectedOut - (expectedOut * BigInt(SLIPPAGE_BPS)) / BigInt(10_000);
+
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 300);
   const swapHash = await walletClient.writeContract({
     address: AERO_SWAP_ROUTER,
@@ -132,7 +154,7 @@ async function tick() {
       recipient: account.address,
       deadline,
       amountIn: usdcBalance,
-      amountOutMinimum: BigInt(0), // first run accepts any output; tighten after pool is known
+      amountOutMinimum,
       sqrtPriceLimitX96: BigInt(0),
     }],
   });
