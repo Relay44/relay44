@@ -34,7 +34,6 @@ const navLinks = [
   },
   { href: "/agents", label: "Agents", note: "Manage market agents" },
   { href: "/identity", label: "Identity", note: "On-chain ERC-8004 agent identity" },
-  { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
   { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
   { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
   { href: "/docs", label: "Docs", note: "Guides, API reference, and developer resources" },
