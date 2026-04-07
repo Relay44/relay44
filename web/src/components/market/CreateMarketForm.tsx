@@ -1262,7 +1262,7 @@ export function CreateMarketForm({
 
             <div className="bg-bg-tertiary p-4">
               <p className="text-sm text-text-secondary">Creation Fee</p>
-              <p className="text-xl font-semibold text-text-primary">0.5 R44</p>
+              <p className="text-xl font-semibold text-text-primary">0.5 RELAY</p>
             </div>
           </div>
         )}

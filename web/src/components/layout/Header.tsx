@@ -25,6 +25,7 @@ const primaryLinks = [
   { href: "/context-graph", label: "Context Graph" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/staking", label: "Staking" },
 ];
 
 function ConnectWalletButton() {
