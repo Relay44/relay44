@@ -3278,6 +3278,7 @@ pub async fn get_base_markets(
                 include_low_liquidity,
                 allow_limitless,
                 allow_polymarket,
+                ..Default::default()
             },
         )
         .await?;
@@ -8269,6 +8270,67 @@ fn unix_to_rfc3339(timestamp: u64) -> String {
         .single()
         .map(|value| value.to_rfc3339())
         .unwrap_or_else(|| Utc::now().to_rfc3339())
+}
+
+// ---- Scanner endpoints ----
+
+#[derive(Deserialize)]
+pub struct ScannedMarketsQuery {
+    pub limit: Option<i64>,
+    #[serde(rename = "opportunityType")]
+    pub opportunity_type: Option<String>,
+}
+
+pub async fn get_scanned_limitless(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ScannedMarketsQuery>,
+) -> Result<impl Responder, ApiError> {
+    if !state.config.evm_enabled || !state.config.evm_reads_enabled {
+        return Err(ApiError::bad_request(
+            "EVM_DISABLED",
+            "EVM services are disabled",
+        ));
+    }
+    let limit = query.limit.unwrap_or(50).min(200);
+    let rows = crate::services::limitless_scanner::list_scanned_markets(
+        &state,
+        query.opportunity_type.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| ApiError::internal(&format!("Scanner query failed: {}", e)))?;
+
+    Ok(web::Json(serde_json::json!({
+        "markets": rows,
+        "count": rows.len(),
+        "provider": "limitless",
+    })))
+}
+
+pub async fn get_scanned_aerodrome(
+    state: web::Data<Arc<AppState>>,
+    query: web::Query<ScannedMarketsQuery>,
+) -> Result<impl Responder, ApiError> {
+    if !state.config.evm_enabled || !state.config.evm_reads_enabled {
+        return Err(ApiError::bad_request(
+            "EVM_DISABLED",
+            "EVM services are disabled",
+        ));
+    }
+    let limit = query.limit.unwrap_or(50).min(200);
+    let rows = crate::services::aerodrome_scanner::list_scanned_pools(
+        &state,
+        query.opportunity_type.as_deref(),
+        limit,
+    )
+    .await
+    .map_err(|e| ApiError::internal(&format!("Scanner query failed: {}", e)))?;
+
+    Ok(web::Json(serde_json::json!({
+        "pools": rows,
+        "count": rows.len(),
+        "provider": "aerodrome",
+    })))
 }
 
 #[cfg(test)]
