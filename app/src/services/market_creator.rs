@@ -166,6 +166,7 @@ async fn find_mirror_candidates(
             include_low_liquidity: false,
             allow_limitless: true,
             allow_polymarket: true,
+            ..Default::default()
         },
     )
     .await

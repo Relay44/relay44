@@ -66,6 +66,7 @@ pub struct ExternalMarketsRequest {
     pub include_low_liquidity: bool,
     pub allow_limitless: bool,
     pub allow_polymarket: bool,
+    pub allow_aerodrome: bool,
 }
 
 impl Default for ExternalMarketsRequest {
@@ -74,6 +75,7 @@ impl Default for ExternalMarketsRequest {
             include_low_liquidity: false,
             allow_limitless: true,
             allow_polymarket: true,
+            allow_aerodrome: true,
         }
     }
 }

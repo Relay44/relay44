@@ -225,9 +225,10 @@ async fn match_cross_venue(
     state: &AppState,
     limitless_markets: &[ExternalMarketSnapshot],
 ) -> i32 {
-    // Load polymarket scanned questions.
-    let poly_rows = match sqlx::query_as::<_, (String, String, Option<String>)>(
-        "SELECT condition_id, question, slug FROM polymarket_scanned_markets WHERE active = TRUE",
+    // Load polymarket scanned questions with end_date epoch for close_time validation.
+    let poly_rows = match sqlx::query_as::<_, (String, String, Option<String>, Option<f64>)>(
+        "SELECT condition_id, question, slug, EXTRACT(EPOCH FROM end_date)::FLOAT8 \
+         FROM polymarket_scanned_markets WHERE active = TRUE",
     )
     .fetch_all(state.db.pool())
     .await
@@ -243,6 +244,8 @@ async fn match_cross_venue(
         return 0;
     }
 
+    const CLOSE_TIME_MAX_DELTA_SECS: u64 = 7 * 24 * 3600; // 7 days
+
     let mut matches = 0i32;
 
     for lm in limitless_markets {
@@ -252,7 +255,7 @@ async fn match_cross_venue(
         };
         let lm_normalized = normalize_question(&lm.question);
 
-        for (poly_condition_id, poly_question, poly_slug) in &poly_rows {
+        for (poly_condition_id, poly_question, poly_slug, poly_end_epoch) in &poly_rows {
             let poly_normalized = normalize_question(poly_question);
 
             // Match if normalized questions are similar enough.
@@ -261,8 +264,25 @@ async fn match_cross_venue(
                 continue;
             }
 
-            // Also check close_time proximity (within 7 days).
-            // Skip close_time check if either is 0.
+            // Check close_time proximity (within 7 days).
+            // Skip check if either is 0/null (perpetual or unknown expiry).
+            let lm_close = lm.close_time;
+            if lm_close > 0 {
+                if let Some(&poly_ts) = poly_end_epoch.as_ref() {
+                    let poly_secs = poly_ts as u64;
+                    if poly_secs > 0 {
+                        let delta = if lm_close > poly_secs {
+                            lm_close - poly_secs
+                        } else {
+                            poly_secs - lm_close
+                        };
+                        if delta > CLOSE_TIME_MAX_DELTA_SECS {
+                            continue;
+                        }
+                    }
+                }
+            }
+
             let market_slug = build_venue_slug(lm_slug, poly_slug.as_deref());
 
             // Upsert Limitless venue link.
