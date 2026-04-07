@@ -26,6 +26,7 @@ pub mod polymarket_scanner;
 pub mod polymarket_ws;
 pub mod portfolio_snapshot;
 pub mod smart_router;
+pub mod staking;
 pub mod websocket;
 pub mod x402;
 pub mod xmtp_swarm;
