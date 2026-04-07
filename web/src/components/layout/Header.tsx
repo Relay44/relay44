@@ -22,7 +22,6 @@ const primaryLinks = [
   { href: "/agents", label: "Swarm" },
   { href: "/identity", label: "Identity" },
   { href: "/insights", label: "Insights" },
-  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/portfolio", label: "Portfolio" },
 ];
 
