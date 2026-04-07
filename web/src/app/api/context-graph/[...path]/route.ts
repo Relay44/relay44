@@ -12,7 +12,9 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path:
   }
 
   const { path } = await params;
-  const target = new URL(`${CONTEXT_GRAPH_URL}/${path.join('/')}`);
+  const base = CONTEXT_GRAPH_URL.replace(/\/$/, '');
+  const upstreamBase = base.endsWith('/api/context-graph') ? base : `${base}/api/context-graph`;
+  const target = new URL(`${upstreamBase}/${path.join('/')}`);
   request.nextUrl.searchParams.forEach((v, k) => target.searchParams.append(k, v));
 
   const method = request.method.toUpperCase();
