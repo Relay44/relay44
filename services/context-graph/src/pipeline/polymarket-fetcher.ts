@@ -45,28 +45,19 @@ export class PolymarketFetcher {
   }
 
   private async fetchBySlug(slug: string): Promise<Omit<MarketContext, 'movementHistory'>> {
-    // Try market slug first
-    const marketRes = await fetch(`${this.gammaApi}/markets?slug=${encodeURIComponent(slug)}&limit=1`);
-    if (marketRes.ok) {
-      const markets: GammaMarketResponse[] = await marketRes.json();
-      if (markets.length) return this.parseGammaMarket(markets[0]);
-    }
+    const res = await fetch(`${this.gammaApi}/events?slug=${encodeURIComponent(slug)}&limit=1`);
+    if (!res.ok) throw new Error(`Gamma API error: ${res.status}`);
 
-    // Fall back to event slug — Polymarket URLs use /event/{eventSlug}
-    const eventRes = await fetch(`${this.gammaApi}/events?slug=${encodeURIComponent(slug)}&limit=1`);
-    if (!eventRes.ok) throw new Error(`Gamma API error: ${eventRes.status}`);
-
-    const events = await eventRes.json();
+    const events = await res.json();
     if (!events.length || !events[0].markets?.length) {
       throw new Error(`No market found for slug: ${slug}`);
     }
 
-    // Pick the most active market from the event
-    const eventMarkets: GammaMarketResponse[] = events[0].markets;
-    const active = eventMarkets.filter((m: GammaMarketResponse) => m.active);
+    const markets: GammaMarketResponse[] = events[0].markets;
+    const active = markets.filter((m: GammaMarketResponse) => m.active);
     const best = active.length ? active.reduce((a: GammaMarketResponse, b: GammaMarketResponse) =>
       parseFloat(b.volume || '0') > parseFloat(a.volume || '0') ? b : a
-    ) : eventMarkets[0];
+    ) : markets[0];
 
     return this.parseGammaMarket(best);
   }
