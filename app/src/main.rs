@@ -33,6 +33,7 @@ pub struct AppState {
     pub ws_hub: WebSocketHub,
     pub event_bus: EventBus,
     pub kyc: services::kyc::KycService,
+    pub limitless_partner: Option<services::limitless_partner::LimitlessPartnerConfig>,
     pub is_shutting_down: Arc<AtomicBool>,
 }
 
@@ -140,6 +141,7 @@ async fn main() -> std::io::Result<()> {
     let event_bus = EventBus::new();
 
     let kyc = services::kyc::KycService::new(services::kyc::KycConfig::from_env());
+    let limitless_partner = services::limitless_partner::LimitlessPartnerConfig::from_config(&config);
 
     let app_state = Arc::new(AppState {
         config: config.clone(),
@@ -153,6 +155,7 @@ async fn main() -> std::io::Result<()> {
         ws_hub,
         event_bus,
         kyc,
+        limitless_partner,
         is_shutting_down: Arc::new(AtomicBool::new(false)),
     });
 
@@ -491,10 +494,6 @@ async fn main() -> std::io::Result<()> {
                             )
                             .route("/deposit", web::post().to(api::wallet::deposit))
                             .route("/withdraw", web::post().to(api::wallet::withdraw)),
-                    )
-                    .route(
-                        "/webhooks/blindfold",
-                        web::post().to(api::wallet::blindfold_webhook),
                     )
                     .service(
                         web::scope("/auth")
@@ -973,6 +972,22 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/agents/{agent_id}/execute",
                                 web::post().to(api::external::execute_external_agent),
+                            )
+                            .route(
+                                "/partner/status",
+                                web::get().to(api::external::get_limitless_partner_status),
+                            )
+                            .route(
+                                "/partner/sub-account",
+                                web::post().to(api::external::create_limitless_sub_account),
+                            )
+                            .route(
+                                "/partner/order",
+                                web::post().to(api::external::place_limitless_delegated_order),
+                            )
+                            .route(
+                                "/partner/order/{order_id}",
+                                web::delete().to(api::external::cancel_limitless_order),
                             ),
                     )
                     .service(

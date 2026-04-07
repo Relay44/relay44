@@ -18,6 +18,7 @@ use crate::api::ApiError;
 use crate::config::{AppConfig, ExternalExecutionMode};
 use crate::services::external;
 use crate::services::external::credentials::{decrypt_json, encrypt_json, mask_secret};
+use crate::services::limitless_partner;
 use crate::services::external::ledger::{self, PerformanceLedgerKind};
 use crate::services::external::paper::{realized_pnl, simulate_fill, unrealized_pnl};
 use crate::services::external::types::{
@@ -13577,6 +13578,77 @@ pub async fn get_calibration_curve(
         .collect();
 
     Ok(HttpResponse::Ok().json(json!({ "provider": "polymarket", "buckets": buckets })))
+}
+
+// ── Limitless Partner API ──
+
+pub async fn get_limitless_partner_status(
+    state: web::Data<Arc<AppState>>,
+) -> Result<impl Responder, ApiError> {
+    Ok(HttpResponse::Ok().json(limitless_partner::partner_status(&state.config)))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSubAccountRequest {
+    pub display_name: String,
+}
+
+pub async fn create_limitless_sub_account(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<CreateSubAccountRequest>,
+) -> Result<impl Responder, ApiError> {
+    let _user = extract_authenticated_user(&req, &state).await?;
+
+    let partner = state
+        .limitless_partner
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request("LIMITLESS_PARTNER_NOT_CONFIGURED", "Partner API credentials not configured"))?;
+
+    let account = limitless_partner::create_sub_account(partner, &body.display_name).await?;
+    Ok(HttpResponse::Ok().json(json!({
+        "profileId": account.profile_id,
+        "account": account.account,
+        "displayName": account.display_name,
+    })))
+}
+
+pub async fn place_limitless_delegated_order(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<limitless_partner::DelegatedOrderRequest>,
+) -> Result<impl Responder, ApiError> {
+    let _user = extract_authenticated_user(&req, &state).await?;
+
+    let partner = state
+        .limitless_partner
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request("LIMITLESS_PARTNER_NOT_CONFIGURED", "Partner API credentials not configured"))?;
+
+    let result = limitless_partner::place_delegated_order(partner, &body).await?;
+    Ok(HttpResponse::Ok().json(json!({
+        "orderId": result.order_id,
+        "status": result.status,
+        "makerMatches": result.maker_matches,
+    })))
+}
+
+pub async fn cancel_limitless_order(
+    req: HttpRequest,
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+) -> Result<impl Responder, ApiError> {
+    let _user = extract_authenticated_user(&req, &state).await?;
+
+    let partner = state
+        .limitless_partner
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request("LIMITLESS_PARTNER_NOT_CONFIGURED", "Partner API credentials not configured"))?;
+
+    let order_id = path.into_inner();
+    limitless_partner::cancel_order(partner, &order_id).await?;
+    Ok(HttpResponse::Ok().json(json!({"cancelled": true, "orderId": order_id})))
 }
 
 #[cfg(test)]
