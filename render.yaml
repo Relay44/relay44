@@ -248,10 +248,26 @@ services:
       - key: CONTEXT_GRAPH_SHARED_SECRET
         generateValue: true
       - key: CONTEXT_GRAPH_DKG_ENABLED
-        value: "false"
+        value: "true"
+      - key: DKG_ENDPOINT
+        sync: false
+      - key: DKG_PRIVATE_KEY
+        sync: false
+      - key: DKG_RPC_URL
+        value: https://mainnet.base.org
+      - key: DKG_BLOCKCHAIN
+        value: "base:8453"
+      - key: CONTEXT_GRAPH_PARANET_UAL
+        sync: false
       - key: CONTEXT_GRAPH_LLM_ENABLED
         value: "true"
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SOCIAL_DATA_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+      - key: GOOGLE_FACTCHECK_API_KEY
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         value: https://relay44.com,https://relay44-web.onrender.com
