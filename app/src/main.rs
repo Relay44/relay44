@@ -671,6 +671,9 @@ async fn main() -> std::io::Result<()> {
                                 web::post().to(api::evm::oracle_keeper_report),
                             )
                             .route("/token/state", web::get().to(api::evm::get_r44_token_state))
+                            // ---- Scanner endpoints ----
+                            .route("/scanner/limitless", web::get().to(api::evm::get_scanned_limitless))
+                            .route("/scanner/aerodrome", web::get().to(api::evm::get_scanned_aerodrome))
                             .service(
                                 web::scope("/write")
                                     .route(
