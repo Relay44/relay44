@@ -1,4 +1,4 @@
-use crate::{api::ApiError, config::AppConfig};
+use crate::{api::ApiError, config::AppConfig, services::evm_rpc::EvmRpcService};
 use actix_web::{HttpRequest, HttpResponseBuilder};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::StatusCode;
@@ -127,12 +127,20 @@ struct X402FacilitatorEnvelope {
     payment_requirements: X402PaymentRequirement,
 }
 
-fn required_amount(config: &AppConfig, resource: X402Resource) -> u64 {
+fn base_amount(config: &AppConfig, resource: X402Resource) -> u64 {
     match resource {
         X402Resource::OrderBook => config.x402_orderbook_price_microusdc,
         X402Resource::Trades => config.x402_trades_price_microusdc,
         X402Resource::McpToolCall => config.x402_mcp_price_microusdc,
     }
+}
+
+fn required_amount(config: &AppConfig, resource: X402Resource) -> u64 {
+    base_amount(config, resource)
+}
+
+fn required_amount_for_tier(config: &AppConfig, resource: X402Resource, tier: u64) -> u64 {
+    super::staking::discounted_amount(base_amount(config, resource), tier)
 }
 
 fn primary_origin(config: &AppConfig) -> String {
@@ -389,13 +397,46 @@ fn build_envelope(
     }
 }
 
+fn extract_staker_address(req: &HttpRequest) -> Option<String> {
+    req.headers()
+        .get("x-relay-address")
+        .or_else(|| req.headers().get("X-Relay-Address"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| s.len() == 42 && s.starts_with("0x"))
+}
+
 pub async fn ensure_payment_for_request(
     config: &AppConfig,
     req: &HttpRequest,
     resource: X402Resource,
 ) -> Result<Option<X402SettleResponse>, ApiError> {
+    ensure_payment_for_request_with_rpc(config, req, resource, None).await
+}
+
+pub async fn ensure_payment_for_request_with_rpc(
+    config: &AppConfig,
+    req: &HttpRequest,
+    resource: X402Resource,
+    rpc: Option<&EvmRpcService>,
+) -> Result<Option<X402SettleResponse>, ApiError> {
     if !config.x402_enabled {
         return Ok(None);
+    }
+
+    // Check staking tier for fee reduction/bypass
+    if let (Some(rpc), Some(staker)) = (rpc, extract_staker_address(req)) {
+        let tier = super::staking::get_staking_tier(
+            rpc,
+            &config.relay_staking_address,
+            &staker,
+        )
+        .await
+        .unwrap_or(0);
+
+        if tier >= 2 {
+            return Ok(None); // tier 2+ gets free access
+        }
     }
 
     let resource_url = resource_url_from_request(config, req);

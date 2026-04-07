@@ -4936,7 +4936,7 @@ pub async fn get_base_orderbook(
         ));
     }
     let settlement =
-        x402::ensure_payment_for_request(&state.config, &req, X402Resource::OrderBook).await?;
+        x402::ensure_payment_for_request_with_rpc(&state.config, &req, X402Resource::OrderBook, Some(&state.evm_rpc)).await?;
 
     let market_id_raw = path.into_inner();
     let outcome = match query.outcome.as_deref().unwrap_or("yes") {
@@ -5244,7 +5244,7 @@ pub async fn get_base_trades(
         ));
     }
     let settlement =
-        x402::ensure_payment_for_request(&state.config, &req, X402Resource::Trades).await?;
+        x402::ensure_payment_for_request_with_rpc(&state.config, &req, X402Resource::Trades, Some(&state.evm_rpc)).await?;
 
     let market_id_raw = path.into_inner();
     let limit = query.limit.unwrap_or(50).min(MAX_TRADES_PAGE_SIZE);

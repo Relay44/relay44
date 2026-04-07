@@ -16,7 +16,10 @@ use crate::api::jwt::{check_role, UserRole};
 use crate::api::notifications::{create_notification, NewNotification, NotificationType};
 use crate::api::ApiError;
 use crate::services::external::{self, types::ExternalMarketId};
+use crate::services::staking;
 use crate::AppState;
+
+const MIN_TIER_FOR_AUTOMATION: u64 = 1;
 
 const MAX_PAGE_SIZE: i64 = 100;
 const RECOMMENDATION_LEAD_THRESHOLD_BPS: i32 = 750;
@@ -2879,6 +2882,21 @@ pub async fn attach_agent_to_decision_node(
     body: web::Json<AttachDecisionAgentRequest>,
 ) -> Result<impl Responder, ApiError> {
     let user = extract_authenticated_user(&req, &state).await?;
+
+    let tier = staking::get_staking_tier(
+        &state.evm_rpc,
+        &state.config.relay_staking_address,
+        &user.wallet_address,
+    )
+    .await
+    .unwrap_or(0);
+
+    if tier < MIN_TIER_FOR_AUTOMATION {
+        return Err(ApiError::forbidden(
+            "Stake $RELAY (Silver tier or above) to attach agents to decision cells",
+        ));
+    }
+
     let (cell_id, node_id) = path.into_inner();
     load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
 
@@ -2951,6 +2969,23 @@ pub async fn update_decision_automation(
     body: web::Json<UpdateDecisionAutomationRequest>,
 ) -> Result<impl Responder, ApiError> {
     let user = extract_authenticated_user(&req, &state).await?;
+
+    if body.automation_enabled == Some(true) {
+        let tier = staking::get_staking_tier(
+            &state.evm_rpc,
+            &state.config.relay_staking_address,
+            &user.wallet_address,
+        )
+        .await
+        .unwrap_or(0);
+
+        if tier < MIN_TIER_FOR_AUTOMATION {
+            return Err(ApiError::forbidden(
+                "Stake $RELAY (Silver tier or above) to enable decision cell automation",
+            ));
+        }
+    }
+
     let cell_id = path.into_inner();
     let graph = load_cell_graph(&state, cell_id.as_str(), user.wallet_address.as_str()).await?;
 
