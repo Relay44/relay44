@@ -330,20 +330,26 @@ async fn load_active_mirror_links(
 }
 
 async fn update_mirror_error(state: &AppState, link_id: i32, error: &str) {
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE mirror_market_links SET mirror_error = $1, updated_at = NOW() WHERE id = $2",
     )
     .bind(error)
     .bind(link_id)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to update mirror error for link {}: {}", link_id, e);
+    }
 }
 
 async fn clear_mirror_error(state: &AppState, link_id: i32) {
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         "UPDATE mirror_market_links SET mirror_error = NULL, last_mirror_at = NOW(), updated_at = NOW() WHERE id = $1",
     )
     .bind(link_id)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to clear mirror error for link {}: {}", link_id, e);
+    }
 }

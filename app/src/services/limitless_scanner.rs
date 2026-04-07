@@ -270,7 +270,7 @@ async fn match_cross_venue(
                 state,
                 &market_slug,
                 "limitless",
-                &format!("limitless:{}", lm_slug),
+                lm_slug,
                 0, // Limitless maker fee = 0
             )
             .await
@@ -284,7 +284,7 @@ async fn match_cross_venue(
                 state,
                 &market_slug,
                 "polymarket",
-                &format!("polymarket:{}", poly_condition_id),
+                poly_condition_id,
                 0, // Polymarket maker fee = 0
             )
             .await
@@ -450,7 +450,7 @@ async fn record_scan_run(
     venue_matches: i32,
     error: Option<&str>,
 ) {
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         r#"
         INSERT INTO limitless_scanner_runs
             (markets_scanned, markets_indexed, opportunities_found, venue_matches_found, completed_at, error)
@@ -463,7 +463,10 @@ async fn record_scan_run(
     .bind(venue_matches)
     .bind(error)
     .execute(state.db.pool())
-    .await;
+    .await
+    {
+        warn!("Failed to record limitless scan run: {}", e);
+    }
 }
 
 // ── Public API for querying scanned markets ──
