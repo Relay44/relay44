@@ -22,7 +22,7 @@ function resolveDataDir(dataDir: string): string {
     return dataDir;
   } catch (error) {
     const err = error as NodeJS.ErrnoException;
-    if (err.code !== 'EACCES') {
+    if (err.code !== 'EACCES' && err.code !== 'EPERM') {
       throw err;
     }
 
