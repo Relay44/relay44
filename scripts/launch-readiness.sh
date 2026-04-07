@@ -90,8 +90,11 @@ fi
 
 if ((REQUIRE_DX_SNAPSHOT)); then
   echo "==> dx snapshot requirement requested"
-  if command -v npm >/dev/null 2>&1; then
-    npm run dx:snapshot
+  if [[ -x scripts/dx-terminal-pro.sh ]]; then
+    bash scripts/dx-terminal-pro.sh snapshot
+  else
+    echo "dx snapshot helper is unavailable in this repository snapshot" >&2
+    exit 1
   fi
 fi
 
