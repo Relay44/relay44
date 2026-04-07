@@ -3280,19 +3280,29 @@ class ApiClient {
     metric: LeaderboardMetric = "pnl",
     limit = 100,
   ): Promise<Leaderboard> {
+    const MIN_REAL_ENTRIES = 10;
     try {
       const result = await this.request<Leaderboard>(
         `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
       );
-      if (result.entries?.length > 0) return result;
-      // Backend returned empty — use mock data until real trades exist
+      if (result.entries?.length >= MIN_REAL_ENTRIES) return result;
+      // Not enough real data yet — backfill with mock entries
       const { getMockLeaderboard } = await import("./mock-data");
-      console.warn("[relay44] Leaderboard empty, using mock data");
-      return getMockLeaderboard(period, metric, limit);
+      const mock = getMockLeaderboard(period, metric, limit);
+      if (!result.entries?.length) return mock;
+      // Merge: real entries take top ranks, mock fills the rest
+      const realWallets = new Set(
+        result.entries.map((e) => e.wallet.toLowerCase()),
+      );
+      const backfill = mock.entries.filter(
+        (e) => !realWallets.has(e.wallet.toLowerCase()),
+      );
+      const merged = [...result.entries, ...backfill].slice(0, limit);
+      merged.forEach((e, i) => (e.rank = i + 1));
+      return { ...mock, entries: merged, updatedAt: result.updatedAt ?? mock.updatedAt };
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         const { getMockLeaderboard } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /leaderboard");
         return getMockLeaderboard(period, metric, limit);
       }
       throw err;
