@@ -2,7 +2,7 @@
 pragma solidity 0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {R44Token} from "../src/R44Token.sol";
+import {RelayToken} from "../src/RelayToken.sol";
 import {MarketCore} from "../src/MarketCore.sol";
 import {OrderBook} from "../src/OrderBook.sol";
 import {CollateralVault} from "../src/CollateralVault.sol";
@@ -12,19 +12,19 @@ import {AgentReputationRegistry} from "../src/AgentReputationRegistry.sol";
 import {ERC8004IdentityRegistry} from "../src/ERC8004IdentityRegistry.sol";
 import {ERC8004ReputationRegistry} from "../src/ERC8004ReputationRegistry.sol";
 import {ERC8004ValidationRegistry} from "../src/ERC8004ValidationRegistry.sol";
-import {R44Staking} from "../src/R44Staking.sol";
+import {RelayStaking} from "../src/RelayStaking.sol";
 import {RewardDistributor} from "../src/RewardDistributor.sol";
 
 contract DeployCoreScript is Script {
     function run() external {
         address admin = vm.envAddress("BASE_ADMIN");
         address treasury = vm.envAddress("BASE_TREASURY");
-        uint256 cap = vm.envUint("R44_CAP_WEI");
-        uint256 initialSupply = vm.envUint("R44_INITIAL_SUPPLY_WEI");
+        uint256 cap = vm.envUint("RELAY_CAP_WEI");
+        uint256 initialSupply = vm.envUint("RELAY_INITIAL_SUPPLY_WEI");
 
         vm.startBroadcast();
 
-        R44Token token = new R44Token("Relay44", "R44", cap, admin, treasury, initialSupply);
+        RelayToken token = new RelayToken("Relay", "RELAY", cap, admin, treasury, initialSupply);
         address tokenAddr = address(token);
 
         MarketCore marketCore = new MarketCore(admin);
@@ -46,7 +46,7 @@ contract DeployCoreScript is Script {
 
         vm.stopBroadcast();
 
-        console2.log("R44Token:", tokenAddr);
+        console2.log("RelayToken:", tokenAddr);
         console2.log("MarketCore:", address(marketCore));
         console2.log("CollateralVault:", address(collateralVault));
         console2.log("OrderBook:", address(orderBook));
@@ -83,17 +83,17 @@ contract DeployCoreScript is Script {
         address marketCoreAddr,
         address orderBookAddr
     ) internal {
-        R44Staking staking = new R44Staking(admin, tokenAddr);
+        RelayStaking staking = new RelayStaking(admin, tokenAddr);
         uint256 epochDuration = vm.envOr("EPOCH_DURATION", uint256(7 days));
         RewardDistributor distributor = new RewardDistributor(admin, tokenAddr, treasury, epochDuration);
 
-        R44Token(tokenAddr).grantRole(R44Token(tokenAddr).BURNER_ROLE(), agentRuntimeAddr);
-        AgentRuntime(agentRuntimeAddr).setR44Token(tokenAddr);
-        MarketCore(marketCoreAddr).setR44Token(tokenAddr);
+        RelayToken(tokenAddr).grantRole(RelayToken(tokenAddr).BURNER_ROLE(), agentRuntimeAddr);
+        AgentRuntime(agentRuntimeAddr).setRelayToken(tokenAddr);
+        MarketCore(marketCoreAddr).setRelayToken(tokenAddr);
         staking.grantRole(staking.DISTRIBUTOR_ROLE(), address(distributor));
         distributor.setStakingPool(address(staking));
 
-        console2.log("R44Staking:", address(staking));
+        console2.log("RelayStaking:", address(staking));
         console2.log("RewardDistributor:", address(distributor));
     }
 }

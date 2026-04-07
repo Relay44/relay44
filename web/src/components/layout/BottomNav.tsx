@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, TrendingUp, Briefcase, Bot, GitBranch, Trophy } from 'lucide-react';
+import { Home, TrendingUp, Bot, GitBranch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -10,7 +10,6 @@ const navItems = [
   { href: '/markets', label: 'Markets', icon: TrendingUp },
   { href: '/decisions', label: 'Decisions', icon: GitBranch },
   { href: '/agents', label: 'Agents', icon: Bot },
-  { href: '/hackathon', label: 'Hackathon', icon: Trophy },
 ];
 
 export function BottomNav() {
@@ -18,7 +17,7 @@ export function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-sticky glass border-t border-border md:hidden safe-area-inset">
-      <div className="flex items-center justify-around h-16">
+      <div className="flex h-14 items-center justify-around">
         {navItems.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href || (href !== '/' && pathname.startsWith(href));
           return (
@@ -26,7 +25,7 @@ export function BottomNav() {
               key={href}
               href={href}
               className={cn(
-                'flex flex-col items-center justify-center w-full h-full gap-1',
+                'flex h-full w-full flex-col items-center justify-center gap-0.5',
                 'transition-all duration-fast',
                 isActive
                   ? 'text-accent'
@@ -40,7 +39,7 @@ export function BottomNav() {
                 )}
               />
               <span className={cn(
-                'text-xs',
+                'text-xs leading-none',
                 isActive ? 'font-medium' : 'font-normal'
               )}>
                 {label}
