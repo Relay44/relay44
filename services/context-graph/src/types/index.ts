@@ -25,6 +25,7 @@ export interface DKGClientConfig {
 }
 
 export interface ServiceConfig {
+  host: string;
   port: number;
   dataDir: string;
   sharedSecret?: string;

@@ -81,12 +81,14 @@ export function validateConfig(config: ServiceConfig): void {
 }
 
 export function loadConfig(): ServiceConfig {
-  const port = parseInt(process.env.CONTEXT_GRAPH_PORT || '3010', 10);
+  const rawPort = process.env.PORT || process.env.CONTEXT_GRAPH_PORT || '3010';
+  const port = parseInt(rawPort, 10);
   if (!Number.isFinite(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid CONTEXT_GRAPH_PORT: ${process.env.CONTEXT_GRAPH_PORT}`);
+    throw new Error(`Invalid CONTEXT_GRAPH_PORT/PORT: ${rawPort}`);
   }
 
   return {
+    host: firstNonEmpty(['HOST', 'CONTEXT_GRAPH_HOST']) || '0.0.0.0',
     port,
     dataDir: process.env.CONTEXT_GRAPH_DATA_DIR || './data',
     sharedSecret: firstNonEmpty(['CONTEXT_GRAPH_SHARED_SECRET', 'SHARED_SECRET']),
