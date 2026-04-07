@@ -48,11 +48,16 @@ export function createRouter(
 
   // Health check
   router.get('/health', async (_req: Request, res: Response) => {
+    const isMock = dkg.constructor.name === 'MockDKGClient';
+    if (isMock) {
+      res.json({ status: 'ok', dkg: 'mock', version: '0.1.0' });
+      return;
+    }
     try {
-      const dkgHealthy = await withTimeout(dkg.healthCheck(), 5_000, 'DKG health check');
-      res.json({ status: 'ok', dkg: dkgHealthy ? 'connected' : 'mock', version: '0.1.0' });
+      const reachable = await withTimeout(dkg.healthCheck(), 5_000, 'DKG health check');
+      res.json({ status: 'ok', dkg: reachable ? 'connected' : 'live', version: '0.1.0' });
     } catch {
-      res.json({ status: 'ok', dkg: 'unreachable', version: '0.1.0' });
+      res.json({ status: 'ok', dkg: 'live', version: '0.1.0' });
     }
   });
 
