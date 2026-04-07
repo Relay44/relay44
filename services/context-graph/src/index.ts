@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { mkdirSync } from 'fs';
 import { join } from 'path';
 import { loadConfig, validateConfig } from './config.js';
 import { createDKGClient } from './dkg/client.js';
@@ -14,6 +15,25 @@ process.on('uncaughtException', (err) => {
   console.error('[context-graph] Uncaught exception:', err);
   process.exit(1);
 });
+
+function resolveDataDir(dataDir: string): string {
+  try {
+    mkdirSync(dataDir, { recursive: true });
+    return dataDir;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== 'EACCES') {
+      throw err;
+    }
+
+    const fallback = '/tmp/context-graph';
+    console.warn(
+      `[context-graph] Data dir ${dataDir} is not writable, falling back to ${fallback}`,
+    );
+    mkdirSync(fallback, { recursive: true });
+    return fallback;
+  }
+}
 
 async function main() {
   const config = loadConfig();
@@ -45,7 +65,8 @@ async function main() {
     },
   );
 
-  const dbPath = join(config.dataDir, 'context-graph.db');
+  const dataDir = resolveDataDir(config.dataDir);
+  const dbPath = join(dataDir, 'context-graph.db');
   const db = initDatabase(dbPath);
   console.log(`[context-graph] Database: ${dbPath}`);
 
