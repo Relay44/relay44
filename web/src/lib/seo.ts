@@ -160,7 +160,7 @@ export function buildOrganizationStructuredData(): StructuredDataNode {
     url: SITE_URL,
     logo: absoluteUrl('/relay44.svg'),
     image: absoluteUrl(SITE_IMAGE_PATH),
-    sameAs: ['https://x.com/relay44'],
+    sameAs: ['https://x.com/Relay44BASE'],
   };
 }
 
