@@ -421,7 +421,7 @@ async fn record_scan_run(
     error: Option<String>,
 ) {
     let pool = state.db.pool();
-    let _ = sqlx::query(
+    if let Err(e) = sqlx::query(
         r#"
         INSERT INTO polymarket_scanner_runs
             (markets_scanned, opportunities_found, longshots_found,
@@ -436,7 +436,10 @@ async fn record_scan_run(
     .bind(spreads)
     .bind(error)
     .execute(pool)
-    .await;
+    .await
+    {
+        warn!("Failed to record polymarket scan run: {}", e);
+    }
 }
 
 // ── Public API ──
