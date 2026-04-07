@@ -18,7 +18,8 @@
     "pino-pretty": "^13.0.0",
     "dotenv": "^16.4.7",
     "crypto-js": "^4.2.0",
-    "@anthropic-ai/sdk": "^0.39.0"
+    "@anthropic-ai/sdk": "^0.39.0",
+    "rollup": "^4.60.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
