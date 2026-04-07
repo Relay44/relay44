@@ -30,7 +30,7 @@ jobs:
       DATABASE_URL: postgres://relay44:relay44@localhost:5432/relay44_test
       REDIS_URL: redis://localhost:6379
       JWT_SECRET: launch-readiness-static-secret-32-bytes-minimum
-      BLINDFOLD_WEBHOOK_SECRET: launch-readiness-blindfold-secret
+      RELAY_WEBHOOK_SECRET: launch-readiness-relay-webhook-secret
       EVM_ENABLED: "true"
       EVM_READS_ENABLED: "true"
       EVM_WRITES_ENABLED: "true"
