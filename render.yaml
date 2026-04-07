@@ -27,6 +27,8 @@ services:
         value: "8080"
       - key: JWT_SECRET
         generateValue: true
+      - key: RELAY_WEBHOOK_SECRET
+        sync: false
       - key: EXTERNAL_MARKETS_ENABLED
         value: "true"
       - key: EXTERNAL_TRADING_ENABLED
