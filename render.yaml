@@ -677,6 +677,22 @@ services:
       - key: NODE_ENV
         value: production
 
+  - type: cron
+    name: relay44-public-mirror
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "0 * * * *"
+    buildCommand: npm ci
+    startCommand: bash scripts/mirror-public-cron.sh
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: PUBLIC_MIRROR_TOKEN
+        sync: false
+      - key: NODE_ENV
+        value: production
+
 databases:
   - name: relay44-db
     plan: starter
