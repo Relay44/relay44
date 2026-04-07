@@ -2,12 +2,14 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import type { DKGClientInterface } from './dkg/client.js';
 import type { ServiceConfig } from './types/index.js';
 import { createRouter } from './api/routes.js';
+import type { TickAnalyzer } from './workers/tick-analyzer.js';
 import type Database from 'better-sqlite3';
 
 export function createServer(
   dkg: DKGClientInterface,
   db: Database.Database,
   config: ServiceConfig,
+  tickAnalyzer?: TickAnalyzer,
 ): express.Application {
   const app = express();
 
@@ -54,7 +56,7 @@ export function createServer(
   });
 
   // Mount API routes
-  app.use('/api/context-graph', createRouter(dkg, db, config));
+  app.use('/api/context-graph', createRouter(dkg, db, config, tickAnalyzer));
 
   // 404 handler
   app.use((_req: Request, res: Response) => {

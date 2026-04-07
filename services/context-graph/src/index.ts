@@ -4,6 +4,7 @@ import { loadConfig, validateConfig } from './config.js';
 import { createDKGClient } from './dkg/client.js';
 import { initDatabase } from './db/schema.js';
 import { createServer } from './server.js';
+import { TickAnalyzer } from './workers/tick-analyzer.js';
 
 process.on('unhandledRejection', (reason) => {
   console.error('[context-graph] Unhandled rejection:', reason);
@@ -48,10 +49,12 @@ async function main() {
   const db = initDatabase(dbPath);
   console.log(`[context-graph] Database: ${dbPath}`);
 
-  const app = createServer(dkg, db, config);
+  const tickAnalyzer = new TickAnalyzer(dkg, db, config);
+  const app = createServer(dkg, db, config, tickAnalyzer);
 
   const server = app.listen(config.port, config.host, () => {
     console.log(`[context-graph] Relay44 Context Graph Service running on ${config.host}:${config.port}`);
+    tickAnalyzer.start();
   });
 
   let shuttingDown = false;
@@ -59,6 +62,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`[context-graph] ${signal} received, shutting down...`);
+    tickAnalyzer.stop();
 
     server.close(() => {
       console.log('[context-graph] HTTP server closed');
