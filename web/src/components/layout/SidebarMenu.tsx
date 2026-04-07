@@ -34,6 +34,7 @@ const navLinks = [
   },
   { href: "/agents", label: "Agents", note: "Manage market agents" },
   { href: "/identity", label: "Identity", note: "On-chain ERC-8004 agent identity" },
+  { href: "/context-graph", label: "Context Graph", note: "Misinformation detection via OriginTrail DKG" },
   { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
   { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
   { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
