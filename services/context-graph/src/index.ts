@@ -19,6 +19,7 @@ async function main() {
   validateConfig(config);
 
   console.log('[context-graph] Starting Relay44 Context Graph Service');
+  console.log(`[context-graph] Host: ${config.host}`);
   console.log(`[context-graph] Port: ${config.port}`);
   console.log(`[context-graph] DKG: ${config.features.dkgEnabled ? config.dkg.endpoint || 'mock' : 'disabled'}`);
   console.log(`[context-graph] LLM: ${config.features.llmEnabled ? config.llm.model : 'disabled'}`);
@@ -49,8 +50,8 @@ async function main() {
 
   const app = createServer(dkg, db, config);
 
-  const server = app.listen(config.port, () => {
-    console.log(`[context-graph] Relay44 Context Graph Service running on :${config.port}`);
+  const server = app.listen(config.port, config.host, () => {
+    console.log(`[context-graph] Relay44 Context Graph Service running on ${config.host}:${config.port}`);
   });
 
   let shuttingDown = false;

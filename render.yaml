@@ -237,6 +237,10 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
+      - key: CONTEXT_GRAPH_HOST
+        value: 0.0.0.0
       - key: CONTEXT_GRAPH_PORT
         value: "3010"
       - key: CONTEXT_GRAPH_DATA_DIR
