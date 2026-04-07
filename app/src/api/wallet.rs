@@ -74,7 +74,6 @@ pub struct DepositRequest {
 #[serde(rename_all = "snake_case")]
 pub enum DepositSource {
     Wallet,
-    Blindfold,
     Jupiter,
 }
 
@@ -580,53 +579,6 @@ pub async fn withdraw(
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct BlindpayWebhook {
-    pub event: String,
-    pub payment_id: String,
-    pub amount: u64,
-    pub wallet_address: String,
-    pub signature: String,
-}
-
-pub async fn blindfold_webhook(
-    state: web::Data<Arc<AppState>>,
-    body: web::Json<BlindpayWebhook>,
-) -> Result<impl Responder, ApiError> {
-    ensure_wallet_write_mode(&state)?;
-
-    let expected_sig = compute_blindfold_signature(&body, &state.config.relay_webhook_secret);
-    if body.signature != expected_sig {
-        return Err(ApiError::unauthorized("Invalid webhook signature"));
-    }
-
-    let wallet = body.wallet_address.to_ascii_lowercase();
-
-    match body.event.as_str() {
-        "payment.completed" => {
-            let tx_id = Uuid::new_v4().to_string();
-            record_transaction(
-                &state,
-                &tx_id,
-                &wallet,
-                TransactionType::Deposit,
-                body.amount,
-                None,
-                0,
-                Some(body.payment_id.clone()),
-                "confirmed",
-            )
-            .await?;
-        }
-        "payment.failed" => {
-            update_transaction_status(&state, &body.payment_id, "failed").await?;
-        }
-        _ => {}
-    }
-
-    Ok(HttpResponse::Ok().json(serde_json::json!({"received": true})))
-}
-
 async fn get_locked_balance(state: &AppState, wallet: &str) -> Result<u64, ApiError> {
     let (orders, _) = state
         .db
@@ -824,17 +776,6 @@ async fn ensure_tx_signature_unused(state: &AppState, tx_signature: &str) -> Res
         ));
     }
     Ok(())
-}
-
-fn compute_blindfold_signature(webhook: &BlindpayWebhook, secret: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let payload = format!(
-        "{}{}{}{}",
-        webhook.event, webhook.payment_id, webhook.amount, secret
-    );
-    let mut hasher = Sha256::new();
-    hasher.update(payload.as_bytes());
-    hex::encode(hasher.finalize())
 }
 
 async fn get_vault_balances(
