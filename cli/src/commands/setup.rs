@@ -95,14 +95,50 @@ pub async fn run(config: Arc<Mutex<Config>>, profile_name: &str, api_url: &str) 
 
     println!("4/4 shell completions");
     let shell = std::env::var("SHELL").unwrap_or_default();
-    if shell.contains("zsh") {
-        output::dimmed("  r44 completions zsh > ~/.zfunc/_r44");
+    let (shell_name, install_path, install_hint) = if shell.contains("zsh") {
+        ("zsh", Some(dirs::home_dir().map(|h| h.join(".zfunc/_r44"))), "r44 completions zsh > ~/.zfunc/_r44")
     } else if shell.contains("bash") {
-        output::dimmed("  r44 completions bash >> ~/.bashrc");
+        let target = dirs::home_dir().map(|h| h.join(".local/share/bash-completion/completions/r44"));
+        ("bash", Some(target), "r44 completions bash > ~/.local/share/bash-completion/completions/r44")
     } else if shell.contains("fish") {
-        output::dimmed("  r44 completions fish > ~/.config/fish/completions/r44.fish");
+        let target = dirs::config_dir().map(|c| c.join("fish/completions/r44.fish"));
+        ("fish", Some(target), "r44 completions fish > ~/.config/fish/completions/r44.fish")
     } else {
-        output::dimmed("  r44 completions <bash|zsh|fish>");
+        ("", None, "r44 completions <bash|zsh|fish>")
+    };
+
+    let installed = if let Some(Some(target)) = install_path {
+        let choice = prompt(&format!("Install {shell_name} completions? [Y/n]: "))?;
+        if choice.trim().is_empty() || choice.trim().eq_ignore_ascii_case("y") {
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            let comp_output = std::process::Command::new(std::env::current_exe()?)
+                .args(["completions", shell_name])
+                .output();
+            match comp_output {
+                Ok(result) if result.status.success() => {
+                    std::fs::write(&target, &result.stdout)?;
+                    output::success(&format!("completions installed → {}", target.display()));
+                    true
+                }
+                _ => {
+                    output::warn("could not generate completions, install manually:");
+                    output::dimmed(&format!("  {install_hint}"));
+                    false
+                }
+            }
+        } else {
+            output::dimmed(&format!("  {install_hint}"));
+            false
+        }
+    } else {
+        output::dimmed(&format!("  {install_hint}"));
+        false
+    };
+
+    if installed && shell.contains("zsh") {
+        output::dimmed("  ensure ~/.zfunc is in your fpath (add: fpath=(~/.zfunc $fpath) to .zshrc)");
     }
     println!();
 

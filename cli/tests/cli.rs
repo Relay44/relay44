@@ -197,6 +197,342 @@ fn completions_fish() {
 }
 
 #[test]
+fn profile_show_json() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": {
+              "api_url": "https://relay44-api.onrender.com/v1",
+              "access_token": "tok-secret"
+            }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "profile", "show"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"active\": true"));
+    assert!(stdout.contains("\"authenticated\": true"));
+    assert!(!stdout.contains("tok-secret"), "token must not leak into show output");
+}
+
+#[test]
+fn profile_use_switches_active() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://default.example.com/v1" },
+            "staging": { "api_url": "https://staging.example.com/v1" }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["profile", "use", "staging"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+
+    let verify = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "profile", "list"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&verify.stdout);
+    assert!(stdout.contains("\"active\": \"staging\""));
+}
+
+#[test]
+fn profile_use_nonexistent_fails() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["profile", "use", "ghost"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    assert_eq!(out.status.code(), Some(6));
+}
+
+#[test]
+fn config_show_json() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          },
+          "workflows": {
+            "check": { "steps": ["markets list"] }
+          },
+          "hooks": [
+            { "command": "orders place", "run": "echo hook", "stage": "pre", "enabled": true }
+          ]
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "config", "show"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"workflows\": 1"));
+    assert!(stdout.contains("\"hooks\": 1"));
+}
+
+#[test]
+fn config_set_url_persists() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://old.example.com/v1" }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["config", "set-url", "https://new.example.com/v1"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+
+    let verify = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "config", "show"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&verify.stdout);
+    assert!(stdout.contains("https://new.example.com/v1"));
+}
+
+#[test]
+fn config_reset_with_yes_flag() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "custom",
+          "profiles": {
+            "custom": { "api_url": "https://custom.example.com/v1" }
+          },
+          "workflows": { "w1": { "steps": ["markets list"] } }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["config", "reset", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+
+    let verify = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "config", "show"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&verify.stdout);
+    assert!(stdout.contains("\"workflows\": 0"));
+}
+
+#[test]
+fn config_path_prints_path() {
+    let out = r44().args(["config", "path"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("config.json"));
+}
+
+#[test]
+fn workflow_list_shows_workflows() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          },
+          "workflows": {
+            "snapshot": {
+              "description": "market snapshot",
+              "steps": ["markets list --limit 5", "leaderboard top"]
+            }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["--output", "json", "workflow", "list"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("snapshot"));
+    assert!(stdout.contains("market snapshot"));
+}
+
+#[test]
+fn workflow_run_dry_run() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          },
+          "workflows": {
+            "peek": {
+              "steps": ["markets get {{1}}"]
+            }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["workflow", "run", "peek", "--dry-run", "market-42"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("market-42"));
+}
+
+#[test]
+fn workflow_validate_rejects_nested_workflow() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          },
+          "workflows": {
+            "bad": {
+              "steps": ["workflow run bad"]
+            }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["workflow", "validate", "bad"])
+        .output()
+        .unwrap();
+
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("nested"), "expected nested workflow error in: {stderr}");
+}
+
+#[test]
+fn env_var_output_format_override() {
+    let (_dir, config_root) = config_env();
+    write_config(
+        &config_root,
+        r#"{
+          "active_profile": "default",
+          "profiles": {
+            "default": { "api_url": "https://relay44-api.onrender.com/v1" }
+          }
+        }"#,
+    );
+
+    let out = r44()
+        .env("HOME", &config_root)
+        .env("XDG_CONFIG_HOME", &config_root)
+        .env("R44_OUTPUT", "json")
+        .args(["config", "show"])
+        .output()
+        .unwrap();
+
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"activeProfile\""), "R44_OUTPUT=json should produce JSON output");
+}
+
+#[test]
+fn quiet_flag_suppresses_output() {
+    let out = r44().args(["--quiet", "--help"]).output().unwrap();
+    assert!(out.status.success());
+}
+
+#[test]
+fn subcommand_help_flags() {
+    for cmd in ["markets", "orders", "positions", "agents", "wallet", "config", "profile", "workflow", "session"] {
+        let out = r44().args([cmd, "--help"]).output().unwrap();
+        assert!(out.status.success(), "{cmd} --help failed");
+    }
+}
+
+#[test]
+fn edge_scanner_help() {
+    let out = r44().args(["edge-scanner", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("signals"));
+    assert!(stdout.contains("curve"));
+}
+
+#[test]
 fn new_commands_appear_in_help() {
     let out = r44().arg("--help").output().unwrap();
     assert!(out.status.success());
