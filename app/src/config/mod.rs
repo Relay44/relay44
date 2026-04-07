@@ -99,6 +99,7 @@ pub struct AppConfig {
     pub erc8004_identity_registry_address: String,
     pub erc8004_reputation_registry_address: String,
     pub erc8004_validation_registry_address: String,
+    pub relay_staking_address: String,
     pub x402_enabled: bool,
     pub x402_signing_key: String,
     pub x402_receiver_address: String,
@@ -485,6 +486,8 @@ impl AppConfig {
             erc8004_reputation_registry_address: env::var("ERC8004_REPUTATION_REGISTRY_ADDRESS")
                 .unwrap_or_else(|_| "".to_string()),
             erc8004_validation_registry_address: env::var("ERC8004_VALIDATION_REGISTRY_ADDRESS")
+                .unwrap_or_else(|_| "".to_string()),
+            relay_staking_address: env::var("RELAY_STAKING_ADDRESS")
                 .unwrap_or_else(|_| "".to_string()),
             x402_enabled,
             x402_signing_key,

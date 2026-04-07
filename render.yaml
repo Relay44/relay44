@@ -694,6 +694,24 @@ services:
         value: production
 
   - type: cron
+    name: relay44-fee-pipeline
+    runtime: node
+    region: singapore
+    plan: starter
+    schedule: "30 */6 * * *"
+    buildCommand: npm ci
+    startCommand: node scripts/fee-pipeline-tick.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: BASE_RPC_URL
+        sync: false
+      - key: FEE_PIPELINE_PRIVATE_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
+
+  - type: cron
     name: relay44-reward-keeper
     runtime: node
     region: singapore
