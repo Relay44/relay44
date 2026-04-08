@@ -18,6 +18,9 @@
     "x402"
   ],
   "author": "Relay44 <hello@relay44.com>",
+  "contributors": [
+    "Mizuki Hayashi"
+  ],
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
