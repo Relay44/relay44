@@ -129,7 +129,7 @@ for p in "${paths[@]}"; do
 
   if [[ "$p" == edge/* ]]; then
     if ! is_allowed_edge_path "$p"; then
-      violations+=("$p :: closed-edge runtime code must stay private")
+      violations+=("$p :: private edge runtime code must not be tracked")
       continue
     fi
   fi
