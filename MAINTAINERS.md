@@ -1,52 +1,50 @@
 # Maintainers
 
-Relay44 uses role aliases rather than publishing individual maintainer identities in the repository metadata.
+Relay44 uses role aliases rather than publishing individual maintainer identities in the repository.
 
 ## Contact Roles
 
-| Alias | Responsibility | Typical use |
+| Alias | Responsibility | Use |
 | --- | --- | --- |
-| `support@relay44.com` | maintainer queue | issue triage, contributor questions, general review routing |
-| `security@relay44.com` | security response | vulnerability intake, security-sensitive review, coordinated disclosure |
-| `hello@relay44.com` | release and governance | release notes, publication, policy, and administrative escalation |
+| `support@relay44.com` | Maintainer queue | Issue triage, contributor questions, review routing |
+| `security@relay44.com` | Security response | Vulnerability intake, coordinated disclosure |
+| `hello@relay44.com` | Release and governance | Release notes, publication, policy, administrative escalation |
 
 ## Response Targets
 
 | Queue | Target |
 | --- | --- |
-| issue acknowledgement | within 5 business days |
-| pull request first maintainer response | within 5 business days |
-| security acknowledgement | within 72 hours |
-| release blocker escalation | same day when actively in a release window |
+| Issue acknowledgement | 5 business days |
+| Pull request first response | 5 business days |
+| Security acknowledgement | 72 hours |
+| Release blocker escalation | Same day during release windows |
 
 These are operating targets, not guarantees.
 
 ## Ownership Map
 
-| Path | Primary owner | Secondary owner |
+| Path | Primary | Secondary |
 | --- | --- | --- |
 | `.github/`, release metadata, policy docs | `hello@relay44.com` | `security@relay44.com` |
 | `app/`, `sdk/`, `services/`, `scripts/`, `config/`, `migrations/` | `support@relay44.com` | `hello@relay44.com` |
 | `web/` | `support@relay44.com` | `hello@relay44.com` |
 | `evm/`, `programs/` | `support@relay44.com` | `security@relay44.com` |
-| `SECURITY.md`, security workflows, auth and trust boundaries | `security@relay44.com` | `hello@relay44.com` |
+| `SECURITY.md`, security workflows, auth paths | `security@relay44.com` | `hello@relay44.com` |
 
-The authoritative path map used by GitHub review routing lives in [.github/CODEOWNERS](.github/CODEOWNERS).
+The authoritative ownership map for GitHub review routing is in [.github/CODEOWNERS](.github/CODEOWNERS).
 
-## Maintainer Expectations
+## Expectations
 
 Maintainers are expected to:
 
-- keep public docs honest about feature readiness and repository boundaries
-- triage issues and pull requests with enough context that contributors can act
-- protect the open-core boundary and reject leaks of private runtime code or internal deployment state
-- require tests, docs, or release notes when public behavior changes
-- act quickly when security or user-funds risk is involved
+- Keep documentation accurate and up to date.
+- Triage issues and pull requests with enough context for contributors to act.
+- Enforce repository standards and reject changes that introduce secrets or private deployment state.
+- Require tests, documentation, or release notes when behavior changes.
+- Act quickly when security or user-funds risk is involved.
 
 ## Escalation
 
-Use:
-
-- `support@relay44.com` for normal contributor and triage escalation
-- `security@relay44.com` for vulnerability or abuse-path escalation
-- `hello@relay44.com` for release-blocking governance or publication issues
+- `support@relay44.com` — contributor and triage escalation
+- `security@relay44.com` — vulnerability or abuse escalation
+- `hello@relay44.com` — release-blocking or governance issues

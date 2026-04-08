@@ -1,55 +1,52 @@
 # Support
 
-Use this file to choose the right support path before opening an issue.
+Use this file to choose the right channel before opening an issue.
 
-## Which Channel to Use
+## Channels
 
-| Need | Best path |
+| Need | Path |
 | --- | --- |
-| Reproducible bug in open-core code | GitHub issue |
+| Reproducible bug | GitHub issue |
 | Feature proposal | GitHub issue |
 | Usage, integration, or setup question | `support@relay44.com` |
 | Security concern | [SECURITY.md](SECURITY.md) |
 | Conduct concern | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
 
-## Before You Ask for Help
+## Before You Ask
 
-Gather enough information that someone else can act on it:
+Gather enough information for someone else to act on it:
 
-- exact command, route, or code path involved
-- version or commit SHA
-- environment assumptions
-- logs, stack traces, or screenshots if relevant
-- expected behavior and actual behavior
+- Exact command, route, or code path involved
+- Version or commit SHA
+- Environment details
+- Logs, stack traces, or screenshots
+- Expected behavior and actual behavior
 
-Questions without concrete context are slow to resolve and may be redirected until that information is added.
+Requests without this context are difficult to triage and may be redirected.
 
-## Issue Triage Rules
+## When to Open an Issue
 
-Open an issue when all of the following are true:
+Open a GitHub issue when:
 
-- the problem is reproducible
-- the problem belongs to open-core code in this repository
-- you can describe impact and reproduction clearly
+- The problem is reproducible.
+- You can describe the impact and steps to reproduce clearly.
 
 Do not open a public issue for:
 
-- private deployment or credential problems you cannot reproduce in open-core code
-- security vulnerabilities
-- general product or business inquiries
+- Security vulnerabilities (use [SECURITY.md](SECURITY.md))
+- General product or business inquiries
 
 ## Response Expectations
 
-- community issues are triaged on a best-effort basis
-- maintainers prioritize security, correctness, release blockers, and reproducible regressions
-- urgent production support for private runtime systems is not handled through the public issue tracker
+- Issues are triaged on a best-effort basis.
+- Maintainers prioritize security, correctness, release blockers, and reproducible regressions.
 
-## What Maintainers Need in a Good Report
+## What Makes a Good Report
 
-- minimal reproduction steps
-- version or commit
-- affected area (`app/`, `web/`, `evm/`, `sdk/`, or repo tooling)
-- whether the issue is a regression
-- logs or traces that identify the failure mode
+- Minimal reproduction steps
+- Version or commit
+- Affected area (`app/`, `web/`, `evm/`, `sdk/`, or tooling)
+- Whether the issue is a regression
+- Logs or traces that identify the failure
 
-If you can also point to the failing file, route, or workflow, triage gets much faster.
+Pointing to the failing file, route, or workflow speeds up triage significantly.
