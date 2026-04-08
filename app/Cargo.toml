@@ -59,7 +59,7 @@ hmac = "0.12"
 hex = "0.4"
 aes-gcm = "0.10"
 k256 = { version = "0.13", features = ["ecdsa"] }
-rlp = "0.5"
+rlp = "0.6"
 
 # JWT for session tokens
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
