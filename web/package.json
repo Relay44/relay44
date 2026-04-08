@@ -58,7 +58,7 @@
     "tailwindcss-animate": "^1.0.7",
     "viem": "^2.47.1",
     "wagmi": "^3.5.0",
-    "zustand": "^5.0.11"
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
