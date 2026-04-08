@@ -2,46 +2,43 @@
 
 Read this document before opening an issue or pull request.
 
-Relay44 is an open-core project. Contributions are accepted for the public code in this repository. Private runtime services, funded operational paths, and closed-edge execution logic are out of scope here.
+## Before You Start
 
-## Start Here
+- Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- Read [SUPPORT.md](SUPPORT.md) to choose the right channel.
+- Read [SECURITY.md](SECURITY.md) before reporting anything security-related.
+- Check open issues and pull requests for duplicates.
 
-- read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- read [SUPPORT.md](SUPPORT.md) so you choose the right channel
-- read [SECURITY.md](SECURITY.md) before reporting anything security-sensitive
-- check open issues and pull requests for duplicates before opening a new one
+## Choosing the Right Channel
 
-## Choose the Right Channel
+### Usage and Integration Questions
 
-### Usage, integration, and operator questions
+Start with [SUPPORT.md](SUPPORT.md). If the answer is not covered there, use the support channel listed in that file rather than opening an issue.
 
-Start with [SUPPORT.md](SUPPORT.md). If the answer is not already covered there, use the support channel documented in that file instead of opening a bug without evidence.
-
-### Bug reports
+### Bug Reports
 
 Open an issue when you can provide a minimal, reproducible defect report.
 
-Before opening the issue:
+Before opening:
 
-- reproduce the problem on the latest `main` branch or latest release tag you can test
-- gather exact steps, config assumptions, logs, and observed behavior
-- confirm the problem is in open-core code, not a private deployment-only path
+- Reproduce the problem on the latest `main` branch or latest release tag.
+- Gather exact steps, configuration, logs, and observed behavior.
+- Confirm the problem is reproducible from the code in this repository.
 
-If you already have a fix ready, open the pull request directly and include the reproduction and validation evidence there instead of opening both an issue and a PR for the same change.
+If you already have a fix, open the pull request directly and include the reproduction and validation evidence there.
 
-### Feature proposals
+### Feature Proposals
 
-Prefer pull requests for small, concrete changes. For larger work, open an issue with:
+For small, concrete changes, open a pull request directly. For larger work, open an issue with:
 
-- the problem you are solving
-- who is affected
-- the expected behavior
-- alternatives considered
-- why the work belongs in the open-source mirror
+- The problem being solved
+- Who is affected
+- Expected behavior
+- Alternatives considered
 
-Maintainers may ask for a pull request instead of keeping a broad feature request open indefinitely.
+Maintainers may close broad feature requests and ask for a focused pull request instead.
 
-### Security reports
+### Security Reports
 
 Do not use public issues. Follow [SECURITY.md](SECURITY.md).
 
@@ -52,7 +49,7 @@ Do not use public issues. Follow [SECURITY.md](SECURITY.md).
 - Node.js 22+
 - Rust stable toolchain
 - Docker
-- Foundry (`forge`, `cast`) if you need EVM contract builds or tests
+- Foundry (`forge`, `cast`) for EVM contract builds and tests
 
 ### Bootstrap
 
@@ -63,7 +60,7 @@ npm ci
 npm ci --prefix web
 ```
 
-Optional dev servers:
+Optional development servers:
 
 ```bash
 cargo run --manifest-path app/Cargo.toml
@@ -72,17 +69,18 @@ npm --prefix web run dev
 
 ## Branching and Scope
 
-- use `main` as the integration base
-- use short, descriptive branch names with `relay44/` prefix
-- keep pull requests focused and reviewable
-- do not mix boundary, release, and product changes unless they are part of the same fix
+- Branch from `main`.
+- Use short, descriptive branch names with a `relay44/` prefix.
+- Keep pull requests focused and reviewable.
+- Do not mix unrelated changes in a single pull request.
 
-## Required Checks Before PR
+## Required Checks
+
+Run the following before opening a pull request:
 
 ```bash
 npm run ops:repo-standards
 npm run ops:silo-check:strict
-npm run ops:open-core-check
 npm run ops:no-internal-assets:tracked
 npm run ops:commit-hygiene
 npm --prefix web run lint
@@ -91,50 +89,50 @@ cargo test --manifest-path app/Cargo.toml --release
 forge test --root evm
 ```
 
-If your change only touches documentation or repository metadata, explain which checks were intentionally skipped and why.
+If your change only touches documentation or repository metadata, note which checks were skipped and why.
 
 ## Coding Standards
 
-- match existing style and project conventions
-- prefer small, explicit changes over broad refactors
-- add tests for behavior changes
-- keep public docs honest about what is and is not live
-- do not introduce credentials, internal runbooks, private runtime logic, or deployment-only state
+- Match existing style and conventions.
+- Prefer small, targeted changes over broad refactors.
+- Add tests when behavior changes.
+- Keep documentation accurate.
+- Do not introduce credentials, private runtime state, or deployment-specific configuration.
 
 ## Commit Policy
 
-- commit subjects must be short, lowercase, and descriptive
-- AI attribution lines and co-author trailers are not allowed
-- install repo hooks with `npm run ops:hooks:install` before starting work
-- if a feature branch fails the hygiene gate, rewrite its local commits before asking for review
+- Commit subjects: short, lowercase, descriptive.
+- No AI attribution lines or co-author trailers.
+- Install hooks with `npm run ops:hooks:install` before starting work.
+- Fix hygiene gate failures before requesting review.
 
 ## Pull Request Expectations
 
-Every PR should make review easy:
+Every pull request should include:
 
-- explain what changed and why
-- describe user-facing or operator-facing impact
-- include validation evidence
-- update docs and changelog entries when the public contract changes
-- call out breaking changes, migrations, or rollout risk explicitly
+- What changed and why.
+- User-facing or operator-facing impact.
+- Validation evidence (tests, logs, screenshots).
+- Updated documentation and changelog entries where applicable.
+- Explicit callout of breaking changes, migrations, or rollout risk.
 
-Maintainers may reject or defer changes that increase public maintenance burden without a clear operational payoff.
+Maintainers may reject or defer changes that increase maintenance burden without clear operational value.
 
 ## Review and Merge
 
-- CODEOWNERS define the default review path
-- maintainers decide merge order, release timing, and whether a change is backportable
-- high-impact changes to contracts, protocol behavior, auth, or security-sensitive paths require stronger review and explicit release notes
+- CODEOWNERS defines the default review path.
+- Maintainers control merge order, release timing, and backport decisions.
+- Contract changes, protocol behavior, authentication, and security-sensitive paths require thorough review and release notes.
 
 ## LLM-Assisted Contributions
 
-LLM-assisted contributions are acceptable only if you can fully own the change.
+LLM-assisted contributions are permitted if you take full ownership of the result.
 
-- manually review every generated diff before submitting it
-- verify all commands, code, and prose yourself
-- be able to answer review comments without deferring to the tool
-- do not add AI attribution text to commits or release metadata
+- Review every generated diff before submitting.
+- Verify all commands, code, and prose.
+- Be prepared to answer review comments without deferring to the tool.
+- Do not add AI attribution to commits or release metadata.
 
 ## First-Time Contributors
 
-First-time contributors are welcome. Small fixes to docs, CI, validation tooling, and isolated product bugs are the easiest place to start. If you are unsure whether a change belongs here, ask through the support path before investing a large amount of work.
+Small fixes to documentation, CI, validation tooling, and isolated product bugs are a good place to start. If you are unsure whether a change belongs in this repository, ask through the support channel before investing significant effort.

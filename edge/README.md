@@ -1,18 +1,19 @@
-# relay44 closed edge boundary
+# Edge
 
-This repository is open core. Closed edge runtime code is not stored here.
+This directory contains public interface contracts and boundary documentation for components that are not included in this repository.
 
-Allowed contents under `edge/`:
+## Allowed Contents
+
 - `README.md`
 - `LICENSE`
 - `interfaces/` (public interface contracts only)
 
-Not allowed in this repo:
-- private execution logic
-- production operator code
-- internal runbooks or incident evidence
+## Not Included
 
-Rules:
-- Open core must never import closed edge runtime paths.
-- Closed edge may depend on open core, never the reverse.
-- Private edge code stays in a separate private repository/workspace.
+- Private execution logic
+- Production operator code
+- Internal runbooks or incident data
+
+## Dependency Direction
+
+Code in this repository must not import from private edge paths. Edge components may depend on the public codebase, but not the reverse.

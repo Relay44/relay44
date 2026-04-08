@@ -2,6 +2,22 @@
   "name": "relay44",
   "version": "0.1.0",
   "description": "Autonomous market infrastructure on Base and Solana",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Relay44/relay44.git"
+  },
+  "homepage": "https://relay44.com",
+  "keywords": [
+    "prediction-markets",
+    "base",
+    "solana",
+    "defi",
+    "agents",
+    "orderbook",
+    "x402"
+  ],
+  "author": "Relay44 <hello@relay44.com>",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
