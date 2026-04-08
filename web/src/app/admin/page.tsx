@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { api } from '@/lib/api';
-import { isAdminWallet } from '@/lib/admin';
+import { useAdminGate } from '@/hooks/useAdminGate';
 import { PageShell } from '@/components/layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -18,7 +18,7 @@ interface Stats {
 
 export default function AdminDashboard() {
   const { address } = useBaseWallet();
-  const isAdmin = useMemo(() => isAdminWallet(address), [address]);
+  const isAdmin = useAdminGate(address);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

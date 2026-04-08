@@ -1,10 +1,9 @@
-const ADMIN_WALLETS = new Set(
-  (process.env.NEXT_PUBLIC_ADMIN_WALLETS || '')
-    .split(',')
-    .map((wallet) => wallet.trim().toLowerCase())
-    .filter((wallet) => wallet.startsWith('0x') && wallet.length === 42),
-);
+import { checkAdminWallet } from '@/lib/server/adminGate';
 
-export function isAdminWallet(address?: string | null) {
-  return Boolean(address && ADMIN_WALLETS.has(address.toLowerCase()));
+/**
+ * Validate admin status via server action.
+ * The wallet list is kept server-side so it never leaks into the client bundle.
+ */
+export async function isAdminWallet(address?: string | null): Promise<boolean> {
+  return checkAdminWallet(address ?? null);
 }

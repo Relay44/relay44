@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { PageShell } from "@/components/layout";
 import { ReadOnlyNotice } from "@/components/runtime/ReadOnlyNotice";
@@ -32,7 +32,7 @@ import {
   useSessionState,
 } from "@/hooks";
 import { useMarketLiveData, useWebSocket } from "@/hooks/useWebSocket";
-import { isAdminWallet } from "@/lib/admin";
+import { useAdminGate } from "@/hooks/useAdminGate";
 import { api, type CompliancePolicy } from "@/lib/api";
 import { SITE_URL } from "@/lib/seo";
 import { extractTradingViewReference } from "@/lib/tradingView";
@@ -82,7 +82,7 @@ export default function MarketDetailPage() {
   const resolveMarket = useResolveMarket();
   const [adminAction, setAdminAction] = useState<string | null>(null);
   const [compliancePolicy, setCompliancePolicy] = useState<CompliancePolicy | null>(null);
-  const isAdmin = useMemo(() => isAdminWallet(baseWallet.address), [baseWallet.address]);
+  const isAdmin = useAdminGate(baseWallet.address);
 
   const { data: market, isLoading, error, refetch } = useMarket(marketId);
   const { isConnected: wsConnected } = useWebSocket();
