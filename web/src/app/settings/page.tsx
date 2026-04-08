@@ -110,12 +110,15 @@ export default function SettingsPage() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <div className="font-medium">Push Notifications</div>
-              <div className="text-text-secondary text-sm">Price alerts and updates</div>
+              <div className="font-medium">Notifications</div>
+              <div className="text-text-secondary text-sm">Order fills, resolutions, and alerts</div>
             </div>
-            <div className="relative h-6 w-12 self-start bg-bg-tertiary sm:self-auto">
-              <div className="absolute left-1 top-1 w-4 h-4 bg-text-muted " />
-            </div>
+            <Link
+              href="/settings/notifications"
+              className="inline-flex h-10 items-center border border-border px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary self-start sm:self-auto"
+            >
+              Configure
+            </Link>
           </div>
         </div>
       </Card>

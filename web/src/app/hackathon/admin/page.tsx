@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { PageShell } from '@/components/layout';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { useHackathons } from '@/hooks/useHackathons';
-import { isAdminWallet } from '@/lib/admin';
+import { useAdminGate } from '@/hooks/useAdminGate';
 import { useToast } from '@/components/ui/Toast';
 import { api } from '@/lib/api';
 import type { Hackathon } from '@/types';
@@ -20,7 +20,7 @@ function extractErrorMessage(err: unknown): string {
 
 export default function HackathonAdminPage() {
   const { address } = useBaseWallet();
-  const isAdmin = useMemo(() => isAdminWallet(address), [address]);
+  const isAdmin = useAdminGate(address);
   const { data, refetch } = useHackathons();
   const { addToast } = useToast();
 
