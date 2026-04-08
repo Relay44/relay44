@@ -11,7 +11,7 @@ services:
     runtime: docker
     dockerfilePath: ./app/Dockerfile
     dockerContext: .
-    region: singapore
+    region: frankfurt
     plan: starter
     healthCheckPath: /health
     envVars:
@@ -121,13 +121,13 @@ services:
         sync: false
       - key: X402_FACILITATOR_URL
         fromService:
-          name: relay44-x402-facilitator
-          type: pserv
+          name: relay44-x402-facilitator-web
+          type: web
           property: hostport
       - key: X402_FACILITATOR_TOKEN
         fromService:
-          name: relay44-x402-facilitator
-          type: pserv
+          name: relay44-x402-facilitator-web
+          type: web
           envVarKey: X402_FACILITATOR_SHARED_SECRET
       - key: XMTP_SWARM_ENABLED
         value: "true"
@@ -153,13 +153,13 @@ services:
       - key: POLYMARKET_CLOB_API_BASE
         value: https://clob.polymarket.com
       - key: CORS_ORIGINS
-        value: https://relay44.com,https://relay44-web.onrender.com,https://warpcast.com
+        value: https://relay44.com,https://relay44-core.onrender.com,https://warpcast.com
 
   - type: web
-    name: relay44-web
+    name: relay44-core
     runtime: node
     rootDir: web
-    region: singapore
+    region: frankfurt
     plan: starter
     buildCommand: npm ci && npm run build
     startCommand: npm run start
@@ -223,7 +223,7 @@ services:
           type: web
           envVarKey: CONTEXT_GRAPH_SHARED_SECRET
       - key: AUTH_ALLOWED_ORIGINS
-        value: https://relay44.com,https://relay44-web.onrender.com
+        value: https://relay44.com,https://relay44-core.onrender.com
 
   - type: web
     name: relay44-context-graph
@@ -270,7 +270,7 @@ services:
       - key: GOOGLE_FACTCHECK_API_KEY
         sync: false
       - key: CORS_ALLOWED_ORIGINS
-        value: https://relay44.com,https://relay44-web.onrender.com
+        value: https://relay44.com,https://relay44-core.onrender.com
       - key: NODE_ENV
         value: production
     disk:
@@ -278,10 +278,10 @@ services:
       mountPath: /var/data/context-graph
       sizeGB: 1
 
-  - type: pserv
-    name: relay44-x402-facilitator
+  - type: web
+    name: relay44-x402-facilitator-web
     runtime: node
-    region: singapore
+    region: frankfurt
     plan: starter
     buildCommand: npm ci
     startCommand: npm run x402:facilitator
@@ -326,7 +326,7 @@ services:
   - type: pserv
     name: relay44-xmtp-bridge
     runtime: node
-    region: singapore
+    region: oregon
     plan: starter
     buildCommand: npm ci
     startCommand: npm run xmtp:bridge
@@ -446,11 +446,36 @@ services:
         value: production
 
   - type: cron
+    name: relay44-alpha-cohort-health
+    runtime: node
+    region: frankfurt
+    plan: starter
+    schedule: "*/10 * * * *"
+    buildCommand: npm ci
+    startCommand: npm run alpha-cohort:health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: ALPHA_COHORT_API_URL
+        fromService:
+          name: relay44-api
+          type: web
+          property: hostport
+      - key: ALPHA_COHORT_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: ALPHA_COHORT_SIWE_DOMAIN
+        value: relay44.com
+      - key: ALPHA_COHORT_CHAIN_ID
+        value: "8453"
+      - key: NODE_ENV
+        value: production
+
+  - type: cron
     name: relay44-farcaster-bot
     runtime: node
-    region: singapore
+    region: oregon
     plan: starter
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: npm ci
     startCommand: npm run farcaster-bot:tick
     envVars:
@@ -489,7 +514,7 @@ services:
   - type: cron
     name: relay44-external-agent-runner
     runtime: node
-    region: singapore
+    region: frankfurt
     plan: starter
     schedule: "* * * * *"
     buildCommand: npm ci
@@ -520,7 +545,7 @@ services:
   - type: cron
     name: relay44-decision-runner
     runtime: node
-    region: singapore
+    region: frankfurt
     plan: starter
     schedule: "* * * * *"
     buildCommand: npm ci
@@ -549,7 +574,7 @@ services:
   - type: cron
     name: relay44-base-agent-operator
     runtime: node
-    region: singapore
+    region: frankfurt
     plan: starter
     schedule: "* * * * *"
     buildCommand: npm ci
@@ -584,7 +609,7 @@ services:
   - type: cron
     name: relay44-polymarket-indexer
     runtime: node
-    region: singapore
+    region: frankfurt
     plan: starter
     schedule: "* * * * *"
     buildCommand: npm ci
@@ -624,7 +649,7 @@ services:
   - type: cron
     name: relay44-creator-economics-materializer
     runtime: node
-    region: singapore
+    region: frankfurt
     plan: starter
     schedule: "15 * * * *"
     buildCommand: npm ci
@@ -655,9 +680,9 @@ services:
   - type: cron
     name: relay44-leaderboard-compute
     runtime: node
-    region: singapore
+    region: oregon
     plan: starter
-    schedule: "*/30 * * * *"
+    schedule: "0 */6 * * *"
     buildCommand: npm ci
     startCommand: npm run leaderboard:compute
     envVars:
