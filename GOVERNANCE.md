@@ -10,48 +10,40 @@ Maintainers review and merge pull requests, manage issue triage, enforce reposit
 
 ### Release Stewards
 
-Release stewards control version tags, release notes, and public mirror publication. They may defer otherwise correct changes if release timing or operational risk is wrong.
+Release stewards control version tags, release notes, and publication. They may defer otherwise correct changes if release timing or operational risk requires it.
 
 ### Security Responders
 
-Security responders own private vulnerability intake, coordinated disclosure timing, and emergency policy decisions when user funds, auth, or protocol integrity are at risk.
+Security responders handle vulnerability intake, coordinated disclosure, and emergency decisions when user funds, authentication, or protocol integrity are at risk.
 
 ## Decision Model
 
-- low-risk changes: maintainer review and merge
-- high-impact changes: explicit maintainer consensus
-- security or incident response: responders may act immediately, with follow-up review after the system is stable
+- Low-risk changes: maintainer review and merge.
+- High-impact changes: explicit maintainer consensus.
+- Security or incident response: responders may act immediately, with follow-up review after the system is stable.
 
-The following always count as high-impact:
+The following always require maintainer consensus:
 
-- contract semantics or settlement behavior
-- auth, wallet, or session model changes
-- public API contract changes
-- security controls and disclosure policy
-- release and publication workflow changes
+- Contract semantics or settlement behavior
+- Authentication, wallet, or session model changes
+- Public API changes
+- Security controls and disclosure policy
+- Release workflow changes
 
 ## Merge Policy
 
-- maintainers decide review depth and required approvals
-- CODEOWNERS define the default ownership path, not an entitlement to merge
-- maintainers may request narrower scope, additional tests, or release notes before merge
-- stale or low-signal changes may be closed rather than carried indefinitely
+- Maintainers decide review depth and required approvals.
+- CODEOWNERS define the default review path, not an entitlement to merge.
+- Maintainers may request narrower scope, additional tests, or release notes before merge.
+- Stale or low-signal changes may be closed rather than carried indefinitely.
 
 ## Release Policy
 
-- tags, release notes, and mirror publication are maintainer-owned
-- public releases should reflect the state of the open-source mirror, not hidden local work
-- security fixes may be disclosed on a delayed timetable when coordinated disclosure is required
+- Tags, release notes, and publication are maintainer-owned.
+- Security fixes may be disclosed on a delayed schedule when coordinated disclosure is required.
 
-See [RELEASING.md](RELEASING.md) for the operational checklist.
+See [RELEASING.md](RELEASING.md) for the full checklist.
 
-## Repository Boundary
+## Repository Standards
 
-This repository is open core only.
-
-- public code belongs here
-- private runtime services do not
-- internal deployment state does not
-- open-core code must never depend on closed-edge runtime paths
-
-Boundary enforcement is automated through repo scripts and CI. Maintainers may reject otherwise useful changes if they weaken that separation.
+Automated validation scripts and CI enforce code quality and repository hygiene. Maintainers may reject otherwise useful changes if they fail these gates.

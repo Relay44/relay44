@@ -42,11 +42,10 @@ In scope:
 - API services under `app/`
 - web client under `web/`
 - repository CI/CD and release automation
-- credential handling, auth, and signing flows in the public mirror
+- credential handling, auth, and signing flows in this repository
 
 Out of scope:
 
-- closed-edge runtime code tracked outside this mirror
 - issues that require physical access to maintainer systems
 - unsupported historical tags with no active fix line
 

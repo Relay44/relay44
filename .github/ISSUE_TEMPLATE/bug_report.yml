@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible defect in relay44 open core.
+description: Report a reproducible defect in Relay44.
 title: "[bug] "
 labels: ["bug", "triage"]
 body:
@@ -12,7 +12,7 @@ body:
     attributes:
       label: Pre-flight
       options:
-        - label: I confirmed this problem affects open-core code in this repository.
+        - label: I confirmed this problem is reproducible from code in this repository.
           required: true
         - label: I checked for existing issues and pull requests before opening this report.
           required: true

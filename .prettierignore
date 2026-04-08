@@ -1,0 +1,10 @@
+node_modules
+.next
+dist
+build
+target
+evm/lib
+evm/out
+evm/cache
+vendor
+*.lock

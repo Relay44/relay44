@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a scoped feature for relay44 open core.
+description: Propose a feature for Relay44.
 title: "[feature] "
 labels: ["enhancement", "triage"]
 body:
@@ -10,7 +10,7 @@ body:
       options:
         - label: I reviewed existing issues and pull requests for duplicates.
           required: true
-        - label: This request targets open-core code only.
+        - label: This request targets code in this repository.
           required: true
   - type: textarea
     id: problem

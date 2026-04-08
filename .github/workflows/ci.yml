@@ -39,9 +39,6 @@ jobs:
       - name: Verify public repo standards
         run: bash ./scripts/verify-public-repo-standards.sh
 
-      - name: Verify open core boundary
-        run: node ./scripts/verify-open-core-boundary.mjs
-
       - name: Verify no private edge assets are tracked
         run: bash ./scripts/verify-no-internal-assets.sh tracked
 

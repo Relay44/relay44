@@ -21,13 +21,12 @@ List the checks you ran and any intentionally skipped checks.
 
 - [ ] I followed the contribution guidelines in `CONTRIBUTING.md`.
 - [ ] I checked for overlapping open PRs or issues before submitting this change.
-- [ ] I updated docs, changelog, or release notes where the public contract changed.
+- [ ] I updated docs, changelog, or release notes where applicable.
 - [ ] I ran `npm run ops:repo-standards`.
-- [ ] I ran `npm run ops:open-core-check`.
 - [ ] I ran `npm run ops:no-internal-assets:tracked`.
 - [ ] I added or updated tests where behavior changed.
-- [ ] I did not add secrets, credentials, internal deployment state, or closed-edge runtime code.
-- [ ] Any LLM-assisted content was manually reviewed by me, and I take full responsibility for the final diff.
+- [ ] I did not add secrets, credentials, or private deployment state.
+- [ ] Any LLM-assisted content was manually reviewed and I take full responsibility for the final diff.
 
 ## Linked Issues
 
