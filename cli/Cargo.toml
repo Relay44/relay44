@@ -25,7 +25,7 @@ anyhow = "1"
 percent-encoding = "2"
 ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 bs58 = "0.5"
-colored = "2"
+colored = "3"
 indicatif = "0.17"
 rand = "0.8"
 chrono = "0.4"
