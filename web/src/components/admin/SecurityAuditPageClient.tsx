@@ -3,12 +3,12 @@
 import { useBaseWallet } from '@/hooks/useBaseWallet';
 import { PageShell } from '@/components/layout';
 import { Card, CardContent } from '@/components/ui/Card';
-import { isAdminWallet } from '@/lib/admin';
+import { useAdminGate } from '@/hooks/useAdminGate';
 import { SecurityAuditChecklist } from './SecurityAuditChecklist';
 
 export function SecurityAuditPageClient() {
   const { address } = useBaseWallet();
-  const isAdmin = isAdminWallet(address);
+  const isAdmin = useAdminGate(address);
 
   if (!address) {
     return (

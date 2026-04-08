@@ -299,10 +299,15 @@ export async function readHealth() {
 
 export async function readDetailedHealth() {
   const capabilities = buildLocalWeb4Capabilities();
+  const mode = capabilities.runtime.external_trading_enabled
+    ? 'full'
+    : capabilities.runtime.external_markets_enabled
+      ? 'read-only'
+      : 'web-only';
   const checks: Record<string, unknown> = {
     runtime: {
       status: 'healthy',
-      mode: 'web-only',
+      mode,
       service: 'relay44-web',
       chain_mode: capabilities.chain_mode,
     },
