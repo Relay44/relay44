@@ -682,12 +682,14 @@ async function tryApiMaterialize(env, options) {
     return null;
   }
 
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || "").trim();
   const response = await fetch(`${apiBase}/evm/creator/materializer/run`, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
       "x-admin-key": adminKey,
+      ...(internalKey ? { "x-internal-service-key": internalKey } : {}),
     },
     body: JSON.stringify({
       owner: options.owner,

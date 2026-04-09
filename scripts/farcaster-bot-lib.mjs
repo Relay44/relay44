@@ -26,6 +26,8 @@ export const COOLDOWN_MS = Number(process.env.FARCASTER_BOT_COOLDOWN_MINUTES || 
 function buildHeaders(token) {
   const headers = { 'content-type': 'application/json' };
   if (token) headers.authorization = `Bearer ${token}`;
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || '').trim();
+  if (internalKey) headers['x-internal-service-key'] = internalKey;
   return headers;
 }
 

@@ -160,9 +160,13 @@ async function fetchCreatorEconomicsFreshness(env) {
 }
 
 async function fetchApiJson(path) {
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || "").trim();
   const response = await fetch(`${API_URL}${path}`, {
     signal: AbortSignal.timeout(30_000),
-    headers: { Accept: "application/json" },
+    headers: {
+      Accept: "application/json",
+      ...(internalKey ? { "x-internal-service-key": internalKey } : {}),
+    },
   });
   const text = await response.text();
   let payload = null;
@@ -187,11 +191,13 @@ async function fetchApiJsonAdmin(path) {
     throw new Error("missing ADMIN_CONTROL_KEY");
   }
 
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || "").trim();
   const response = await fetch(`${API_URL}${path}`, {
     signal: AbortSignal.timeout(30_000),
     headers: {
       Accept: "application/json",
       "x-admin-key": adminKey,
+      ...(internalKey ? { "x-internal-service-key": internalKey } : {}),
     },
   });
   const text = await response.text();

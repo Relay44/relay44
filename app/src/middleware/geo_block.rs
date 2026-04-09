@@ -128,6 +128,15 @@ where
             });
         }
 
+        // Allow internal services to bypass geo-blocking with a shared secret
+        if is_internal_service_bypass(&req) {
+            let fut = self.service.call(req);
+            return Box::pin(async move {
+                let res = fut.await?;
+                Ok(res.map_into_left_body())
+            });
+        }
+
         // Restrict writes only. Read endpoints stay publicly accessible.
         let is_write = matches!(
             *req.method(),
@@ -246,6 +255,24 @@ fn get_country_from_headers(req: &ServiceRequest) -> Option<String> {
     }
 
     None
+}
+
+/// Allow internal Render cron jobs to bypass geo-blocking.
+/// Requires `INTERNAL_SERVICE_KEY` env var set on the API,
+/// and the cron job sending `X-Internal-Service-Key` header.
+fn is_internal_service_bypass(req: &ServiceRequest) -> bool {
+    static INTERNAL_KEY: OnceLock<Option<String>> = OnceLock::new();
+    let expected = INTERNAL_KEY.get_or_init(|| {
+        std::env::var("INTERNAL_SERVICE_KEY").ok().filter(|k| !k.is_empty())
+    });
+    match expected {
+        Some(key) => req
+            .headers()
+            .get("X-Internal-Service-Key")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v == key),
+        None => false,
+    }
 }
 
 fn get_country_override(req: &ServiceRequest) -> Option<String> {
