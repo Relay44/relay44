@@ -1,14 +1,18 @@
 # Maintainers
 
-Relay44 uses role aliases rather than publishing individual maintainer identities in the repository.
+## Active Maintainers
 
-## Contact Roles
+| Name | GitHub | Area |
+| --- | --- | --- |
+| 0p3r4t0r44 | [@0p3r4t0r44](https://github.com/0p3r4t0r44) | Architecture, backend, contracts, operations |
 
-| Alias | Responsibility | Use |
+## Contact
+
+| Queue | Address | Use |
 | --- | --- | --- |
 | `support@relay44.com` | Maintainer queue | Issue triage, contributor questions, review routing |
 | `security@relay44.com` | Security response | Vulnerability intake, coordinated disclosure |
-| `hello@relay44.com` | Release and governance | Release notes, publication, policy, administrative escalation |
+| `hello@relay44.com` | General | Release notes, governance, administrative escalation |
 
 ## Response Targets
 
@@ -23,13 +27,12 @@ These are operating targets, not guarantees.
 
 ## Ownership Map
 
-| Path | Primary | Secondary |
-| --- | --- | --- |
-| `.github/`, release metadata, policy docs | `hello@relay44.com` | `security@relay44.com` |
-| `app/`, `sdk/`, `services/`, `scripts/`, `config/`, `migrations/` | `support@relay44.com` | `hello@relay44.com` |
-| `web/` | `support@relay44.com` | `hello@relay44.com` |
-| `evm/`, `programs/` | `support@relay44.com` | `security@relay44.com` |
-| `SECURITY.md`, security workflows, auth paths | `security@relay44.com` | `hello@relay44.com` |
+| Path | Owner |
+| --- | --- |
+| `app/`, `migrations/`, `services/`, `scripts/` | @0p3r4t0r44 |
+| `web/`, `sdk/` | @0p3r4t0r44 |
+| `evm/`, `programs/` | @0p3r4t0r44 |
+| `.github/`, policy docs, release metadata | @0p3r4t0r44 |
 
 The authoritative ownership map for GitHub review routing is in [.github/CODEOWNERS](.github/CODEOWNERS).
 
