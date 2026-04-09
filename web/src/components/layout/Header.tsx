@@ -16,17 +16,11 @@ import { CHAIN_MODE } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
 const primaryLinks = [
-  { href: "/how-it-works", label: "How it works" },
   { href: "/markets", label: "Markets", tourId: "tour-nav-markets" },
   { href: "/distribution", label: "Distribution" },
   { href: "/decisions", label: "Decisions", tourId: "tour-nav-decisions" },
   { href: "/agents", label: "Swarm", tourId: "tour-nav-agents" },
-  { href: "/identity", label: "Identity" },
-  { href: "/insights", label: "Insights" },
-  { href: "/context-graph", label: "Context Graph" },
-  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/portfolio", label: "Portfolio", tourId: "tour-nav-portfolio" },
-  { href: "/staking", label: "Staking" },
 ];
 
 function ConnectWalletButton() {

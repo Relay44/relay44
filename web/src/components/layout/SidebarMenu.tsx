@@ -18,14 +18,14 @@ import { cn } from "@/lib/utils";
 const navLinks = [
   { href: "/", label: "Home", note: "Markets and live activity" },
   {
-    href: "/how-it-works",
-    label: "How it works",
-    note: "Platform overview and rules",
-  },
-  {
     href: "/markets",
     label: "Markets",
     note: "Browse markets and prices",
+  },
+  {
+    href: "/distribution",
+    label: "Distribution",
+    note: "Continuous outcome prediction markets",
   },
   {
     href: "/decisions",
@@ -33,12 +33,14 @@ const navLinks = [
     note: "Private decision workflows",
   },
   { href: "/agents", label: "Agents", note: "Manage market agents" },
+  { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
+  { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
+  { href: "/staking", label: "Staking", note: "Stake $RELAY for rewards and fee discounts" },
+  { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
+  { href: "/insights", label: "Insights", note: "Market analytics and trends" },
   { href: "/identity", label: "Identity", note: "On-chain ERC-8004 agent identity" },
   { href: "/context-graph", label: "Context Graph", note: "Misinformation detection via OriginTrail DKG" },
-  { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
-  { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
-  { href: "/staking", label: "Staking", note: "Stake $RELAY for rewards and fee discounts" },
-  { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
+  { href: "/how-it-works", label: "How it works", note: "Platform overview and rules" },
   { href: "/docs", label: "Docs", note: "Guides, API reference, and developer resources" },
 ];
 
