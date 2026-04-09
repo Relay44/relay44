@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui';
 import type { DistributionPosition } from '@/types/distribution';
@@ -22,6 +23,34 @@ export function DistributionPositions({
   onClose,
   onClaim,
 }: DistributionPositionsProps) {
+  const [pendingAction, setPendingAction] = useState<number | null>(null);
+
+  const handleClose = useCallback(
+    async (positionId: number) => {
+      if (pendingAction !== null) return;
+      setPendingAction(positionId);
+      try {
+        await onClose(positionId);
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [onClose, pendingAction],
+  );
+
+  const handleClaim = useCallback(
+    async (positionId: number) => {
+      if (pendingAction !== null) return;
+      setPendingAction(positionId);
+      try {
+        await onClaim(positionId);
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [onClaim, pendingAction],
+  );
+
   if (positions.length === 0) {
     return (
       <div className="text-center text-text-secondary text-xs py-8">
@@ -62,6 +91,7 @@ export function DistributionPositions({
           {positions.map((pos) => {
             const pnl = pos.pnl ?? 0;
             const isPnlPositive = pnl >= 0;
+            const isActionPending = pendingAction === pos.positionId;
 
             return (
               <tr
@@ -96,7 +126,9 @@ export function DistributionPositions({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => onClose(pos.positionId)}
+                      onClick={() => handleClose(pos.positionId)}
+                      disabled={pendingAction !== null}
+                      loading={isActionPending}
                       className="text-[0.65rem] px-2 py-1 h-auto"
                     >
                       Close
@@ -106,7 +138,9 @@ export function DistributionPositions({
                     <Button
                       variant="bid"
                       size="sm"
-                      onClick={() => onClaim(pos.positionId)}
+                      onClick={() => handleClaim(pos.positionId)}
+                      disabled={pendingAction !== null}
+                      loading={isActionPending}
                       className="text-[0.65rem] px-2 py-1 h-auto"
                     >
                       Claim
