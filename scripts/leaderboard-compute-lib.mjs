@@ -38,6 +38,11 @@ function buildHeaders(token) {
     headers.authorization = `Bearer ${token}`;
   }
 
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || '').trim();
+  if (internalKey) {
+    headers['x-internal-service-key'] = internalKey;
+  }
+
   return headers;
 }
 

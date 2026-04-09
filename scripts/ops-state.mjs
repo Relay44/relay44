@@ -76,11 +76,13 @@ function normalizeApiRunnerState(payload) {
 }
 
 async function requestApiState(state, path, init = {}) {
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || "").trim();
   const response = await fetch(`${state.apiBaseUrl}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
       "x-admin-key": state.adminKey,
+      ...(internalKey ? { "x-internal-service-key": internalKey } : {}),
       ...(init.body ? { "Content-Type": "application/json" } : {}),
       ...(init.headers || {}),
     },
