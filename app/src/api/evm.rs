@@ -3885,7 +3885,17 @@ pub async fn bootstrap_runner_tick(
         }
         scanned = scanned.saturating_add(1);
 
-        let market = fetch_internal_market_snapshot_by_id(&state, original.market_id).await?;
+        let market = match fetch_internal_market_snapshot_by_id(&state, original.market_id).await {
+            Ok(m) => m,
+            Err(e) if e.status == 404 => {
+                log::warn!(
+                    "bootstrap_runner_tick: skipping market {} (not found on-chain)",
+                    original.market_id
+                );
+                continue 'configs;
+            }
+            Err(e) => return Err(e),
+        };
         let (organic_yes_bids, organic_no_bids) =
             collect_internal_order_levels(&state, original.market_id, now).await?;
         let mut config = maybe_refresh_bootstrap_state(
