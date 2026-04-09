@@ -527,10 +527,15 @@ function buildFailureMetadata(error) {
   };
 }
 
+const internalKeyGlobal = (process.env.INTERNAL_SERVICE_KEY || "").trim();
 let data;
 try {
   const response = await fetch(healthUrl, {
     signal: AbortSignal.timeout(30_000),
+    headers: {
+      Accept: "application/json",
+      ...(internalKeyGlobal ? { "x-internal-service-key": internalKeyGlobal } : {}),
+    },
   });
   data = await response.json();
 } catch (err) {

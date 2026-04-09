@@ -208,7 +208,7 @@ export function getNextTechPost(lastIndex) {
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 
-const STATE_PATH = process.env.FARCASTER_BOT_STATE_PATH || '/var/data/farcaster-bot/state.json';
+const STATE_PATH = process.env.FARCASTER_BOT_STATE_PATH || '/tmp/farcaster-bot/state.json';
 
 export function loadState() {
   try {
@@ -227,8 +227,8 @@ export function loadState() {
 export function saveState(state) {
   try {
     mkdirSync(dirname(STATE_PATH), { recursive: true });
-  } catch {
-    // ignore
+    writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  } catch (err) {
+    console.warn(`saveState failed (non-fatal): ${err.message}`);
   }
-  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 }
