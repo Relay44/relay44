@@ -2526,26 +2526,19 @@ class ApiClient {
         `/external/agents/public${query}`,
       );
       const agents = Array.isArray(response.agents) ? response.agents : [];
-      if (agents.length > 0) {
-        return {
-          agents: agents.map((entry) =>
-            normalizeExternalAgentRecord(
-              entry as unknown as Record<string, unknown>,
-            ),
+      return {
+        agents: agents.map((entry) =>
+          normalizeExternalAgentRecord(
+            entry as unknown as Record<string, unknown>,
           ),
-          total: toNumber(response.total),
-          limit: toNumber(response.limit),
-          offset: toNumber(response.offset),
-        };
-      }
-      const { getMockPublicExternalAgents } = await import("./mock-data");
-      console.warn("[relay44] Public agents empty, using mock data");
-      return getMockPublicExternalAgents(params);
+        ),
+        total: toNumber(response.total),
+        limit: toNumber(response.limit),
+        offset: toNumber(response.offset),
+      };
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        const { getMockPublicExternalAgents } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /external/agents/public");
-        return getMockPublicExternalAgents(params);
+        return { agents: [], total: 0, limit: params?.limit ?? 20, offset: params?.offset ?? 0 };
       }
       throw err;
     }
@@ -2556,16 +2549,16 @@ class ApiClient {
       const response = await this.request<Record<string, unknown>>(
         "/external/agents/public/performance",
       );
-      const normalized = normalizeExternalAgentPerformanceResponse(response);
-      if (normalized.totals.agents > 0) return normalized;
-      const { getMockPublicExternalAgentsPerformance } = await import("./mock-data");
-      console.warn("[relay44] Agent performance empty, using mock data");
-      return getMockPublicExternalAgentsPerformance();
+      return normalizeExternalAgentPerformanceResponse(response);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        const { getMockPublicExternalAgentsPerformance } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /external/agents/public/performance");
-        return getMockPublicExternalAgentsPerformance();
+        return {
+          scope: 'public',
+          totals: { agents: 0, activeAgents: 0, openPositions: 0, closedPositions: 0, fills: 0, volumeUsdc: 0, feesUsdc: 0, realizedPnlUsdc: 0, unrealizedPnlUsdc: 0, netPnlUsdc: 0 },
+          strategies: [],
+          timeline: [],
+          updatedAt: new Date().toISOString(),
+        };
       }
       throw err;
     }
@@ -3280,33 +3273,9 @@ class ApiClient {
     metric: LeaderboardMetric = "pnl",
     limit = 100,
   ): Promise<Leaderboard> {
-    const MIN_REAL_ENTRIES = 10;
-    try {
-      const result = await this.request<Leaderboard>(
-        `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
-      );
-      if (result.entries?.length >= MIN_REAL_ENTRIES) return result;
-      // Not enough real data yet — backfill with mock entries
-      const { getMockLeaderboard } = await import("./mock-data");
-      const mock = getMockLeaderboard(period, metric, limit);
-      if (!result.entries?.length) return mock;
-      // Merge: real entries take top ranks, mock fills the rest
-      const realWallets = new Set(
-        result.entries.map((e) => e.wallet.toLowerCase()),
-      );
-      const backfill = mock.entries.filter(
-        (e) => !realWallets.has(e.wallet.toLowerCase()),
-      );
-      const merged = [...result.entries, ...backfill].slice(0, limit);
-      merged.forEach((e, i) => (e.rank = i + 1));
-      return { ...mock, entries: merged, updatedAt: result.updatedAt ?? mock.updatedAt };
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        const { getMockLeaderboard } = await import("./mock-data");
-        return getMockLeaderboard(period, metric, limit);
-      }
-      throw err;
-    }
+    return this.request<Leaderboard>(
+      `/leaderboard?period=${period}&metric=${metric}&limit=${limit}`,
+    );
   }
 
   async getUserRank(
@@ -3314,85 +3283,32 @@ class ApiClient {
     period: LeaderboardPeriod = "weekly",
     metric: LeaderboardMetric = "pnl",
   ): Promise<{ rank: number; value: number }> {
-    try {
-      const result = await this.request<{ rank: number; value: number }>(
-        `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
-      );
-      if (result?.rank > 0) return result;
-      const { getMockUserRank } = await import("./mock-data");
-      console.warn("[relay44] Rank empty, using mock data");
-      return getMockUserRank(wallet, period, metric);
-    } catch (err) {
-      if (err instanceof ApiError && (err.status === 404 || err.status === 500)) {
-        const { getMockUserRank } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /leaderboard/rank");
-        return getMockUserRank(wallet, period, metric);
-      }
-      throw err;
-    }
+    return this.request<{ rank: number; value: number }>(
+      `/leaderboard/rank/${wallet}?period=${period}&metric=${metric}`,
+    );
   }
 
   // Public profiles
   async getPublicProfile(wallet: string): Promise<PublicProfile> {
-    try {
-      const result = await this.request<PublicProfile>(`/profiles/${wallet}`);
-      if (result?.stats?.totalTrades > 0) return result;
-      // No trade history — enrich with mock data
-      const { getMockPublicProfile } = await import("./mock-data");
-      console.warn("[relay44] Profile empty, using mock data");
-      return getMockPublicProfile(wallet);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        const { getMockPublicProfile } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /profiles");
-        return getMockPublicProfile(wallet);
-      }
-      throw err;
-    }
+    return this.request<PublicProfile>(`/profiles/${wallet}`);
   }
 
   async getProfileActivity(
     wallet: string,
     params?: { limit?: number; offset?: number },
   ): Promise<PaginatedResponse<ProfileActivity>> {
-    try {
-      const query = this.buildQuery(params || {});
-      const result = await this.request<PaginatedResponse<ProfileActivity>>(
-        `/profiles/${wallet}/activity${query}`,
-      );
-      if (result.data?.length > 0) return result;
-      const { getMockProfileActivity } = await import("./mock-data");
-      console.warn("[relay44] Activity empty, using mock data");
-      return getMockProfileActivity(wallet, params?.limit, params?.offset);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        const { getMockProfileActivity } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /profiles/activity");
-        return getMockProfileActivity(wallet, params?.limit, params?.offset);
-      }
-      throw err;
-    }
+    const query = this.buildQuery(params || {});
+    return this.request<PaginatedResponse<ProfileActivity>>(
+      `/profiles/${wallet}/activity${query}`,
+    );
   }
 
   async getProfilePositions(
     wallet: string,
   ): Promise<PaginatedResponse<Position>> {
-    try {
-      const result = await this.request<PaginatedResponse<Position>>(
-        `/profiles/${wallet}/positions`,
-      );
-      if (result.data?.length > 0) return result;
-      const { getMockProfilePositions } = await import("./mock-data");
-      console.warn("[relay44] Positions empty, using mock data");
-      return getMockProfilePositions(wallet);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        const { getMockProfilePositions } = await import("./mock-data");
-        console.warn("[relay44] Using mock data for /profiles/positions");
-        return getMockProfilePositions(wallet);
-      }
-      throw err;
-    }
+    return this.request<PaginatedResponse<Position>>(
+      `/profiles/${wallet}/positions`,
+    );
   }
 
   // Hackathons
