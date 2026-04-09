@@ -48,6 +48,11 @@ import type {
   ScannedOpportunity,
   CalibrationBucket,
   ScanRun,
+  AgentTemplate,
+  ManagedAgent,
+  ManagedAgentTrade,
+  DeployAgentRequest,
+  DeployAgentResponse,
 } from "@/types";
 import { CURATED_MARKETS_BY_ID } from "@/lib/curatedMarkets";
 import {
@@ -3390,7 +3395,7 @@ class ApiClient {
 
   async getHackathonLeaderboard(
     id: string,
-    params?: { limit?: number; offset?: number },
+    params?: { limit?: number; offset?: number; scoringMethod?: string },
   ): Promise<HackathonLeaderboard> {
     const query = this.buildQuery(params || {});
     return this.request(`/hackathons/${id}/leaderboard${query}`);
@@ -3926,6 +3931,47 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // Agent-as-a-Service (managed agents / templates)
+
+  async listAgentTemplates(): Promise<{ templates: AgentTemplate[] }> {
+    return this.request("/agents/templates");
+  }
+
+  async deployManagedAgent(
+    data: DeployAgentRequest,
+  ): Promise<DeployAgentResponse> {
+    return this.request("/agents/deploy", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listManagedAgents(params?: {
+    status?: string;
+    limit?: number;
+  }): Promise<{ agents: ManagedAgent[] }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/agents/managed${query}`);
+  }
+
+  async updateManagedAgent(
+    agentId: string,
+    data: { status: string },
+  ): Promise<{ ok: boolean; status: string }> {
+    return this.request(`/agents/managed/${encodeURIComponent(agentId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getManagedAgentTrades(
+    agentId: string,
+  ): Promise<{ trades: ManagedAgentTrade[] }> {
+    return this.request(
+      `/agents/managed/${encodeURIComponent(agentId)}/trades`,
+    );
   }
 }
 

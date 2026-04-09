@@ -9,6 +9,7 @@ use log::{info, warn};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::api::notifications::{create_notification, NewNotification, NotificationType};
 use crate::services::distribution::DistributionMarketState;
 use crate::services::websocket::DistResolveUpdate;
 use crate::AppState;
@@ -232,6 +233,35 @@ async fn check_oracle_resolutions(state: &AppState) -> Result<(), String> {
                 timestamp: now.timestamp(),
             })
             .await;
+
+        // Notify all position holders that the market resolved
+        let owners: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT owner FROM distribution_positions WHERE market_id = $1 AND status = 2",
+        )
+        .bind(&market_id)
+        .fetch_all(state.db.pool())
+        .await
+        .unwrap_or_default();
+
+        for (owner,) in owners {
+            let _ = create_notification(
+                state,
+                NewNotification {
+                    owner,
+                    kind: NotificationType::DistributionMarketResolved,
+                    title: "Distribution market resolved".to_string(),
+                    message: format!(
+                        "Resolved at {:.4}. Claim your payout.",
+                        resolved_value
+                    ),
+                    market_id: Some(market_id.clone()),
+                    order_id: None,
+                    decision_cell_id: None,
+                    metadata: serde_json::json!({ "resolvedValue": resolved_value }),
+                },
+            )
+            .await;
+        }
     }
 
     Ok(())
