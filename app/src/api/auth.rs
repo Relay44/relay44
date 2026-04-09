@@ -1,4 +1,5 @@
 use crate::api::{
+    api_key::{self, ApiKeyScope, AuthMethod},
     check_auth_rate_limit,
     jwt::{TokenPair, UserRole},
     ApiError,
@@ -25,6 +26,7 @@ const SOLANA_SIGNATURE_BYTES_LEN: usize = 64;
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser {
     pub wallet_address: String,
+    pub auth_method: AuthMethod,
 }
 
 pub async fn extract_authenticated_user(
@@ -44,6 +46,13 @@ pub async fn extract_authenticated_user(
     }
 
     let token = &auth_header[7..];
+
+    // Branch: API key auth (token starts with "r44_")
+    if api_key::is_api_key_token(token) {
+        return validate_api_key_auth(token, req, state).await;
+    }
+
+    // Branch: JWT auth (existing flow)
     let claims = state.jwt.validate_token(token)?;
 
     let revoked = state
@@ -60,12 +69,89 @@ pub async fn extract_authenticated_user(
     }
 
     let wallet = claims.sub.to_ascii_lowercase();
+    check_sanctions(req, state, &wallet).await?;
+
+    Ok(AuthenticatedUser {
+        wallet_address: wallet,
+        auth_method: AuthMethod::Jwt,
+    })
+}
+
+async fn validate_api_key_auth(
+    api_key_token: &str,
+    req: &HttpRequest,
+    state: &web::Data<Arc<AppState>>,
+) -> Result<AuthenticatedUser, ApiError> {
+    let key_hash = api_key::hash_api_key(api_key_token);
+
+    // Fast path: check Redis revocation cache
+    let revoked = state.redis.is_api_key_revoked(&key_hash).await.unwrap_or(false);
+    if revoked {
+        return Err(ApiError::unauthorized("API key has been revoked"));
+    }
+
+    // Look up key in database
+    let row = state
+        .db
+        .get_api_key_by_hash(&key_hash)
+        .await
+        .map_err(|e| {
+            log::error!("API key lookup failed: {}", e);
+            ApiError::internal("Authentication validation failed")
+        })?;
+
+    let (key_id, wallet_address, scope_str, is_active, expires_at) =
+        row.ok_or_else(|| ApiError::unauthorized("Invalid API key"))?;
+
+    if !is_active {
+        // Re-cache revocation in Redis (cache may have expired)
+        state.redis.revoke_api_key(&key_hash).await.ok();
+        return Err(ApiError::unauthorized("API key has been revoked"));
+    }
+
+    if let Some(exp) = expires_at {
+        if exp < chrono::Utc::now() {
+            return Err(ApiError::unauthorized("API key has expired"));
+        }
+    }
+
+    let scope = ApiKeyScope::from_str(&scope_str)
+        .ok_or_else(|| ApiError::internal("Invalid API key scope in database"))?;
+
+    // Scope enforcement: read-only keys cannot write
+    if is_write_method(req.method()) && !scope.has_permission(ApiKeyScope::Trade) {
+        return Err(ApiError::forbidden(
+            "API key scope 'read' does not permit write operations",
+        ));
+    }
+
+    let wallet = wallet_address.to_ascii_lowercase();
+    check_sanctions(req, state, &wallet).await?;
+
+    // Fire-and-forget last_used_at update
+    let db = state.db.clone();
+    let kid = key_id.clone();
+    tokio::spawn(async move {
+        db.touch_api_key_last_used(&kid).await.ok();
+    });
+
+    Ok(AuthenticatedUser {
+        wallet_address: wallet,
+        auth_method: AuthMethod::ApiKey { scope },
+    })
+}
+
+async fn check_sanctions(
+    req: &HttpRequest,
+    state: &web::Data<Arc<AppState>>,
+    wallet: &str,
+) -> Result<(), ApiError> {
     if is_write_method(req.method())
         && state
             .config
             .sanctions_blocked_addresses
             .iter()
-            .any(|blocked| blocked == &wallet)
+            .any(|blocked| blocked == wallet)
     {
         let request_id = req
             .headers()
@@ -78,7 +164,7 @@ pub async fn extract_authenticated_user(
         });
         let decision = ComplianceDecisionEntry {
             request_id,
-            wallet: Some(wallet.as_str()),
+            wallet: Some(wallet),
             country_code: None,
             action: "write",
             route: route.as_str(),
@@ -93,10 +179,7 @@ pub async fn extract_authenticated_user(
             "wallet is restricted under sanctions policy",
         ));
     }
-
-    Ok(AuthenticatedUser {
-        wallet_address: wallet,
-    })
+    Ok(())
 }
 
 fn is_write_method(method: &actix_web::http::Method) -> bool {
@@ -912,6 +995,7 @@ mod tests {
     fn test_authenticated_user_struct() {
         let user = AuthenticatedUser {
             wallet_address: "0xabc".to_string(),
+            auth_method: AuthMethod::Jwt,
         };
         assert_eq!(user.wallet_address, "0xabc");
     }

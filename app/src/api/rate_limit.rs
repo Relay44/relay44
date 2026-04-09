@@ -7,11 +7,14 @@
 //! - Claim: 5/min per user (economic attack protection)
 //! - Write: 30/min (general writes)
 //! - Read: 120/min (general reads)
+//! - AgentOrder: 120/min per user (elevated for API key agents)
+//! - AgentRead: 600/min per user (elevated for API key agents)
 
 #![allow(dead_code)]
 
 use actix_web::HttpRequest;
 
+use super::api_key::AuthMethod;
 use super::ApiError;
 use crate::services::RedisService;
 
@@ -34,6 +37,10 @@ pub enum RateLimitTier {
     DistTrade,
     /// Distribution quote: 60 requests per minute (read-like but heavier compute)
     DistQuote,
+    /// Agent order placement: 120 requests per minute per user (API key only)
+    AgentOrder,
+    /// Agent reads: 600 requests per minute per user (API key only)
+    AgentRead,
 }
 
 impl RateLimitTier {
@@ -47,6 +54,8 @@ impl RateLimitTier {
             RateLimitTier::Read => 120,
             RateLimitTier::DistTrade => 10,
             RateLimitTier::DistQuote => 60,
+            RateLimitTier::AgentOrder => 120,
+            RateLimitTier::AgentRead => 600,
         }
     }
 
@@ -67,7 +76,27 @@ impl RateLimitTier {
             RateLimitTier::Read => "rl:read",
             RateLimitTier::DistTrade => "rl:dist_trade",
             RateLimitTier::DistQuote => "rl:dist_quote",
+            RateLimitTier::AgentOrder => "rl:agent_order",
+            RateLimitTier::AgentRead => "rl:agent_read",
         }
+    }
+}
+
+/// Select the order rate limit tier based on auth method.
+/// API key users get 12x the limit (120/min vs 10/min).
+pub fn order_tier_for(auth_method: &AuthMethod) -> RateLimitTier {
+    match auth_method {
+        AuthMethod::ApiKey { .. } => RateLimitTier::AgentOrder,
+        AuthMethod::Jwt => RateLimitTier::Order,
+    }
+}
+
+/// Select the read rate limit tier based on auth method.
+/// API key users get 5x the limit (600/min vs 120/min).
+pub fn read_tier_for(auth_method: &AuthMethod) -> RateLimitTier {
+    match auth_method {
+        AuthMethod::ApiKey { .. } => RateLimitTier::AgentRead,
+        AuthMethod::Jwt => RateLimitTier::Read,
     }
 }
 
@@ -161,9 +190,18 @@ pub async fn check_write_rate_limit(
     check_rate_limit(req, redis, RateLimitTier::Write).await
 }
 
-/// Helper to check order-tier rate limit (10/min per user)
+/// Helper to check order-tier rate limit (10/min per user, or 120/min for agents)
 pub async fn check_order_rate_limit(wallet: &str, redis: &RedisService) -> Result<(), ApiError> {
     check_rate_limit_by_user(wallet, redis, RateLimitTier::Order).await
+}
+
+/// Helper to check order rate limit with auth-method-aware tier selection
+pub async fn check_order_rate_limit_for(
+    wallet: &str,
+    redis: &RedisService,
+    auth_method: &AuthMethod,
+) -> Result<(), ApiError> {
+    check_rate_limit_by_user(wallet, redis, order_tier_for(auth_method)).await
 }
 
 /// Helper to check market-creation rate limit (1/hour per user)
@@ -191,6 +229,8 @@ mod tests {
         assert_eq!(RateLimitTier::Claim.limit(), 5);
         assert_eq!(RateLimitTier::Write.limit(), 30);
         assert_eq!(RateLimitTier::Read.limit(), 120);
+        assert_eq!(RateLimitTier::AgentOrder.limit(), 120);
+        assert_eq!(RateLimitTier::AgentRead.limit(), 600);
     }
 
     #[test]
@@ -201,6 +241,8 @@ mod tests {
         assert_eq!(RateLimitTier::Claim.window_secs(), 60);
         assert_eq!(RateLimitTier::Write.window_secs(), 60);
         assert_eq!(RateLimitTier::Read.window_secs(), 60);
+        assert_eq!(RateLimitTier::AgentOrder.window_secs(), 60);
+        assert_eq!(RateLimitTier::AgentRead.window_secs(), 60);
     }
 
     #[test]
@@ -211,6 +253,8 @@ mod tests {
         assert_eq!(RateLimitTier::Claim.key_prefix(), "rl:claim");
         assert_eq!(RateLimitTier::Write.key_prefix(), "rl:write");
         assert_eq!(RateLimitTier::Read.key_prefix(), "rl:read");
+        assert_eq!(RateLimitTier::AgentOrder.key_prefix(), "rl:agent_order");
+        assert_eq!(RateLimitTier::AgentRead.key_prefix(), "rl:agent_read");
     }
 
     #[test]
@@ -223,14 +267,50 @@ mod tests {
             RateLimitTier::Claim,
             RateLimitTier::Write,
             RateLimitTier::Read,
+            RateLimitTier::DistTrade,
+            RateLimitTier::DistQuote,
+            RateLimitTier::AgentOrder,
+            RateLimitTier::AgentRead,
         ]
         .iter()
         .map(|t| t.key_prefix())
         .collect();
         assert_eq!(
             prefixes.len(),
-            6,
+            10,
             "All rate limit tiers should have unique key prefixes"
         );
+    }
+
+    #[test]
+    fn test_order_tier_selection() {
+        use crate::api::api_key::ApiKeyScope;
+
+        assert!(matches!(
+            order_tier_for(&AuthMethod::Jwt),
+            RateLimitTier::Order
+        ));
+        assert!(matches!(
+            order_tier_for(&AuthMethod::ApiKey {
+                scope: ApiKeyScope::Trade
+            }),
+            RateLimitTier::AgentOrder
+        ));
+    }
+
+    #[test]
+    fn test_read_tier_selection() {
+        use crate::api::api_key::ApiKeyScope;
+
+        assert!(matches!(
+            read_tier_for(&AuthMethod::Jwt),
+            RateLimitTier::Read
+        ));
+        assert!(matches!(
+            read_tier_for(&AuthMethod::ApiKey {
+                scope: ApiKeyScope::Read
+            }),
+            RateLimitTier::AgentRead
+        ));
     }
 }
