@@ -9,7 +9,6 @@ import { FeaturedSlider } from "@/components/market";
 import { LeaderboardMini } from "@/components/leaderboard";
 import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
 import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
-import { getMockPlatformStats } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import type { HomeLiveFeed } from "@/lib/server/homeLive";
 import type { ExternalAgentRecord } from "@/lib/api";
@@ -147,15 +146,14 @@ function buildHeroRows(
     }));
   }
 
-  const mockStats = getMockPlatformStats();
   return [
     {
       label: "AGENTS",
-      value: agentsError ? "FEED UNAVAILABLE" : isLoadingAgents ? "LOADING" : `${mockStats.activeAgents} ACTIVE`,
+      value: agentsError ? "FEED UNAVAILABLE" : isLoadingAgents ? "LOADING" : "0 ACTIVE",
     },
     {
       label: "MARKETS",
-      value: `${signal.marketsTracked || mockStats.totalMarkets} TRACKED`,
+      value: `${signal.marketsTracked || 0} TRACKED`,
     },
     {
       label: "FEEDS",
@@ -447,13 +445,11 @@ function formatStatNumber(n: number): string {
 function PlatformStatsBar({ markets, agentCount }: { markets: Market[]; agentCount: number }) {
   const totalVolume = markets.reduce((sum, m) => sum + (m.totalVolume ?? 0), 0);
   const activeMarkets = markets.filter((m) => m.status === "active").length;
-  const mockStats = getMockPlatformStats();
-
   const stats = [
-    { label: "Markets", value: activeMarkets > 0 ? activeMarkets.toString() : mockStats.totalMarkets.toString() },
-    { label: "Volume", value: totalVolume > 0 ? formatStatNumber(totalVolume) : formatStatNumber(mockStats.totalVolume) },
-    { label: "Traders", value: mockStats.totalTraders.toLocaleString() },
-    { label: "Agents", value: agentCount > 0 ? agentCount.toString() : mockStats.activeAgents.toString() },
+    { label: "Markets", value: activeMarkets.toString() },
+    { label: "Volume", value: formatStatNumber(totalVolume) },
+    { label: "Traders", value: "--" },
+    { label: "Agents", value: agentCount.toString() },
   ];
 
   return (
