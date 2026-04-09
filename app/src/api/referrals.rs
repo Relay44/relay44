@@ -4,6 +4,7 @@ use serde_json::json;
 use sqlx::Row;
 use std::sync::Arc;
 
+use super::rate_limit::{check_rate_limit_by_user, RateLimitTier};
 use super::ApiError;
 use crate::AppState;
 
@@ -26,6 +27,7 @@ pub async fn generate_code(
     state: web::Data<Arc<AppState>>,
 ) -> Result<impl Responder, ApiError> {
     let user = crate::api::auth::extract_authenticated_user(&req, &state).await?;
+    check_rate_limit_by_user(&user.wallet_address, &state.redis, RateLimitTier::Write).await?;
     let wallet = user.wallet_address.to_lowercase();
     let pool = state.db.pool();
 
@@ -129,6 +131,7 @@ pub async fn apply_code(
     body: web::Json<ApplyReferralRequest>,
 ) -> Result<impl Responder, ApiError> {
     let user = crate::api::auth::extract_authenticated_user(&req, &state).await?;
+    check_rate_limit_by_user(&user.wallet_address, &state.redis, RateLimitTier::Write).await?;
     let wallet = user.wallet_address.to_lowercase();
     let pool = state.db.pool();
 

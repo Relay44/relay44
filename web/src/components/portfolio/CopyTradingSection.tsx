@@ -45,7 +45,18 @@ export function CopyTradingSection() {
     );
   }
 
-  if (subscriptions.length === 0 && subscriberCount === 0) return null;
+  if (subscriptions.length === 0 && subscriberCount === 0) {
+    return (
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold mb-4">Copy Trading</h2>
+        <Card>
+          <div className="text-sm text-text-secondary">
+            You are not copying any traders yet. Visit a trader&#39;s profile to start copying.
+          </div>
+        </Card>
+      </section>
+    );
+  }
 
   return (
     <section className="mb-8">
