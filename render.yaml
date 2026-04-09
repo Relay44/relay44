@@ -8,11 +8,11 @@ services:
 
   - type: web
     name: relay44-api
-    runtime: docker
-    dockerfilePath: ./app/Dockerfile
-    dockerContext: .
+    runtime: rust
     region: frankfurt
     plan: starter
+    buildCommand: cargo build --profile ci --package relay44-backend
+    startCommand: ./target/ci/relay44-api
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
