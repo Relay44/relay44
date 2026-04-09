@@ -854,6 +854,33 @@ async fn main() -> std::io::Result<()> {
                             ),
                     )
                     .service(
+                        web::scope("/copy-trading")
+                            .route(
+                                "/subscribe",
+                                web::post().to(api::copy_trading::subscribe),
+                            )
+                            .route(
+                                "/subscribe/{id}",
+                                web::delete().to(api::copy_trading::unsubscribe),
+                            )
+                            .route(
+                                "/subscribe/{id}",
+                                web::put().to(api::copy_trading::update_subscription),
+                            )
+                            .route(
+                                "/subscribe/{id}/history",
+                                web::get().to(api::copy_trading::get_subscription_history),
+                            )
+                            .route(
+                                "/subscriptions",
+                                web::get().to(api::copy_trading::list_subscriptions),
+                            )
+                            .route(
+                                "/subscribers",
+                                web::get().to(api::copy_trading::get_subscriber_count),
+                            ),
+                    )
+                    .service(
                         web::scope("/external")
                             .route(
                                 "/credentials",

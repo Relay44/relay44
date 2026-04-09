@@ -36,6 +36,20 @@ export {
   useRegisterForHackathon,
   useLinkAgentToHackathon,
 } from './useHackathons';
+export {
+  useScannerOpportunities,
+  useScannerCalibration,
+  useScannerRuns,
+} from './useScanner';
+export {
+  useCopySubscriptions,
+  useCopySubscriberCount,
+  useCopySubscriptionHistory,
+  useStartCopyTrading,
+  useStopCopyTrading,
+  useUpdateCopySubscription,
+  useCopyStatus,
+} from './useCopyTrading';
 export { useRuntimeMode } from './useRuntimeMode';
 export { useSessionState } from './useSessionState';
 export {
@@ -64,3 +78,8 @@ export {
   useCreateDistributionMarket,
   useResolveDistributionMarket,
 } from './useDistribution';
+export {
+  useSignalProviders,
+  useSignalProviderEmissions,
+  useCreateSignalProvider,
+} from './useSignals';

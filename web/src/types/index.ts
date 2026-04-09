@@ -825,6 +825,71 @@ export interface CopyTradingSubscription {
   maxPositionUsdc: number;
   active: boolean;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface CopyTradeExecution {
+  id: string;
+  marketId: string;
+  side: string;
+  outcome: string;
+  amountUsdc: number;
+  priceBps: number;
+  status: string;
+  createdAt: string;
+}
+
+// Scanner types
+
+export type OpportunityType =
+  | 'longshot_yes'
+  | 'longshot_no'
+  | 'near_certainty_yes'
+  | 'near_certainty_no'
+  | 'spread_capture';
+
+export interface ScannedOpportunity {
+  conditionId: string;
+  question: string;
+  slug: string;
+  category: string;
+  yesTokenId: string;
+  noTokenId: string;
+  yesPrice: number;
+  noPrice: number;
+  spreadBps: number;
+  volumeUsdc: number;
+  liquidityUsdc: number;
+  opportunityType: string;
+  opportunityScore: number;
+  mispricingScore: number;
+  durationMinutes: number | null;
+  feeRateBps: number;
+  lastScannedAt: string;
+}
+
+export interface CalibrationBucket {
+  priceBucketLow: number;
+  priceBucketHigh: number;
+  category: string;
+  totalPositions: number;
+  wins: number;
+  actualWinRate: number;
+  impliedProbability: number;
+  mispricingPct: number;
+  lastUpdatedAt: string;
+}
+
+export interface ScanRun {
+  id: string;
+  startedAt: string;
+  completedAt: string | null;
+  marketsScanned: number;
+  opportunitiesFound: number;
+  longshotsFound: number;
+  nearCertaintiesFound: number;
+  spreadCapturesFound: number;
+  error: string | null;
 }
 
 export type SignalDirection = 'yes' | 'no' | 'neutral';
@@ -844,3 +909,12 @@ export interface TradingSignal {
   resolvedAt?: string;
   outcomeCorrect?: boolean;
 }
+
+// Signal marketplace types
+export type {
+  SignalProvider,
+  SignalProviderStats,
+  SignalEmission,
+  SignalProviderFilters,
+  CreateSignalProviderRequest,
+} from './signals';

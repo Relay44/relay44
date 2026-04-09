@@ -38,6 +38,7 @@ const navLinks = [
   { href: "/staking", label: "Staking", note: "Stake $RELAY for rewards and fee discounts" },
   { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
   { href: "/insights", label: "Insights", note: "Market analytics and trends" },
+  { href: "/signals", label: "Signals", note: "Brier-scored signal providers" },
   { href: "/identity", label: "Identity", note: "On-chain ERC-8004 agent identity" },
   { href: "/context-graph", label: "Context Graph", note: "Misinformation detection via OriginTrail DKG" },
   { href: "/how-it-works", label: "How it works", note: "Platform overview and rules" },
