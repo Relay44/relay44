@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { LeaderboardEntry, Market, PublicProfile } from '@/types';
+import type { DistributionMarket } from '@/types/distribution';
 
 export const SITE_NAME = 'Relay44';
 export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://relay44.com')
@@ -309,6 +310,139 @@ export function buildMarketStructuredData(market: Market): StructuredDataNode {
       description: cleanText(market.description || DEFAULT_DESCRIPTION),
     },
   };
+}
+
+export function buildMarketEventStructuredData(market: Market): StructuredDataNode {
+  const yesPercent = Math.round(market.yesPrice * 100);
+  const noPercent = Math.round(market.noPrice * 100);
+  const marketUrl = absoluteUrl(`/markets/${encodeURIComponent(market.id)}`);
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Event',
+    '@id': `${marketUrl}#event`,
+    name: market.question,
+    description: cleanText(
+      market.description ||
+        `Prediction market: ${market.question}. Current probability: YES ${yesPercent}%, NO ${noPercent}%.`,
+    ),
+    url: marketUrl,
+    startDate: market.createdAt,
+    endDate: market.tradingEnd || market.resolutionDeadline,
+    eventStatus: market.status === 'active'
+      ? 'https://schema.org/EventScheduled'
+      : market.status === 'resolved'
+        ? 'https://schema.org/EventMovedOnline'
+        : 'https://schema.org/EventCancelled',
+    eventAttendanceMode: 'https://schema.org/OnlineEventAttendanceMode',
+    location: {
+      '@type': 'VirtualLocation',
+      url: marketUrl,
+    },
+    organizer: {
+      '@id': absoluteUrl('/#organization'),
+    },
+    image: resolveSeoImage(market.imageUrl),
+    ...(market.category ? { about: { '@type': 'Thing', name: market.category } } : {}),
+  };
+}
+
+export function buildDistributionMarketStructuredData(
+  market: DistributionMarket,
+): StructuredDataNode {
+  const marketUrl = absoluteUrl(`/distribution/${encodeURIComponent(market.id)}`);
+  const mu = market.marketMu ?? (market.outcomeMin + market.outcomeMax) / 2;
+  const sigma = market.marketSigma ?? (market.outcomeMax - market.outcomeMin) / 6;
+  const unit = market.outcomeUnit || '';
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Event',
+    '@id': `${marketUrl}#event`,
+    name: market.question,
+    description: cleanText(
+      market.description ||
+        `Distribution market: ${market.question}. Current mean: ${mu.toFixed(1)}${unit ? ` ${unit}` : ''}, std dev: ${sigma.toFixed(1)}.`,
+    ),
+    url: marketUrl,
+    startDate: market.createdAt,
+    endDate: market.tradingEnd || market.resolutionDeadline,
+    eventStatus: market.status === 'active'
+      ? 'https://schema.org/EventScheduled'
+      : market.status === 'resolved'
+        ? 'https://schema.org/EventMovedOnline'
+        : 'https://schema.org/EventCancelled',
+    eventAttendanceMode: 'https://schema.org/OnlineEventAttendanceMode',
+    location: {
+      '@type': 'VirtualLocation',
+      url: marketUrl,
+    },
+    organizer: {
+      '@id': absoluteUrl('/#organization'),
+    },
+    ...(market.category ? { about: { '@type': 'Thing', name: market.category } } : {}),
+  };
+}
+
+function formatVolumeCompact(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+function formatEndDateCompact(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+export function buildMarketDescription(market: Market): string {
+  const yesPercent = Math.round(market.yesPrice * 100);
+  const noPercent = Math.round(market.noPrice * 100);
+  const parts: string[] = [market.question];
+
+  if (market.yesPrice > 0 || market.noPrice > 0) {
+    parts.push(`YES ${yesPercent}%, NO ${noPercent}%.`);
+  }
+
+  const vol = market.totalVolume || market.volume24h || 0;
+  if (vol > 0) {
+    parts.push(`Volume: ${formatVolumeCompact(vol)}.`);
+  }
+
+  if (market.tradingEnd) {
+    const endStr = formatEndDateCompact(market.tradingEnd);
+    if (endStr) {
+      parts.push(`Ends ${endStr}.`);
+    }
+  }
+
+  return cleanText(parts.join(' '));
+}
+
+export function buildDistributionMarketDescription(market: DistributionMarket): string {
+  const mu = market.marketMu ?? (market.outcomeMin + market.outcomeMax) / 2;
+  const sigma = market.marketSigma ?? (market.outcomeMax - market.outcomeMin) / 6;
+  const unit = market.outcomeUnit || '';
+  const parts: string[] = [market.question];
+
+  parts.push(
+    `Current mean: ${mu.toFixed(1)}${unit ? ` ${unit}` : ''}, std dev: ${sigma.toFixed(1)}.`,
+  );
+
+  parts.push(
+    `Outcome range: ${market.outcomeMin}${unit ? ` ${unit}` : ''} to ${market.outcomeMax}${unit ? ` ${unit}` : ''}.`,
+  );
+
+  if (market.totalCollateral > 0) {
+    parts.push(`Collateral: ${formatVolumeCompact(market.totalCollateral)}.`);
+  }
+
+  return cleanText(parts.join(' '));
 }
 
 export function buildProfileStructuredData(

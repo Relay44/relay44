@@ -1291,6 +1291,13 @@ async fn main() -> std::io::Result<()> {
                             ),
                     )
                     .service(
+                        web::scope("/referrals")
+                            .route("/generate", web::post().to(api::referrals::generate_code))
+                            .route("/apply", web::post().to(api::referrals::apply_code))
+                            .route("/stats", web::get().to(api::referrals::get_stats))
+                            .route("/code", web::get().to(api::referrals::get_code)),
+                    )
+                    .service(
                         web::scope("/compliance")
                             .route(
                                 "/policy",

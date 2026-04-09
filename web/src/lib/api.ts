@@ -75,6 +75,18 @@ export function resolveApiUrl(path: string): string {
   return `${PRIMARY_API_BASE}${normalizedPath}`;
 }
 
+export interface ReferralStats {
+  totalReferrals: number;
+  rewardedCount: number;
+  pendingRewards: number;
+  referredBy: string | null;
+  referees: Array<{
+    wallet: string;
+    createdAt: string;
+    rewarded: boolean;
+  }>;
+}
+
 export interface BaseTokenState {
   chain_id: number;
   token_address: string;
@@ -3972,6 +3984,25 @@ class ApiClient {
     return this.request(
       `/agents/managed/${encodeURIComponent(agentId)}/trades`,
     );
+  }
+
+  async generateReferralCode(): Promise<{ code: string; created: boolean }> {
+    return this.request("/referrals/generate", { method: "POST" });
+  }
+
+  async getReferralCode(): Promise<{ code: string | null }> {
+    return this.request("/referrals/code");
+  }
+
+  async applyReferralCode(code: string): Promise<{ ok: boolean; referrer: string }> {
+    return this.request("/referrals/apply", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  async getReferralStats(): Promise<ReferralStats> {
+    return this.request("/referrals/stats");
   }
 }
 
