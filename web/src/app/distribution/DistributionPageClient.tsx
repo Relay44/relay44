@@ -1,8 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { BarChart3, TrendingUp, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { BarChart3, Plus, TrendingUp, Wallet } from 'lucide-react';
 import { Header, BottomNav } from '@/components/layout';
+import { Button } from '@/components/ui';
 import { DistributionMarketCard } from '@/components/distribution';
 import { useDistributionMarkets } from '@/hooks/useDistribution';
 import { cn } from '@/lib/utils';
@@ -99,9 +101,12 @@ export default function DistributionPageClient() {
                 Continuous outcome markets powered by Gaussian LMSR pricing
               </p>
             </div>
-            <span className="text-sm text-text-muted">
-              {markets.length} market{markets.length !== 1 ? 's' : ''}
-            </span>
+            <Link href="/distribution/create">
+              <Button variant="primary" size="sm" className="flex items-center gap-1.5">
+                <Plus className="w-3.5 h-3.5" />
+                Create Market
+              </Button>
+            </Link>
           </div>
 
           {/* Stats row */}
