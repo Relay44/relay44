@@ -1,4 +1,5 @@
 pub mod agent_service;
+pub mod api_key;
 pub mod auth;
 pub mod compliance;
 pub mod creator_tiers;
@@ -45,5 +46,6 @@ pub use ws::ws_handler;
 #[allow(unused_imports)]
 pub use rate_limit::{
     check_claim_rate_limit, check_market_create_rate_limit, check_order_rate_limit,
-    check_write_rate_limit, RateLimitTier,
+    check_order_rate_limit_for, check_write_rate_limit, order_tier_for, read_tier_for,
+    RateLimitTier,
 };

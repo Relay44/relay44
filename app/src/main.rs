@@ -445,6 +445,9 @@ async fn main() -> std::io::Result<()> {
                         web::scope("/orders")
                             .route("", web::get().to(api::orders::list_orders))
                             .route("", web::post().to(api::orders::place_order))
+                            .route("/batch", web::post().to(api::orders::batch_place_orders))
+                            .route("/cancel-batch", web::post().to(api::orders::batch_cancel_orders))
+                            .route("/replace", web::post().to(api::orders::replace_orders))
                             .route("/{order_id}", web::get().to(api::orders::get_order))
                             .route("/{order_id}", web::delete().to(api::orders::cancel_order)),
                     )
@@ -533,7 +536,10 @@ async fn main() -> std::io::Result<()> {
                                 web::post().to(api::auth::farcaster_login),
                             )
                             .route("/refresh", web::post().to(api::auth::refresh_token))
-                            .route("/logout", web::post().to(api::auth::logout)),
+                            .route("/logout", web::post().to(api::auth::logout))
+                            .route("/api-keys", web::post().to(api::api_key::create_api_key_handler))
+                            .route("/api-keys", web::get().to(api::api_key::list_api_keys_handler))
+                            .route("/api-keys/{key_id}", web::delete().to(api::api_key::revoke_api_key_handler)),
                     )
                     .service(
                         web::scope("/payments").service(

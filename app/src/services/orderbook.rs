@@ -353,6 +353,99 @@ impl OrderBookService {
         let ask = self.best_ask(market_id, outcome)?;
         Some((bid + ask) / 2.0)
     }
+
+    /// Add multiple orders to the order book atomically (single lock acquisition).
+    /// Returns a Vec of match results, one per input order, in the same order.
+    pub fn add_orders_batch(&self, orders: &[Order]) -> Vec<Vec<MatchedTrade>> {
+        let mut books = self.write_books();
+        let mut all_matches = Vec::with_capacity(orders.len());
+
+        for order in orders {
+            let market_book = books
+                .entry(order.market_id.clone())
+                .or_insert_with(|| MarketOrderBook {
+                    yes: OutcomeOrderBook {
+                        bids: BTreeMap::new(),
+                        asks: BTreeMap::new(),
+                    },
+                    no: OutcomeOrderBook {
+                        bids: BTreeMap::new(),
+                        asks: BTreeMap::new(),
+                    },
+                });
+
+            let outcome_book = match order.outcome {
+                Outcome::Yes => &mut market_book.yes,
+                Outcome::No => &mut market_book.no,
+            };
+
+            let mut entry = OrderEntry {
+                order_id: order.id.clone(),
+                owner: order.owner.clone(),
+                price_bps: order.price_bps,
+                remaining: order.remaining_quantity,
+                timestamp: Utc::now().timestamp(),
+            };
+
+            let matches = self.match_order(
+                outcome_book,
+                order.market_id.as_str(),
+                order.outcome,
+                &mut entry,
+                order.side,
+            );
+
+            if entry.remaining > 0 {
+                match order.side {
+                    OrderSide::Buy => {
+                        outcome_book
+                            .bids
+                            .entry(order.price_bps)
+                            .or_insert_with(Vec::new)
+                            .push(entry);
+                    }
+                    OrderSide::Sell => {
+                        outcome_book
+                            .asks
+                            .entry(order.price_bps)
+                            .or_insert_with(Vec::new)
+                            .push(entry);
+                    }
+                }
+            }
+
+            all_matches.push(matches);
+        }
+
+        all_matches
+    }
+
+    /// Remove multiple orders atomically (single lock acquisition).
+    pub fn remove_orders_batch(
+        &self,
+        cancels: &[(String, Outcome, OrderSide, String)],
+    ) {
+        let mut books = self.write_books();
+
+        for (market_id, outcome, side, order_id) in cancels {
+            if let Some(market_book) = books.get_mut(market_id.as_str()) {
+                let outcome_book = match outcome {
+                    Outcome::Yes => &mut market_book.yes,
+                    Outcome::No => &mut market_book.no,
+                };
+
+                let book = match side {
+                    OrderSide::Buy => &mut outcome_book.bids,
+                    OrderSide::Sell => &mut outcome_book.asks,
+                };
+
+                for (_, orders) in book.iter_mut() {
+                    orders.retain(|o| o.order_id != *order_id);
+                }
+                book.retain(|_, orders| !orders.is_empty());
+            }
+        }
+    }
 }
 
 impl Default for OrderBookService {

@@ -2717,6 +2717,216 @@ impl DatabaseService {
             created_at: row.get("created_at"),
         })
     }
+
+    // ── API Key CRUD ────────────────────────────────────────────────
+
+    pub async fn create_api_key(
+        &self,
+        wallet_address: &str,
+        key_hash: &str,
+        key_prefix: &str,
+        label: &str,
+        scope: &str,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<String> {
+        let row: (String,) = sqlx::query_as(
+            "INSERT INTO api_keys (wallet_address, key_hash, key_prefix, label, scope, expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+        )
+        .bind(wallet_address)
+        .bind(key_hash)
+        .bind(key_prefix)
+        .bind(label)
+        .bind(scope)
+        .bind(expires_at)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
+
+    pub async fn get_api_key_by_hash(
+        &self,
+        key_hash: &str,
+    ) -> Result<Option<(String, String, String, bool, Option<DateTime<Utc>>)>> {
+        let row = sqlx::query_as::<_, (String, String, String, bool, Option<DateTime<Utc>>)>(
+            "SELECT id, wallet_address, scope, is_active, expires_at FROM api_keys WHERE key_hash = $1",
+        )
+        .bind(key_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    pub async fn get_api_key_hash_by_id(
+        &self,
+        key_id: &str,
+        wallet_address: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query_as::<_, (String,)>(
+            "SELECT key_hash FROM api_keys WHERE id = $1 AND wallet_address = $2",
+        )
+        .bind(key_id)
+        .bind(wallet_address)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.0))
+    }
+
+    pub async fn revoke_api_key(&self, key_id: &str, wallet_address: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE api_keys SET is_active = false, revoked_at = NOW() \
+             WHERE id = $1 AND wallet_address = $2 AND is_active = true",
+        )
+        .bind(key_id)
+        .bind(wallet_address)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn list_api_keys(
+        &self,
+        wallet_address: &str,
+    ) -> Result<Vec<crate::api::api_key::ApiKeyListItem>> {
+        let rows = sqlx::query_as::<_, (String, String, String, String, bool, Option<DateTime<Utc>>, Option<DateTime<Utc>>, DateTime<Utc>)>(
+            "SELECT id, key_prefix, label, scope, is_active, expires_at, last_used_at, created_at \
+             FROM api_keys WHERE wallet_address = $1 ORDER BY created_at DESC",
+        )
+        .bind(wallet_address)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, prefix, label, scope, is_active, expires_at, last_used_at, created_at)| {
+                crate::api::api_key::ApiKeyListItem {
+                    id,
+                    prefix,
+                    label,
+                    scope,
+                    is_active,
+                    expires_at,
+                    last_used_at,
+                    created_at,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn touch_api_key_last_used(&self, key_id: &str) -> Result<()> {
+        sqlx::query("UPDATE api_keys SET last_used_at = NOW() WHERE id = $1")
+            .bind(key_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // ── Batch Order Persistence ─────────────────────────────────────
+
+    pub async fn persist_batch_order_flow(
+        &self,
+        takers: &[Order],
+        maker_updates: &[Order],
+        settlements: &[LocalTradeSettlement],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        for taker in takers {
+            sqlx::query(
+                r#"
+                INSERT INTO orders (
+                    id, order_id, market_id, owner, side, outcome, order_type,
+                    price, price_bps, quantity, filled_quantity, remaining_quantity,
+                    status, is_private, tx_signature, created_at, updated_at, expires_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                "#,
+            )
+            .bind(&taker.id)
+            .bind(taker.order_id as i64)
+            .bind(&taker.market_id)
+            .bind(&taker.owner)
+            .bind(taker.side as i16)
+            .bind(taker.outcome as i16)
+            .bind(taker.order_type as i16)
+            .bind(taker.price)
+            .bind(taker.price_bps as i16)
+            .bind(taker.quantity as i64)
+            .bind(taker.filled_quantity as i64)
+            .bind(taker.remaining_quantity as i64)
+            .bind(taker.status as i16)
+            .bind(taker.is_private)
+            .bind(&taker.tx_signature)
+            .bind(taker.created_at)
+            .bind(taker.updated_at)
+            .bind(taker.expires_at)
+            .execute(&mut *tx)
+            .await?;
+
+            upsert_orderbook_entry_tx(&mut tx, taker).await?;
+        }
+
+        for maker in maker_updates {
+            sqlx::query(
+                "UPDATE orders SET status = $1, filled_quantity = $2, remaining_quantity = $3, updated_at = $4 WHERE id = $5",
+            )
+            .bind(maker.status as i16)
+            .bind(maker.filled_quantity as i64)
+            .bind(maker.remaining_quantity as i64)
+            .bind(maker.updated_at)
+            .bind(&maker.id)
+            .execute(&mut *tx)
+            .await?;
+
+            upsert_orderbook_entry_tx(&mut tx, maker).await?;
+        }
+
+        for settlement in settlements {
+            sqlx::query(
+                r#"
+                INSERT INTO trades (
+                    id, market_id, buy_order_id, sell_order_id, outcome,
+                    price, price_bps, quantity, collateral_amount,
+                    buyer, seller, tx_signature, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                "#,
+            )
+            .bind(&settlement.trade.id)
+            .bind(&settlement.trade.market_id)
+            .bind(&settlement.trade.buy_order_id)
+            .bind(&settlement.trade.sell_order_id)
+            .bind(settlement.trade.outcome as i16)
+            .bind(settlement.trade.price)
+            .bind(settlement.trade.price_bps as i16)
+            .bind(settlement.trade.quantity as i64)
+            .bind(settlement.trade.collateral_amount as i64)
+            .bind(&settlement.trade.buyer)
+            .bind(&settlement.trade.seller)
+            .bind(&settlement.trade.tx_signature)
+            .bind(settlement.trade.created_at)
+            .execute(&mut *tx)
+            .await?;
+
+            apply_position_delta_tx(
+                &mut tx,
+                settlement.trade.market_id.as_str(),
+                settlement.trade.buyer.as_str(),
+                settlement.buyer_yes_delta,
+                settlement.buyer_no_delta,
+            )
+            .await?;
+            apply_position_delta_tx(
+                &mut tx,
+                settlement.trade.market_id.as_str(),
+                settlement.trade.seller.as_str(),
+                settlement.seller_yes_delta,
+                settlement.seller_no_delta,
+            )
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
 }
 
 async fn upsert_orderbook_entry_tx(

@@ -370,4 +370,21 @@ impl RedisService {
         let _: () = conn.del(&lock_key).await?;
         Ok(())
     }
+
+    // ── API Key Revocation Cache ────────────────────────────────────
+
+    pub async fn revoke_api_key(&self, key_hash: &str) -> Result<()> {
+        let key = format!("apikey:revoked:{}", key_hash);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let _: () = conn.set_ex(&key, "1", 86400u64).await?;
+        info!("API key revoked in Redis cache: {}", &key_hash[..16]);
+        Ok(())
+    }
+
+    pub async fn is_api_key_revoked(&self, key_hash: &str) -> Result<bool> {
+        let key = format!("apikey:revoked:{}", key_hash);
+        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let exists: bool = conn.exists(&key).await?;
+        Ok(exists)
+    }
 }
