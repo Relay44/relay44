@@ -728,12 +728,15 @@ export interface HackathonRegistration {
   agentCount: number;
 }
 
+export type HackathonScoringMethod = 'net_pnl' | 'sharpe_ratio' | 'win_rate';
+
 export interface HackathonLeaderboardEntry {
   rank: number;
   walletAddress: string;
   netPnlUsdc: number;
   totalVolumeUsdc: number;
   winRateBps: number;
+  sharpeRatioBps: number;
   positionCount: number;
   tradeCount: number;
   snapshotTime: string;
@@ -741,6 +744,7 @@ export interface HackathonLeaderboardEntry {
 
 export interface HackathonLeaderboard {
   hackathonId: string;
+  scoringMethod: HackathonScoringMethod;
   entries: HackathonLeaderboardEntry[];
   updatedAt: string | null;
   total: number;
@@ -750,6 +754,8 @@ export interface HackathonSnapshot {
   walletAddress: string;
   netPnlUsdc: number;
   totalVolumeUsdc: number;
+  sharpeRatioBps: number;
+  winRateBps: number;
   rank: number;
   snapshotTime: string;
 }
@@ -918,3 +924,61 @@ export type {
   SignalProviderFilters,
   CreateSignalProviderRequest,
 } from './signals';
+
+// Agent-as-a-Service types
+export type AgentTemplateRiskTier = 'low' | 'medium' | 'high';
+export type AgentTemplateCategory = 'momentum' | 'arbitrage' | 'yield' | 'hedging' | 'custom';
+export type ManagedAgentStatus = 'active' | 'paused' | 'stopped';
+
+export interface AgentTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  strategy: string;
+  category: string;
+  riskTier: string;
+  minSeedUsdc: number;
+  defaultParams: Record<string, unknown>;
+}
+
+export interface ManagedAgent {
+  id: string;
+  name: string;
+  templateName: string;
+  strategy: string;
+  seedUsdc: number;
+  status: ManagedAgentStatus;
+  pnlUsdc: number;
+  totalTrades: number;
+  maxDrawdownPct: number;
+  highWatermarkUsdc: number;
+  lastExecutedAt: string | null;
+  createdAt: string;
+}
+
+export interface ManagedAgentTrade {
+  id: number;
+  marketSlug: string;
+  outcome: string;
+  side: string;
+  price: number;
+  quantity: number;
+  pnlUsdc: number | null;
+  provider: string | null;
+  createdAt: string;
+}
+
+export interface DeployAgentRequest {
+  templateId: string;
+  name: string;
+  seedUsdc: number;
+  params?: Record<string, unknown>;
+}
+
+export interface DeployAgentResponse {
+  id: string;
+  strategy: string;
+  params: Record<string, unknown>;
+  seedUsdc: number;
+  status: string;
+}

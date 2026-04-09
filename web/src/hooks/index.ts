@@ -84,3 +84,11 @@ export {
   useSignalProviderEmissions,
   useCreateSignalProvider,
 } from './useSignals';
+export {
+  useAgentTemplates,
+  useAgentTemplate,
+  useManagedAgents,
+  useManagedAgentTrades,
+  useDeployManagedAgent,
+  useUpdateManagedAgent,
+} from './useAgentService';

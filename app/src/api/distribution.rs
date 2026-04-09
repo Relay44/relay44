@@ -1415,6 +1415,33 @@ pub async fn claim_payout(
     .await
     .map_err(|e| ApiError::internal(&e.to_string()))?;
 
+    // Notify user that payout has been claimed
+    let payout_amount = position.payout.unwrap_or(0);
+    let pnl = position.pnl.unwrap_or(0.0);
+    let _ = create_notification(
+        &state,
+        NewNotification {
+            owner: user.wallet_address.clone(),
+            kind: NotificationType::DistributionPayoutReady,
+            title: "Distribution payout claimed".to_string(),
+            message: format!(
+                "Payout of {} claimed (PnL: {}{:.2})",
+                payout_amount,
+                if pnl >= 0.0 { "+" } else { "" },
+                pnl,
+            ),
+            market_id: Some(position.market_id.clone()),
+            order_id: None,
+            decision_cell_id: None,
+            metadata: serde_json::json!({
+                "positionId": position.position_id,
+                "payout": payout_amount,
+                "pnl": pnl,
+            }),
+        },
+    )
+    .await;
+
     // Return updated position
     let updated: PositionRow = sqlx::query_as(
         "SELECT id, position_id, market_id, owner, mu, sigma, size, collateral, cost_basis, \
