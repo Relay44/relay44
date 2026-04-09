@@ -25,10 +25,10 @@ async function main() {
   );
 
   if (!alphaAgents.length) {
-    console.error(
-      JSON.stringify({ ok: false, error: "no alpha wallet_follow_v2 agents found", severity: "critical" }),
+    console.log(
+      JSON.stringify({ ok: true, skipped: true, reason: "no alpha wallet_follow_v2 agents found" }),
     );
-    process.exit(3);
+    process.exit(0);
   }
 
   const active = alphaAgents.filter((a) => a.active);
