@@ -65,6 +65,7 @@ export function useStopCopyTrading() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: COPY_SUBS_KEY });
+      queryClient.invalidateQueries({ queryKey: ['copy-trading', 'history'] });
     },
   });
 }
@@ -85,6 +86,7 @@ export function useUpdateCopySubscription() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: COPY_SUBS_KEY });
+      queryClient.invalidateQueries({ queryKey: ['copy-trading', 'history'] });
     },
   });
 }

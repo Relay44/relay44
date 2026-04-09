@@ -36,6 +36,7 @@ const navLinks = [
   { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
   { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
   { href: "/staking", label: "Staking", note: "Stake $RELAY for rewards and fee discounts" },
+  { href: "/referrals", label: "Referrals", note: "Invite friends and earn rewards" },
   { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
   { href: "/insights", label: "Insights", note: "Market analytics and trends" },
   { href: "/signals", label: "Signals", note: "Brier-scored signal providers" },

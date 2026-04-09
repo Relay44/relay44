@@ -159,7 +159,8 @@ export default async function Image({
 
   const status = statusLabel(market.status);
   const mu = market.marketMu ?? (market.outcomeMin + market.outcomeMax) / 2;
-  const sigma = market.marketSigma ?? (market.outcomeMax - market.outcomeMin) / 6;
+  const rawSigma = market.marketSigma ?? (market.outcomeMax - market.outcomeMin) / 6;
+  const sigma = rawSigma > 0 ? rawSigma : (market.outcomeMax - market.outcomeMin) / 6 || 1;
   const collateral = formatVolume(market.totalCollateral || 0);
   const volume = formatVolume(market.totalVolume || 0);
   const unit = market.outcomeUnit || "";

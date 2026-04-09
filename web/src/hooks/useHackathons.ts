@@ -73,6 +73,7 @@ export function useRegisterForHackathon() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hackathon'] });
       queryClient.invalidateQueries({ queryKey: ['hackathon-registrations'] });
+      queryClient.invalidateQueries({ queryKey: ['hackathon-leaderboard'] });
     },
   });
 }
@@ -84,6 +85,7 @@ export function useLinkAgentToHackathon() {
       api.linkAgentToHackathon(params.hackathonId, params.agentId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hackathon'] });
+      queryClient.invalidateQueries({ queryKey: ['hackathon-leaderboard'] });
     },
   });
 }
