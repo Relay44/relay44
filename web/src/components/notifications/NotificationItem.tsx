@@ -62,6 +62,21 @@ const NOTIFICATION_ICONS: Record<NotificationType, React.ReactNode> = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 17H4m12-10l-4 4-4-4" />
     </svg>
   ),
+  distribution_trade_confirmed: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  ),
+  distribution_market_resolved: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  distribution_payout_ready: (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
   system: (
     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -80,6 +95,9 @@ const NOTIFICATION_COLORS: Record<NotificationType, string> = {
   decision_recommendation_changed: 'text-accent bg-accent/10',
   decision_threshold_crossed: 'text-bid bg-bid/10',
   decision_confidence_dropped: 'text-ask bg-ask/10',
+  distribution_trade_confirmed: 'text-bid bg-bid/10',
+  distribution_market_resolved: 'text-accent bg-accent/10',
+  distribution_payout_ready: 'text-bid bg-bid/10',
   system: 'text-accent bg-accent/10',
 };
 
@@ -88,7 +106,9 @@ function getNotificationLink(notification: Notification): string | null {
     return `/decisions/${encodeURIComponent(notification.decisionCellId)}`;
   }
   if (notification.marketId) {
-    return `/markets/${encodeURIComponent(notification.marketId)}`;
+    const isDistribution = notification.type.startsWith('distribution_');
+    const base = isDistribution ? '/distribution' : '/markets';
+    return `${base}/${encodeURIComponent(notification.marketId)}`;
   }
   if (notification.orderId) {
     return '/orders';

@@ -49,4 +49,18 @@ export {
   useTradeSubscription,
   usePriceSubscription,
   useMarketLiveData,
+  useDistributionLiveData,
 } from './useWebSocket';
+export {
+  useDistributionMarkets,
+  useDistributionMarket,
+  useDistributionQuote,
+  useDistributionCurve,
+  useDistributionTrade,
+  useDistributionPositions,
+  useCloseDistPosition,
+  useClaimDistPayout,
+  useDistributionCurveHistory,
+  useCreateDistributionMarket,
+  useResolveDistributionMarket,
+} from './useDistribution';

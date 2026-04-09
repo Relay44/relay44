@@ -33,6 +33,7 @@ const DECISION_TYPE_ALLOCATION: &str = "allocation";
 const SOURCE_TYPE_INTERNAL_MARKET: &str = "internal_market";
 const SOURCE_TYPE_EXTERNAL_MARKET: &str = "external_market";
 const SOURCE_TYPE_DRAFT_MARKET: &str = "draft_market";
+const SOURCE_TYPE_DISTRIBUTION_MARKET: &str = "distribution_market";
 
 const NODE_STATUS_DRAFT: &str = "draft";
 const NODE_STATUS_LIVE: &str = "live";
@@ -529,12 +530,12 @@ fn normalize_decision_type(raw: &str) -> Result<String, ApiError> {
 fn normalize_source_type(raw: &str) -> Result<String, ApiError> {
     let value = raw.trim().to_ascii_lowercase();
     match value.as_str() {
-        SOURCE_TYPE_INTERNAL_MARKET | SOURCE_TYPE_EXTERNAL_MARKET | SOURCE_TYPE_DRAFT_MARKET => {
+        SOURCE_TYPE_INTERNAL_MARKET | SOURCE_TYPE_EXTERNAL_MARKET | SOURCE_TYPE_DRAFT_MARKET | SOURCE_TYPE_DISTRIBUTION_MARKET => {
             Ok(value)
         }
         _ => Err(ApiError::bad_request(
             "INVALID_SOURCE_TYPE",
-            "source type must be one of: internal_market, external_market, draft_market",
+            "source type must be one of: internal_market, external_market, draft_market, distribution_market",
         )),
     }
 }
@@ -971,6 +972,24 @@ async fn ensure_internal_market_exists(state: &AppState, market_id: &str) -> Res
     Ok(())
 }
 
+async fn ensure_distribution_market_exists(
+    state: &AppState,
+    market_id: &str,
+) -> Result<(), ApiError> {
+    let exists = sqlx::query("SELECT id FROM distribution_markets WHERE id = $1")
+        .bind(market_id)
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?
+        .is_some();
+
+    if !exists {
+        return Err(ApiError::not_found("Distribution market"));
+    }
+
+    Ok(())
+}
+
 async fn ensure_cell_exists_for_owner(
     state: &AppState,
     cell_id: &str,
@@ -1230,6 +1249,58 @@ async fn resolve_node_market(
                 })),
             }
         }
+        SOURCE_TYPE_DISTRIBUTION_MARKET => {
+            let Some(source_ref) = node.source_ref.as_deref() else {
+                return Ok(None);
+            };
+            let row = sqlx::query(
+                "SELECT id, question, status, market_mu, market_sigma, outcome_min, outcome_max, \
+                         outcome_unit, trading_end, resolution_deadline, resolved_value
+                 FROM distribution_markets WHERE id = $1",
+            )
+            .bind(source_ref)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|err| ApiError::internal(&err.to_string()))?;
+
+            let Some(row) = row else {
+                return Ok(Some(ResolvedNodeMarket {
+                    probability_bps: 0,
+                    snapshot: json!({
+                        "status": "missing",
+                        "error": "distribution_market_not_found"
+                    }),
+                }));
+            };
+
+            let market_mu: f64 = row.try_get("market_mu").unwrap_or(0.5);
+            let outcome_min: f64 = row.try_get("outcome_min").unwrap_or(0.0);
+            let outcome_max: f64 = row.try_get("outcome_max").unwrap_or(1.0);
+            // Normalize mu to [0, 1] probability range relative to outcome bounds
+            let normalized = if outcome_max > outcome_min {
+                ((market_mu - outcome_min) / (outcome_max - outcome_min)).clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+            let probability_bps = (normalized * 10_000.0).round() as i32;
+
+            Ok(Some(ResolvedNodeMarket {
+                probability_bps,
+                snapshot: json!({
+                    "id": row.try_get::<String, _>("id").unwrap_or_default(),
+                    "question": row.try_get::<String, _>("question").unwrap_or_default(),
+                    "status": row.try_get::<i16, _>("status").unwrap_or_default(),
+                    "type": "distribution",
+                    "marketMu": market_mu,
+                    "marketSigma": row.try_get::<Option<f64>, _>("market_sigma").ok().flatten(),
+                    "outcomeMin": outcome_min,
+                    "outcomeMax": outcome_max,
+                    "outcomeUnit": row.try_get::<Option<String>, _>("outcome_unit").ok().flatten(),
+                    "resolvedValue": row.try_get::<Option<f64>, _>("resolved_value").ok().flatten(),
+                    "tradingEnd": row.try_get::<Option<DateTime<Utc>>, _>("trading_end").ok().flatten().map(|v| v.to_rfc3339()),
+                }),
+            }))
+        }
         _ => Ok(None),
     }
 }
@@ -1250,6 +1321,7 @@ fn unresolved_snapshot(node: &DecisionNodeRecord, snapshot: Option<&Value>) -> V
             SOURCE_TYPE_INTERNAL_MARKET => "internal",
             SOURCE_TYPE_EXTERNAL_MARKET => "external",
             SOURCE_TYPE_DRAFT_MARKET => "draft",
+            SOURCE_TYPE_DISTRIBUTION_MARKET => "distribution",
             _ => node.source_type.as_str(),
         }),
     );
@@ -2829,12 +2901,14 @@ pub async fn attach_market_to_decision_node(
     if source_type == SOURCE_TYPE_DRAFT_MARKET {
         return Err(ApiError::bad_request(
             "INVALID_SOURCE_TYPE",
-            "attach-market only supports internal_market or external_market",
+            "attach-market only supports internal_market, external_market, or distribution_market",
         ));
     }
     let source_ref = clean_required(body.source_ref.as_str(), "sourceRef", 160)?;
     if source_type == SOURCE_TYPE_INTERNAL_MARKET {
         ensure_internal_market_exists(&state, source_ref.as_str()).await?;
+    } else if source_type == SOURCE_TYPE_DISTRIBUTION_MARKET {
+        ensure_distribution_market_exists(&state, source_ref.as_str()).await?;
     } else {
         ExternalMarketId::parse(source_ref.as_str())?;
     }

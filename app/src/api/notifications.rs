@@ -26,6 +26,9 @@ pub enum NotificationType {
     DecisionRecommendationChanged,
     DecisionThresholdCrossed,
     DecisionConfidenceDropped,
+    DistributionTradeConfirmed,
+    DistributionMarketResolved,
+    DistributionPayoutReady,
 }
 
 impl NotificationType {
@@ -42,6 +45,9 @@ impl NotificationType {
             Self::DecisionRecommendationChanged => "decision_recommendation_changed",
             Self::DecisionThresholdCrossed => "decision_threshold_crossed",
             Self::DecisionConfidenceDropped => "decision_confidence_dropped",
+            Self::DistributionTradeConfirmed => "distribution_trade_confirmed",
+            Self::DistributionMarketResolved => "distribution_market_resolved",
+            Self::DistributionPayoutReady => "distribution_payout_ready",
         }
     }
 }
@@ -134,8 +140,8 @@ fn notification_allowed_by_preferences(
     prefs: &NotificationPreferences,
 ) -> bool {
     match kind {
-        NotificationType::OrderFilled | NotificationType::OrderCancelled => prefs.order_fills,
-        NotificationType::MarketResolved => prefs.market_resolutions,
+        NotificationType::OrderFilled | NotificationType::OrderCancelled | NotificationType::DistributionTradeConfirmed => prefs.order_fills,
+        NotificationType::MarketResolved | NotificationType::DistributionMarketResolved | NotificationType::DistributionPayoutReady => prefs.market_resolutions,
         NotificationType::PriceAlert => prefs.price_alerts,
         NotificationType::DecisionRecommendationChanged
         | NotificationType::DecisionThresholdCrossed
