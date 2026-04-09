@@ -237,6 +237,7 @@ fn spawn_background_services(app_state: Arc<AppState>) {
     }
 
     services::agent_scheduler::spawn_agent_scheduler(app_state.clone());
+    services::distribution_scheduler::spawn_distribution_scheduler(app_state.clone());
     services::liquidity_mirror::spawn_liquidity_mirror(app_state.clone());
     services::hedge_engine::spawn_hedge_engine(app_state.clone());
     services::smart_router::spawn_arb_scanner(app_state.clone());
@@ -454,6 +455,26 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/{market_id}/claim",
                                 web::post().to(api::positions::claim_winnings),
+                            ),
+                    )
+                    .service(
+                        web::scope("/distribution")
+                            .service(
+                                web::scope("/markets")
+                                    .route("", web::get().to(api::distribution::list_dist_markets))
+                                    .route("", web::post().to(api::distribution::create_dist_market))
+                                    .route("/{id}", web::get().to(api::distribution::get_dist_market))
+                                    .route("/{id}/quote", web::get().to(api::distribution::get_quote))
+                                    .route("/{id}/trade", web::post().to(api::distribution::open_position))
+                                    .route("/{id}/resolve", web::post().to(api::distribution::resolve_market))
+                                    .route("/{id}/curve", web::get().to(api::distribution::get_curve))
+                                    .route("/{id}/history", web::get().to(api::distribution::get_curve_history)),
+                            )
+                            .service(
+                                web::scope("/positions")
+                                    .route("", web::get().to(api::distribution::list_positions))
+                                    .route("/{id}", web::delete().to(api::distribution::close_position))
+                                    .route("/{id}/claim", web::post().to(api::distribution::claim_payout)),
                             ),
                     )
                     .service(

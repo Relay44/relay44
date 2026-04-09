@@ -3770,6 +3770,138 @@ class ApiClient {
     const query = this.buildQuery(params || {});
     return this.request(`/signals/feed${query}`);
   }
+
+  // Distribution market methods
+
+  async getDistributionMarkets(params?: {
+    status?: string;
+    category?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    data: import("@/types/distribution").DistributionMarket[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/distribution/markets${query}`);
+  }
+
+  async getDistributionMarket(
+    id: string,
+  ): Promise<import("@/types/distribution").DistributionMarket> {
+    return this.request(`/distribution/markets/${encodeURIComponent(id)}`);
+  }
+
+  async getDistributionQuote(
+    marketId: string,
+    mu: number,
+    sigma: number,
+    size: number,
+  ): Promise<import("@/types/distribution").DistributionQuote> {
+    const query = this.buildQuery({ mu, sigma, size });
+    return this.request(
+      `/distribution/markets/${encodeURIComponent(marketId)}/quote${query}`,
+    );
+  }
+
+  async getDistributionCurve(
+    marketId: string,
+    proposalMu?: number,
+    proposalSigma?: number,
+  ): Promise<import("@/types/distribution").CurvePoint[]> {
+    const query = this.buildQuery({
+      ...(proposalMu !== undefined ? { proposalMu } : {}),
+      ...(proposalSigma !== undefined ? { proposalSigma } : {}),
+    });
+    return this.request(
+      `/distribution/markets/${encodeURIComponent(marketId)}/curve${query}`,
+    );
+  }
+
+  async executeDistributionTrade(
+    marketId: string,
+    body: { mu: number; sigma: number; size: number },
+  ): Promise<{ positionId: number; txSignature?: string }> {
+    return this.request(
+      `/distribution/markets/${encodeURIComponent(marketId)}/trade`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  async getDistributionPositions(): Promise<
+    import("@/types/distribution").DistributionPosition[]
+  > {
+    return this.request("/distribution/positions");
+  }
+
+  async closeDistributionPosition(
+    positionId: number,
+  ): Promise<{ success: boolean; txSignature?: string }> {
+    return this.request(`/distribution/positions/${positionId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async claimDistributionPayout(
+    positionId: number,
+  ): Promise<{ amount: number; txSignature?: string }> {
+    return this.request(`/distribution/positions/${positionId}/claim`, {
+      method: "POST",
+    });
+  }
+
+  async createDistributionMarket(data: {
+    marketId: string;
+    question: string;
+    description?: string;
+    category?: string;
+    outcomeMin: number;
+    outcomeMax: number;
+    outcomeUnit?: string;
+    liquidityParam: number;
+    collateralToken: string;
+    feeBps?: number;
+    resolver?: string;
+    useOracle?: boolean;
+    oracleFeedId?: string;
+    tradingEnd?: string;
+    resolutionDeadline?: string;
+  }): Promise<import("@/types/distribution").DistributionMarket> {
+    return this.request("/distribution/markets", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async resolveDistributionMarket(
+    marketId: string,
+    value: number,
+  ): Promise<import("@/types/distribution").DistributionMarket> {
+    return this.request(
+      `/distribution/markets/${encodeURIComponent(marketId)}/resolve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ value }),
+      },
+    );
+  }
+
+  async getDistributionCurveHistory(
+    marketId: string,
+    params?: { limit?: number; since?: string },
+  ): Promise<import("@/types/distribution").CurveSnapshot[]> {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.since) query.set("since", params.since);
+    const qs = query.toString();
+    return this.request(
+      `/distribution/markets/${encodeURIComponent(marketId)}/history${qs ? `?${qs}` : ""}`,
+    );
+  }
 }
 
 export const api = new ApiClient();

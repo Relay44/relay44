@@ -293,11 +293,20 @@ pub async fn compute_leaderboard(
                     UNION ALL
                     SELECT o.owner AS wallet, o.realized_pnl_usdc AS pnl
                     FROM external_outcomes o WHERE 1=1 {outcome_time_clause}
+                    UNION ALL
+                    SELECT dp.owner AS wallet, COALESCE(dp.pnl, 0) AS pnl
+                    FROM distribution_positions dp WHERE dp.status IN (2, 3) {dist_time_clause}
                 ) sub
                 GROUP BY wallet
                 ORDER BY value DESC",
                 time_clause = time_clause,
                 outcome_time_clause = outcome_time_clause,
+                dist_time_clause = match *period {
+                    "daily" => "AND dp.closed_at >= NOW() - INTERVAL '1 day'",
+                    "weekly" => "AND dp.closed_at >= NOW() - INTERVAL '7 days'",
+                    "monthly" => "AND dp.closed_at >= NOW() - INTERVAL '30 days'",
+                    _ => "",
+                },
             ),
         ).await?;
         total_entries += pnl_entries;
@@ -320,11 +329,20 @@ pub async fn compute_leaderboard(
                     UNION ALL
                     SELECT p.owner AS wallet, p.notional_usdc AS vol
                     FROM external_fills p WHERE 1=1 {paper_time_clause}
+                    UNION ALL
+                    SELECT dt.owner AS wallet, ABS(dt.cost) AS vol
+                    FROM distribution_trades dt WHERE dt.trade_type = 'open' {dist_trade_time_clause}
                 ) sub
                 GROUP BY wallet
                 ORDER BY value DESC",
                 time_clause = time_clause,
                 paper_time_clause = paper_time_clause,
+                dist_trade_time_clause = match *period {
+                    "daily" => "AND dt.created_at >= NOW() - INTERVAL '1 day'",
+                    "weekly" => "AND dt.created_at >= NOW() - INTERVAL '7 days'",
+                    "monthly" => "AND dt.created_at >= NOW() - INTERVAL '30 days'",
+                    _ => "",
+                },
             ),
         ).await?;
         total_entries += volume_entries;
@@ -341,11 +359,19 @@ pub async fn compute_leaderboard(
                     SELECT p.owner AS wallet FROM paper_fills p WHERE 1=1 {paper_time_clause}
                     UNION ALL
                     SELECT p.owner AS wallet FROM external_fills p WHERE 1=1 {paper_time_clause}
+                    UNION ALL
+                    SELECT dt.owner AS wallet FROM distribution_trades dt WHERE 1=1 {dist_trade_time_clause2}
                 ) sub
                 GROUP BY wallet
                 ORDER BY value DESC",
                 time_clause = time_clause,
                 paper_time_clause = paper_time_clause,
+                dist_trade_time_clause2 = match *period {
+                    "daily" => "AND dt.created_at >= NOW() - INTERVAL '1 day'",
+                    "weekly" => "AND dt.created_at >= NOW() - INTERVAL '7 days'",
+                    "monthly" => "AND dt.created_at >= NOW() - INTERVAL '30 days'",
+                    _ => "",
+                },
             ),
         ).await?;
         total_entries += trades_entries;
@@ -373,12 +399,21 @@ pub async fn compute_leaderboard(
                     UNION ALL
                     SELECT o.owner AS wallet, (o.gross_pnl_usdc > 0) AS is_win
                     FROM external_outcomes o WHERE 1=1 {outcome_time_clause}
+                    UNION ALL
+                    SELECT dp.owner AS wallet, (COALESCE(dp.pnl, 0) > 0) AS is_win
+                    FROM distribution_positions dp WHERE dp.status IN (2, 3) {dist_wr_time_clause}
                 ) sub
                 GROUP BY wallet
                 HAVING COUNT(*) >= 5
                 ORDER BY value DESC",
                 time_clause = time_clause,
                 outcome_time_clause = outcome_time_clause,
+                dist_wr_time_clause = match *period {
+                    "daily" => "AND dp.closed_at >= NOW() - INTERVAL '1 day'",
+                    "weekly" => "AND dp.closed_at >= NOW() - INTERVAL '7 days'",
+                    "monthly" => "AND dp.closed_at >= NOW() - INTERVAL '30 days'",
+                    _ => "",
+                },
             ),
         ).await?;
         total_entries += win_rate_entries;

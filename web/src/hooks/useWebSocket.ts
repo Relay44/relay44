@@ -206,3 +206,46 @@ export function useMarketLiveData(marketId: string, outcome: Outcome = 'yes') {
   useTradeSubscription(marketId);
   usePriceSubscription(marketId);
 }
+
+/** Subscribe to distribution market live updates (aggregate mu/sigma, trades, resolution). */
+export function useDistributionLiveData(marketId: string) {
+  const queryClient = useQueryClient();
+  const { subscribe: sub, send: wsSend, isConnected } = useWebSocket();
+
+  useEffect(() => {
+    if (!isConnected || !marketId) return;
+
+    wsSend('subscribe', { channel: 'distribution', marketId });
+
+    const unsubs = [
+      sub('dist_market_update', (data) => {
+        const update = data as { market_id: string };
+        if (update.market_id === marketId) {
+          queryClient.invalidateQueries({ queryKey: ['distribution-market', marketId] });
+          queryClient.invalidateQueries({ queryKey: ['distribution-curve', marketId] });
+        }
+      }),
+      sub('dist_trade', (data) => {
+        const update = data as { market_id: string };
+        if (update.market_id === marketId) {
+          queryClient.invalidateQueries({ queryKey: ['distribution-market', marketId] });
+          queryClient.invalidateQueries({ queryKey: ['distribution-positions'] });
+          queryClient.invalidateQueries({ queryKey: ['distribution-curve', marketId] });
+        }
+      }),
+      sub('dist_resolve', (data) => {
+        const update = data as { market_id: string };
+        if (update.market_id === marketId) {
+          queryClient.invalidateQueries({ queryKey: ['distribution-market', marketId] });
+          queryClient.invalidateQueries({ queryKey: ['distribution-positions'] });
+          queryClient.invalidateQueries({ queryKey: ['distribution-markets'] });
+        }
+      }),
+    ];
+
+    return () => {
+      wsSend('unsubscribe', { channel: 'distribution', marketId });
+      unsubs.forEach((fn) => fn());
+    };
+  }, [isConnected, marketId, sub, wsSend, queryClient]);
+}
