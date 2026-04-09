@@ -10,7 +10,7 @@ use crate::services::distribution::{CurvePoint, DistributionMarketState};
 use crate::services::websocket::{DistMarketUpdate, DistResolveUpdate, DistTradeUpdate};
 use crate::AppState;
 
-use super::rate_limit::{check_rate_limit, RateLimitTier};
+use super::rate_limit::{check_rate_limit, check_rate_limit_by_user, RateLimitTier};
 use super::notifications::{create_notification, NewNotification, NotificationType};
 
 // ---------------------------------------------------------------------------
@@ -334,8 +334,8 @@ pub async fn list_dist_markets(
     state: web::Data<Arc<AppState>>,
     query: web::Query<ListDistMarketsQuery>,
 ) -> Result<impl Responder, ApiError> {
-    let limit = query.limit.unwrap_or(20).min(100);
-    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(20).max(1).min(100);
+    let offset = query.offset.unwrap_or(0).max(0);
 
     // Build dynamic query to avoid repeating column list 4 times
     let mut conditions = Vec::new();
@@ -410,17 +410,65 @@ pub async fn create_dist_market(
 ) -> Result<impl Responder, ApiError> {
     let user = extract_jwt_user(&req, &state)?;
 
-    // Validate inputs
+    // Rate limit: 1 market creation per hour per user
+    check_rate_limit_by_user(&user.wallet_address, &state.redis, RateLimitTier::MarketCreate).await?;
+
+    // --- Market ID ---
     if body.market_id.is_empty() || body.market_id.len() > 64 {
         return Err(ApiError::bad_request(
             "INVALID_MARKET_ID",
             "Market ID must be 1-64 characters",
         ));
     }
-    if body.question.is_empty() || body.question.len() > 256 {
+    if !body.market_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(ApiError::bad_request(
+            "INVALID_MARKET_ID",
+            "Market ID must contain only alphanumeric characters, hyphens, and underscores",
+        ));
+    }
+
+    // --- Question ---
+    let question = body.question.trim();
+    if question.len() < 10 || question.len() > 256 {
         return Err(ApiError::bad_request(
             "INVALID_QUESTION",
-            "Question must be 1-256 characters",
+            "Question must be 10-256 characters",
+        ));
+    }
+    if !question.ends_with('?') {
+        return Err(ApiError::bad_request(
+            "INVALID_QUESTION",
+            "Question must end with ?",
+        ));
+    }
+    if question.contains('<') || question.contains('>') {
+        return Err(ApiError::bad_request(
+            "INVALID_QUESTION",
+            "Question must not contain HTML tags",
+        ));
+    }
+
+    // --- Description ---
+    if let Some(desc) = &body.description {
+        if desc.len() > 5000 {
+            return Err(ApiError::bad_request(
+                "DESCRIPTION_TOO_LONG",
+                "Description must be at most 5000 characters",
+            ));
+        }
+        if desc.contains('<') || desc.contains('>') {
+            return Err(ApiError::bad_request(
+                "INVALID_DESCRIPTION",
+                "Description must not contain HTML tags",
+            ));
+        }
+    }
+
+    // --- Outcome range ---
+    if !body.outcome_min.is_finite() || !body.outcome_max.is_finite() {
+        return Err(ApiError::bad_request(
+            "INVALID_OUTCOME",
+            "Outcome values must be finite numbers",
         ));
     }
     if body.outcome_min >= body.outcome_max {
@@ -429,21 +477,107 @@ pub async fn create_dist_market(
             "outcome_min must be less than outcome_max",
         ));
     }
-    if (body.outcome_max - body.outcome_min) < 0.01 {
+    let range = body.outcome_max - body.outcome_min;
+    if range < 0.01 {
         return Err(ApiError::bad_request(
             "RANGE_TOO_SMALL",
             "Outcome range must be at least 0.01 to avoid numerical instability",
         ));
     }
-    if body.liquidity_param <= 0.0 {
+    if range > 1e15 {
         return Err(ApiError::bad_request(
-            "INVALID_LIQUIDITY",
-            "liquidity_param must be positive",
+            "RANGE_TOO_LARGE",
+            "Outcome range must be at most 1e15",
         ));
     }
+
+    // --- Liquidity parameter ---
+    if !body.liquidity_param.is_finite() || body.liquidity_param <= 0.0 {
+        return Err(ApiError::bad_request(
+            "INVALID_LIQUIDITY",
+            "liquidity_param must be a positive finite number",
+        ));
+    }
+    if body.liquidity_param > 1e10 {
+        return Err(ApiError::bad_request(
+            "LIQUIDITY_TOO_LARGE",
+            "liquidity_param must be at most 1e10",
+        ));
+    }
+
+    // --- Fee ---
     let fee_bps = body.fee_bps.unwrap_or(100);
     if fee_bps < 0 || fee_bps > 1000 {
         return Err(ApiError::bad_request("INVALID_FEE", "Fee must be 0-1000 bps"));
+    }
+
+    // --- Collateral token (must be valid hex address) ---
+    let token = body.collateral_token.trim();
+    if token.len() != 42
+        || !token.starts_with("0x")
+        || !token[2..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err(ApiError::bad_request(
+            "INVALID_TOKEN",
+            "collateral_token must be a valid address (0x + 40 hex chars)",
+        ));
+    }
+
+    // --- Resolver address (optional, must be valid if provided) ---
+    if let Some(resolver) = &body.resolver {
+        let addr = resolver.trim();
+        if !addr.is_empty()
+            && (addr.len() != 42
+                || !addr.starts_with("0x")
+                || !addr[2..].chars().all(|c| c.is_ascii_hexdigit()))
+        {
+            return Err(ApiError::bad_request(
+                "INVALID_RESOLVER",
+                "Resolver must be a valid address (0x + 40 hex chars) or empty",
+            ));
+        }
+    }
+
+    // --- Oracle feed ID (required if use_oracle is true) ---
+    let use_oracle = body.use_oracle.unwrap_or(false);
+    if use_oracle {
+        let feed_id = body.oracle_feed_id.as_deref().unwrap_or("");
+        if feed_id.len() != 66
+            || !feed_id.starts_with("0x")
+            || !feed_id[2..].chars().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(ApiError::bad_request(
+                "INVALID_FEED_ID",
+                "oracle_feed_id must be a valid Pyth feed ID (0x + 64 hex chars)",
+            ));
+        }
+    }
+
+    // --- Trading end / resolution deadline ---
+    let now = Utc::now();
+    if let Some(trading_end) = body.trading_end {
+        if trading_end <= now {
+            return Err(ApiError::bad_request(
+                "INVALID_DATE",
+                "trading_end must be in the future",
+            ));
+        }
+    }
+    if let Some(deadline) = body.resolution_deadline {
+        if deadline <= now {
+            return Err(ApiError::bad_request(
+                "INVALID_DATE",
+                "resolution_deadline must be in the future",
+            ));
+        }
+        if let Some(trading_end) = body.trading_end {
+            if deadline < trading_end {
+                return Err(ApiError::bad_request(
+                    "INVALID_DATE",
+                    "resolution_deadline must be after trading_end",
+                ));
+            }
+        }
     }
 
     let now = Utc::now();

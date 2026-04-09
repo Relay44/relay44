@@ -31,8 +31,8 @@ function generateMarketId(question: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/\s+/g, '-')
-    .slice(0, 48);
-  const suffix = Math.random().toString(36).slice(2, 8);
+    .slice(0, 32);
+  const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   return `dist-${slug}-${suffix}`;
 }
 
