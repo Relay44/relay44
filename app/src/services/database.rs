@@ -596,6 +596,19 @@ impl DatabaseService {
         Self::with_config(database_url, PoolConfig::from_env()).await
     }
 
+    /// Create a stub DatabaseService for integration tests.
+    /// Any actual query will fail, but the struct can be constructed.
+    pub fn test_stub() -> Self {
+        use sqlx::postgres::PgPoolOptions;
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .min_connections(0)
+            .idle_timeout(std::time::Duration::from_secs(1))
+            .connect_lazy("postgres://test@localhost:5432/relay44_test")
+            .expect("test_stub pool");
+        Self { pool }
+    }
+
     pub async fn with_config(database_url: &str, config: PoolConfig) -> Result<Self> {
         info!("Connecting to database with pool config:");
         info!("  max_connections: {}", config.max_connections);

@@ -3831,6 +3831,7 @@ dependencies = [
  "rand 0.10.0",
  "redis",
  "regex",
+ "relay44-backend",
  "reqwest",
  "rlp",
  "serde",
