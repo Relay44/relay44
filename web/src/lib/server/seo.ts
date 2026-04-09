@@ -1,5 +1,6 @@
 import { fetchLiveBaseMarket, fetchLiveBaseMarkets } from '@/lib/server/baseMarketData';
 import type { Leaderboard, LeaderboardEntry, Market, PublicProfile } from '@/types';
+import type { DistributionMarket } from '@/types/distribution';
 
 const DEFAULT_API_BASE = 'http://localhost:8080/v1';
 const REQUEST_TIMEOUT_MS = 8_000;
@@ -108,6 +109,18 @@ export async function fetchSeoProfile(wallet: string): Promise<PublicProfile | n
   const payload = await fetchJsonFromBases<PublicProfile>(`/profiles/${encodeURIComponent(wallet)}`);
 
   if (!payload || typeof payload.wallet !== 'string') {
+    return null;
+  }
+
+  return payload;
+}
+
+export async function fetchSeoDistributionMarket(id: string): Promise<DistributionMarket | null> {
+  const payload = await fetchJsonFromBases<DistributionMarket>(
+    `/distribution/markets/${encodeURIComponent(id)}`,
+  );
+
+  if (!payload || typeof payload.id !== 'string') {
     return null;
   }
 

@@ -24,6 +24,7 @@ pub mod payments;
 pub mod positions;
 pub mod profiles;
 pub mod rate_limit;
+pub mod referrals;
 pub mod risk_console;
 pub mod routing;
 pub mod signals;
