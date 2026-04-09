@@ -839,6 +839,18 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/{wallet}/followers-count",
                                 web::get().to(api::social::get_follower_counts),
+                            )
+                            .route(
+                                "/{wallet}",
+                                web::get().to(api::profiles::get_public_profile),
+                            )
+                            .route(
+                                "/{wallet}/activity",
+                                web::get().to(api::profiles::get_profile_activity),
+                            )
+                            .route(
+                                "/{wallet}/positions",
+                                web::get().to(api::profiles::get_profile_positions),
                             ),
                     )
                     .service(
@@ -1248,21 +1260,6 @@ async fn main() -> std::io::Result<()> {
                             .route(
                                 "/compute",
                                 web::post().to(api::leaderboard::compute_leaderboard),
-                            ),
-                    )
-                    .service(
-                        web::scope("/profiles")
-                            .route(
-                                "/{wallet}",
-                                web::get().to(api::profiles::get_public_profile),
-                            )
-                            .route(
-                                "/{wallet}/activity",
-                                web::get().to(api::profiles::get_profile_activity),
-                            )
-                            .route(
-                                "/{wallet}/positions",
-                                web::get().to(api::profiles::get_profile_positions),
                             ),
                     )
                     .service(
