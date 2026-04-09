@@ -15,6 +15,8 @@ import {
   useExternalAgents,
   usePublicExternalAgents,
   usePublicExternalAgentsPerformance,
+  useManagedAgents,
+  useUpdateManagedAgent,
   useMarkets,
   useRuntimeMode,
   useSessionState,
@@ -436,6 +438,12 @@ export default function AgentsPage() {
             Launch, monitor, and manage market agents across onchain and external venues.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href="/agents/templates"
+              className="inline-flex h-10 items-center border border-accent bg-accent/10 px-4 text-sm font-medium uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/20"
+            >
+              Browse templates
+            </Link>
             <Link
               href="/settings/credentials"
               className="inline-flex h-10 items-center border border-border px-4 text-sm font-medium uppercase tracking-[0.12em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
@@ -1215,7 +1223,146 @@ export default function AgentsPage() {
             )}
           </Card>
         </section>
+
+        <ManagedAgentsSection />
       </PageShell>
     </TooltipProvider>
+  );
+}
+
+function ManagedAgentsSection() {
+  const { addToast } = useToast();
+  const { data: agents, isLoading } = useManagedAgents();
+  const updateAgent = useUpdateManagedAgent();
+
+  const handleStatusChange = async (agentId: string, status: string) => {
+    try {
+      await updateAgent.mutateAsync({ agentId, status });
+      addToast(`Agent ${status === 'active' ? 'resumed' : status}`, 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update agent';
+      addToast(msg, 'error');
+    }
+  };
+
+  const managedStatusBadge = (status: string) => {
+    if (status === 'active') return 'success' as const;
+    if (status === 'paused') return 'warning' as const;
+    return 'danger' as const;
+  };
+
+  const formatTimeAgo = (isoString: string | null) => {
+    if (!isoString) return 'never';
+    const diff = Date.now() - new Date(isoString).getTime();
+    const mins = Math.round(diff / 60_000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 48) return `${hours}h ago`;
+    return `${Math.round(hours / 24)}d ago`;
+  };
+
+  return (
+    <section className="mb-8">
+      <Card className="space-y-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text-primary">
+            Managed Agents
+          </h2>
+          <Link href="/agents/templates">
+            <Button variant="outline" size="sm">
+              Deploy new
+            </Button>
+          </Link>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="h-5 w-5 animate-spin border-2 border-accent border-t-transparent rounded-full" />
+          </div>
+        ) : !agents || agents.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-sm text-text-muted">
+              No managed agents yet.{' '}
+              <Link href="/agents/templates" className="text-accent hover:underline">
+                Browse templates
+              </Link>{' '}
+              to get started.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {agents.map((agent) => (
+              <div
+                key={agent.id}
+                className="flex flex-col gap-3 border border-border bg-bg-secondary p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-text-primary">{agent.name}</span>
+                    <span className={cn(
+                      'inline-flex items-center px-2 py-0.5 text-xs font-medium border',
+                      agent.status === 'active' && 'bg-accent/10 text-accent border-accent/20',
+                      agent.status === 'paused' && 'bg-bg-tertiary text-text-secondary border-border',
+                      agent.status === 'stopped' && 'bg-bg-tertiary text-text-muted border-border',
+                    )}>
+                      {agent.status}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
+                    <span>Strategy: <span className="text-text-secondary">{agent.strategy}</span></span>
+                    <span>Seed: <span className="text-text-secondary">{formatCompactUsd(agent.seedUsdc)}</span></span>
+                    <span>
+                      PnL:{' '}
+                      <span className={agent.pnlUsdc >= 0 ? 'text-accent' : 'text-text-secondary'}>
+                        {formatCompactUsd(agent.pnlUsdc)}
+                      </span>
+                    </span>
+                    <span>Trades: <span className="text-text-secondary">{agent.totalTrades}</span></span>
+                    <span>Max DD: <span className="text-text-secondary">{agent.maxDrawdownPct.toFixed(1)}%</span></span>
+                    <span>Last exec: <span className="text-text-secondary">{formatTimeAgo(agent.lastExecutedAt)}</span></span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {agent.status === 'active' && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={updateAgent.isPending}
+                      onClick={() => handleStatusChange(agent.id, 'paused')}
+                    >
+                      Pause
+                    </Button>
+                  )}
+                  {agent.status === 'paused' && (
+                    <>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        loading={updateAgent.isPending}
+                        onClick={() => handleStatusChange(agent.id, 'active')}
+                      >
+                        Resume
+                      </Button>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={updateAgent.isPending}
+                        onClick={() => handleStatusChange(agent.id, 'stopped')}
+                      >
+                        Stop
+                      </Button>
+                    </>
+                  )}
+                  {agent.status === 'stopped' && (
+                    <span className="text-xs text-text-muted px-2 py-1">Stopped</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </section>
   );
 }

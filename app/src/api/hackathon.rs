@@ -18,7 +18,7 @@ use crate::AppState;
 // ---------------------------------------------------------------------------
 
 const ALLOWED_STATUSES: &[&str] = &["upcoming", "active", "completed", "cancelled"];
-const ALLOWED_SCORING_METHODS: &[&str] = &["net_pnl"];
+const ALLOWED_SCORING_METHODS: &[&str] = &["net_pnl", "sharpe_ratio", "win_rate"];
 const MAX_RULES_JSON_BYTES: usize = 65_536; // 64 KB
 const MAX_AGENTS_PER_WALLET: i64 = 3;
 const SNAPSHOT_LOCK_TTL_SECS: u64 = 600;
@@ -76,6 +76,7 @@ pub struct LinkAgentRequest {
 pub struct LeaderboardQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub scoring_method: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -725,6 +726,28 @@ pub async fn get_leaderboard(
     let (limit, offset) = validate_pagination(query.limit, query.offset)?;
     let pool = state.db.pool();
 
+    // Determine scoring method: query param overrides hackathon default
+    let scoring_method = if let Some(ref sm) = query.scoring_method {
+        if !ALLOWED_SCORING_METHODS.contains(&sm.as_str()) {
+            return Err(ApiError::bad_request(
+                "INVALID_SCORING_METHOD",
+                &format!(
+                    "Scoring method must be one of: {}",
+                    ALLOWED_SCORING_METHODS.join(", ")
+                ),
+            ));
+        }
+        sm.clone()
+    } else {
+        // Fall back to the hackathon's configured scoring method
+        let hackathon = sqlx::query("SELECT scoring_method FROM hackathons WHERE id = $1")
+            .bind(&hackathon_id)
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Hackathon"))?;
+        hackathon.get::<String, _>("scoring_method")
+    };
+
     // Get the latest snapshot timestamp
     let latest_ts = sqlx::query(
         "SELECT MAX(snapshot_time) AS latest FROM hackathon_snapshots WHERE hackathon_id = $1",
@@ -738,6 +761,7 @@ pub async fn get_leaderboard(
     if latest.is_none() {
         return Ok(HttpResponse::Ok().json(json!({
             "hackathonId": hackathon_id,
+            "scoringMethod": scoring_method,
             "entries": [],
             "updatedAt": Value::Null,
             "total": 0,
@@ -746,30 +770,42 @@ pub async fn get_leaderboard(
 
     let latest = latest.unwrap();
 
-    let rows = sqlx::query(
+    // Order by the selected scoring method
+    let order_clause = match scoring_method.as_str() {
+        "sharpe_ratio" => "sharpe_ratio_bps DESC, net_pnl_usdc DESC",
+        "win_rate" => "win_rate_bps DESC, net_pnl_usdc DESC",
+        _ => "net_pnl_usdc DESC",
+    };
+
+    let sql = format!(
         "SELECT wallet_address, net_pnl_usdc, total_volume_usdc, win_rate_bps,
-                position_count, trade_count, rank, snapshot_time
+                sharpe_ratio_bps, position_count, trade_count, snapshot_time,
+                ROW_NUMBER() OVER (ORDER BY {}) AS dynamic_rank
          FROM hackathon_snapshots
          WHERE hackathon_id = $1 AND snapshot_time = $2
-         ORDER BY rank ASC
+         ORDER BY {}
          LIMIT $3 OFFSET $4",
-    )
-    .bind(&hackathon_id)
-    .bind(latest)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
+        order_clause, order_clause,
+    );
+
+    let rows = sqlx::query(&sql)
+        .bind(&hackathon_id)
+        .bind(latest)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
 
     let entries: Vec<Value> = rows
         .iter()
         .map(|row| {
             json!({
-                "rank": row.get::<i32, _>("rank"),
+                "rank": row.get::<i64, _>("dynamic_rank") as i32,
                 "walletAddress": row.get::<String, _>("wallet_address"),
                 "netPnlUsdc": row.get::<f64, _>("net_pnl_usdc"),
                 "totalVolumeUsdc": row.get::<f64, _>("total_volume_usdc"),
                 "winRateBps": row.get::<i32, _>("win_rate_bps"),
+                "sharpeRatioBps": row.get::<i32, _>("sharpe_ratio_bps"),
                 "positionCount": row.get::<i32, _>("position_count"),
                 "tradeCount": row.get::<i32, _>("trade_count"),
                 "snapshotTime": row.get::<chrono::DateTime<Utc>, _>("snapshot_time").to_rfc3339(),
@@ -788,6 +824,7 @@ pub async fn get_leaderboard(
 
     Ok(HttpResponse::Ok().json(json!({
         "hackathonId": hackathon_id,
+        "scoringMethod": scoring_method,
         "entries": entries,
         "updatedAt": latest.to_rfc3339(),
         "total": total_row.get::<i64, _>("cnt"),
@@ -810,7 +847,8 @@ pub async fn get_leaderboard_snapshots(
     let rows = if let Some(ref wallet) = query.wallet_address {
         let wallet = sanitize_string(wallet, 256);
         sqlx::query(
-            "SELECT wallet_address, net_pnl_usdc, total_volume_usdc, rank, snapshot_time
+            "SELECT wallet_address, net_pnl_usdc, total_volume_usdc, sharpe_ratio_bps,
+                    win_rate_bps, rank, snapshot_time
              FROM hackathon_snapshots
              WHERE hackathon_id = $1 AND wallet_address = $2
              ORDER BY snapshot_time ASC
@@ -824,7 +862,8 @@ pub async fn get_leaderboard_snapshots(
     } else {
         sqlx::query(
             "SELECT DISTINCT ON (wallet_address)
-                wallet_address, net_pnl_usdc, total_volume_usdc, rank, snapshot_time
+                wallet_address, net_pnl_usdc, total_volume_usdc, sharpe_ratio_bps,
+                win_rate_bps, rank, snapshot_time
              FROM hackathon_snapshots
              WHERE hackathon_id = $1
              ORDER BY wallet_address, snapshot_time DESC
@@ -843,6 +882,8 @@ pub async fn get_leaderboard_snapshots(
                 "walletAddress": row.get::<String, _>("wallet_address"),
                 "netPnlUsdc": row.get::<f64, _>("net_pnl_usdc"),
                 "totalVolumeUsdc": row.get::<f64, _>("total_volume_usdc"),
+                "sharpeRatioBps": row.try_get::<i32, _>("sharpe_ratio_bps").unwrap_or(0),
+                "winRateBps": row.try_get::<i32, _>("win_rate_bps").unwrap_or(0),
                 "rank": row.get::<i32, _>("rank"),
                 "snapshotTime": row.get::<chrono::DateTime<Utc>, _>("snapshot_time").to_rfc3339(),
             })
@@ -911,6 +952,44 @@ pub async fn trigger_snapshot(
     result
 }
 
+/// Compute Sharpe ratio from individual position returns.
+/// Returns the result in basis points (e.g., 150 = 1.50 Sharpe ratio).
+/// Sharpe = mean(returns) / stddev(returns). Returns 0 if fewer than 2 positions
+/// or if standard deviation is zero.
+fn compute_sharpe_ratio(rows: &[sqlx::postgres::PgRow]) -> i32 {
+    if rows.len() < 2 {
+        return 0;
+    }
+
+    // Compute return per position as realized_pnl / total_cost
+    let returns: Vec<f64> = rows
+        .iter()
+        .filter_map(|r| {
+            let pnl: f64 = r.try_get("realized_pnl").unwrap_or(0.0);
+            let cost: f64 = r.try_get("total_cost").unwrap_or(0.0);
+            if cost > 0.0 { Some(pnl / cost) } else { None }
+        })
+        .collect();
+
+    if returns.len() < 2 {
+        return 0;
+    }
+
+    let n = returns.len() as f64;
+    let mean = returns.iter().sum::<f64>() / n;
+    let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    let std_dev = variance.sqrt();
+
+    if std_dev < 1e-12 {
+        return 0;
+    }
+
+    let sharpe = mean / std_dev;
+
+    // Clamp to i32 range; store as basis points (multiply by 100)
+    (sharpe * 100.0).round().clamp(-32_000.0, 32_000.0) as i32
+}
+
 async fn compute_snapshot(
     pool: &sqlx::PgPool,
     _state: &AppState,
@@ -955,8 +1034,9 @@ async fn compute_snapshot(
             .push(agent_id);
     }
 
-    // Compute PnL for each wallet
-    let mut entries: Vec<(String, f64, f64, i32, i32, i32)> = Vec::new();
+    // Compute PnL, win rate, and Sharpe ratio for each wallet
+    // Tuple: (wallet, net_pnl, volume, win_rate_bps, position_count, trade_count, sharpe_ratio_bps)
+    let mut entries: Vec<(String, f64, f64, i32, i32, i32, i32)> = Vec::new();
 
     for wallet_row in &wallet_rows {
         let wallet: String = wallet_row.get("wallet_address");
@@ -985,6 +1065,24 @@ async fn compute_snapshot(
         .fetch_one(pool)
         .await;
 
+        // Query individual position returns for Sharpe ratio calculation
+        let returns_rows = sqlx::query(
+            "SELECT p.realized_pnl, p.total_cost
+             FROM positions p
+             WHERE p.wallet = $1
+               AND p.updated_at >= $2
+               AND p.updated_at <= $3
+               AND p.total_cost > 0",
+        )
+        .bind(&wallet)
+        .bind(start_time)
+        .bind(effective_end)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        let sharpe_ratio_bps = compute_sharpe_ratio(&returns_rows);
+
         match pnl_row {
             Ok(row) => {
                 let realized: f64 = row.try_get("realized_pnl").unwrap_or(0.0);
@@ -1001,11 +1099,12 @@ async fn compute_snapshot(
                     win_rate as i32,
                     position_count as i32,
                     trade_count as i32,
+                    sharpe_ratio_bps,
                 ));
             }
             Err(e) => {
                 log::warn!("PnL query failed for wallet {} in hackathon {}: {}", wallet, hackathon_id, e);
-                entries.push((wallet, 0.0, 0.0, 0, 0, 0));
+                entries.push((wallet, 0.0, 0.0, 0, 0, 0, 0));
             }
         }
     }
@@ -1020,19 +1119,21 @@ async fn compute_snapshot(
     })?;
 
     let mut snapshot_count = 0;
-    for (rank, (wallet, pnl, volume, win_rate, positions, trades)) in entries.iter().enumerate() {
+    for (rank, (wallet, pnl, volume, win_rate, positions, trades, sharpe)) in entries.iter().enumerate() {
         sqlx::query(
             "INSERT INTO hackathon_snapshots
                 (hackathon_id, wallet_address, snapshot_time, net_pnl_usdc,
-                 total_volume_usdc, win_rate_bps, position_count, trade_count, rank)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 total_volume_usdc, win_rate_bps, position_count, trade_count, rank,
+                 sharpe_ratio_bps)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              ON CONFLICT (hackathon_id, wallet_address, snapshot_time) DO UPDATE SET
                 net_pnl_usdc = EXCLUDED.net_pnl_usdc,
                 total_volume_usdc = EXCLUDED.total_volume_usdc,
                 win_rate_bps = EXCLUDED.win_rate_bps,
                 position_count = EXCLUDED.position_count,
                 trade_count = EXCLUDED.trade_count,
-                rank = EXCLUDED.rank",
+                rank = EXCLUDED.rank,
+                sharpe_ratio_bps = EXCLUDED.sharpe_ratio_bps",
         )
         .bind(hackathon_id)
         .bind(wallet)
@@ -1043,6 +1144,7 @@ async fn compute_snapshot(
         .bind(positions)
         .bind(trades)
         .bind((rank + 1) as i32)
+        .bind(sharpe)
         .execute(&mut *tx)
         .await
         .map_err(|e| {

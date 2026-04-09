@@ -27,11 +27,11 @@ export function useHackathon(id: string | undefined) {
   });
 }
 
-export function useHackathonLeaderboard(id: string | undefined) {
+export function useHackathonLeaderboard(id: string | undefined, scoringMethod?: string) {
   return useQuery<HackathonLeaderboard>({
-    queryKey: ['hackathon-leaderboard', id],
+    queryKey: ['hackathon-leaderboard', id, scoringMethod],
     enabled: !!id,
-    queryFn: () => api.getHackathonLeaderboard(id!, { limit: 100 }),
+    queryFn: () => api.getHackathonLeaderboard(id!, { limit: 100, scoringMethod }),
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
     staleTime: 10_000,
