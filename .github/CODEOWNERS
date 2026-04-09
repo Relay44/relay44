@@ -1,30 +1,14 @@
 # Relay44 code ownership
-#
-# GitHub supports code owners specified as usernames, teams, or email addresses.
-# These role aliases are the public ownership contract for the mirror.
 
-* support@relay44.com
+* @0p3r4t0r44
 
-/.github/ hello@relay44.com
-/.github/workflows/ hello@relay44.com security@relay44.com
-
-/CHANGELOG.md hello@relay44.com
-/CONTRIBUTING.md hello@relay44.com
-/CODE_OF_CONDUCT.md hello@relay44.com
-/GOVERNANCE.md hello@relay44.com
-/MAINTAINERS.md hello@relay44.com
-/README.md hello@relay44.com
-/RELEASING.md hello@relay44.com
-/SECURITY.md security@relay44.com
-/SUPPORT.md support@relay44.com
-
-/app/ support@relay44.com
-/config/ support@relay44.com
-/evm/ support@relay44.com security@relay44.com
-/migrations/ support@relay44.com
-/programs/ support@relay44.com security@relay44.com
-/render.yaml hello@relay44.com
-/scripts/ support@relay44.com
-/sdk/ support@relay44.com
-/services/ support@relay44.com
-/web/ support@relay44.com
+/.github/              @0p3r4t0r44
+/SECURITY.md           @0p3r4t0r44
+/app/                  @0p3r4t0r44
+/evm/                  @0p3r4t0r44
+/migrations/           @0p3r4t0r44
+/programs/             @0p3r4t0r44
+/scripts/              @0p3r4t0r44
+/sdk/                  @0p3r4t0r44
+/services/             @0p3r4t0r44
+/web/                  @0p3r4t0r44
