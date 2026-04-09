@@ -125,8 +125,10 @@ export default function DistributionMarketPage() {
 
   const handleCopyLink = useCallback(() => {
     const url = `${SITE_URL}/distribution/${encodeURIComponent(marketId)}`;
-    navigator.clipboard.writeText(url);
-    addToast('Link copied', 'success');
+    navigator.clipboard.writeText(url).then(
+      () => addToast('Link copied', 'success'),
+      () => addToast('Failed to copy link', 'error'),
+    );
   }, [marketId, addToast]);
 
   const handleShareX = useCallback(() => {

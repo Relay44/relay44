@@ -22,8 +22,8 @@ export function MobileDistributionSheet(props: MobileDistributionSheetProps) {
 
   return (
     <>
-      {/* Sticky bottom bar — mobile only */}
-      <div className="fixed bottom-0 inset-x-0 z-40 border-t border-border bg-bg-primary/95 backdrop-blur-sm p-3 lg:hidden">
+      {/* Sticky bottom bar — mobile only, above BottomNav (z-sticky=100, h-14=56px) */}
+      <div className="fixed bottom-14 md:bottom-0 inset-x-0 z-sticky border-t border-border bg-bg-primary/95 backdrop-blur-sm p-3 lg:hidden">
         <div className="flex items-center justify-between gap-3 max-w-[1400px] mx-auto">
           <div className="flex items-center gap-3 min-w-0 text-xs">
             <span className="text-text-secondary font-mono tabular-nums">

@@ -454,7 +454,7 @@ pub async fn create_dist_market(
 
     let now = Utc::now();
     let initial_mu = (body.outcome_min + body.outcome_max) / 2.0;
-    let initial_sigma = (body.outcome_max - body.outcome_min) / 4.0;
+    let initial_sigma = (body.outcome_max - body.outcome_min) / 6.0; // 3-sigma rule, matches contract
     let use_oracle = body.use_oracle.unwrap_or(false);
 
     sqlx::query(
@@ -1115,8 +1115,11 @@ pub async fn resolve_market(
             0, // discount applied at claim time per-user
         );
 
-        // Cap cumulative payouts to the pool
+        // Guard against NaN/Infinity from degenerate density ratios
         let mut gross = payout_result.gross_payout;
+        if !gross.is_finite() || gross < 0.0 {
+            gross = 0.0;
+        }
         if total_gross_paid + gross > total_pool {
             gross = (total_pool - total_gross_paid).max(0.0);
         }
