@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { StructuredData } from '@/components/seo/StructuredData';
 import {
   buildBreadcrumbStructuredData,
+  buildMarketDescription,
+  buildMarketEventStructuredData,
   buildMarketStructuredData,
   buildPageMetadata,
 } from '@/lib/seo';
@@ -26,12 +28,20 @@ export async function generateMetadata({ params }: Omit<MarketLayoutProps, 'chil
     });
   }
 
+  const description = buildMarketDescription(market);
+
   return buildPageMetadata({
     title: market.question,
-    description: market.description || `Track live pricing and market context for ${market.question}.`,
+    description,
     path: `/markets/${encodeURIComponent(marketId)}`,
     image: market.imageUrl,
-    keywords: [market.category, market.provider, market.source],
+    keywords: [
+      market.category,
+      market.provider,
+      market.source,
+      'prediction market',
+      'binary market',
+    ].filter(Boolean),
     openGraphType: 'article',
   });
 }
@@ -41,20 +51,21 @@ export default async function MarketLayout({ children, params }: MarketLayoutPro
   const marketId = decodeURIComponent(id);
   const market = await fetchSeoMarket(marketId);
 
+  const breadcrumbs = buildBreadcrumbStructuredData([
+    { name: 'Home', url: '/' },
+    { name: 'Markets', url: '/markets' },
+    { name: market?.question || marketId, url: `/markets/${encodeURIComponent(marketId)}` },
+  ]);
+
   return (
     <>
-      {market ? (
-        <StructuredData
-          data={[
-            buildBreadcrumbStructuredData([
-              { name: 'Home', url: '/' },
-              { name: 'Markets', url: '/markets' },
-              { name: market.question, url: `/markets/${encodeURIComponent(marketId)}` },
-            ]),
-            buildMarketStructuredData(market),
-          ]}
-        />
-      ) : null}
+      <StructuredData
+        data={
+          market
+            ? [breadcrumbs, buildMarketStructuredData(market), buildMarketEventStructuredData(market)]
+            : [breadcrumbs]
+        }
+      />
       {children}
     </>
   );
