@@ -18,6 +18,7 @@ export interface DistributionMarket {
   totalCollateral: number;
   totalVolume: number;
   volume24h: number;
+  positionCount: number;
   feeBps: number;
   resolver?: string;
   useOracle: boolean;
@@ -67,6 +68,15 @@ export interface CurvePoint {
   marketPdf: number;
   proposalPdf?: number;
   cdf: number;
+}
+
+export interface DistributionActivity {
+  mu: number;
+  sigma: number;
+  size: number;
+  collateral: number;
+  status: string;
+  createdAt: string;
 }
 
 export interface CurveSnapshot {

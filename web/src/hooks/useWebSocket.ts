@@ -231,6 +231,7 @@ export function useDistributionLiveData(marketId: string) {
           queryClient.invalidateQueries({ queryKey: ['distribution-market', marketId] });
           queryClient.invalidateQueries({ queryKey: ['distribution-positions'] });
           queryClient.invalidateQueries({ queryKey: ['distribution-curve', marketId] });
+          queryClient.invalidateQueries({ queryKey: ['distribution-activity', marketId] });
         }
       }),
       sub('dist_resolve', (data) => {
