@@ -134,6 +134,18 @@ pub struct DistMarketResponse {
     pub resolution_deadline: Option<chrono::DateTime<Utc>>,
     pub created_at: chrono::DateTime<Utc>,
     pub resolved_at: Option<chrono::DateTime<Utc>>,
+    pub position_count: i64,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DistActivityEntry {
+    pub mu: f64,
+    pub sigma: f64,
+    pub size: i64,
+    pub collateral: i64,
+    pub status: String,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -194,7 +206,8 @@ const MARKET_COLUMNS: &str = "id, question, description, category, status, outco
     outcome_unit, liquidity_param, market_mu, market_sigma, collateral_token, \
     total_collateral, total_volume, volume_24h, fee_bps, resolver, use_oracle, \
     oracle_feed_id, resolved_value, trading_end, resolution_deadline, created_at, \
-    resolved_at";
+    resolved_at, \
+    (SELECT COUNT(*) FROM distribution_positions dp WHERE dp.market_id = distribution_markets.id) AS position_count";
 
 const POSITION_COLUMNS: &str = "id, position_id, market_id, owner, mu, sigma, size, collateral, \
     cost_basis, status, payout, pnl, created_at, closed_at";
@@ -229,6 +242,7 @@ struct MarketRow {
     resolution_deadline: Option<chrono::DateTime<Utc>>,
     created_at: chrono::DateTime<Utc>,
     resolved_at: Option<chrono::DateTime<Utc>>,
+    position_count: Option<i64>,
 }
 
 impl MarketRow {
@@ -282,6 +296,7 @@ impl MarketRow {
             resolution_deadline: self.resolution_deadline,
             created_at: self.created_at,
             resolved_at: self.resolved_at,
+            position_count: self.position_count.unwrap_or(0),
         }
     }
 }
@@ -1519,4 +1534,43 @@ pub async fn get_curve_history(
         .collect();
 
     Ok(HttpResponse::Ok().json(snapshots))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ActivityQuery {
+    pub limit: Option<i64>,
+}
+
+pub async fn get_market_activity(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    query: web::Query<ActivityQuery>,
+) -> Result<impl Responder, ApiError> {
+    let market_id = path.into_inner();
+    let limit = query.limit.unwrap_or(10).max(1).min(50);
+
+    let rows: Vec<(f64, f64, i64, i64, i16, chrono::DateTime<Utc>)> = sqlx::query_as(
+        "SELECT mu, sigma, size, collateral, status, created_at \
+         FROM distribution_positions WHERE market_id = $1 \
+         ORDER BY created_at DESC LIMIT $2",
+    )
+    .bind(&market_id)
+    .bind(limit)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
+
+    let entries: Vec<DistActivityEntry> = rows
+        .into_iter()
+        .map(|(mu, sigma, size, collateral, status, created_at)| DistActivityEntry {
+            mu,
+            sigma,
+            size,
+            collateral,
+            status: int_to_position_status(status),
+            created_at,
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(entries))
 }

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { cn } from '@/lib/utils';
-import type { CurvePoint } from '@/types/distribution';
+import type { CurvePoint, DistributionPosition } from '@/types/distribution';
 
 export interface DistributionChartProps {
   curveData: CurvePoint[];
@@ -11,6 +11,7 @@ export interface DistributionChartProps {
   outcomeUnit?: string;
   marketMu?: number;
   marketSigma?: number;
+  userPositions?: DistributionPosition[];
   onHover?: (point: { x: number; pdf: number; cdf: number } | null) => void;
   className?: string;
 }
@@ -60,6 +61,7 @@ export function DistributionChart({
   outcomeUnit,
   marketMu,
   marketSigma,
+  userPositions,
   onHover,
   className,
 }: DistributionChartProps) {
@@ -240,17 +242,56 @@ export function DistributionChart({
 
         {/* Mean indicator */}
         {marketMu !== undefined && (
-          <line
-            x1={scaleX(marketMu)}
-            y1={PAD_T}
-            x2={scaleX(marketMu)}
-            y2={PAD_T + PLOT_H}
-            stroke="var(--color-accent)"
-            strokeWidth="1"
-            strokeDasharray="4 2"
-            opacity="0.6"
-          />
+          <>
+            <line
+              x1={scaleX(marketMu)}
+              y1={PAD_T}
+              x2={scaleX(marketMu)}
+              y2={PAD_T + PLOT_H}
+              stroke="var(--color-accent)"
+              strokeWidth="1"
+              strokeDasharray="4 2"
+              opacity="0.6"
+            />
+            <text
+              x={scaleX(marketMu)}
+              y={PAD_T - 6}
+              textAnchor="middle"
+              fill="var(--color-accent)"
+              fontSize="9"
+              fontFamily="monospace"
+              opacity="0.8"
+            >
+              Crowd {formatTickValue(marketMu)}
+            </text>
+          </>
         )}
+
+        {/* User position markers */}
+        {userPositions?.map((pos) => {
+          const px = scaleX(pos.mu);
+          const inBounds = pos.mu >= outcomeMin && pos.mu <= outcomeMax;
+          if (!inBounds) return null;
+          return (
+            <g key={pos.id}>
+              <line
+                x1={px}
+                y1={PAD_T + 8}
+                x2={px}
+                y2={PAD_T + PLOT_H}
+                stroke="var(--color-accent)"
+                strokeWidth="1.5"
+                opacity="0.7"
+              />
+              <polygon
+                points={`${px},${PAD_T + 4} ${px - 5},${PAD_T + 12} ${px + 5},${PAD_T + 12}`}
+                fill="var(--color-accent)"
+                opacity="0.9"
+              />
+              <title>{`mu: ${pos.mu.toFixed(2)}, sigma: ${pos.sigma.toFixed(2)}, size: ${pos.size}`}</title>
+            </g>
+          );
+        })}
 
         {/* X-axis ticks */}
         {xTicks.map((tick) => (
@@ -340,6 +381,30 @@ export function DistributionChart({
               />
               <text x="26" y="20" fill="var(--color-text-secondary)" fontSize="10">
                 Your Proposal
+              </text>
+            </>
+          )}
+          {userPositions && userPositions.length > 0 && (
+            <>
+              <line
+                x1="0"
+                y1={hasProposal ? 32 : 16}
+                x2="20"
+                y2={hasProposal ? 32 : 16}
+                stroke="var(--color-accent)"
+                strokeWidth="1.5"
+              />
+              <polygon
+                points={`10,${hasProposal ? 27 : 11} 7,${hasProposal ? 33 : 17} 13,${hasProposal ? 33 : 17}`}
+                fill="var(--color-accent)"
+              />
+              <text
+                x="26"
+                y={hasProposal ? 36 : 20}
+                fill="var(--color-text-secondary)"
+                fontSize="10"
+              >
+                Your Positions
               </text>
             </>
           )}

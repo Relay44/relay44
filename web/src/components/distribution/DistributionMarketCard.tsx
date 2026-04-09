@@ -137,11 +137,23 @@ export function DistributionMarketCard({ market }: DistributionMarketCardProps) 
 
         {/* Footer */}
         <div className="relative flex items-center justify-between pt-3 border-t border-border mt-auto">
-          <div className="flex items-center gap-2 text-xs text-text-muted">
-            <span className="font-semibold text-text-primary">
-              {formatVolume(market.totalVolume)}
+          <div className="flex items-center gap-3 text-xs text-text-muted">
+            <span className="inline-flex items-center gap-1">
+              <span className="font-semibold text-text-primary">
+                {formatVolume(market.totalVolume)}
+              </span>
+              <span className="text-text-secondary">vol</span>
             </span>
-            <span className="text-text-secondary">vol</span>
+            {market.positionCount > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-semibold text-text-primary">
+                  {market.positionCount}
+                </span>
+                <span className="text-text-secondary">
+                  {market.positionCount === 1 ? 'trader' : 'traders'}
+                </span>
+              </span>
+            )}
           </div>
           <span className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.12em] text-text-muted">
             Open

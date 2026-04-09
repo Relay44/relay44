@@ -75,6 +75,7 @@ export {
   useCloseDistPosition,
   useClaimDistPayout,
   useDistributionCurveHistory,
+  useDistributionActivity,
   useCreateDistributionMarket,
   useResolveDistributionMarket,
 } from './useDistribution';

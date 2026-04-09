@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import { useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { Link as LinkIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatCurrency, formatTimeAgo } from '@/lib/utils';
 import { PageShell } from '@/components/layout';
 import { Button, LoadingScreen, useToast } from '@/components/ui';
 import {
@@ -26,6 +26,7 @@ import {
   useCloseDistPosition,
   useClaimDistPayout,
   useDistributionCurveHistory,
+  useDistributionActivity,
 } from '@/hooks/useDistribution';
 import { useDistributionLiveData } from '@/hooks/useWebSocket';
 import { useBaseWallet } from '@/hooks/useBaseWallet';
@@ -45,6 +46,7 @@ export default function DistributionMarketPage() {
   const { data: market, isLoading, error, refetch } = useDistributionMarket(marketId);
   const { data: positionsData } = useDistributionPositions();
   const { data: curveHistory } = useDistributionCurveHistory(marketId);
+  const { data: recentActivity } = useDistributionActivity(marketId, 8);
   const tradeMutation = useDistributionTrade();
   const closeMutation = useCloseDistPosition();
   const claimMutation = useClaimDistPayout();
@@ -257,6 +259,7 @@ export default function DistributionMarketPage() {
                 outcomeUnit={market.outcomeUnit}
                 marketMu={market.marketMu}
                 marketSigma={market.marketSigma}
+                userPositions={myPositions.length > 0 ? myPositions : undefined}
               />
             </div>
 
@@ -287,6 +290,47 @@ export default function DistributionMarketPage() {
                   snapshots={curveHistory!}
                   outcomeUnit={market.outcomeUnit}
                 />
+              </div>
+            )}
+
+            {/* Recent Activity */}
+            {(recentActivity ?? []).length > 0 && (
+              <div className="mt-6">
+                <h2 className="text-xs text-text-secondary uppercase tracking-wide mb-3">
+                  Recent Activity
+                </h2>
+                <div className="border border-border divide-y divide-border">
+                  {recentActivity!.map((entry, i) => (
+                    <div
+                      key={`${entry.createdAt}-${entry.mu}-${entry.sigma}-${i}`}
+                      className="flex items-center justify-between px-4 py-2.5 text-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={cn(
+                            'px-1.5 py-0.5 border text-[10px] uppercase tracking-wider',
+                            entry.status === 'open'
+                              ? 'text-bid border-bid/30 bg-bid/10'
+                              : entry.status === 'closed'
+                                ? 'text-ask border-ask/30 bg-ask/10'
+                                : 'text-text-muted border-border bg-bg-secondary',
+                          )}
+                        >
+                          {entry.status}
+                        </span>
+                        <span className="text-text-secondary">
+                          {'\u03BC'}={entry.mu.toFixed(2)} {'\u03C3'}={entry.sigma.toFixed(2)}
+                        </span>
+                        <span className="font-mono tabular-nums text-text-primary">
+                          {formatCurrency(entry.collateral)}
+                        </span>
+                      </div>
+                      <span className="text-text-muted">
+                        {formatTimeAgo(entry.createdAt)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
