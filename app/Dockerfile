@@ -5,12 +5,27 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 
+# Cache dependencies — only re-downloaded/compiled when Cargo.toml/Cargo.lock change
 COPY Cargo.toml Cargo.lock ./
+COPY app/Cargo.toml ./app/Cargo.toml
+COPY cli/Cargo.toml ./cli/Cargo.toml
+COPY programs/polyguard-orderbook/Cargo.toml ./programs/polyguard-orderbook/Cargo.toml
+
+# Create stub source files so cargo can resolve the workspace and build deps
+RUN mkdir -p app/src cli/src programs/polyguard-orderbook/src \
+    && echo "fn main() {}" > app/src/main.rs \
+    && echo "fn main() {}" > cli/src/main.rs \
+    && touch programs/polyguard-orderbook/src/lib.rs
+
+ENV CARGO_BUILD_JOBS=2
+RUN cargo build --profile ci --package relay44-backend 2>/dev/null || true
+RUN rm -rf app/src cli/src programs/polyguard-orderbook/src
+
+# Copy real source and build
 COPY app ./app
 COPY cli ./cli
 COPY programs ./programs
 
-ENV CARGO_BUILD_JOBS=1
 RUN cargo build --profile ci --package relay44-backend
 
 # Runtime stage
