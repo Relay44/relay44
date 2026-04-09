@@ -402,19 +402,13 @@ pub async fn get_dist_market(
     }
 }
 
-/// POST /distribution/markets — admin only
+/// POST /distribution/markets — any authenticated user
 pub async fn create_dist_market(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
     body: web::Json<CreateDistMarketRequest>,
 ) -> Result<impl Responder, ApiError> {
     let user = extract_jwt_user(&req, &state)?;
-
-    if !matches!(user.role, UserRole::Admin) {
-        return Err(ApiError::forbidden(
-            "Only admins can create distribution markets",
-        ));
-    }
 
     // Validate inputs
     if body.market_id.is_empty() || body.market_id.len() > 64 {
