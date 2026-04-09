@@ -906,8 +906,27 @@ if (isEnabled(process.env.CREATOR_ECONOMICS_MATERIALIZER_ENABLED)) {
   }
 }
 
-if (failures.length > 0) {
-  const msg = `[relay44 ALERT] Health check failed:\n${failures.join("\n")}`;
+// Separate hard failures from soft warnings (overdue smoke tests).
+// Smoke-test overdue means the *tested service* may be unhealthy, not the
+// monitor itself — alert but don't fail the cron run.
+const warnings = [];
+const hardFailures = [];
+for (const f of failures) {
+  if (/^(x402_overdue|order_smoke_overdue)\b/.test(f)) {
+    warnings.push(f);
+  } else {
+    hardFailures.push(f);
+  }
+}
+
+if (warnings.length > 0) {
+  const warnMsg = `[relay44 WARN] ${warnings.join("; ")}`;
+  console.warn(warnMsg);
+  await sendAlert(warnMsg, process.env);
+}
+
+if (hardFailures.length > 0) {
+  const msg = `[relay44 ALERT] Health check failed:\n${hardFailures.join("\n")}`;
   console.error(msg);
   await sendAlert(msg, process.env);
   await closeOpsState(opsState);
