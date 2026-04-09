@@ -3857,6 +3857,18 @@ class ApiClient {
     );
   }
 
+  async getDistributionActivity(
+    marketId: string,
+    limit?: number,
+  ): Promise<import("@/types/distribution").DistributionActivity[]> {
+    const query = new URLSearchParams();
+    if (limit) query.set("limit", String(limit));
+    const qs = query.toString();
+    return this.request(
+      `/distribution/markets/${encodeURIComponent(marketId)}/activity${qs ? `?${qs}` : ""}`,
+    );
+  }
+
   // Scanner
 
   async getScannerOpportunities(params?: {

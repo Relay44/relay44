@@ -471,7 +471,8 @@ async fn main() -> std::io::Result<()> {
                                     .route("/{id}/trade", web::post().to(api::distribution::open_position))
                                     .route("/{id}/resolve", web::post().to(api::distribution::resolve_market))
                                     .route("/{id}/curve", web::get().to(api::distribution::get_curve))
-                                    .route("/{id}/history", web::get().to(api::distribution::get_curve_history)),
+                                    .route("/{id}/history", web::get().to(api::distribution::get_curve_history))
+                                    .route("/{id}/activity", web::get().to(api::distribution::get_market_activity)),
                             )
                             .service(
                                 web::scope("/positions")

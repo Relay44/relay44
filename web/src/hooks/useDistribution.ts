@@ -4,6 +4,7 @@ import type {
   DistributionMarket,
   DistributionPosition,
   DistributionQuote,
+  DistributionActivity,
   CurvePoint,
   CurveSnapshot,
 } from '@/types/distribution';
@@ -95,6 +96,7 @@ export function useDistributionTrade() {
       queryClient.invalidateQueries({ queryKey: ['distribution-markets'] });
       queryClient.invalidateQueries({ queryKey: ['distribution-curve', variables.marketId] });
       queryClient.invalidateQueries({ queryKey: ['distribution-positions'] });
+      queryClient.invalidateQueries({ queryKey: ['distribution-activity', variables.marketId] });
     },
   });
 }
@@ -179,6 +181,18 @@ export function useResolveDistributionMarket() {
       queryClient.invalidateQueries({ queryKey: ['distribution-markets'] });
       queryClient.invalidateQueries({ queryKey: ['distribution-positions'] });
     },
+  });
+}
+
+export function useDistributionActivity(marketId: string, limit = 10) {
+  return useQuery({
+    queryKey: ['distribution-activity', marketId, limit],
+    queryFn: async (): Promise<DistributionActivity[]> => {
+      return api.getDistributionActivity(marketId, limit);
+    },
+    enabled: !!marketId,
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
   });
 }
 
