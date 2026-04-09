@@ -30,6 +30,10 @@ pub enum RateLimitTier {
     Write,
     /// Read operations: 120 requests per minute
     Read,
+    /// Distribution trades: 10 requests per minute per user
+    DistTrade,
+    /// Distribution quote: 60 requests per minute (read-like but heavier compute)
+    DistQuote,
 }
 
 impl RateLimitTier {
@@ -41,13 +45,15 @@ impl RateLimitTier {
             RateLimitTier::Claim => 5,
             RateLimitTier::Write => 30,
             RateLimitTier::Read => 120,
+            RateLimitTier::DistTrade => 10,
+            RateLimitTier::DistQuote => 60,
         }
     }
 
     pub fn window_secs(&self) -> u64 {
         match self {
             RateLimitTier::MarketCreate => 3600, // 1 hour
-            _ => 60,                             // 1 minute
+            _ => 60,                              // 1 minute
         }
     }
 
@@ -59,6 +65,8 @@ impl RateLimitTier {
             RateLimitTier::Claim => "rl:claim",
             RateLimitTier::Write => "rl:write",
             RateLimitTier::Read => "rl:read",
+            RateLimitTier::DistTrade => "rl:dist_trade",
+            RateLimitTier::DistQuote => "rl:dist_quote",
         }
     }
 }

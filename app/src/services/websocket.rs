@@ -24,6 +24,15 @@ pub enum WsMessage {
     /// Raw platform event JSON (from event bus).
     #[serde(rename = "event")]
     RawEvent(String),
+    /// Distribution market aggregate state changed
+    #[serde(rename = "dist_market_update")]
+    DistMarketUpdate(DistMarketUpdate),
+    /// Distribution position opened or closed
+    #[serde(rename = "dist_trade")]
+    DistTrade(DistTradeUpdate),
+    /// Distribution market resolved
+    #[serde(rename = "dist_resolve")]
+    DistResolve(DistResolveUpdate),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -62,6 +71,37 @@ pub struct MarketUpdate {
     pub yes_price: f64,
     pub no_price: f64,
     pub status: String,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DistMarketUpdate {
+    pub market_id: String,
+    pub market_mu: f64,
+    pub market_sigma: f64,
+    pub stiffness: f64,
+    pub peak_density: f64,
+    pub total_collateral: i64,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DistTradeUpdate {
+    pub market_id: String,
+    pub position_id: i64,
+    pub owner: String,
+    pub trade_type: String,
+    pub mu: f64,
+    pub sigma: f64,
+    pub size: i64,
+    pub cost: f64,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DistResolveUpdate {
+    pub market_id: String,
+    pub resolved_value: f64,
     pub timestamp: i64,
 }
 
@@ -160,6 +200,39 @@ impl WebSocketHub {
             let _ = tx.send(msg.clone());
         }
 
+        let _ = self.global_tx.send(msg);
+    }
+
+    /// Broadcast distribution market state update
+    pub async fn broadcast_dist_market(&self, update: DistMarketUpdate) {
+        let market_id = update.market_id.clone();
+        let msg = WsMessage::DistMarketUpdate(update);
+
+        if let Some(tx) = self.market_channels.read().await.get(&market_id) {
+            let _ = tx.send(msg.clone());
+        }
+        let _ = self.global_tx.send(msg);
+    }
+
+    /// Broadcast distribution trade event
+    pub async fn broadcast_dist_trade(&self, update: DistTradeUpdate) {
+        let market_id = update.market_id.clone();
+        let msg = WsMessage::DistTrade(update);
+
+        if let Some(tx) = self.market_channels.read().await.get(&market_id) {
+            let _ = tx.send(msg.clone());
+        }
+        let _ = self.global_tx.send(msg);
+    }
+
+    /// Broadcast distribution market resolution
+    pub async fn broadcast_dist_resolve(&self, update: DistResolveUpdate) {
+        let market_id = update.market_id.clone();
+        let msg = WsMessage::DistResolve(update);
+
+        if let Some(tx) = self.market_channels.read().await.get(&market_id) {
+            let _ = tx.send(msg.clone());
+        }
         let _ = self.global_tx.send(msg);
     }
 

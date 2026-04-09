@@ -92,7 +92,7 @@ export function useUpdateDecisionNode(cellId: string, nodeId: string) {
 export function useAttachDecisionMarket(cellId: string, nodeId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { sourceType: 'internal_market' | 'external_market'; sourceRef: string }) =>
+    mutationFn: async (data: { sourceType: 'internal_market' | 'external_market' | 'distribution_market'; sourceRef: string }) =>
       api.attachDecisionMarket(cellId, nodeId, data),
     onSuccess: () => invalidateDecisionQueries(queryClient, cellId),
   });

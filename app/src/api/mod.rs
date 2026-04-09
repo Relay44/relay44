@@ -4,6 +4,7 @@ pub mod compliance;
 pub mod creator_tiers;
 pub mod creator;
 pub mod decisions;
+pub mod distribution;
 pub mod error;
 pub mod evm;
 pub mod external;

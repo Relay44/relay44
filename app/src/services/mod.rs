@@ -3,6 +3,8 @@ pub mod aerodrome_scanner;
 pub mod agent_scheduler;
 pub mod creator_economics;
 pub mod database;
+pub mod distribution;
+pub mod distribution_scheduler;
 pub mod event_bus;
 pub mod evm_indexer;
 pub mod evm_rpc;

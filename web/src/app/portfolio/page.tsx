@@ -5,13 +5,17 @@ import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { Card } from "@/components/ui";
 import { PositionList } from "@/components/position";
 import { OrderList } from "@/components/order";
-import { useDecisionCells, usePositions, useSessionState } from "@/hooks";
+import { DistributionPositions } from "@/components/distribution";
+import { useDecisionCells, usePositions, useSessionState, useDistributionPositions, useCloseDistPosition, useClaimDistPayout } from "@/hooks";
 import { formatCurrency, formatPnl } from "@/lib/utils";
 
 export default function PortfolioPage() {
   const { isConnected } = useBaseWallet();
   const { hasSession, sessionRestored } = useSessionState();
   const { data: positionsData } = usePositions();
+  const { data: distPositions } = useDistributionPositions();
+  const closeDistPosition = useCloseDistPosition();
+  const claimDistPayout = useClaimDistPayout();
   const { data: decisionCellsData } = useDecisionCells({
     limit: 50,
     enabled: isConnected && hasSession && sessionRestored,
@@ -61,6 +65,11 @@ export default function PortfolioPage() {
   const totalPnl = positions.reduce((sum, p) => sum + p.unrealizedPnl, 0);
   const realizedPnl = positions.reduce((sum, p) => sum + p.realizedPnl, 0);
   const totalClaimable = positions.reduce((sum, p) => sum + p.claimable, 0);
+
+  const openDistPositions = (distPositions || []).filter((p) => p.status === 'open');
+  const resolvedDistPositions = (distPositions || []).filter((p) => p.status !== 'open');
+  const distCollateralValue = (distPositions || []).reduce((sum, p) => sum + p.collateral, 0);
+  const distPnl = (distPositions || []).reduce((sum, p) => sum + (p.pnl ?? 0), 0);
 
   return (
     <>
@@ -146,6 +155,42 @@ export default function PortfolioPage() {
         <h2 className="text-lg font-semibold mb-4">Open Orders</h2>
         <OrderList />
       </section>
+
+      {(distPositions || []).length > 0 && (
+        <section className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Distribution Positions</h2>
+            <div className="flex items-center gap-4 text-sm text-text-secondary">
+              <span>Collateral: {formatCurrency(distCollateralValue)}</span>
+              <span className={distPnl >= 0 ? 'text-accent' : 'text-text-secondary'}>
+                PnL: {formatPnl(distPnl)}
+              </span>
+            </div>
+          </div>
+          {openDistPositions.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-sm font-medium text-text-secondary mb-2 uppercase tracking-wide">Open</h3>
+              <DistributionPositions
+                positions={openDistPositions}
+                marketResolved={false}
+                onClose={(positionId) => closeDistPosition.mutate(positionId)}
+                onClaim={() => {}}
+              />
+            </div>
+          )}
+          {resolvedDistPositions.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-text-secondary mb-2 uppercase tracking-wide">Resolved / Claimed</h3>
+              <DistributionPositions
+                positions={resolvedDistPositions}
+                marketResolved={true}
+                onClose={() => {}}
+                onClaim={(positionId) => claimDistPayout.mutate(positionId)}
+              />
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }
