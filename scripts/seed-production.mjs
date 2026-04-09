@@ -51,6 +51,8 @@ function buildHeaders(token) {
   if (token) headers.authorization = `Bearer ${token}`;
   const country = (process.env.PAPER_RUNNER_COUNTRY_CODE || "").trim();
   if (country) headers["x-country-code"] = country;
+  const internalKey = (process.env.INTERNAL_SERVICE_KEY || "").trim();
+  if (internalKey) headers["x-internal-service-key"] = internalKey;
   return headers;
 }
 
