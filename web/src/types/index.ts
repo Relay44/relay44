@@ -478,6 +478,9 @@ export type NotificationType =
   | 'decision_recommendation_changed'
   | 'decision_threshold_crossed'
   | 'decision_confidence_dropped'
+  | 'distribution_trade_confirmed'
+  | 'distribution_market_resolved'
+  | 'distribution_payout_ready'
   | 'system';
 
 export interface Notification {
@@ -504,7 +507,7 @@ export interface NotificationPreferences {
 }
 
 export type DecisionType = 'timing' | 'choice' | 'hedge' | 'allocation';
-export type DecisionNodeSourceType = 'internal_market' | 'external_market' | 'draft_market';
+export type DecisionNodeSourceType = 'internal_market' | 'external_market' | 'draft_market' | 'distribution_market';
 export type DecisionNodeEffect = 'support' | 'oppose' | 'neutral';
 export type DecisionTriggerMode =
   | 'on_recommendation_gain'
