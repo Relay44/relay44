@@ -55,26 +55,39 @@ pub async fn extract_authenticated_user(
     // Branch: JWT auth (existing flow)
     let claims = state.jwt.validate_token(token)?;
 
-    let revoked = state
-        .redis
-        .is_token_revoked(&claims.jti)
-        .await
-        .map_err(|e| {
-            log::error!("Token revocation check failed: {}", e);
-            ApiError::internal("Authentication validation failed")
-        })?;
-
-    if revoked {
-        return Err(ApiError::unauthorized("Token revoked"));
+    // In test-stubs mode, skip Redis revocation check (tests don't have Redis)
+    #[cfg(feature = "test-stubs")]
+    {
+        let wallet = claims.sub.to_ascii_lowercase();
+        return Ok(AuthenticatedUser {
+            wallet_address: wallet,
+            auth_method: AuthMethod::Jwt,
+        });
     }
 
-    let wallet = claims.sub.to_ascii_lowercase();
-    check_sanctions(req, state, &wallet).await?;
+    #[cfg(not(feature = "test-stubs"))]
+    {
+        let revoked = state
+            .redis
+            .is_token_revoked(&claims.jti)
+            .await
+            .map_err(|e| {
+                log::error!("Token revocation check failed: {}", e);
+                ApiError::internal("Authentication validation failed")
+            })?;
 
-    Ok(AuthenticatedUser {
-        wallet_address: wallet,
-        auth_method: AuthMethod::Jwt,
-    })
+        if revoked {
+            return Err(ApiError::unauthorized("Token revoked"));
+        }
+
+        let wallet = claims.sub.to_ascii_lowercase();
+        check_sanctions(req, state, &wallet).await?;
+
+        Ok(AuthenticatedUser {
+            wallet_address: wallet,
+            auth_method: AuthMethod::Jwt,
+        })
+    }
 }
 
 async fn validate_api_key_auth(

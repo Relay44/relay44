@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "relay44 backend API - order matching, settlement, and real-time updates"
 
+[lib]
+name = "relay44_backend"
+path = "src/lib.rs"
+
 [[bin]]
 name = "relay44-api"
 path = "src/main.rs"
@@ -69,6 +73,9 @@ time = "0.3"
 # WebSocket
 tokio-tungstenite = "0.21"
 
+[features]
+test-stubs = []
+
 [dev-dependencies]
 actix-rt = "2"
 actix-web = { version = "4", features = ["macros"] }
@@ -76,3 +83,4 @@ actix-http = "3"
 mockall = "0.14"
 tempfile = "3"
 serial_test = "3"
+relay44-backend = { path = ".", features = ["test-stubs"] }
