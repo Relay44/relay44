@@ -5,6 +5,7 @@ import { useBaseWallet } from "@/hooks/useBaseWallet";
 import { Card } from "@/components/ui";
 import { PositionList } from "@/components/position";
 import { OrderList } from "@/components/order";
+import { CopyTradingSection } from "@/components/portfolio/CopyTradingSection";
 import { DistributionPositions } from "@/components/distribution";
 import { useDecisionCells, usePositions, useSessionState, useDistributionPositions, useCloseDistPosition, useClaimDistPayout } from "@/hooks";
 import { formatCurrency, formatPnl } from "@/lib/utils";
@@ -146,6 +147,8 @@ export default function PortfolioPage() {
             </div>
           </div>
         ) : null}
+
+        <CopyTradingSection />
 
         <h2 className="text-lg font-semibold mb-4">Active Positions</h2>
         <PositionList />
