@@ -45,6 +45,9 @@ import type {
   CreatorEconomicsMarketSummary,
   CreatorEconomicsMarketDetail,
   CreatorEconomicsPoint,
+  ScannedOpportunity,
+  CalibrationBucket,
+  ScanRun,
 } from "@/types";
 import { CURATED_MARKETS_BY_ID } from "@/lib/curatedMarkets";
 import {
@@ -3605,33 +3608,68 @@ class ApiClient {
     });
   }
 
-  // Social: copy trading
+  // Copy trading
 
   async startCopyTrading(
     targetWallet: string,
     data: { allocationUsdc?: number; maxPositionUsdc?: number },
   ): Promise<import("@/types").CopyTradingSubscription> {
-    return this.request(`/social/copy/${targetWallet}`, {
+    return this.request("/copy-trading/subscribe", {
       method: "POST",
+      body: JSON.stringify({ targetWallet, ...data }),
+    });
+  }
+
+  async stopCopyTrading(subscriptionId: string): Promise<{ ok: boolean }> {
+    return this.request(`/copy-trading/subscribe/${encodeURIComponent(subscriptionId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async updateCopySubscription(
+    subscriptionId: string,
+    data: {
+      active?: boolean;
+      allocationUsdc?: number;
+      maxPositionUsdc?: number;
+    },
+  ): Promise<import("@/types").CopyTradingSubscription> {
+    return this.request(`/copy-trading/subscribe/${encodeURIComponent(subscriptionId)}`, {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
-  async stopCopyTrading(targetWallet: string): Promise<{ ok: boolean }> {
-    return this.request(`/social/copy/${targetWallet}`, { method: "DELETE" });
-  }
-
-  async getCopySubscriptions(): Promise<{
+  async getCopySubscriptions(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<{
     data: import("@/types").CopyTradingSubscription[];
+    limit: number;
+    offset: number;
   }> {
-    return this.request("/social/copy");
+    const query = this.buildQuery(params || {});
+    return this.request(`/copy-trading/subscriptions${query}`);
   }
 
-  async getCopyStats(wallet: string): Promise<{
+  async getCopySubscriberCount(): Promise<{
     copySubscriberCount: number;
-    totalCopyAumUsdc: number;
   }> {
-    return this.request(`/profiles/${wallet}/copy-stats`);
+    return this.request("/copy-trading/subscribers");
+  }
+
+  async getCopySubscriptionHistory(
+    subscriptionId: string,
+    params?: { limit?: number; offset?: number },
+  ): Promise<{
+    data: import("@/types").CopyTradeExecution[];
+    limit: number;
+    offset: number;
+  }> {
+    const query = this.buildQuery(params || {});
+    return this.request(
+      `/copy-trading/subscribe/${encodeURIComponent(subscriptionId)}/history${query}`,
+    );
   }
 
   // Social: signals
@@ -3817,6 +3855,65 @@ class ApiClient {
     return this.request(
       `/distribution/markets/${encodeURIComponent(marketId)}/history${qs ? `?${qs}` : ""}`,
     );
+  }
+
+  // Scanner
+
+  async getScannerOpportunities(params?: {
+    opportunityType?: string;
+    category?: string;
+    minScore?: number;
+    limit?: number;
+  }): Promise<{ opportunities: ScannedOpportunity[]; count: number }> {
+    const query = this.buildQuery(params || {});
+    return this.request(`/pm-scanner/opportunities${query}`);
+  }
+
+  async getScannerCalibration(): Promise<{
+    calibrationBuckets: CalibrationBucket[];
+    count: number;
+  }> {
+    return this.request("/pm-scanner/calibration");
+  }
+
+  async getScannerRuns(): Promise<{ runs: ScanRun[]; count: number }> {
+    return this.request("/pm-scanner/runs");
+  }
+
+  async triggerScan(): Promise<{
+    scanned: boolean;
+    totalOpportunities: number;
+    longshots: number;
+    nearCertainties: number;
+    spreadCaptures: number;
+  }> {
+    return this.request("/pm-scanner/scan", { method: "POST" });
+  }
+
+  // Signal marketplace (Brier-scored signal providers)
+
+  async getSignalProviders(filters?: import("@/types").SignalProviderFilters): Promise<{
+    providers: import("@/types").SignalProvider[];
+  }> {
+    const query = this.buildQuery(filters || {});
+    return this.request(`/signals/providers${query}`);
+  }
+
+  async getSignalProviderEmissions(
+    marketSlug: string,
+  ): Promise<{
+    signals: import("@/types").SignalEmission[];
+  }> {
+    return this.request(`/signals/market/${encodeURIComponent(marketSlug)}`);
+  }
+
+  async createSignalProvider(
+    data: import("@/types").CreateSignalProviderRequest,
+  ): Promise<{ id: string; ok: boolean }> {
+    return this.request("/signals/providers", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   }
 }
 

@@ -2,6 +2,7 @@ pub mod agent_service;
 pub mod api_key;
 pub mod auth;
 pub mod compliance;
+pub mod copy_trading;
 pub mod creator_tiers;
 pub mod creator;
 pub mod decisions;
