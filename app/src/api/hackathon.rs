@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::api::auth::{extract_authenticated_user, extract_jwt_user};
 use crate::api::jwt::{check_role, UserRole};
+use crate::api::rate_limit::{check_rate_limit_by_user, RateLimitTier};
 use crate::api::validation::{sanitize_string, validate_pagination};
 use crate::api::ApiError;
 use crate::AppState;
@@ -506,6 +507,7 @@ pub async fn register_for_hackathon(
     body: web::Json<RegisterForHackathonRequest>,
 ) -> Result<impl Responder, ApiError> {
     let user = extract_authenticated_user(&req, &state).await?;
+    check_rate_limit_by_user(&user.wallet_address, &state.redis, RateLimitTier::Write).await?;
     let hackathon_id = path.into_inner();
     let pool = state.db.pool();
 
@@ -631,6 +633,7 @@ pub async fn link_agent_to_hackathon(
     body: web::Json<LinkAgentRequest>,
 ) -> Result<impl Responder, ApiError> {
     let user = extract_authenticated_user(&req, &state).await?;
+    check_rate_limit_by_user(&user.wallet_address, &state.redis, RateLimitTier::Write).await?;
     let hackathon_id = path.into_inner();
     let pool = state.db.pool();
 

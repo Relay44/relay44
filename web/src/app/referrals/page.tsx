@@ -104,11 +104,22 @@ function ReferralLinkSection() {
 
 function ApplyCodeSection() {
   const [inputCode, setInputCode] = useState('');
+  const [validationError, setValidationError] = useState('');
   const applyCode = useApplyReferralCode();
 
   const handleApply = () => {
-    if (!inputCode.trim()) return;
-    applyCode.mutate(inputCode.trim());
+    const code = inputCode.trim();
+    if (!code) return;
+    if (code.length < 1 || code.length > 32) {
+      setValidationError('Code must be between 1 and 32 characters.');
+      return;
+    }
+    if (!/^[a-f0-9]+$/i.test(code)) {
+      setValidationError('Code must be alphanumeric (hex characters only).');
+      return;
+    }
+    setValidationError('');
+    applyCode.mutate(code);
   };
 
   return (
@@ -121,7 +132,10 @@ function ApplyCodeSection() {
         <Input
           placeholder="Enter referral code"
           value={inputCode}
-          onChange={(e) => setInputCode(e.target.value)}
+          onChange={(e) => {
+            setInputCode(e.target.value);
+            if (validationError) setValidationError('');
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') handleApply();
           }}
@@ -134,6 +148,9 @@ function ApplyCodeSection() {
           {applyCode.isPending ? 'Applying...' : 'Apply'}
         </Button>
       </div>
+      {validationError && (
+        <p className="text-red-400 text-sm mt-2">{validationError}</p>
+      )}
       {applyCode.isSuccess && (
         <p className="text-green-400 text-sm mt-2">
           Referral code applied successfully!
