@@ -79,9 +79,11 @@ jobs:
           replicas="$(kubectl get deployment "$deployment_name" -n "$namespace" \
             -o jsonpath='{.status.readyReplicas}')"
 
-          echo "current_image=$current_image" >> "$GITHUB_OUTPUT"
-          echo "current_revision=$current_revision" >> "$GITHUB_OUTPUT"
-          echo "current_replicas=$replicas" >> "$GITHUB_OUTPUT"
+          {
+            echo "current_image=$current_image"
+            echo "current_revision=$current_revision"
+            echo "current_replicas=$replicas"
+          } >> "$GITHUB_OUTPUT"
 
           echo "Current state:"
           echo "  Namespace: $namespace"
@@ -181,14 +183,16 @@ jobs:
 
       - name: Create rollback record
         run: |
-          echo "## Rollback Record" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Environment | ${{ github.event.inputs.environment }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Rollback type | ${{ github.event.inputs.rollback_type }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Previous image | ${{ steps.current.outputs.current_image }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| New image | ${{ steps.verify.outputs.new_image }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Reason | ${{ github.event.inputs.reason }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Triggered by | ${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Timestamp | $(date -u +"%Y-%m-%dT%H:%M:%SZ") |" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Rollback Record"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Environment | ${{ github.event.inputs.environment }} |"
+            echo "| Rollback type | ${{ github.event.inputs.rollback_type }} |"
+            echo "| Previous image | ${{ steps.current.outputs.current_image }} |"
+            echo "| New image | ${{ steps.verify.outputs.new_image }} |"
+            echo "| Reason | ${{ github.event.inputs.reason }} |"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Timestamp | $(date -u +"%Y-%m-%dT%H:%M:%SZ") |"
+          } >> "$GITHUB_STEP_SUMMARY"

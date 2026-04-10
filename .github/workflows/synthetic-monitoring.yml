@@ -51,9 +51,11 @@ jobs:
             exit 0
           fi
 
-          echo "enabled=true" >> "${GITHUB_OUTPUT}"
-          echo "api_url=${api_url}" >> "${GITHUB_OUTPUT}"
-          echo "web_url=${web_url}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "enabled=true"
+            echo "api_url=${api_url}"
+            echo "web_url=${web_url}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Run synthetic probe
         if: steps.targets.outputs.enabled == 'true'
