@@ -82,8 +82,24 @@ function TicketCanvas({
       mouseY = -9999;
     };
 
+    const onTouch = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+      const rect = host.getBoundingClientRect();
+      mouseX = touch.clientX - rect.left;
+      mouseY = touch.clientY - rect.top;
+    };
+    const onTouchEnd = () => {
+      mouseX = -9999;
+      mouseY = -9999;
+    };
+
     host.addEventListener('mousemove', onMouseMove);
     host.addEventListener('mouseleave', onMouseLeave);
+    host.addEventListener('touchstart', onTouch, { passive: true });
+    host.addEventListener('touchmove', onTouch, { passive: true });
+    host.addEventListener('touchend', onTouchEnd, { passive: true });
+    host.addEventListener('touchcancel', onTouchEnd, { passive: true });
 
     let glyphs: Array<{
       char: '0' | '1' | 'o';
@@ -487,6 +503,10 @@ function TicketCanvas({
       window.removeEventListener('resize', resizeCanvas);
       host.removeEventListener('mousemove', onMouseMove);
       host.removeEventListener('mouseleave', onMouseLeave);
+      host.removeEventListener('touchstart', onTouch);
+      host.removeEventListener('touchmove', onTouch);
+      host.removeEventListener('touchend', onTouchEnd);
+      host.removeEventListener('touchcancel', onTouchEnd);
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
       }
