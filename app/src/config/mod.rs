@@ -162,6 +162,8 @@ pub struct AppConfig {
     pub signals_enabled: bool,
     pub parlays_enabled: bool,
     pub agent_service_enabled: bool,
+    pub managed_agent_runner_enabled: bool,
+    pub managed_agent_runner_interval_secs: u64,
     pub creator_tiers_enabled: bool,
     pub risk_console_enabled: bool,
 }
@@ -644,6 +646,14 @@ impl AppConfig {
                 .unwrap_or_else(|_| "false".to_string())
                 .to_lowercase()
                 == "true",
+            managed_agent_runner_enabled: env::var("MANAGED_AGENT_RUNNER_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .to_lowercase()
+                == "true",
+            managed_agent_runner_interval_secs: env::var("MANAGED_AGENT_RUNNER_INTERVAL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(60),
             creator_tiers_enabled: env::var("CREATOR_TIERS_ENABLED")
                 .unwrap_or_else(|_| "false".to_string())
                 .to_lowercase()

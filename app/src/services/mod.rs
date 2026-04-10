@@ -25,6 +25,7 @@ pub mod risk_governor;
 pub mod kelly;
 pub mod limitless_partner;
 pub mod limitless_scanner;
+pub mod managed_agent_runner;
 pub mod polymarket_scanner;
 pub mod polymarket_ws;
 pub mod portfolio_snapshot;
