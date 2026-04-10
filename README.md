@@ -11,7 +11,7 @@ Open infrastructure for prediction markets on Base.
 
 Relay44 is a prediction market platform built on Base. It ships a Rust API, Base smart contracts, a Next.js web client, and PostgreSQL migrations in a single monorepo.
 
-**Links**: [relay44.com](https://relay44.com) · [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) · [SUPPORT](SUPPORT.md) · [CHANGELOG](CHANGELOG.md)
+**Links**: [relay44.com](https://relay44.com) · [CONTRIBUTING](CONTRIBUTING.md) · [SECURITY](SECURITY.md) · [SUPPORT](SUPPORT.md) · [CHANGELOG](CHANGELOG.md) · [ARCHITECTURE](ARCHITECTURE.md) · [TESTING](TESTING.md)
 
 ## What This Is
 
