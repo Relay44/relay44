@@ -18,6 +18,10 @@ interface SwarmPanelProps {
   className?: string;
 }
 
+const PAGE_SIZE = 50;
+const MIN_POLL_MS = 5_000;
+const MAX_POLL_MS = 60_000;
+
 function truncateAddress(address: string): string {
   if (address.length <= 10) {
     return address;
@@ -41,52 +45,155 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function mergeMessages(
+  existing: SwarmMessage[],
+  incoming: SwarmMessage[],
+): SwarmMessage[] {
+  const seen = new Set<string>();
+  const merged: SwarmMessage[] = [];
+  for (const msg of [...incoming, ...existing]) {
+    if (seen.has(msg.id)) continue;
+    seen.add(msg.id);
+    merged.push(msg);
+  }
+  merged.sort((a, b) => {
+    const ta = new Date(a.sentAt).getTime();
+    const tb = new Date(b.sentAt).getTime();
+    if (ta !== tb) return ta - tb;
+    // Deterministic tiebreaker when timestamps collide.
+    if (a.id === b.id) return 0;
+    return a.id < b.id ? -1 : 1;
+  });
+  return merged;
+}
+
 export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
   const [messages, setMessages] = useState<SwarmMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesStartRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consecutiveErrorsRef = useRef(0);
+  const offsetRef = useRef(PAGE_SIZE);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
-  const fetchMessages = useCallback(async () => {
+  const fetchLatest = useCallback(async () => {
     try {
-      const response = await api.getSwarmMessages(swarmId, { limit: 50 });
-      setMessages(response.data);
+      const response = await api.getSwarmMessages(swarmId, {
+        limit: PAGE_SIZE,
+        offset: 0,
+      });
+      setMessages((prev) => mergeMessages(prev, response.data));
+      setHasMoreOlder(response.has_more);
       setError(null);
+      consecutiveErrorsRef.current = 0;
+      return true;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to load messages';
-      if (loading) {
-        setError(message);
-      }
+      consecutiveErrorsRef.current += 1;
+      setError((prev) => (prev == null && !loading ? null : message));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [loading, swarmId]);
 
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMoreOlder) return;
+    setLoadingOlder(true);
+    try {
+      const response = await api.getSwarmMessages(swarmId, {
+        limit: PAGE_SIZE,
+        offset: offsetRef.current,
+      });
+      setMessages((prev) => mergeMessages(prev, response.data));
+      offsetRef.current += response.data.length;
+      setHasMoreOlder(response.has_more && response.data.length > 0);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to load older messages';
+      setError(message);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasMoreOlder, loadingOlder, swarmId]);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
     setMessages([]);
-    fetchMessages();
-  }, [fetchMessages, swarmId]);
+    setHasMoreOlder(false);
+    offsetRef.current = PAGE_SIZE;
+    consecutiveErrorsRef.current = 0;
+    fetchLatest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [swarmId]);
 
   useEffect(() => {
-    const interval = setInterval(fetchMessages, 5000);
-    return () => clearInterval(interval);
-  }, [fetchMessages]);
+    let cancelled = false;
+
+    const clearTimer = () => {
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+
+    const schedule = () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const errors = consecutiveErrorsRef.current;
+      const delay =
+        errors === 0
+          ? MIN_POLL_MS
+          : Math.min(MIN_POLL_MS * 2 ** errors, MAX_POLL_MS);
+      pollTimerRef.current = setTimeout(async () => {
+        await fetchLatest();
+        schedule();
+      }, delay);
+    };
+
+    const handleVisibility = () => {
+      if (typeof document === 'undefined') return;
+      if (document.hidden) {
+        clearTimer();
+      } else {
+        clearTimer();
+        // On refocus, reset backoff and fetch immediately.
+        consecutiveErrorsRef.current = 0;
+        void fetchLatest().then(() => schedule());
+      }
+    };
+
+    schedule();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
+
+    return () => {
+      cancelled = true;
+      clearTimer();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
+    };
+  }, [fetchLatest]);
 
   useEffect(() => {
-    if (messages.length > prevMessageCountRef.current) {
+    if (messages.length > prevMessageCountRef.current && !loadingOlder) {
       scrollToBottom();
     }
     prevMessageCountRef.current = messages.length;
-  }, [messages.length, scrollToBottom]);
+  }, [messages.length, loadingOlder, scrollToBottom]);
 
   if (loading) {
     return (
@@ -102,7 +209,7 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
     );
   }
 
-  if (error) {
+  if (error && messages.length === 0) {
     return (
       <div
         className={cn(
@@ -118,7 +225,8 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
           onClick={() => {
             setLoading(true);
             setError(null);
-            fetchMessages();
+            consecutiveErrorsRef.current = 0;
+            fetchLatest();
           }}
         >
           Retry
@@ -144,6 +252,24 @@ export function SwarmPanel({ swarmId, className }: SwarmPanelProps) {
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        <div ref={messagesStartRef} />
+        {hasMoreOlder && (
+          <div className="flex justify-center">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={loadingOlder}
+              onClick={loadOlder}
+            >
+              {loadingOlder ? 'Loading…' : 'Load older'}
+            </Button>
+          </div>
+        )}
+        {error && messages.length > 0 && (
+          <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            {error}
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-text-secondary">No messages yet.</p>

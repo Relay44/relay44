@@ -3032,6 +3032,48 @@ class ApiClient {
     });
   }
 
+  async prepareBaseGiveFeedback(data: {
+    from?: string;
+    agentId: string;
+    value: string;
+    valueDecimals: number;
+    tag1: string;
+    tag2: string;
+    endpoint: string;
+    feedbackUri: string;
+    feedbackHash: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/reputation/feedback", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseRevokeFeedback(data: {
+    from?: string;
+    agentId: string;
+    feedbackIndex: number;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/reputation/feedback/revoke", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async prepareBaseAppendResponse(data: {
+    from?: string;
+    agentId: string;
+    clientAddress: string;
+    feedbackIndex: number;
+    responseUri: string;
+    responseHash: string;
+  }): Promise<PreparedEvmWriteTx> {
+    return this.request("/evm/write/reputation/feedback/response", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async prepareBaseValidationRequest(data: {
     from?: string;
     validator: string;
@@ -3437,6 +3479,38 @@ class ApiClient {
     return this.request(`/evm/identity/${encodeURIComponent(wallet)}`);
   }
 
+  // Reputation (ERC-8004)
+  async getBaseReputation(wallet: string): Promise<{
+    wallet: string;
+    scoreBps?: number;
+    confidenceBps?: number;
+    events?: number;
+    notionalMicrousdc?: string;
+    source: string;
+  }> {
+    return this.request(`/evm/reputation/${encodeURIComponent(wallet)}`);
+  }
+
+  async getBaseReputationFeedback(wallet: string): Promise<{
+    wallet: string;
+    agentId?: string;
+    clients: string[];
+    feedback: Array<{
+      client: string;
+      feedbackIndex: number;
+      value: string;
+      valueDecimals: number;
+      tag1: string;
+      tag2: string;
+      revoked: boolean;
+    }>;
+    source: string;
+  }> {
+    return this.request(
+      `/evm/reputation/${encodeURIComponent(wallet)}/feedback`,
+    );
+  }
+
   // x402 payments
   async getX402Quote(
     resource: "orderbook" | "trades" | "mcp_tool_call",
@@ -3447,7 +3521,7 @@ class ApiClient {
   // Swarm messaging (XMTP bridge)
   async getSwarmMessages(
     swarmId: string,
-    params?: { limit?: number; cursor?: string },
+    params?: { limit?: number; offset?: number },
   ): Promise<{
     data: Array<{
       id: string;
@@ -3455,7 +3529,6 @@ class ApiClient {
       content: string;
       sentAt: string;
     }>;
-    cursor?: string;
     has_more: boolean;
   }> {
     const query = this.buildQuery(params || {});

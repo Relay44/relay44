@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useMemo } from "react";
 import { PageShell } from "@/components/layout";
 import { LoadingScreen } from "@/components/ui";
+import { ReputationPanel } from "@/components/reputation/ReputationPanel";
 import { usePublicExternalAgents } from "@/hooks";
 import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
 import { cn } from "@/lib/utils";
@@ -243,7 +244,7 @@ export default function AgentDetailPage() {
       </div>
 
       {agent.market_id && (
-        <div className="border border-border bg-bg-secondary/40 p-5">
+        <div className="border border-border bg-bg-secondary/40 p-5 mb-6">
           <h2 className="text-sm font-medium text-text-primary mb-3">
             Linked Market
           </h2>
@@ -257,6 +258,10 @@ export default function AgentDetailPage() {
             </svg>
           </Link>
         </div>
+      )}
+
+      {agent.owner && agent.owner.startsWith("0x") && (
+        <ReputationPanel wallet={agent.owner} />
       )}
     </PageShell>
   );
