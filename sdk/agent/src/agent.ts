@@ -1,5 +1,10 @@
 import { Address, Hex, PublicClient, WalletClient, parseEventLogs } from 'viem';
 
+import {
+  MARKET_CORE_ABI,
+  MARKET_CREATED_EVENT_ABI,
+  ORDER_PLACED_EVENT_ABI,
+} from './abis';
 import { PositionTracker, RiskManager } from './risk';
 import { Strategy } from './strategy';
 import {
@@ -11,93 +16,6 @@ import {
   TradeResult,
   TradingAgentConfig,
 } from './types';
-
-const MARKET_CORE_ABI = [
-  {
-    type: 'function',
-    name: 'createMarket',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'questionHash', type: 'bytes32' },
-      { name: 'closeTime', type: 'uint64' },
-      { name: 'resolver', type: 'address' },
-    ],
-    outputs: [{ name: 'marketId', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'markets',
-    stateMutability: 'view',
-    inputs: [{ name: 'marketId', type: 'uint256' }],
-    outputs: [
-      { name: 'questionHash', type: 'bytes32' },
-      { name: 'closeTime', type: 'uint64' },
-      { name: 'resolveTime', type: 'uint64' },
-      { name: 'resolver', type: 'address' },
-      { name: 'resolved', type: 'bool' },
-      { name: 'outcome', type: 'bool' },
-    ],
-  },
-] as const;
-
-const ORDER_BOOK_ABI = [
-  {
-    type: 'function',
-    name: 'placeOrder',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'marketId', type: 'uint256' },
-      { name: 'isYes', type: 'bool' },
-      { name: 'priceBps', type: 'uint128' },
-      { name: 'size', type: 'uint128' },
-      { name: 'expiry', type: 'uint64' },
-    ],
-    outputs: [{ name: 'orderId', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'cancelOrder',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'orderId', type: 'uint256' }],
-    outputs: [],
-  },
-  {
-    type: 'function',
-    name: 'claim',
-    stateMutability: 'nonpayable',
-    inputs: [{ name: 'marketId', type: 'uint256' }],
-    outputs: [{ name: 'payout', type: 'uint256' }],
-  },
-] as const;
-
-const MARKET_CREATED_EVENT = [
-  {
-    type: 'event',
-    name: 'MarketCreated',
-    inputs: [
-      { indexed: true, name: 'marketId', type: 'uint256' },
-      { indexed: true, name: 'questionHash', type: 'bytes32' },
-      { indexed: false, name: 'closeTime', type: 'uint64' },
-      { indexed: false, name: 'resolver', type: 'address' },
-    ],
-  },
-] as const;
-
-const ORDER_PLACED_EVENT = [
-  {
-    type: 'event',
-    name: 'OrderPlaced',
-    inputs: [
-      { indexed: true, name: 'orderId', type: 'uint256' },
-      { indexed: true, name: 'maker', type: 'address' },
-      { indexed: true, name: 'marketId', type: 'uint256' },
-      { indexed: false, name: 'isYes', type: 'bool' },
-      { indexed: false, name: 'priceBps', type: 'uint128' },
-      { indexed: false, name: 'size', type: 'uint128' },
-      { indexed: false, name: 'expiry', type: 'uint64' },
-    ],
-  },
-] as const;
 
 export interface TradingAgentOptions {
   publicClient: PublicClient;
@@ -162,7 +80,7 @@ export class TradingAgent {
 
     const receipt = await this.options.publicClient.waitForTransactionReceipt({ hash: txHash });
     const [event] = parseEventLogs({
-      abi: MARKET_CREATED_EVENT,
+      abi: MARKET_CREATED_EVENT_ABI,
       eventName: 'MarketCreated',
       logs: receipt.logs,
     });
@@ -205,7 +123,7 @@ export class TradingAgent {
 
       const receipt = await this.options.publicClient.waitForTransactionReceipt({ hash: txHash });
       const [event] = parseEventLogs({
-        abi: ORDER_PLACED_EVENT,
+        abi: ORDER_PLACED_EVENT_ABI,
         eventName: 'OrderPlaced',
         logs: receipt.logs,
       });

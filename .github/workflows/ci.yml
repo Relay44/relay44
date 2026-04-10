@@ -4,6 +4,7 @@
 #   - rust
 #   - web
 #   - solidity
+#   - sdk
 
 name: CI
 
@@ -76,6 +77,35 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  sdk:
+    name: sdk
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: sdk/agent/node_modules
+          key: sdk-agent-${{ runner.os }}-${{ hashFiles('sdk/agent/package-lock.json') }}
+          restore-keys: sdk-agent-${{ runner.os }}-
+
+      - name: Install deps
+        run: npm ci
+
+      - name: ABI parity (SDK ↔ web)
+        run: npm run check:abi
 
       - name: Build
         run: npm run build
