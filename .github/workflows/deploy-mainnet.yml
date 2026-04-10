@@ -63,9 +63,9 @@ jobs:
         id: set-tag
         run: |
           if [[ -n "${{ github.event.inputs.image_tag }}" ]]; then
-            echo "image_tag=${{ github.event.inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "image_tag=sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+            echo "image_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Determine deployment targets
@@ -73,16 +73,16 @@ jobs:
         run: |
           case "${{ github.event.inputs.deploy_target }}" in
             "api-only")
-              echo "deploy_api=true" >> $GITHUB_OUTPUT
-              echo "deploy_contracts=false" >> $GITHUB_OUTPUT
+              echo "deploy_api=true" >> "$GITHUB_OUTPUT"
+              echo "deploy_contracts=false" >> "$GITHUB_OUTPUT"
               ;;
             "contracts-only")
-              echo "deploy_api=false" >> $GITHUB_OUTPUT
-              echo "deploy_contracts=true" >> $GITHUB_OUTPUT
+              echo "deploy_api=false" >> "$GITHUB_OUTPUT"
+              echo "deploy_contracts=true" >> "$GITHUB_OUTPUT"
               ;;
             "full")
-              echo "deploy_api=true" >> $GITHUB_OUTPUT
-              echo "deploy_contracts=true" >> $GITHUB_OUTPUT
+              echo "deploy_api=true" >> "$GITHUB_OUTPUT"
+              echo "deploy_contracts=true" >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -90,9 +90,9 @@ jobs:
         id: network
         run: |
           if [[ "${{ github.event.inputs.environment }}" == "production" ]]; then
-            echo "chain_network=mainnet" >> $GITHUB_OUTPUT
+            echo "chain_network=mainnet" >> "$GITHUB_OUTPUT"
           else
-            echo "chain_network=sepolia" >> $GITHUB_OUTPUT
+            echo "chain_network=sepolia" >> "$GITHUB_OUTPUT"
           fi
 
   pre-deploy-tests:
