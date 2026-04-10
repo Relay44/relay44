@@ -262,6 +262,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                             web::get().to(api::evm::get_base_reputation),
                         )
                         .route(
+                            "/reputation/{wallet}/feedback",
+                            web::get().to(api::evm::get_base_reputation_feedback),
+                        )
+                        .route(
                             "/validation/{request_hash}",
                             web::get().to(api::evm::get_base_validation),
                         )
@@ -429,6 +433,21 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                                     "/reputation/outcome",
                                     web::post()
                                         .to(api::evm::prepare_erc8004_submit_outcome_write),
+                                )
+                                .route(
+                                    "/reputation/feedback",
+                                    web::post()
+                                        .to(api::evm::prepare_erc8004_give_feedback_write),
+                                )
+                                .route(
+                                    "/reputation/feedback/revoke",
+                                    web::post()
+                                        .to(api::evm::prepare_erc8004_revoke_feedback_write),
+                                )
+                                .route(
+                                    "/reputation/feedback/response",
+                                    web::post()
+                                        .to(api::evm::prepare_erc8004_append_response_write),
                                 )
                                 .route(
                                     "/oracle/configure",
