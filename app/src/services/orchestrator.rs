@@ -193,6 +193,7 @@ pub fn spawn_background_services(app_state: Arc<AppState>) {
     spawn_event_bridge(&app_state);
 
     super::agent_scheduler::spawn_agent_scheduler(app_state.clone());
+    super::managed_agent_runner::spawn_managed_agent_runner(app_state.clone());
     super::distribution_scheduler::spawn_distribution_scheduler(app_state.clone());
     super::liquidity_mirror::spawn_liquidity_mirror(app_state.clone());
     super::hedge_engine::spawn_hedge_engine(app_state.clone());
