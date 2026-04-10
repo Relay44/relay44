@@ -7,6 +7,7 @@ export const metadata: Metadata = buildPageMetadata({
   description:
     'How $RELAY captures value from the Relay44 Protocol — fee routing, staking tiers, reward distribution, and the roadmap to fee-through-$RELAY.',
   path: '/tokenomics',
+  image: '/tokenomics/opengraph-image',
   keywords: [
     'tokenomics',
     'RELAY token',

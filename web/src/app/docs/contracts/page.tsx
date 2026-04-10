@@ -21,6 +21,7 @@ export const metadata = buildPageMetadata({
   description:
     'Live contract addresses, ABIs, and a viem integration example for the Relay44 Protocol on Base.',
   path: '/docs/contracts',
+  image: '/docs/contracts/opengraph-image',
   keywords: [
     'smart contracts',
     'base',
