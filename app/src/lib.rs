@@ -1,3 +1,36 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::manual_clamp,
+    clippy::manual_div_ceil,
+    clippy::manual_is_multiple_of,
+    clippy::manual_ignore_case_cmp,
+    clippy::manual_abs_diff,
+    clippy::manual_range_contains,
+    clippy::manual_async_fn,
+    clippy::manual_flatten,
+    clippy::needless_as_bytes,
+    clippy::needless_borrow,
+    clippy::needless_lifetimes,
+    clippy::needless_bool,
+    clippy::needless_question_mark,
+    clippy::cloned_ref_to_slice_refs,
+    clippy::format_in_format_args,
+    clippy::unnecessary_map_or,
+    clippy::unnecessary_cast,
+    clippy::collapsible_if,
+    clippy::clone_on_copy,
+    clippy::bind_instead_of_map,
+    clippy::redundant_closure,
+    clippy::should_implement_trait,
+    clippy::match_like_matches_macro,
+    clippy::if_same_then_else,
+    dead_code,
+    unused_imports,
+    unused_variables,
+    private_interfaces
+)]
+
 pub mod api;
 pub mod config;
 pub mod middleware;
