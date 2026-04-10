@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CircleHelp } from 'lucide-react';
 import { PageShell } from '@/components/layout';
 import { ReadOnlyNotice } from '@/components/runtime/ReadOnlyNotice';
-import { Button, Card, Input, Select, useToast } from '@/components/ui';
+import { Button, Card, Input, ReputationBadge, Select, useToast } from '@/components/ui';
 import {
   useAgents,
   useCreateAgent,
@@ -758,9 +758,14 @@ export default function AgentsPage() {
                         Owner {truncateAddress(agent.owner)} · Size {Number(agent.size) / 1_000_000} USDC · Cadence {agent.cadence}s
                       </p>
                       {agent.identityTier !== undefined || agent.reputationScoreBps !== undefined ? (
-                        <p className="text-xs text-text-muted">
-                          Identity {agent.identityTier ?? 'n/a'} · Reputation {agent.reputationScoreBps ?? 'n/a'} bps
-                        </p>
+                        <div className="flex items-center gap-2 text-xs text-text-muted">
+                          <span>Identity {agent.identityTier ?? 'n/a'}</span>
+                          <span>·</span>
+                          <ReputationBadge
+                            scoreBps={agent.reputationScoreBps}
+                            confidenceBps={agent.reputationConfidenceBps}
+                          />
+                        </div>
                       ) : null}
                       <p className="text-xs text-text-muted">Strategy: {agent.strategy || 'n/a'}</p>
                     </div>
