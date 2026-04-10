@@ -16,6 +16,7 @@ pub mod liquidity_mirror;
 pub mod logging;
 pub mod market_creator;
 pub mod metrics;
+pub mod orchestrator;
 pub mod orderbook;
 pub mod provider_rails;
 pub mod pyth;
