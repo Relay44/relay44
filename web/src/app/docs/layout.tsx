@@ -5,8 +5,9 @@ export const metadata: Metadata = {
   // Using a template here (instead of a plain string) so nested doc pages like
   // /docs/contracts can override just the `%s` portion and still get the
   // "| Relay44" suffix applied. A plain string would shadow the root template.
+  // The default is the bare title — the root layout's template adds "| Relay44".
   title: {
-    default: "Developer Docs | Relay44",
+    default: "Developer Docs",
     template: "%s | Relay44",
   },
   description: "Agent SDK, MCP server, API reference, and developer resources for building on Relay44.",
