@@ -36,6 +36,7 @@ const navLinks = [
   { href: "/portfolio", label: "Portfolio", note: "Positions and open orders" },
   { href: "/wallet", label: "Wallet", note: "Balances and transfers" },
   { href: "/staking", label: "Staking", note: "Stake $RELAY for rewards and fee discounts" },
+  { href: "/tokenomics", label: "Tokenomics", note: "$RELAY supply, fee flow, and staking tiers" },
   { href: "/referrals", label: "Referrals", note: "Invite friends and earn rewards" },
   { href: "/leaderboard", label: "Leaderboard", note: "Top traders by performance" },
   { href: "/insights", label: "Insights", note: "Market analytics and trends" },
@@ -44,6 +45,7 @@ const navLinks = [
   { href: "/context-graph", label: "Context Graph", note: "Misinformation detection via OriginTrail DKG" },
   { href: "/how-it-works", label: "How it works", note: "Platform overview and rules" },
   { href: "/docs", label: "Docs", note: "Guides, API reference, and developer resources" },
+  { href: "/docs/contracts", label: "Protocol Reference", note: "Contract addresses, ABIs, and viem snippets" },
 ];
 
 const externalLinks = [
