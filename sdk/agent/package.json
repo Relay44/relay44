@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "jest",
+    "test": "node ../../scripts/check-abi-parity.mjs && jest --passWithNoTests",
+    "check:abi": "node ../../scripts/check-abi-parity.mjs",
     "lint": "eslint src --ext .ts"
   },
   "keywords": ["base", "prediction-market", "trading-agent", "ai"],
