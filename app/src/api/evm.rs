@@ -61,6 +61,11 @@ const ERC8004_REPUTATION_SUBMIT_OUTCOME_SELECTOR: &str = "0x30a51426";
 const ERC8004_VALIDATION_STATUS_SELECTOR: &str = "0xff2febfc";
 const ERC8004_VALIDATION_REQUEST_SELECTOR: &str = "0xaaf400c4";
 const ERC8004_VALIDATION_RESPONSE_SELECTOR: &str = "0x30e5993a";
+const ERC8004_REPUTATION_GIVE_FEEDBACK_SELECTOR: &str = "0x8bf653ef";
+const ERC8004_REPUTATION_REVOKE_FEEDBACK_SELECTOR: &str = "0x4ab3ca99";
+const ERC8004_REPUTATION_APPEND_RESPONSE_SELECTOR: &str = "0xc2349ab2";
+const ERC8004_REPUTATION_GET_CLIENTS_SELECTOR: &str = "0x42dd519c";
+const ERC8004_REPUTATION_READ_ALL_FEEDBACK_SELECTOR: &str = "0x80b87594";
 const ORDER_FILLED_TOPIC: &str =
     "0x5aac01386940f75e601757cfe5dc1d4ab2bac84f98d30664486114a8abb38a45";
 const MAX_MARKETS_PAGE_SIZE: u64 = 200;
@@ -71,6 +76,10 @@ const MAX_AGENTS_PAGE_SIZE: u64 = 200;
 const ORDERBOOK_SCAN_WINDOW: u64 = 150;
 const TRADES_BLOCK_SCAN_WINDOW: u64 = 25_000;
 const MAX_MARKET_TEXT_LENGTH: usize = 2_048;
+const MAX_REPUTATION_URI_LENGTH: usize = 1_024;
+const MAX_REPUTATION_VALUE_DECIMALS: u8 = 18;
+const MAX_REPUTATION_FEEDBACK_CLIENT_PAGE: u64 = 200;
+const DEFAULT_REPUTATION_FEEDBACK_CLIENT_PAGE: u64 = 50;
 const ERC8004_MAX_TIER: u8 = 100;
 const MATCHER_STATE_REDIS_KEY: &str = "ops:matcher:state";
 const MATCHER_STATS_REDIS_KEY: &str = "ops:matcher:stats";
@@ -597,6 +606,39 @@ pub struct BaseValidationResponse {
     pub source: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseReputationFeedbackEntry {
+    pub client: String,
+    pub feedback_index: u64,
+    pub value: String,
+    pub value_decimals: u8,
+    pub tag1: String,
+    pub tag2: String,
+    pub revoked: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseReputationFeedbackResponse {
+    pub wallet: String,
+    pub agent_id: Option<String>,
+    pub clients: Vec<String>,
+    pub feedback: Vec<BaseReputationFeedbackEntry>,
+    pub source: String,
+    pub total_clients: u64,
+    pub client_offset: u64,
+    pub client_limit: u64,
+    pub has_more: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseReputationFeedbackQuery {
+    pub client_offset: Option<u64>,
+    pub client_limit: Option<u64>,
+}
+
 #[derive(Clone, Serialize)]
 pub struct BaseAgentSnapshot {
     pub id: String,
@@ -932,6 +974,39 @@ pub struct PrepareErc8004ValidationResponseWriteRequest {
     pub response_uri: String,
     pub response_hash: String,
     pub tag: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareErc8004GiveFeedbackWriteRequest {
+    pub from: Option<String>,
+    pub agent_id: String,
+    pub value: String,
+    pub value_decimals: u8,
+    pub tag1: String,
+    pub tag2: String,
+    pub endpoint: String,
+    pub feedback_uri: String,
+    pub feedback_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareErc8004RevokeFeedbackWriteRequest {
+    pub from: Option<String>,
+    pub agent_id: String,
+    pub feedback_index: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareErc8004AppendResponseWriteRequest {
+    pub from: Option<String>,
+    pub agent_id: String,
+    pub client_address: String,
+    pub feedback_index: u64,
+    pub response_uri: String,
+    pub response_hash: String,
 }
 
 #[derive(Deserialize)]
@@ -4908,6 +4983,83 @@ pub async fn get_base_reputation(
     }))
 }
 
+pub async fn get_base_reputation_feedback(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<String>,
+    query: web::Query<BaseReputationFeedbackQuery>,
+) -> Result<impl Responder, ApiError> {
+    let wallet = normalize_required_address(
+        path.as_str(),
+        "INVALID_WALLET",
+        "wallet must be a valid 0x EVM address",
+    )?;
+
+    let client_limit = query
+        .client_limit
+        .unwrap_or(DEFAULT_REPUTATION_FEEDBACK_CLIENT_PAGE)
+        .clamp(1, MAX_REPUTATION_FEEDBACK_CLIENT_PAGE);
+    let client_offset = query.client_offset.unwrap_or(0);
+
+    // Empty response when no identity or reputation registry configured.
+    let identity = fetch_erc8004_identity(&state, wallet.as_str()).await?;
+    let Some(identity) = identity else {
+        return Ok(HttpResponse::Ok().json(BaseReputationFeedbackResponse {
+            wallet,
+            agent_id: None,
+            clients: Vec::new(),
+            feedback: Vec::new(),
+            source: "erc8004_reputation_registry".to_string(),
+            total_clients: 0,
+            client_offset,
+            client_limit,
+            has_more: false,
+        }));
+    };
+
+    let registry = state.config.erc8004_reputation_registry_address.trim();
+    if registry.is_empty() || !is_valid_evm_address(registry) {
+        return Ok(HttpResponse::Ok().json(BaseReputationFeedbackResponse {
+            wallet,
+            agent_id: Some(identity.identity_id.to_string()),
+            clients: Vec::new(),
+            feedback: Vec::new(),
+            source: "erc8004_reputation_registry".to_string(),
+            total_clients: 0,
+            client_offset,
+            client_limit,
+            has_more: false,
+        }));
+    }
+
+    let all_clients =
+        fetch_erc8004_reputation_clients(&state, registry, identity.identity_id).await?;
+    let total_clients = all_clients.len() as u64;
+
+    let start = client_offset.min(total_clients) as usize;
+    let end = (client_offset + client_limit).min(total_clients) as usize;
+    let clients = all_clients[start..end].to_vec();
+    let has_more = (end as u64) < total_clients;
+
+    let feedback = if clients.is_empty() {
+        Vec::new()
+    } else {
+        fetch_erc8004_reputation_all_feedback(&state, registry, identity.identity_id, &clients)
+            .await?
+    };
+
+    Ok(HttpResponse::Ok().json(BaseReputationFeedbackResponse {
+        wallet,
+        agent_id: Some(identity.identity_id.to_string()),
+        clients,
+        feedback,
+        source: "erc8004_reputation_registry".to_string(),
+        total_clients,
+        client_offset,
+        client_limit,
+        has_more,
+    }))
+}
+
 pub async fn get_base_validation(
     state: web::Data<Arc<AppState>>,
     path: web::Path<String>,
@@ -6411,6 +6563,162 @@ pub async fn prepare_erc8004_validation_response_write(
     )))
 }
 
+pub async fn prepare_erc8004_give_feedback_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004GiveFeedbackWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let registry = configured_address(
+        &state.config.erc8004_reputation_registry_address,
+        "ERC8004_REPUTATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_REPUTATION_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let agent_id = parse_u128_decimal(body.agent_id.as_str(), "agentId")?;
+    let value = parse_i128_decimal(body.value.as_str(), "value")?;
+    if body.value_decimals > MAX_REPUTATION_VALUE_DECIMALS {
+        return Err(ApiError::bad_request(
+            "INVALID_VALUE_DECIMALS",
+            "valueDecimals must be <= 18",
+        ));
+    }
+    if body.feedback_uri.len() > MAX_REPUTATION_URI_LENGTH {
+        return Err(ApiError::bad_request(
+            "FEEDBACK_URI_TOO_LONG",
+            "feedbackUri must be <= 1024 bytes",
+        ));
+    }
+    let tag1 = normalize_required_bytes32(
+        body.tag1.as_str(),
+        "INVALID_TAG1",
+        "tag1 must be a valid 0x-prefixed bytes32 value",
+    )?;
+    let tag2 = normalize_required_bytes32(
+        body.tag2.as_str(),
+        "INVALID_TAG2",
+        "tag2 must be a valid 0x-prefixed bytes32 value",
+    )?;
+    let endpoint = normalize_required_bytes32(
+        body.endpoint.as_str(),
+        "INVALID_ENDPOINT",
+        "endpoint must be a valid 0x-prefixed bytes32 value",
+    )?;
+    let feedback_hash = normalize_required_bytes32(
+        body.feedback_hash.as_str(),
+        "INVALID_FEEDBACK_HASH",
+        "feedbackHash must be a valid 0x-prefixed bytes32 value",
+    )?;
+
+    // 8 head words × 32 bytes = 0x100 offset for the dynamic string tail.
+    let head_len_bytes = 32u128 * 8;
+    let feedback_uri_tail = encode_dynamic_string_tail(body.feedback_uri.as_str());
+    let data = format!(
+        "{}{}{}{}{}{}{}{}{}{}",
+        ERC8004_REPUTATION_GIVE_FEEDBACK_SELECTOR,
+        encode_u256_hex_u128(agent_id),
+        encode_int128_as_u256(value),
+        encode_u256_hex_u128(body.value_decimals as u128),
+        encode_bytes32_word(tag1.as_str())?,
+        encode_bytes32_word(tag2.as_str())?,
+        encode_bytes32_word(endpoint.as_str())?,
+        encode_u256_hex_u128(head_len_bytes),
+        encode_bytes32_word(feedback_hash.as_str())?,
+        feedback_uri_tail,
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "giveFeedback",
+    )))
+}
+
+pub async fn prepare_erc8004_revoke_feedback_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004RevokeFeedbackWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let registry = configured_address(
+        &state.config.erc8004_reputation_registry_address,
+        "ERC8004_REPUTATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_REPUTATION_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let agent_id = parse_u128_decimal(body.agent_id.as_str(), "agentId")?;
+
+    let data = format!(
+        "{}{}{}",
+        ERC8004_REPUTATION_REVOKE_FEEDBACK_SELECTOR,
+        encode_u256_hex_u128(agent_id),
+        encode_u256_hex(body.feedback_index),
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "revokeFeedback",
+    )))
+}
+
+pub async fn prepare_erc8004_append_response_write(
+    state: web::Data<Arc<AppState>>,
+    body: web::Json<PrepareErc8004AppendResponseWriteRequest>,
+) -> Result<impl Responder, ApiError> {
+    ensure_evm_writes_enabled(&state)?;
+
+    let registry = configured_address(
+        &state.config.erc8004_reputation_registry_address,
+        "ERC8004_REPUTATION_REGISTRY_NOT_CONFIGURED",
+        "ERC8004_REPUTATION_REGISTRY_ADDRESS must be configured for write operations",
+    )?;
+    let from = normalize_optional_address(body.from.as_ref())?;
+    let agent_id = parse_u128_decimal(body.agent_id.as_str(), "agentId")?;
+    let client_address = normalize_required_address(
+        body.client_address.as_str(),
+        "INVALID_CLIENT_ADDRESS",
+        "clientAddress must be a valid 0x EVM address",
+    )?;
+    let response_hash = normalize_required_bytes32(
+        body.response_hash.as_str(),
+        "INVALID_RESPONSE_HASH",
+        "responseHash must be a valid 0x-prefixed bytes32 value",
+    )?;
+    if body.response_uri.len() > MAX_REPUTATION_URI_LENGTH {
+        return Err(ApiError::bad_request(
+            "RESPONSE_URI_TOO_LONG",
+            "responseUri must be <= 1024 bytes",
+        ));
+    }
+
+    // 5 head words × 32 bytes = 0xa0 offset for the dynamic string tail.
+    let head_len_bytes = 32u128 * 5;
+    let response_uri_tail = encode_dynamic_string_tail(body.response_uri.as_str());
+    let data = format!(
+        "{}{}{}{}{}{}{}",
+        ERC8004_REPUTATION_APPEND_RESPONSE_SELECTOR,
+        encode_u256_hex_u128(agent_id),
+        encode_address_word(client_address.as_str())?,
+        encode_u256_hex(body.feedback_index),
+        encode_u256_hex_u128(head_len_bytes),
+        encode_bytes32_word(response_hash.as_str())?,
+        response_uri_tail,
+    );
+
+    Ok(HttpResponse::Ok().json(prepared_write_response(
+        state.config.base_chain_id,
+        from,
+        registry,
+        data,
+        "appendResponse",
+    )))
+}
+
 pub async fn relay_raw_transaction(
     state: web::Data<Arc<AppState>>,
     body: web::Json<RelayRawTransactionRequest>,
@@ -7573,6 +7881,32 @@ fn encode_u256_hex_u128(value: u128) -> String {
     format!("{:064x}", value)
 }
 
+fn encode_int128_as_u256(value: i128) -> String {
+    // Sign-extend an int128 into a 256-bit two's complement word.
+    if value >= 0 {
+        format!("{:064x}", value as u128)
+    } else {
+        let unsigned = value as u128;
+        format!("{}{:032x}", "f".repeat(32), unsigned)
+    }
+}
+
+fn parse_i128_decimal(value: &str, field: &str) -> Result<i128, ApiError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ApiError::bad_request(
+            "INVALID_NUMERIC_FIELD",
+            &format!("{} is required", field),
+        ));
+    }
+    trimmed.parse::<i128>().map_err(|_| {
+        ApiError::bad_request(
+            "INVALID_NUMERIC_FIELD",
+            &format!("{} must be a signed integer string", field),
+        )
+    })
+}
+
 fn encode_bool_word(value: bool) -> String {
     if value {
         format!("{:064x}", 1)
@@ -8186,6 +8520,154 @@ async fn fetch_erc8004_reputation(
         events,
         notional_microusdc,
     }))
+}
+
+async fn fetch_erc8004_reputation_clients(
+    state: &Arc<AppState>,
+    registry: &str,
+    agent_id: u128,
+) -> Result<Vec<String>, ApiError> {
+    let calldata = format!(
+        "{}{}",
+        ERC8004_REPUTATION_GET_CLIENTS_SELECTOR,
+        encode_u256_hex_u128(agent_id),
+    );
+    let payload = state
+        .evm_rpc
+        .eth_call(registry, calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
+    decode_address_array(payload.as_str())
+}
+
+async fn fetch_erc8004_reputation_all_feedback(
+    state: &Arc<AppState>,
+    registry: &str,
+    agent_id: u128,
+    clients: &[String],
+) -> Result<Vec<BaseReputationFeedbackEntry>, ApiError> {
+    // readAllFeedback(uint256 agentId, address[] clientAddresses, bytes32 tag1, bytes32 tag2, bool includeRevoked)
+    // Head layout: agentId, clientAddresses offset, tag1, tag2, includeRevoked = 5 words, head_bytes = 0xa0.
+    let head_len_bytes = 32u128 * 5;
+    let mut clients_tail = encode_u256_hex_u128(clients.len() as u128);
+    for client in clients {
+        clients_tail.push_str(encode_address_word(client.as_str())?.as_str());
+    }
+
+    let zero_bytes32 = "0".repeat(64);
+    let calldata = format!(
+        "{}{}{}{}{}{}{}",
+        ERC8004_REPUTATION_READ_ALL_FEEDBACK_SELECTOR,
+        encode_u256_hex_u128(agent_id),
+        encode_u256_hex_u128(head_len_bytes),
+        zero_bytes32, // tag1 = 0 (no filter)
+        zero_bytes32.clone(), // tag2 = 0 (no filter)
+        encode_bool_word(true), // includeRevoked = true
+        clients_tail,
+    );
+
+    let payload = state
+        .evm_rpc
+        .eth_call(registry, calldata.as_str())
+        .await
+        .map_err(map_evm_rpc_error)?;
+
+    decode_reputation_feedback_batch(payload.as_str())
+}
+
+fn decode_address_array(payload: &str) -> Result<Vec<String>, ApiError> {
+    // Dynamic address[] return: [offset (word 0), length, addr0, addr1, ...]
+    if !payload.starts_with("0x") {
+        return Err(ApiError::internal("invalid RPC payload"));
+    }
+    if payload.len() < 2 + 64 * 2 {
+        return Ok(Vec::new());
+    }
+    let length = parse_u64_hex(word_at(payload, 1)?)? as usize;
+    let mut out = Vec::with_capacity(length);
+    for i in 0..length {
+        let word = word_at(payload, 2 + i)?;
+        out.push(format!("0x{}", &word[24..]).to_ascii_lowercase());
+    }
+    Ok(out)
+}
+
+fn decode_int128_word(word: &str) -> Result<i128, ApiError> {
+    // Word is a 256-bit sign-extended int128. Take the lower 128 bits and
+    // interpret based on the top 128 bits of the original word.
+    if word.len() != 64 {
+        return Err(ApiError::internal("invalid int128 word length"));
+    }
+    let lower_hex = &word[32..];
+    let lower = u128::from_str_radix(lower_hex, 16)
+        .map_err(|_| ApiError::internal("invalid int128 encoding"))?;
+    Ok(lower as i128)
+}
+
+fn decode_reputation_feedback_batch(
+    payload: &str,
+) -> Result<Vec<BaseReputationFeedbackEntry>, ApiError> {
+    // Return tuple: (address[] clients, uint64[] indices, int128[] values,
+    //                uint8[] valueDecimals, bytes32[] tag1s, bytes32[] tag2s, bool[] revoked)
+    // Head: 7 offsets (one per array).
+    if !payload.starts_with("0x") {
+        return Err(ApiError::internal("invalid RPC payload"));
+    }
+    if payload.len() < 2 + 64 * 7 {
+        return Ok(Vec::new());
+    }
+
+    fn array_at(payload: &str, word_index: usize) -> Result<(usize, usize), ApiError> {
+        let offset = parse_u64_hex(word_at(payload, word_index)?)? as usize;
+        // offset is in bytes from start of the tuple data (word 0).
+        let start_word = offset / 32;
+        let length = parse_u64_hex(word_at(payload, start_word)?)? as usize;
+        Ok((start_word + 1, length))
+    }
+
+    let (clients_start, length) = array_at(payload, 0)?;
+    let (indices_start, indices_len) = array_at(payload, 1)?;
+    let (values_start, values_len) = array_at(payload, 2)?;
+    let (decimals_start, decimals_len) = array_at(payload, 3)?;
+    let (tag1_start, tag1_len) = array_at(payload, 4)?;
+    let (tag2_start, tag2_len) = array_at(payload, 5)?;
+    let (revoked_start, revoked_len) = array_at(payload, 6)?;
+
+    if indices_len != length
+        || values_len != length
+        || decimals_len != length
+        || tag1_len != length
+        || tag2_len != length
+        || revoked_len != length
+    {
+        return Err(ApiError::internal(
+            "reputation feedback batch array lengths mismatch",
+        ));
+    }
+
+    let mut out = Vec::with_capacity(length);
+    for i in 0..length {
+        let client_word = word_at(payload, clients_start + i)?;
+        let client = format!("0x{}", &client_word[24..]).to_ascii_lowercase();
+        let feedback_index = parse_u64_hex(word_at(payload, indices_start + i)?)?;
+        let value = decode_int128_word(word_at(payload, values_start + i)?)?;
+        let value_decimals = parse_u8_hex(word_at(payload, decimals_start + i)?)?;
+        let tag1 = format!("0x{}", word_at(payload, tag1_start + i)?);
+        let tag2 = format!("0x{}", word_at(payload, tag2_start + i)?);
+        let revoked = parse_bool_word(word_at(payload, revoked_start + i)?)?;
+
+        out.push(BaseReputationFeedbackEntry {
+            client,
+            feedback_index,
+            value: value.to_string(),
+            value_decimals,
+            tag1,
+            tag2,
+            revoked,
+        });
+    }
+    Ok(out)
 }
 
 async fn fetch_erc8004_validation(
@@ -8843,6 +9325,315 @@ mod tests {
         let encoded = encode_u256_hex(42);
         assert_eq!(encoded.len(), 64);
         assert!(encoded.ends_with("2a"));
+    }
+
+    #[test]
+    fn test_encode_int128_as_u256_positive() {
+        let encoded = encode_int128_as_u256(42);
+        assert_eq!(encoded.len(), 64);
+        assert_eq!(
+            encoded,
+            "000000000000000000000000000000000000000000000000000000000000002a"
+        );
+    }
+
+    #[test]
+    fn test_encode_int128_as_u256_zero() {
+        let encoded = encode_int128_as_u256(0);
+        assert_eq!(encoded.len(), 64);
+        assert!(encoded.chars().all(|c| c == '0'));
+    }
+
+    #[test]
+    fn test_encode_int128_as_u256_negative_one() {
+        let encoded = encode_int128_as_u256(-1);
+        assert_eq!(encoded.len(), 64);
+        assert!(encoded.chars().all(|c| c == 'f'));
+    }
+
+    #[test]
+    fn test_encode_int128_as_u256_negative_value() {
+        // -42 as int128 two's complement, sign-extended to 256 bits.
+        let encoded = encode_int128_as_u256(-42);
+        assert_eq!(encoded.len(), 64);
+        // Top 128 bits must be all 1s (sign extension).
+        assert!(encoded[..32].chars().all(|c| c == 'f'));
+        // Bottom 128 bits = two's complement of -42 as u128.
+        let expected_lower = format!("{:032x}", (-42i128) as u128);
+        assert_eq!(&encoded[32..], expected_lower);
+    }
+
+    #[test]
+    fn test_parse_i128_decimal() {
+        assert_eq!(parse_i128_decimal("42", "value").unwrap(), 42);
+        assert_eq!(parse_i128_decimal("-42", "value").unwrap(), -42);
+        assert_eq!(parse_i128_decimal("0", "value").unwrap(), 0);
+        assert!(parse_i128_decimal("", "value").is_err());
+        assert!(parse_i128_decimal("abc", "value").is_err());
+    }
+
+    #[test]
+    fn test_give_feedback_calldata_matches_cast() {
+        // Reference generated via:
+        //   cast calldata "giveFeedback(uint256,int128,uint8,bytes32,bytes32,bytes32,string,bytes32)" \
+        //     42 -5 2 0x00...01 0x00...02 0x00...03 "ipfs://foo" 0x00...aa
+        let expected = "0x8bf653ef\
+000000000000000000000000000000000000000000000000000000000000002a\
+fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb\
+0000000000000000000000000000000000000000000000000000000000000002\
+0000000000000000000000000000000000000000000000000000000000000001\
+0000000000000000000000000000000000000000000000000000000000000002\
+0000000000000000000000000000000000000000000000000000000000000003\
+0000000000000000000000000000000000000000000000000000000000000100\
+00000000000000000000000000000000000000000000000000000000000000aa\
+000000000000000000000000000000000000000000000000000000000000000a\
+697066733a2f2f666f6f00000000000000000000000000000000000000000000";
+
+        let head_len_bytes = 32u128 * 8;
+        let feedback_uri_tail = encode_dynamic_string_tail("ipfs://foo");
+        let tag1 = "0x0000000000000000000000000000000000000000000000000000000000000001";
+        let tag2 = "0x0000000000000000000000000000000000000000000000000000000000000002";
+        let endpoint = "0x0000000000000000000000000000000000000000000000000000000000000003";
+        let feedback_hash =
+            "0x00000000000000000000000000000000000000000000000000000000000000aa";
+
+        let data = format!(
+            "{}{}{}{}{}{}{}{}{}{}",
+            ERC8004_REPUTATION_GIVE_FEEDBACK_SELECTOR,
+            encode_u256_hex_u128(42u128),
+            encode_int128_as_u256(-5),
+            encode_u256_hex_u128(2u128),
+            encode_bytes32_word(tag1).unwrap(),
+            encode_bytes32_word(tag2).unwrap(),
+            encode_bytes32_word(endpoint).unwrap(),
+            encode_u256_hex_u128(head_len_bytes),
+            encode_bytes32_word(feedback_hash).unwrap(),
+            feedback_uri_tail,
+        );
+
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_revoke_feedback_calldata_matches_cast() {
+        // cast calldata "revokeFeedback(uint256,uint64)" 42 7
+        let expected = "0x4ab3ca99\
+000000000000000000000000000000000000000000000000000000000000002a\
+0000000000000000000000000000000000000000000000000000000000000007";
+
+        let data = format!(
+            "{}{}{}",
+            ERC8004_REPUTATION_REVOKE_FEEDBACK_SELECTOR,
+            encode_u256_hex_u128(42u128),
+            encode_u256_hex(7u64),
+        );
+
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_decode_int128_word_positive() {
+        let word = "000000000000000000000000000000000000000000000000000000000000002a";
+        assert_eq!(decode_int128_word(word).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_decode_int128_word_negative() {
+        let word = "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb";
+        assert_eq!(decode_int128_word(word).unwrap(), -5);
+    }
+
+    #[test]
+    fn test_decode_int128_roundtrip() {
+        for v in [-123_456_789i128, -1, 0, 1, 999_888_777_666_555i128] {
+            let encoded = encode_int128_as_u256(v);
+            let decoded = decode_int128_word(encoded.as_str()).unwrap();
+            assert_eq!(decoded, v);
+        }
+    }
+
+    #[test]
+    fn test_decode_address_array_empty() {
+        // offset word + length 0
+        let payload = format!(
+            "0x{}{}",
+            encode_u256_hex_u128(32),
+            encode_u256_hex_u128(0),
+        );
+        let clients = decode_address_array(&payload).unwrap();
+        assert!(clients.is_empty());
+    }
+
+    #[test]
+    fn test_decode_address_array_two_entries() {
+        // offset word (0x20) + length 2 + 2 addresses
+        let a = encode_address_word("0x71c7656ec7ab88b098defb751b7401b5f6d8976f").unwrap();
+        let b = encode_address_word("0x39e4939df3763e342db531a2a58867bc26a22b98").unwrap();
+        let payload = format!(
+            "0x{}{}{}{}",
+            encode_u256_hex_u128(32),
+            encode_u256_hex_u128(2),
+            a,
+            b,
+        );
+        let clients = decode_address_array(&payload).unwrap();
+        assert_eq!(clients.len(), 2);
+        assert_eq!(clients[0], "0x71c7656ec7ab88b098defb751b7401b5f6d8976f");
+        assert_eq!(clients[1], "0x39e4939df3763e342db531a2a58867bc26a22b98");
+    }
+
+    #[test]
+    fn test_append_response_calldata_matches_cast() {
+        // cast calldata "appendResponse(uint256,address,uint64,string,bytes32)" \
+        //   42 0x71c7656ec7ab88b098defb751b7401b5f6d8976f 7 "ipfs://resp" 0x00...bb
+        let expected = "0xc2349ab2\
+000000000000000000000000000000000000000000000000000000000000002a\
+00000000000000000000000071c7656ec7ab88b098defb751b7401b5f6d8976f\
+0000000000000000000000000000000000000000000000000000000000000007\
+00000000000000000000000000000000000000000000000000000000000000a0\
+00000000000000000000000000000000000000000000000000000000000000bb\
+000000000000000000000000000000000000000000000000000000000000000b\
+697066733a2f2f72657370000000000000000000000000000000000000000000";
+
+        let head_len_bytes = 32u128 * 5;
+        let response_uri_tail = encode_dynamic_string_tail("ipfs://resp");
+        let response_hash =
+            "0x00000000000000000000000000000000000000000000000000000000000000bb";
+
+        let data = format!(
+            "{}{}{}{}{}{}{}",
+            ERC8004_REPUTATION_APPEND_RESPONSE_SELECTOR,
+            encode_u256_hex_u128(42u128),
+            encode_address_word("0x71c7656ec7ab88b098defb751b7401b5f6d8976f").unwrap(),
+            encode_u256_hex(7u64),
+            encode_u256_hex_u128(head_len_bytes),
+            encode_bytes32_word(response_hash).unwrap(),
+            response_uri_tail,
+        );
+
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_give_feedback_int128_max_matches_cast() {
+        // cast calldata "giveFeedback(uint256,int128,uint8,bytes32,bytes32,bytes32,string,bytes32)" \
+        //   1 170141183460469231731687303715884105727 0 0x00..00 0x00..00 0x00..00 "" 0x00..00
+        let expected = "0x8bf653ef\
+0000000000000000000000000000000000000000000000000000000000000001\
+000000000000000000000000000000007fffffffffffffffffffffffffffffff\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000100\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000";
+
+        let zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let head_len_bytes = 32u128 * 8;
+        let data = format!(
+            "{}{}{}{}{}{}{}{}{}{}",
+            ERC8004_REPUTATION_GIVE_FEEDBACK_SELECTOR,
+            encode_u256_hex_u128(1u128),
+            encode_int128_as_u256(i128::MAX),
+            encode_u256_hex_u128(0u128),
+            encode_bytes32_word(zero).unwrap(),
+            encode_bytes32_word(zero).unwrap(),
+            encode_bytes32_word(zero).unwrap(),
+            encode_u256_hex_u128(head_len_bytes),
+            encode_bytes32_word(zero).unwrap(),
+            encode_dynamic_string_tail(""),
+        );
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_give_feedback_int128_min_matches_cast() {
+        // cast calldata "giveFeedback(...)" 1 -170141183460469231731687303715884105728 0 ... "" ...
+        let expected = "0x8bf653ef\
+0000000000000000000000000000000000000000000000000000000000000001\
+ffffffffffffffffffffffffffffffff80000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000100\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000";
+
+        let zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let head_len_bytes = 32u128 * 8;
+        let data = format!(
+            "{}{}{}{}{}{}{}{}{}{}",
+            ERC8004_REPUTATION_GIVE_FEEDBACK_SELECTOR,
+            encode_u256_hex_u128(1u128),
+            encode_int128_as_u256(i128::MIN),
+            encode_u256_hex_u128(0u128),
+            encode_bytes32_word(zero).unwrap(),
+            encode_bytes32_word(zero).unwrap(),
+            encode_bytes32_word(zero).unwrap(),
+            encode_u256_hex_u128(head_len_bytes),
+            encode_bytes32_word(zero).unwrap(),
+            encode_dynamic_string_tail(""),
+        );
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_give_feedback_utf8_uri_matches_cast() {
+        // cast calldata "giveFeedback(...)" 99 123 18 0x00..00 0x00..00 0x00..00 "こんにちは🎉" 0x00..00
+        let expected = "0x8bf653ef\
+0000000000000000000000000000000000000000000000000000000000000063\
+000000000000000000000000000000000000000000000000000000000000007b\
+0000000000000000000000000000000000000000000000000000000000000012\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000100\
+0000000000000000000000000000000000000000000000000000000000000000\
+0000000000000000000000000000000000000000000000000000000000000013\
+e38193e38293e381abe381a1e381aff09f8e8900000000000000000000000000";
+
+        let zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
+        let head_len_bytes = 32u128 * 8;
+        let data = format!(
+            "{}{}{}{}{}{}{}{}{}{}",
+            ERC8004_REPUTATION_GIVE_FEEDBACK_SELECTOR,
+            encode_u256_hex_u128(99u128),
+            encode_int128_as_u256(123),
+            encode_u256_hex_u128(18u128),
+            encode_bytes32_word(zero).unwrap(),
+            encode_bytes32_word(zero).unwrap(),
+            encode_bytes32_word(zero).unwrap(),
+            encode_u256_hex_u128(head_len_bytes),
+            encode_bytes32_word(zero).unwrap(),
+            encode_dynamic_string_tail("こんにちは🎉"),
+        );
+        assert_eq!(data, expected);
+    }
+
+    #[test]
+    fn test_reputation_feedback_pagination_bounds() {
+        // Synthetic slice math used inside get_base_reputation_feedback
+        let all: Vec<&str> = (0..7).map(|_| "x").collect();
+        let total = all.len() as u64;
+
+        // Offset=0, limit=3 → first page
+        let start = 0u64.min(total) as usize;
+        let end = (0u64 + 3).min(total) as usize;
+        assert_eq!(end - start, 3);
+        assert!((end as u64) < total);
+
+        // Offset=6, limit=3 → last (partial) page
+        let start = 6u64.min(total) as usize;
+        let end = (6u64 + 3).min(total) as usize;
+        assert_eq!(end - start, 1);
+        assert!(!((end as u64) < total));
+
+        // Offset beyond end → empty, no panic
+        let start = 20u64.min(total) as usize;
+        let end = (20u64 + 3).min(total) as usize;
+        assert_eq!(end - start, 0);
     }
 
     #[test]
