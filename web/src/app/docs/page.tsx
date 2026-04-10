@@ -238,6 +238,18 @@ export default function DocsPage() {
               >
                 Full API Reference
               </Link>
+              <Link
+                href="/docs/contracts"
+                className="inline-flex h-9 items-center border border-border px-4 font-mono text-xs text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              >
+                Protocol Reference
+              </Link>
+              <Link
+                href="/tokenomics"
+                className="inline-flex h-9 items-center border border-border px-4 font-mono text-xs text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              >
+                Tokenomics
+              </Link>
             </div>
           </div>
 

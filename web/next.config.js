@@ -91,6 +91,12 @@ const nextConfig = {
       fs: false,
       net: false,
       tls: false,
+      // Optional peer dependency of @wagmi/connectors' MetaMask connector.
+      // The connector wraps the import() in a try/catch and throws a runtime
+      // error only if a caller actually uses MetaMask without the SDK installed.
+      // Mapping it to `false` silences webpack's missing-module warning without
+      // breaking any consumer that does install it.
+      '@metamask/connect-evm': false,
     };
     return config;
   },
