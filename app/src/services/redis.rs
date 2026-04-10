@@ -1,10 +1,11 @@
 use anyhow::Result;
 use log::info;
+use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, Client};
 use serde::{de::DeserializeOwned, Serialize};
 
 pub struct RedisService {
-    client: Client,
+    manager: Option<ConnectionManager>,
 }
 
 impl RedisService {
@@ -12,23 +13,40 @@ impl RedisService {
         info!("Connecting to Redis...");
         let client = Client::open(redis_url)?;
 
-        // Test connection — non-fatal since Redis is a cache layer
-        match client.get_multiplexed_async_connection().await {
-            Ok(mut conn) => {
-                match redis::cmd("PING").query_async::<()>(&mut conn).await {
+        let config = redis::aio::ConnectionManagerConfig::new()
+            .set_connection_timeout(std::time::Duration::from_secs(5))
+            .set_response_timeout(std::time::Duration::from_secs(5))
+            .set_number_of_retries(3);
+
+        let manager = match ConnectionManager::new_with_config(client, config).await {
+            Ok(mgr) => {
+                // Test connection
+                let mut test_conn = mgr.clone();
+                match redis::cmd("PING").query_async::<()>(&mut test_conn).await {
                     Ok(()) => info!("Redis connected successfully"),
                     Err(e) => log::warn!("Redis PING failed (will retry on use): {}", e),
                 }
+                Some(mgr)
             }
-            Err(e) => log::warn!("Redis connection deferred (will retry on use): {}", e),
-        }
+            Err(e) => {
+                log::warn!("Redis unavailable (cache layer degraded): {}", e);
+                None
+            }
+        };
 
-        Ok(Self { client })
+        Ok(Self { manager })
+    }
+
+    /// Get a connection, returning an error if Redis is unavailable.
+    fn conn(&self) -> Result<ConnectionManager> {
+        self.manager
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Redis unavailable"))
     }
 
     /// Get a value from cache
     pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let value: Option<String> = conn.get(key).await?;
 
         match value {
@@ -44,7 +62,7 @@ impl RedisService {
         value: &T,
         ttl_seconds: Option<u64>,
     ) -> Result<()> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let serialized = serde_json::to_string(value)?;
 
         match ttl_seconds {
@@ -61,14 +79,14 @@ impl RedisService {
 
     /// Delete a key
     pub async fn delete(&self, key: &str) -> Result<()> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let _: () = conn.del(key).await?;
         Ok(())
     }
 
     /// Publish a message to a channel
     pub async fn publish(&self, channel: &str, message: &str) -> Result<()> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let _: () = conn.publish(channel, message).await?;
         Ok(())
     }
@@ -76,7 +94,7 @@ impl RedisService {
     /// Push an item into a list and trim to max length.
     /// Uses LPUSH so newest entries are returned first by LRANGE.
     pub async fn list_push_with_trim(&self, key: &str, value: &str, max_len: u64) -> Result<()> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let _: i64 = conn.lpush(key, value).await?;
         let trim_end = max_len.saturating_sub(1) as isize;
         let _: () = conn.ltrim(key, 0, trim_end).await?;
@@ -85,7 +103,7 @@ impl RedisService {
 
     /// Read a list range as raw strings.
     pub async fn list_range_raw(&self, key: &str, start: u64, end: u64) -> Result<Vec<String>> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let start_idx = start as isize;
         let end_idx = end as isize;
         let values: Vec<String> = conn.lrange(key, start_idx, end_idx).await?;
@@ -200,9 +218,7 @@ impl RedisService {
         let now = chrono::Utc::now().timestamp();
         let ttl = (expires_at - now).max(1) as u64;
 
-        // Store the revocation with TTL matching token expiration
-        // After token expires, we don't need to track it anymore
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let _: () = conn.set_ex(&key, "1", ttl).await?;
 
         info!("Token {} revoked, TTL: {}s", jti, ttl);
@@ -212,7 +228,7 @@ impl RedisService {
     /// Check if a token has been revoked
     pub async fn is_token_revoked(&self, jti: &str) -> Result<bool> {
         let key = format!("revoked_token:{}", jti);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let exists: bool = conn.exists(&key).await?;
         Ok(exists)
     }
@@ -221,11 +237,8 @@ impl RedisService {
     /// This uses a user-specific generation counter
     pub async fn revoke_all_user_tokens(&self, wallet_address: &str) -> Result<()> {
         let key = format!("user_token_gen:{}", wallet_address);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-
-        // Increment the generation counter
+        let mut conn = self.conn()?;
         let _: i64 = conn.incr(&key, 1i64).await?;
-
         info!("All tokens revoked for user {}", wallet_address);
         Ok(())
     }
@@ -233,7 +246,7 @@ impl RedisService {
     /// Get the current token generation for a user
     pub async fn get_user_token_generation(&self, wallet_address: &str) -> Result<i64> {
         let key = format!("user_token_gen:{}", wallet_address);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let gen: Option<i64> = conn.get(&key).await?;
         Ok(gen.unwrap_or(0))
     }
@@ -245,7 +258,7 @@ impl RedisService {
         generation: i64,
     ) -> Result<()> {
         let key = format!("user_token_gen:{}", wallet_address);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         // 30 days TTL for generation counter
         let _: () = conn.set_ex(&key, generation, 30 * 24 * 3600).await?;
         Ok(())
@@ -258,16 +271,11 @@ impl RedisService {
     /// Increment a counter with TTL, returns new count
     /// Used for simple rate limiting (e.g., WebSocket connections by IP)
     pub async fn increment_with_ttl(&self, key: &str, ttl_secs: u64) -> Result<i64> {
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-
-        // Increment counter
+        let mut conn = self.conn()?;
         let count: i64 = conn.incr(key, 1i64).await?;
-
-        // Set expiry if this is the first request in the window
         if count == 1 {
             let _: () = conn.expire(key, ttl_secs as i64).await?;
         }
-
         Ok(count)
     }
 
@@ -275,26 +283,19 @@ impl RedisService {
     /// Returns the current count and remaining TTL
     pub async fn increment_rate_limit(&self, key: &str, window_secs: u64) -> Result<(i64, i64)> {
         let rate_key = format!("rate_limit:{}", key);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-
-        // Increment counter
+        let mut conn = self.conn()?;
         let count: i64 = conn.incr(&rate_key, 1i64).await?;
-
-        // Set expiry if this is the first request in the window
         if count == 1 {
             let _: () = conn.expire(&rate_key, window_secs as i64).await?;
         }
-
-        // Get TTL
         let ttl: i64 = conn.ttl(&rate_key).await?;
-
         Ok((count, ttl))
     }
 
     /// Check rate limit without incrementing
     pub async fn get_rate_limit_count(&self, key: &str) -> Result<i64> {
         let rate_key = format!("rate_limit:{}", key);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let count: Option<i64> = conn.get(&rate_key).await?;
         Ok(count.unwrap_or(0))
     }
@@ -307,23 +308,18 @@ impl RedisService {
     /// Returns Ok(false) if nonce was already used, Ok(true) if newly recorded
     pub async fn check_and_record_nonce(&self, nonce: &str, ttl_secs: u64) -> Result<bool> {
         let key = format!("auth_nonce:{}", nonce);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-
-        // Use SETNX (SET if Not eXists) for atomic check-and-set
+        let mut conn = self.conn()?;
         let was_set: bool = conn.set_nx(&key, "1").await?;
-
         if was_set {
-            // Set expiration for automatic cleanup
             let _: () = conn.expire(&key, ttl_secs as i64).await?;
         }
-
         Ok(was_set)
     }
 
     /// Check if a nonce has been used without recording
     pub async fn is_nonce_used(&self, nonce: &str) -> Result<bool> {
         let key = format!("auth_nonce:{}", nonce);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let exists: bool = conn.exists(&key).await?;
         Ok(exists)
     }
@@ -336,7 +332,7 @@ impl RedisService {
     /// Returns None if key is new, Some(response) if duplicate request.
     pub async fn check_idempotency_key(&self, key: &str) -> Result<Option<String>> {
         let idem_key = format!("idempotency:{}", key);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let value: Option<String> = conn.get(&idem_key).await?;
         Ok(value)
     }
@@ -344,8 +340,7 @@ impl RedisService {
     /// Store idempotency key with response. TTL: 24 hours.
     pub async fn store_idempotency_key(&self, key: &str, response: &str) -> Result<()> {
         let idem_key = format!("idempotency:{}", key);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-        // 24 hour TTL
+        let mut conn = self.conn()?;
         let _: () = conn.set_ex(&idem_key, response, 86400).await?;
         Ok(())
     }
@@ -354,8 +349,7 @@ impl RedisService {
     /// Returns true if lock acquired, false if already processing.
     pub async fn acquire_idempotency_lock(&self, key: &str) -> Result<bool> {
         let lock_key = format!("idempotency_lock:{}", key);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
-        // Lock with 30 second TTL to handle crashes
+        let mut conn = self.conn()?;
         let acquired: bool = conn.set_nx(&lock_key, "1").await?;
         if acquired {
             let _: () = conn.expire(&lock_key, 30).await?;
@@ -366,7 +360,7 @@ impl RedisService {
     /// Release idempotency lock
     pub async fn release_idempotency_lock(&self, key: &str) -> Result<()> {
         let lock_key = format!("idempotency_lock:{}", key);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let _: () = conn.del(&lock_key).await?;
         Ok(())
     }
@@ -375,7 +369,7 @@ impl RedisService {
 
     pub async fn revoke_api_key(&self, key_hash: &str) -> Result<()> {
         let key = format!("apikey:revoked:{}", key_hash);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let _: () = conn.set_ex(&key, "1", 86400u64).await?;
         info!("API key revoked in Redis cache: {}", &key_hash[..16]);
         Ok(())
@@ -383,7 +377,7 @@ impl RedisService {
 
     pub async fn is_api_key_revoked(&self, key_hash: &str) -> Result<bool> {
         let key = format!("apikey:revoked:{}", key_hash);
-        let mut conn = self.client.get_multiplexed_async_connection().await?;
+        let mut conn = self.conn()?;
         let exists: bool = conn.exists(&key).await?;
         Ok(exists)
     }
