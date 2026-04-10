@@ -6,8 +6,10 @@ import { Agent } from '@xmtp/agent-sdk';
 const HOST = process.env.XMTP_BRIDGE_HOST || '127.0.0.1';
 const PORT = Number(process.env.PORT || process.env.XMTP_BRIDGE_PORT || 8090);
 
-const AGENT_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
-const SYNC_TIMEOUT_MS = 10_000; // 10 seconds
+const AGENT_MAX_AGE_MS = Number(
+  process.env.XMTP_AGENT_MAX_AGE_MS || 10 * 60 * 1000,
+); // default 10 minutes
+const SYNC_TIMEOUT_MS = Number(process.env.XMTP_SYNC_TIMEOUT_MS || 10_000); // default 10 seconds
 
 let agentPromise;
 let agentCreatedAt = 0;
