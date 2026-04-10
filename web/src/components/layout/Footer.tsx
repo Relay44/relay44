@@ -23,6 +23,8 @@ const platformLinks = [
 const resourceLinks = [
   { href: '/how-it-works', label: 'How it works' },
   { href: '/docs', label: 'Docs' },
+  { href: '/docs/contracts', label: 'Protocol Reference' },
+  { href: '/tokenomics', label: 'Tokenomics' },
 ];
 
 const externalLinks = [

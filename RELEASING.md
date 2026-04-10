@@ -26,7 +26,7 @@ cargo test --manifest-path app/Cargo.toml --release
 forge test --root evm
 ```
 
-## Tagging
+## Tagging and GitHub Release
 
 1. Merge release-ready changes to `main`.
 2. Update `CHANGELOG.md`.
