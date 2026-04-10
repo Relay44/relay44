@@ -80,6 +80,8 @@ export default function Image() {
           </div>
           <div
             style={{
+              display: "flex",
+              flexDirection: "column",
               fontSize: 42,
               fontWeight: 600,
               color: "#ffffff",
@@ -89,9 +91,8 @@ export default function Image() {
               maxWidth: 960,
             }}
           >
-            Fees capture value.
-            <br />
-            Stakers earn the flow.
+            <span>Fees capture value.</span>
+            <span>Stakers earn the flow.</span>
           </div>
         </div>
 
