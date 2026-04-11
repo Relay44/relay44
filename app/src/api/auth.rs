@@ -98,20 +98,20 @@ async fn validate_api_key_auth(
     let key_hash = api_key::hash_api_key(api_key_token);
 
     // Fast path: check Redis revocation cache
-    let revoked = state.redis.is_api_key_revoked(&key_hash).await.unwrap_or(false);
+    let revoked = state
+        .redis
+        .is_api_key_revoked(&key_hash)
+        .await
+        .unwrap_or(false);
     if revoked {
         return Err(ApiError::unauthorized("API key has been revoked"));
     }
 
     // Look up key in database
-    let row = state
-        .db
-        .get_api_key_by_hash(&key_hash)
-        .await
-        .map_err(|e| {
-            log::error!("API key lookup failed: {}", e);
-            ApiError::internal("Authentication validation failed")
-        })?;
+    let row = state.db.get_api_key_by_hash(&key_hash).await.map_err(|e| {
+        log::error!("API key lookup failed: {}", e);
+        ApiError::internal("Authentication validation failed")
+    })?;
 
     let (key_id, wallet_address, scope_str, is_active, expires_at) =
         row.ok_or_else(|| ApiError::unauthorized("Invalid API key"))?;
@@ -852,9 +852,8 @@ fn decode_hex_signature(signature: &str) -> Result<Vec<u8>, ApiError> {
 }
 
 const ERC6492_MAGIC_SUFFIX: [u8; 32] = [
-    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
-    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
-    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
+    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
+    0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92, 0x64, 0x92,
 ];
 
 fn is_erc6492_signature(signature: &[u8]) -> bool {
@@ -939,8 +938,8 @@ async fn verify_erc6492_signature(
         .as_str()
         .ok_or("missing result in RPC response")?;
 
-    let result_bytes =
-        hex::decode(result.strip_prefix("0x").unwrap_or(result)).map_err(|_| "invalid result hex")?;
+    let result_bytes = hex::decode(result.strip_prefix("0x").unwrap_or(result))
+        .map_err(|_| "invalid result hex")?;
 
     // isValidSig returns a bool — expect 32 bytes with the last byte == 1
     if result_bytes.len() < 32 || result_bytes[31] != 1 {

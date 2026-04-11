@@ -580,14 +580,17 @@ fn evaluate_mean_revert(state: &MarketState) -> TradeSignal {
     }
 
     // Boost strength when oracle reference price confirms the reversion direction
-    let oracle_boost = state.reference_price.map(|ref_price| {
-        let ref_deviation = state.mid_price - ref_price;
-        if (is_buy && ref_deviation > 0.0) || (!is_buy && ref_deviation < 0.0) {
-            1.0 + (ref_deviation.abs() / 0.05).clamp(0.0, 0.5)
-        } else {
-            1.0
-        }
-    }).unwrap_or(1.0);
+    let oracle_boost = state
+        .reference_price
+        .map(|ref_price| {
+            let ref_deviation = state.mid_price - ref_price;
+            if (is_buy && ref_deviation > 0.0) || (!is_buy && ref_deviation < 0.0) {
+                1.0 + (ref_deviation.abs() / 0.05).clamp(0.0, 0.5)
+            } else {
+                1.0
+            }
+        })
+        .unwrap_or(1.0);
 
     let strength = ((abs_deviation / 0.05).clamp(0.5, 2.0) * oracle_boost).min(2.0);
     TradeSignal {
@@ -1092,36 +1095,38 @@ fn evaluate_longshot_harvest(state: &MarketState, raw: &Value) -> TradeSignal {
     // If the agent is configured to buy NO, that also works
 
     // Size using Kelly Criterion with proper position sizing
-    let (sized_quantity, kelly_metadata) =
-        match crate::services::kelly::kelly_sized_quantity(
-            state.agent_quantity,
-            params.bankroll_usdc,
-            actual_win_rate,
-            implied_prob,
-            params.kelly_fraction,
-            params.max_position_pct,
-            params.is_correlated,
-            params.drawdown_from_peak_pct,
-        ) {
-            Some((qty, result)) => (qty, json!({
+    let (sized_quantity, kelly_metadata) = match crate::services::kelly::kelly_sized_quantity(
+        state.agent_quantity,
+        params.bankroll_usdc,
+        actual_win_rate,
+        implied_prob,
+        params.kelly_fraction,
+        params.max_position_pct,
+        params.is_correlated,
+        params.drawdown_from_peak_pct,
+    ) {
+        Some((qty, result)) => (
+            qty,
+            json!({
                 "side": format!("{:?}", result.side),
                 "fullKellyFrac": result.full_kelly_frac,
                 "adjustedFrac": result.adjusted_frac,
                 "positionSizeUsdc": result.position_size_usdc,
                 "contracts": result.contracts,
                 "edgeBps": result.edge_bps,
-            })),
-            None => {
-                // Fallback: simple edge-scaled sizing
-                let edge_factor = (mispricing / params.min_mispricing_pct).clamp(1.0, 3.0);
-                let base_frac = params.kelly_fraction * params.max_position_pct;
-                let size_frac = (base_frac * edge_factor).min(params.max_position_pct);
-                (
-                    state.agent_quantity * size_frac.clamp(0.1, 1.0),
-                    json!({ "fallback": true, "sizeFraction": size_frac }),
-                )
-            }
-        };
+            }),
+        ),
+        None => {
+            // Fallback: simple edge-scaled sizing
+            let edge_factor = (mispricing / params.min_mispricing_pct).clamp(1.0, 3.0);
+            let base_frac = params.kelly_fraction * params.max_position_pct;
+            let size_frac = (base_frac * edge_factor).min(params.max_position_pct);
+            (
+                state.agent_quantity * size_frac.clamp(0.1, 1.0),
+                json!({ "fallback": true, "sizeFraction": size_frac }),
+            )
+        }
+    };
 
     TradeSignal {
         execute: true,
@@ -1293,34 +1298,36 @@ fn evaluate_near_certainty(state: &MarketState, raw: &Value) -> TradeSignal {
     }
 
     // Size using Kelly Criterion
-    let (sized_quantity, kelly_metadata) =
-        match crate::services::kelly::kelly_sized_quantity(
-            state.agent_quantity,
-            params.bankroll_usdc,
-            calibrated,
-            price,
-            params.kelly_fraction,
-            params.max_position_pct.min(0.03), // cap for near-certainty tail risk
-            params.is_correlated,
-            params.drawdown_from_peak_pct,
-        ) {
-            Some((qty, result)) => (qty, json!({
+    let (sized_quantity, kelly_metadata) = match crate::services::kelly::kelly_sized_quantity(
+        state.agent_quantity,
+        params.bankroll_usdc,
+        calibrated,
+        price,
+        params.kelly_fraction,
+        params.max_position_pct.min(0.03), // cap for near-certainty tail risk
+        params.is_correlated,
+        params.drawdown_from_peak_pct,
+    ) {
+        Some((qty, result)) => (
+            qty,
+            json!({
                 "side": format!("{:?}", result.side),
                 "fullKellyFrac": result.full_kelly_frac,
                 "adjustedFrac": result.adjusted_frac,
                 "positionSizeUsdc": result.position_size_usdc,
                 "contracts": result.contracts,
                 "edgeBps": result.edge_bps,
-            })),
-            None => {
-                // Fallback: fixed small fraction
-                let size_frac = params.max_position_pct.min(0.03);
-                (
-                    state.agent_quantity * (size_frac / params.max_position_pct).clamp(0.1, 1.0),
-                    json!({ "fallback": true, "sizeFraction": size_frac }),
-                )
-            }
-        };
+            }),
+        ),
+        None => {
+            // Fallback: fixed small fraction
+            let size_frac = params.max_position_pct.min(0.03);
+            (
+                state.agent_quantity * (size_frac / params.max_position_pct).clamp(0.1, 1.0),
+                json!({ "fallback": true, "sizeFraction": size_frac }),
+            )
+        }
+    };
 
     TradeSignal {
         execute: true,
@@ -1727,11 +1734,7 @@ mod tests {
     #[test]
     fn near_certainty_skips_low_probability() {
         let state = base_state(); // yes_price = 0.6 = not near certainty
-        let signal = evaluate_strategy(
-            "near_certainty",
-            &state,
-            &json!({ "minPrice": 0.90 }),
-        );
+        let signal = evaluate_strategy("near_certainty", &state, &json!({ "minPrice": 0.90 }));
         assert!(!signal.execute);
     }
 

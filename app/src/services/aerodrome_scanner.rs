@@ -39,10 +39,7 @@ pub fn spawn_aerodrome_scanner(state: Arc<AppState>) {
         .unwrap_or(120)
         .max(60);
 
-    info!(
-        "Starting Aerodrome scanner (interval={}s)",
-        interval_secs
-    );
+    info!("Starting Aerodrome scanner (interval={}s)", interval_secs);
 
     tokio::spawn(async move {
         // Wait for app startup.
@@ -151,10 +148,7 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
         )
         .await
         {
-            warn!(
-                "Failed to persist aerodrome pool {}: {}",
-                pool_address, e
-            );
+            warn!("Failed to persist aerodrome pool {}: {}", pool_address, e);
             continue;
         }
         indexed += 1;
@@ -172,7 +166,10 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
         };
 
         if let Err(e) = upsert_venue_link(state, &slug, pool_address).await {
-            warn!("Failed to upsert venue link for pool {}: {}", pool_address, e);
+            warn!(
+                "Failed to upsert venue link for pool {}: {}",
+                pool_address, e
+            );
         } else {
             venue_links += 1;
         }
@@ -206,10 +203,7 @@ fn compute_spread_bps(
 /// 2. `high_liquidity` (score=liq+spread) — deep pool with good execution
 /// 3. `tight_spread` (score=spread) — moderate pool with narrow spread
 /// 4. `none` (score=0) — no notable opportunity
-fn score_opportunity(
-    pool: &aerodrome::AerodromePoolState,
-    spread_bps: i32,
-) -> (String, f64) {
+fn score_opportunity(pool: &aerodrome::AerodromePoolState, spread_bps: i32) -> (String, f64) {
     // Minimum liquidity threshold (1e15 raw units, roughly $1K+ depending on token)
     let min_liquidity: u128 = 1_000_000_000_000_000;
 
@@ -370,7 +364,21 @@ pub async fn list_scanned_pools(
     limit: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
     let rows = if let Some(opp_type) = opportunity_type {
-        sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>, Option<i32>, f64, i32, String, f64)>(
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<i32>,
+                f64,
+                i32,
+                String,
+                f64,
+            ),
+        >(
             r#"
             SELECT pool_address, token0, token1,
                    token0_symbol, token1_symbol, tick_spacing,
@@ -388,7 +396,21 @@ pub async fn list_scanned_pools(
         .await
         .map_err(|e| e.to_string())?
     } else {
-        sqlx::query_as::<_, (String, String, String, Option<String>, Option<String>, Option<i32>, f64, i32, String, f64)>(
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+                Option<i32>,
+                f64,
+                i32,
+                String,
+                f64,
+            ),
+        >(
             r#"
             SELECT pool_address, token0, token1,
                    token0_symbol, token1_symbol, tick_spacing,
@@ -408,22 +430,35 @@ pub async fn list_scanned_pools(
 
     Ok(rows
         .into_iter()
-        .map(|(pool_address, token0, token1, t0_sym, t1_sym, tick_spacing, price, spread_bps, opp_type, opp_score)| {
-            json!({
-                "poolAddress": pool_address,
-                "token0": token0,
-                "token1": token1,
-                "token0Symbol": t0_sym,
-                "token1Symbol": t1_sym,
-                "tickSpacing": tick_spacing,
-                "price": price,
-                "spreadBps": spread_bps,
-                "opportunityType": opp_type,
-                "opportunityScore": opp_score,
-                "provider": "aerodrome",
-                "marketId": format!("aerodrome:{}", pool_address)
-            })
-        })
+        .map(
+            |(
+                pool_address,
+                token0,
+                token1,
+                t0_sym,
+                t1_sym,
+                tick_spacing,
+                price,
+                spread_bps,
+                opp_type,
+                opp_score,
+            )| {
+                json!({
+                    "poolAddress": pool_address,
+                    "token0": token0,
+                    "token1": token1,
+                    "token0Symbol": t0_sym,
+                    "token1Symbol": t1_sym,
+                    "tickSpacing": tick_spacing,
+                    "price": price,
+                    "spreadBps": spread_bps,
+                    "opportunityType": opp_type,
+                    "opportunityScore": opp_score,
+                    "provider": "aerodrome",
+                    "marketId": format!("aerodrome:{}", pool_address)
+                })
+            },
+        )
         .collect())
 }
 
@@ -504,7 +539,11 @@ mod tests {
     fn score_capped_at_200() {
         let pool = sample_pool(); // Very high liquidity
         let (_, score) = score_opportunity(&pool, 5); // Tight spread too
-        assert!(score <= 200.0, "Score should be capped at 200, got {}", score);
+        assert!(
+            score <= 200.0,
+            "Score should be capped at 200, got {}",
+            score
+        );
     }
 
     #[test]

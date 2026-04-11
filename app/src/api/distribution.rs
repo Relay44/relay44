@@ -10,8 +10,8 @@ use crate::services::distribution::{CurvePoint, DistributionMarketState};
 use crate::services::websocket::{DistMarketUpdate, DistResolveUpdate, DistTradeUpdate};
 use crate::AppState;
 
-use super::rate_limit::{check_rate_limit, check_rate_limit_by_user, RateLimitTier};
 use super::notifications::{create_notification, NewNotification, NotificationType};
+use super::rate_limit::{check_rate_limit, check_rate_limit_by_user, RateLimitTier};
 
 // ---------------------------------------------------------------------------
 // Status mapping helpers
@@ -426,7 +426,12 @@ pub async fn create_dist_market(
     let user = extract_jwt_user(&req, &state)?;
 
     // Rate limit: 1 market creation per hour per user
-    check_rate_limit_by_user(&user.wallet_address, &state.redis, RateLimitTier::MarketCreate).await?;
+    check_rate_limit_by_user(
+        &user.wallet_address,
+        &state.redis,
+        RateLimitTier::MarketCreate,
+    )
+    .await?;
 
     // --- Market ID ---
     if body.market_id.is_empty() || body.market_id.len() > 64 {
@@ -435,7 +440,11 @@ pub async fn create_dist_market(
             "Market ID must be 1-64 characters",
         ));
     }
-    if !body.market_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !body
+        .market_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(ApiError::bad_request(
             "INVALID_MARKET_ID",
             "Market ID must contain only alphanumeric characters, hyphens, and underscores",
@@ -523,7 +532,10 @@ pub async fn create_dist_market(
     // --- Fee ---
     let fee_bps = body.fee_bps.unwrap_or(100);
     if fee_bps < 0 || fee_bps > 1000 {
-        return Err(ApiError::bad_request("INVALID_FEE", "Fee must be 0-1000 bps"));
+        return Err(ApiError::bad_request(
+            "INVALID_FEE",
+            "Fee must be 0-1000 bps",
+        ));
     }
 
     // --- Collateral token (must be valid hex address) ---
@@ -675,11 +687,12 @@ pub async fn get_quote(
         ));
     }
 
-    let current_mu = market.market_mu.unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
-    let current_sigma =
-        market
-            .market_sigma
-            .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
+    let current_mu = market
+        .market_mu
+        .unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
+    let current_sigma = market
+        .market_sigma
+        .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
 
     if query.mu < market.outcome_min || query.mu > market.outcome_max {
         return Err(ApiError::bad_request(
@@ -798,14 +811,20 @@ pub async fn open_position(
     if body.sigma < min_sigma {
         return Err(ApiError::bad_request(
             "SIGMA_TOO_SMALL",
-            &format!("sigma must be at least {:.6} (0.1% of outcome range)", min_sigma),
+            &format!(
+                "sigma must be at least {:.6} (0.1% of outcome range)",
+                min_sigma
+            ),
         ));
     }
     let max_sigma = (market.outcome_max - market.outcome_min) / 2.0;
     if body.sigma > max_sigma {
         return Err(ApiError::bad_request(
             "SIGMA_TOO_LARGE",
-            &format!("sigma must be at most {:.6} (half the outcome range)", max_sigma),
+            &format!(
+                "sigma must be at most {:.6} (half the outcome range)",
+                max_sigma
+            ),
         ));
     }
 
@@ -822,11 +841,12 @@ pub async fn open_position(
         ));
     }
 
-    let current_mu = market.market_mu.unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
-    let current_sigma =
-        market
-            .market_sigma
-            .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
+    let current_mu = market
+        .market_mu
+        .unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
+    let current_sigma = market
+        .market_sigma
+        .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
 
     let ms = DistributionMarketState {
         mu: current_mu,
@@ -949,7 +969,11 @@ pub async fn open_position(
             market_mu: trade_result.new_mu,
             market_sigma: trade_result.new_sigma,
             stiffness: ms.stiffness(),
-            peak_density: DistributionMarketState::pdf(trade_result.new_mu, trade_result.new_mu, trade_result.new_sigma),
+            peak_density: DistributionMarketState::pdf(
+                trade_result.new_mu,
+                trade_result.new_mu,
+                trade_result.new_sigma,
+            ),
             total_collateral: market.total_collateral + collateral,
             timestamp: ts,
         })
@@ -1029,13 +1053,12 @@ pub async fn close_position(
     }
 
     // Check that the market is still active and trading is open
-    let market_row: Option<(i16, Option<chrono::DateTime<Utc>>)> = sqlx::query_as(
-        "SELECT status, trading_end FROM distribution_markets WHERE id = $1",
-    )
-    .bind(&position.market_id)
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    let market_row: Option<(i16, Option<chrono::DateTime<Utc>>)> =
+        sqlx::query_as("SELECT status, trading_end FROM distribution_markets WHERE id = $1")
+            .bind(&position.market_id)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     if let Some((ms, trading_end)) = market_row {
         if ms != 0 {
@@ -1193,11 +1216,12 @@ pub async fn resolve_market(
 
     let now = Utc::now();
 
-    let current_mu = market.market_mu.unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
-    let current_sigma =
-        market
-            .market_sigma
-            .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
+    let current_mu = market
+        .market_mu
+        .unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
+    let current_sigma = market
+        .market_sigma
+        .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
 
     let ms = DistributionMarketState {
         mu: current_mu,
@@ -1474,11 +1498,12 @@ pub async fn get_curve(
 
     let market = row.ok_or_else(|| ApiError::not_found("Distribution market"))?;
 
-    let current_mu = market.market_mu.unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
-    let current_sigma =
-        market
-            .market_sigma
-            .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
+    let current_mu = market
+        .market_mu
+        .unwrap_or((market.outcome_min + market.outcome_max) / 2.0);
+    let current_sigma = market
+        .market_sigma
+        .unwrap_or((market.outcome_max - market.outcome_min) / 4.0);
 
     let ms = DistributionMarketState {
         mu: current_mu,
@@ -1488,8 +1513,7 @@ pub async fn get_curve(
         outcome_max: market.outcome_max,
     };
 
-    let points: Vec<CurvePoint> =
-        ms.generate_curve(200, query.proposal_mu, query.proposal_sigma);
+    let points: Vec<CurvePoint> = ms.generate_curve(200, query.proposal_mu, query.proposal_sigma);
 
     Ok(HttpResponse::Ok().json(points))
 }
@@ -1519,8 +1543,7 @@ pub async fn get_curve_history(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc));
 
-    let rows: Vec<(f64, f64, i64, i32, chrono::DateTime<Utc>)> = if let Some(since) = since_filter
-    {
+    let rows: Vec<(f64, f64, i64, i32, chrono::DateTime<Utc>)> = if let Some(since) = since_filter {
         sqlx::query_as(
             "SELECT market_mu, market_sigma, total_collateral, position_count, captured_at \
              FROM distribution_curve_snapshots \
@@ -1589,14 +1612,16 @@ pub async fn get_market_activity(
 
     let entries: Vec<DistActivityEntry> = rows
         .into_iter()
-        .map(|(mu, sigma, size, collateral, status, created_at)| DistActivityEntry {
-            mu,
-            sigma,
-            size,
-            collateral,
-            status: int_to_position_status(status),
-            created_at,
-        })
+        .map(
+            |(mu, sigma, size, collateral, status, created_at)| DistActivityEntry {
+                mu,
+                sigma,
+                size,
+                collateral,
+                status: int_to_position_status(status),
+                created_at,
+            },
+        )
         .collect();
 
     Ok(HttpResponse::Ok().json(entries))

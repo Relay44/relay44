@@ -101,14 +101,18 @@ pub async fn get_public_profile(
             UNION ALL
             SELECT (CAST(price AS DOUBLE PRECISION) >= 0.5) AS is_win
             FROM trades WHERE LOWER(seller) = $1
-         ) sub"
+         ) sub",
     )
     .bind(&wallet)
     .fetch_one(pool)
     .await?;
     let win_total: f64 = win_row.get("total");
     let wins: f64 = win_row.get("wins");
-    let win_rate = if win_total > 0.0 { wins / win_total } else { 0.0 };
+    let win_rate = if win_total > 0.0 {
+        wins / win_total
+    } else {
+        0.0
+    };
 
     let joined_at = first_trade
         .map(|t| t.to_rfc3339())
@@ -164,7 +168,7 @@ pub async fn get_profile_activity(
          LEFT JOIN markets m ON m.id = t.market_id
          WHERE LOWER(t.buyer) = $1 OR LOWER(t.seller) = $1
          ORDER BY t.created_at DESC
-         LIMIT $2 OFFSET $3"
+         LIMIT $2 OFFSET $3",
     )
     .bind(&wallet)
     .bind(limit)
@@ -174,40 +178,45 @@ pub async fn get_profile_activity(
 
     let count_row = sqlx::query(
         "SELECT COUNT(*)::BIGINT AS total FROM trades
-         WHERE LOWER(buyer) = $1 OR LOWER(seller) = $1"
+         WHERE LOWER(buyer) = $1 OR LOWER(seller) = $1",
     )
     .bind(&wallet)
     .fetch_one(pool)
     .await?;
     let total: i64 = count_row.get("total");
 
-    let data: Vec<serde_json::Value> = rows.iter().map(|row| {
-        let buyer: String = row.get("buyer");
-        let is_buyer = buyer.to_lowercase() == wallet;
-        let price: f64 = row.try_get::<String, _>("price")
-            .ok()
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(0.5);
-        let quantity: f64 = row.try_get::<String, _>("quantity")
-            .ok()
-            .and_then(|q| q.parse().ok())
-            .unwrap_or(0.0);
-        let amount = price * quantity;
-
-        json!({
-            "id": row.get::<String, _>("id"),
-            "type": if is_buyer { "trade" } else { "trade" },
-            "marketId": row.get::<String, _>("market_id"),
-            "marketQuestion": row.try_get::<String, _>("market_question").unwrap_or_default(),
-            "outcome": row
-                .try_get::<i16, _>("outcome")
+    let data: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let buyer: String = row.get("buyer");
+            let is_buyer = buyer.to_lowercase() == wallet;
+            let price: f64 = row
+                .try_get::<String, _>("price")
                 .ok()
-                .and_then(profile_outcome_label),
-            "amount": amount,
-            "pnl": if is_buyer { -amount } else { amount },
-            "createdAt": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(0.5);
+            let quantity: f64 = row
+                .try_get::<String, _>("quantity")
+                .ok()
+                .and_then(|q| q.parse().ok())
+                .unwrap_or(0.0);
+            let amount = price * quantity;
+
+            json!({
+                "id": row.get::<String, _>("id"),
+                "type": if is_buyer { "trade" } else { "trade" },
+                "marketId": row.get::<String, _>("market_id"),
+                "marketQuestion": row.try_get::<String, _>("market_question").unwrap_or_default(),
+                "outcome": row
+                    .try_get::<i16, _>("outcome")
+                    .ok()
+                    .and_then(profile_outcome_label),
+                "amount": amount,
+                "pnl": if is_buyer { -amount } else { amount },
+                "createdAt": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+            })
         })
-    }).collect();
+        .collect();
 
     let has_more = (offset + limit) < total;
 
@@ -231,29 +240,36 @@ pub async fn get_profile_positions(
     let wallet = path.into_inner().to_lowercase();
     validate_wallet(&wallet)?;
 
-    let positions = state.db.get_positions(&wallet).await.map_err(ApiError::from)?;
+    let positions = state
+        .db
+        .get_positions(&wallet)
+        .await
+        .map_err(ApiError::from)?;
 
-    let data: Vec<serde_json::Value> = positions.iter().map(|p| {
-        json!({
-            "marketId": p.market_id,
-            "marketQuestion": p.market_question,
-            "owner": p.owner,
-            "yesBalance": p.yes_balance,
-            "noBalance": p.no_balance,
-            "claimable": 0,
-            "avgYesCost": p.avg_yes_cost,
-            "avgNoCost": p.avg_no_cost,
-            "currentYesPrice": p.current_yes_price,
-            "currentNoPrice": p.current_no_price,
-            "unrealizedPnl": p.unrealized_pnl,
-            "realizedPnl": p.realized_pnl,
-            "totalDeposited": p.total_deposited,
-            "totalWithdrawn": p.total_withdrawn,
-            "openOrderCount": p.open_order_count,
-            "totalTrades": p.total_trades,
-            "createdAt": p.created_at.to_rfc3339(),
+    let data: Vec<serde_json::Value> = positions
+        .iter()
+        .map(|p| {
+            json!({
+                "marketId": p.market_id,
+                "marketQuestion": p.market_question,
+                "owner": p.owner,
+                "yesBalance": p.yes_balance,
+                "noBalance": p.no_balance,
+                "claimable": 0,
+                "avgYesCost": p.avg_yes_cost,
+                "avgNoCost": p.avg_no_cost,
+                "currentYesPrice": p.current_yes_price,
+                "currentNoPrice": p.current_no_price,
+                "unrealizedPnl": p.unrealized_pnl,
+                "realizedPnl": p.realized_pnl,
+                "totalDeposited": p.total_deposited,
+                "totalWithdrawn": p.total_withdrawn,
+                "openOrderCount": p.open_order_count,
+                "totalTrades": p.total_trades,
+                "createdAt": p.created_at.to_rfc3339(),
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(HttpResponse::Ok().json(json!({
         "data": data,

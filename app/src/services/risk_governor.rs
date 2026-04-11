@@ -26,7 +26,18 @@ pub struct RiskCheckResult {
 }
 
 pub async fn get_or_init(pool: &PgPool, owner: &str) -> anyhow::Result<RiskState> {
-    let row = sqlx::query_as::<_, (f64, f64, chrono::DateTime<Utc>, f64, f64, bool, Option<String>)>(
+    let row = sqlx::query_as::<
+        _,
+        (
+            f64,
+            f64,
+            chrono::DateTime<Utc>,
+            f64,
+            f64,
+            bool,
+            Option<String>,
+        ),
+    >(
         "INSERT INTO risk_governor_state (owner) VALUES ($1)
          ON CONFLICT (owner) DO NOTHING;
          SELECT bankroll_usdc, daily_pnl_usdc, daily_reset_at, weekly_high_usdc,

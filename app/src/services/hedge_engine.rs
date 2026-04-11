@@ -41,11 +41,11 @@ pub struct PendingHedge {
     pub internal_market_id: i64,
     pub external_market_id: String,
     pub external_provider: String,
-    pub direction: String,   // "buy" or "sell" — what the internal user did
-    pub side: String,        // "yes" or "no"
-    pub outcome: String,     // "yes" or "no"
-    pub price: f64,          // 0.0 to 1.0
-    pub quantity: f64,       // USDC amount
+    pub direction: String, // "buy" or "sell" — what the internal user did
+    pub side: String,      // "yes" or "no"
+    pub outcome: String,   // "yes" or "no"
+    pub price: f64,        // 0.0 to 1.0
+    pub quantity: f64,     // USDC amount
     pub fill_tx_hash: String,
     pub detected_at: String,
 }
@@ -214,19 +214,10 @@ async fn detect_new_fills(state: &AppState) -> Result<(), String> {
         let price_bps_hex = &data_hex[192..256];
         let quantity_hex = &data_hex[256..320];
 
-        let outcome_yes = u64::from_str_radix(outcome_yes_word.trim_start_matches('0'), 16)
-            .unwrap_or(0)
-            != 0;
-        let price_bps = u64::from_str_radix(
-            price_bps_hex.trim_start_matches('0'),
-            16,
-        )
-        .unwrap_or(0);
-        let quantity = u64::from_str_radix(
-            quantity_hex.trim_start_matches('0'),
-            16,
-        )
-        .unwrap_or(0);
+        let outcome_yes =
+            u64::from_str_radix(outcome_yes_word.trim_start_matches('0'), 16).unwrap_or(0) != 0;
+        let price_bps = u64::from_str_radix(price_bps_hex.trim_start_matches('0'), 16).unwrap_or(0);
+        let quantity = u64::from_str_radix(quantity_hex.trim_start_matches('0'), 16).unwrap_or(0);
 
         let outcome = if outcome_yes { "yes" } else { "no" };
         let price = price_bps as f64 / 10_000.0;
@@ -252,10 +243,7 @@ async fn detect_new_fills(state: &AppState) -> Result<(), String> {
     }
 
     // Update watermark.
-    let _ = state
-        .redis
-        .set(watermark_key, &to_block, Some(86400))
-        .await;
+    let _ = state.redis.set(watermark_key, &to_block, Some(86400)).await;
 
     Ok(())
 }
@@ -285,7 +273,10 @@ async fn fetch_block_number(state: &AppState) -> Result<u64, String> {
         .send()
         .await
         .map_err(|e| format!("RPC blockNumber: {}", e))?;
-    let result: Value = resp.json().await.map_err(|e| format!("Parse block: {}", e))?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse block: {}", e))?;
     let hex = result
         .get("result")
         .and_then(|v| v.as_str())
@@ -318,7 +309,10 @@ async fn fetch_order_filled_logs(
         .send()
         .await
         .map_err(|e| format!("RPC getLogs: {}", e))?;
-    let result: Value = resp.json().await.map_err(|e| format!("Parse logs: {}", e))?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse logs: {}", e))?;
     Ok(result
         .get("result")
         .and_then(|v| v.as_array())
@@ -495,10 +489,7 @@ async fn execute_limitless_hedge(
     encode_data.extend_from_slice(&u256_from_u64(0)); // signatureType = EOA
 
     let type_hash_arr: [u8; 32] = order_type_hash.into();
-    let struct_hash: [u8; 32] = evm_signer::eip712_struct_hash(
-        &type_hash_arr,
-        &encode_data,
-    );
+    let struct_hash: [u8; 32] = evm_signer::eip712_struct_hash(&type_hash_arr, &encode_data);
 
     let domain_separator = evm_signer::eip712_domain_separator(
         LIMITLESS_SIGNING_NAME,
@@ -742,7 +733,10 @@ async fn fetch_usdc_balance(state: &AppState, wallet_address: &str) -> Result<f6
         .await
         .map_err(|e| format!("RPC balanceOf: {}", e))?;
 
-    let result: Value = resp.json().await.map_err(|e| format!("Parse balance: {}", e))?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse balance: {}", e))?;
     let hex = result
         .get("result")
         .and_then(|v| v.as_str())
@@ -810,7 +804,12 @@ fn extract_limitless_token_id_from_market(market: &Value, outcome: &str) -> Resu
         .get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| format!("Cannot find token ID for outcome '{}' in market data", outcome))
+        .ok_or_else(|| {
+            format!(
+                "Cannot find token ID for outcome '{}' in market data",
+                outcome
+            )
+        })
 }
 
 fn generate_salt() -> u128 {
@@ -861,7 +860,10 @@ async fn fetch_nonce(state: &AppState, address: &str) -> Result<u64, String> {
         .await
         .map_err(|e| format!("RPC nonce: {}", e))?;
 
-    let result: Value = resp.json().await.map_err(|e| format!("Parse nonce: {}", e))?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse nonce: {}", e))?;
     let hex = result
         .get("result")
         .and_then(|v| v.as_str())
@@ -891,8 +893,7 @@ async fn fetch_gas_prices(state: &AppState) -> Result<(u128, u128), String> {
         .get("result")
         .and_then(|v| v.as_str())
         .ok_or("No gas price result")?;
-    let base_fee =
-        u128::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(1_000_000_000);
+    let base_fee = u128::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(1_000_000_000);
 
     let priority_fee = 100_000_000u128; // 0.1 gwei default
     Ok((base_fee, priority_fee))
@@ -914,7 +915,10 @@ async fn broadcast_raw_tx(state: &AppState, signed_tx: &str) -> Result<String, S
         .await
         .map_err(|e| format!("Broadcast tx: {}", e))?;
 
-    let result: Value = resp.json().await.map_err(|e| format!("Parse broadcast: {}", e))?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse broadcast: {}", e))?;
 
     if let Some(error) = result.get("error") {
         return Err(format!("Broadcast error: {}", error));
@@ -947,7 +951,10 @@ async fn mark_hedge_complete(
     .execute(state.db.pool())
     .await
     {
-        warn!("CRITICAL: failed to mark hedge {} complete: {}", hedge_id, e);
+        warn!(
+            "CRITICAL: failed to mark hedge {} complete: {}",
+            hedge_id, e
+        );
     }
 
     // Update the mirror link's totals.
@@ -972,7 +979,10 @@ async fn mark_hedge_failed(state: &AppState, hedge_id: i32, error: &str) {
     .execute(state.db.pool())
     .await
     {
-        warn!("CRITICAL: failed to mark hedge {} as failed: {}", hedge_id, e);
+        warn!(
+            "CRITICAL: failed to mark hedge {} as failed: {}",
+            hedge_id, e
+        );
     }
 
     if let Err(e) = sqlx::query(
@@ -984,6 +994,9 @@ async fn mark_hedge_failed(state: &AppState, hedge_id: i32, error: &str) {
     .execute(state.db.pool())
     .await
     {
-        warn!("Failed to update mirror link error for hedge {}: {}", hedge_id, e);
+        warn!(
+            "Failed to update mirror link error for hedge {}: {}",
+            hedge_id, e
+        );
     }
 }

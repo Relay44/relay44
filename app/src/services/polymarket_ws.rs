@@ -60,9 +60,7 @@ impl OrderbookState {
 
     pub fn spread_bps(&self) -> Option<f64> {
         match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) if bid > 0.0 => {
-                Some(((ask - bid) / bid) * 10_000.0)
-            }
+            (Some(bid), Some(ask)) if bid > 0.0 => Some(((ask - bid) / bid) * 10_000.0),
             _ => None,
         }
     }
@@ -182,10 +180,7 @@ pub fn spawn_orderbook_feed(
         return;
     }
 
-    info!(
-        "Starting Polymarket WS feed for {} tokens",
-        token_ids.len()
-    );
+    info!("Starting Polymarket WS feed for {} tokens", token_ids.len());
 
     tokio::spawn(async move {
         loop {
@@ -213,10 +208,7 @@ pub fn spawn_orderbook_feed(
                 break;
             }
 
-            warn!(
-                "PM WS reconnecting in {}s...",
-                RECONNECT_DELAY_SECS
-            );
+            warn!("PM WS reconnecting in {}s...", RECONNECT_DELAY_SECS);
             tokio::time::sleep(Duration::from_secs(RECONNECT_DELAY_SECS)).await;
         }
     });
@@ -305,20 +297,28 @@ async fn process_ws_message(orderbooks: &SharedOrderbooks, msg: WsMessage) {
             asks,
             ..
         } => {
-            let mut parsed_bids: Vec<PriceLevel> =
-                bids.iter().filter_map(parse_level).collect();
-            let mut parsed_asks: Vec<PriceLevel> =
-                asks.iter().filter_map(parse_level).collect();
+            let mut parsed_bids: Vec<PriceLevel> = bids.iter().filter_map(parse_level).collect();
+            let mut parsed_asks: Vec<PriceLevel> = asks.iter().filter_map(parse_level).collect();
 
             // Sort: bids descending, asks ascending
-            parsed_bids.sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap_or(std::cmp::Ordering::Equal));
-            parsed_asks.sort_by(|a, b| a.price.partial_cmp(&b.price).unwrap_or(std::cmp::Ordering::Equal));
+            parsed_bids.sort_by(|a, b| {
+                b.price
+                    .partial_cmp(&a.price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            parsed_asks.sort_by(|a, b| {
+                a.price
+                    .partial_cmp(&b.price)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
             let mut books = orderbooks.write().await;
-            let entry = books.entry(asset_id.clone()).or_insert_with(|| OrderbookState {
-                token_id: asset_id,
-                ..Default::default()
-            });
+            let entry = books
+                .entry(asset_id.clone())
+                .or_insert_with(|| OrderbookState {
+                    token_id: asset_id,
+                    ..Default::default()
+                });
             entry.bids = parsed_bids;
             entry.asks = parsed_asks;
             entry.updated_at = std::time::Instant::now();
@@ -350,11 +350,15 @@ async fn process_ws_message(orderbooks: &SharedOrderbooks, msg: WsMessage) {
                         // Re-sort
                         if change.side == "BUY" || change.side == "buy" {
                             levels.sort_by(|a, b| {
-                                b.price.partial_cmp(&a.price).unwrap_or(std::cmp::Ordering::Equal)
+                                b.price
+                                    .partial_cmp(&a.price)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
                             });
                         } else {
                             levels.sort_by(|a, b| {
-                                a.price.partial_cmp(&b.price).unwrap_or(std::cmp::Ordering::Equal)
+                                a.price
+                                    .partial_cmp(&b.price)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
                             });
                         }
                     }
@@ -400,12 +404,24 @@ mod tests {
         let state = OrderbookState {
             token_id: "tok-1".to_string(),
             bids: vec![
-                PriceLevel { price: 0.45, size: 100.0 },
-                PriceLevel { price: 0.44, size: 200.0 },
+                PriceLevel {
+                    price: 0.45,
+                    size: 100.0,
+                },
+                PriceLevel {
+                    price: 0.44,
+                    size: 200.0,
+                },
             ],
             asks: vec![
-                PriceLevel { price: 0.48, size: 150.0 },
-                PriceLevel { price: 0.49, size: 50.0 },
+                PriceLevel {
+                    price: 0.48,
+                    size: 150.0,
+                },
+                PriceLevel {
+                    price: 0.49,
+                    size: 50.0,
+                },
             ],
             last_trade_price: None,
             last_trade_side: None,
@@ -421,8 +437,14 @@ mod tests {
     fn orderbook_spread_bps() {
         let state = OrderbookState {
             token_id: "tok-1".to_string(),
-            bids: vec![PriceLevel { price: 0.45, size: 100.0 }],
-            asks: vec![PriceLevel { price: 0.48, size: 100.0 }],
+            bids: vec![PriceLevel {
+                price: 0.45,
+                size: 100.0,
+            }],
+            asks: vec![PriceLevel {
+                price: 0.48,
+                size: 100.0,
+            }],
             last_trade_price: None,
             last_trade_side: None,
             updated_at: std::time::Instant::now(),
@@ -437,12 +459,19 @@ mod tests {
         let state = OrderbookState {
             token_id: "tok-1".to_string(),
             bids: vec![
-                PriceLevel { price: 0.45, size: 100.0 },
-                PriceLevel { price: 0.44, size: 200.0 },
+                PriceLevel {
+                    price: 0.45,
+                    size: 100.0,
+                },
+                PriceLevel {
+                    price: 0.44,
+                    size: 200.0,
+                },
             ],
-            asks: vec![
-                PriceLevel { price: 0.48, size: 150.0 },
-            ],
+            asks: vec![PriceLevel {
+                price: 0.48,
+                size: 150.0,
+            }],
             last_trade_price: None,
             last_trade_side: None,
             updated_at: std::time::Instant::now(),

@@ -54,10 +54,7 @@ pub trait ExternalProviderAdapter: Send + Sync {
     ) -> Result<Vec<ExternalMarketSnapshot>, ApiError>;
 
     /// Fetch a single market by its provider-specific ID.
-    async fn fetch_market(
-        &self,
-        market_ref: &str,
-    ) -> Result<ExternalMarketSnapshot, ApiError>;
+    async fn fetch_market(&self, market_ref: &str) -> Result<ExternalMarketSnapshot, ApiError>;
 
     /// Fetch the order book for a market+outcome.
     async fn fetch_orderbook(

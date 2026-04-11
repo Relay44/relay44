@@ -72,10 +72,7 @@ pub async fn route_order(
         match fetch_venue_quote(state, link, outcome).await {
             Ok(q) => quotes.push(q),
             Err(e) => {
-                warn!(
-                    "Route: skip {} for {}: {}",
-                    link.provider, market_slug, e
-                );
+                warn!("Route: skip {} for {}: {}", link.provider, market_slug, e);
             }
         }
     }
@@ -87,8 +84,16 @@ pub async fn route_order(
     // Sort by effective price: best buy = lowest effective_buy, best sell = highest effective_sell.
     let is_buy = side == "buy";
     quotes.sort_by(|a, b| {
-        let pa = if is_buy { a.effective_buy } else { a.effective_sell };
-        let pb = if is_buy { b.effective_buy } else { b.effective_sell };
+        let pa = if is_buy {
+            a.effective_buy
+        } else {
+            a.effective_sell
+        };
+        let pb = if is_buy {
+            b.effective_buy
+        } else {
+            b.effective_sell
+        };
         match (pa, pb) {
             (Some(a), Some(b)) => {
                 if is_buy {
@@ -118,7 +123,9 @@ pub async fn route_order(
             second.effective_sell
         };
         match (chosen_price, second_price) {
-            (Some(c), Some(s)) if s.abs() > f64::EPSILON => ((s - c).abs() / s * 10_000.0).round() as i32,
+            (Some(c), Some(s)) if s.abs() > f64::EPSILON => {
+                ((s - c).abs() / s * 10_000.0).round() as i32
+            }
             _ => 0,
         }
     } else {
@@ -386,7 +393,10 @@ async fn fetch_venue_quote(
         .map_err(|e| format!("Fetch orderbook: {}", e.message))?;
 
     if book.bids.is_empty() && book.asks.is_empty() {
-        return Err(format!("Empty orderbook for {} on {}", link.provider, outcome));
+        return Err(format!(
+            "Empty orderbook for {} on {}",
+            link.provider, outcome
+        ));
     }
 
     let best_bid = book.bids.first().map(|l| l.price).filter(|&p| p > 0.0);

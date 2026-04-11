@@ -426,13 +426,9 @@ pub async fn ensure_payment_for_request_with_rpc(
 
     // Check staking tier for fee reduction/bypass
     if let (Some(rpc), Some(staker)) = (rpc, extract_staker_address(req)) {
-        let tier = super::staking::get_staking_tier(
-            rpc,
-            &config.relay_staking_address,
-            &staker,
-        )
-        .await
-        .unwrap_or(0);
+        let tier = super::staking::get_staking_tier(rpc, &config.relay_staking_address, &staker)
+            .await
+            .unwrap_or(0);
 
         if tier >= 2 {
             return Ok(None); // tier 2+ gets free access

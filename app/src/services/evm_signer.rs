@@ -178,10 +178,14 @@ pub fn sign_eip712_hash(hash: &[u8; 32], private_key_hex: &str) -> Result<String
     let key_bytes = hex::decode(private_key_hex.trim_start_matches("0x"))
         .map_err(|e| ApiError::bad_request("INVALID_KEY", &format!("Invalid hex: {}", e)))?;
     if key_bytes.len() != 32 {
-        return Err(ApiError::bad_request("INVALID_KEY", "Private key must be 32 bytes"));
+        return Err(ApiError::bad_request(
+            "INVALID_KEY",
+            "Private key must be 32 bytes",
+        ));
     }
-    let signing_key = SigningKey::from_bytes(key_bytes.as_slice().into())
-        .map_err(|e| ApiError::bad_request("INVALID_KEY", &format!("Invalid private key: {}", e)))?;
+    let signing_key = SigningKey::from_bytes(key_bytes.as_slice().into()).map_err(|e| {
+        ApiError::bad_request("INVALID_KEY", &format!("Invalid private key: {}", e))
+    })?;
 
     use k256::ecdsa::signature::hazmat::PrehashSigner;
     let (signature, recovery_id): (Signature, RecoveryId) = signing_key
@@ -217,8 +221,8 @@ pub fn eip712_domain_separator(
     let name_hash = Keccak256::digest(name.as_bytes());
     let version_hash = Keccak256::digest(version.as_bytes());
 
-    let contract_bytes = hex::decode(verifying_contract.trim_start_matches("0x"))
-        .unwrap_or_default();
+    let contract_bytes =
+        hex::decode(verifying_contract.trim_start_matches("0x")).unwrap_or_default();
     let mut contract_word = [0u8; 32];
     if contract_bytes.len() == 20 {
         contract_word[12..].copy_from_slice(&contract_bytes);

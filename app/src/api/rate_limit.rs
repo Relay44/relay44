@@ -62,7 +62,7 @@ impl RateLimitTier {
     pub fn window_secs(&self) -> u64 {
         match self {
             RateLimitTier::MarketCreate => 3600, // 1 hour
-            _ => 60,                              // 1 minute
+            _ => 60,                             // 1 minute
         }
     }
 

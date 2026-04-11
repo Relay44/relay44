@@ -54,7 +54,11 @@ fn parse_timestamp(value: Option<&Value>) -> u64 {
         return normalize_unix_timestamp(number);
     }
 
-    let Some(raw_str) = raw.as_str().map(str::trim).filter(|entry| !entry.is_empty()) else {
+    let Some(raw_str) = raw
+        .as_str()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+    else {
         return 0;
     };
 

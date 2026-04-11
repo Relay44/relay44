@@ -380,8 +380,8 @@ mod tests {
             "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "0x0000000000000000000000000000000000000001",
             200,
-            100,  // tick_lower
-            100,  // tick_upper == tick_lower
+            100, // tick_lower
+            100, // tick_upper == tick_lower
             1000,
             1000,
             0,

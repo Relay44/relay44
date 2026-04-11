@@ -181,11 +181,17 @@ mod tests {
 
     #[test]
     fn valid_feed_ids() {
-        assert!(is_valid_feed_id("0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"));
-        assert!(is_valid_feed_id("ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"));
+        assert!(is_valid_feed_id(
+            "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"
+        ));
+        assert!(is_valid_feed_id(
+            "ff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"
+        ));
         assert!(!is_valid_feed_id("too_short"));
         assert!(!is_valid_feed_id(""));
-        assert!(!is_valid_feed_id("0xZZ61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"));
+        assert!(!is_valid_feed_id(
+            "0xZZ61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace"
+        ));
     }
 
     #[test]

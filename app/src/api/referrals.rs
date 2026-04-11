@@ -200,10 +200,7 @@ pub async fn apply_code(
         // Handle unique constraint violation on referee_wallet
         if let sqlx::Error::Database(ref db_err) = e {
             if db_err.code().map_or(false, |c| c == "23505") {
-                return ApiError::conflict(
-                    "ALREADY_REFERRED",
-                    "You have already been referred",
-                );
+                return ApiError::conflict("ALREADY_REFERRED", "You have already been referred");
             }
         }
         ApiError::from(e)
@@ -260,8 +257,7 @@ pub async fn get_stats(
     .fetch_optional(pool)
     .await?;
 
-    let referred_by_wallet: Option<String> =
-        referred_by.map(|r| r.get("referrer_wallet"));
+    let referred_by_wallet: Option<String> = referred_by.map(|r| r.get("referrer_wallet"));
 
     // List of referees
     let referee_rows = sqlx::query(

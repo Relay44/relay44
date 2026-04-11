@@ -23,7 +23,10 @@ pub fn spawn_portfolio_snapshotter(state: Arc<AppState>) {
         .unwrap_or(DEFAULT_INTERVAL_SECS)
         .max(60);
 
-    info!("Starting portfolio snapshotter (interval={}s)", interval_secs);
+    info!(
+        "Starting portfolio snapshotter (interval={}s)",
+        interval_secs
+    );
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(20)).await;
@@ -34,7 +37,10 @@ pub fn spawn_portfolio_snapshotter(state: Arc<AppState>) {
         loop {
             interval.tick().await;
 
-            if state.is_shutting_down.load(std::sync::atomic::Ordering::Relaxed) {
+            if state
+                .is_shutting_down
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
                 info!("Portfolio snapshotter shutting down");
                 break;
             }
@@ -102,29 +108,33 @@ async fn snapshot_user_portfolio(state: &AppState, owner: &str) -> Result<(), St
 
     // Max single position as % of total.
     let max_single_pct = if total_value > 0.0 {
-        let max_pos: Option<(i64,)> = sqlx::query_as(
-            "SELECT MAX(locked_collateral) FROM positions WHERE owner = $1",
-        )
-        .bind(owner)
-        .fetch_optional(state.db.pool())
-        .await
-        .map_err(|e| format!("Query max position: {}", e))?;
+        let max_pos: Option<(i64,)> =
+            sqlx::query_as("SELECT MAX(locked_collateral) FROM positions WHERE owner = $1")
+                .bind(owner)
+                .fetch_optional(state.db.pool())
+                .await
+                .map_err(|e| format!("Query max position: {}", e))?;
 
         max_pos
-            .and_then(|r| if r.0 > 0 { Some(r.0 as f64 / scale / total_value * 100.0) } else { None })
+            .and_then(|r| {
+                if r.0 > 0 {
+                    Some(r.0 as f64 / scale / total_value * 100.0)
+                } else {
+                    None
+                }
+            })
             .unwrap_or(0.0)
     } else {
         0.0
     };
 
     // Get peak from previous snapshots.
-    let prev_peak: Option<(Option<f64>,)> = sqlx::query_as(
-        "SELECT MAX(peak_value_usdc) FROM portfolio_snapshots WHERE owner = $1",
-    )
-    .bind(owner)
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|e| format!("Query peak: {}", e))?;
+    let prev_peak: Option<(Option<f64>,)> =
+        sqlx::query_as("SELECT MAX(peak_value_usdc) FROM portfolio_snapshots WHERE owner = $1")
+            .bind(owner)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|e| format!("Query peak: {}", e))?;
 
     let peak = prev_peak
         .and_then(|r| r.0)
