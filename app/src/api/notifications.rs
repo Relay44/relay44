@@ -140,8 +140,12 @@ fn notification_allowed_by_preferences(
     prefs: &NotificationPreferences,
 ) -> bool {
     match kind {
-        NotificationType::OrderFilled | NotificationType::OrderCancelled | NotificationType::DistributionTradeConfirmed => prefs.order_fills,
-        NotificationType::MarketResolved | NotificationType::DistributionMarketResolved | NotificationType::DistributionPayoutReady => prefs.market_resolutions,
+        NotificationType::OrderFilled
+        | NotificationType::OrderCancelled
+        | NotificationType::DistributionTradeConfirmed => prefs.order_fills,
+        NotificationType::MarketResolved
+        | NotificationType::DistributionMarketResolved
+        | NotificationType::DistributionPayoutReady => prefs.market_resolutions,
         NotificationType::PriceAlert => prefs.price_alerts,
         NotificationType::DecisionRecommendationChanged
         | NotificationType::DecisionThresholdCrossed

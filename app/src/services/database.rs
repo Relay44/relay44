@@ -2801,7 +2801,19 @@ impl DatabaseService {
         &self,
         wallet_address: &str,
     ) -> Result<Vec<crate::api::api_key::ApiKeyListItem>> {
-        let rows = sqlx::query_as::<_, (String, String, String, String, bool, Option<DateTime<Utc>>, Option<DateTime<Utc>>, DateTime<Utc>)>(
+        let rows = sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                String,
+                String,
+                bool,
+                Option<DateTime<Utc>>,
+                Option<DateTime<Utc>>,
+                DateTime<Utc>,
+            ),
+        >(
             "SELECT id, key_prefix, label, scope, is_active, expires_at, last_used_at, created_at \
              FROM api_keys WHERE wallet_address = $1 ORDER BY created_at DESC",
         )
@@ -2811,18 +2823,20 @@ impl DatabaseService {
 
         Ok(rows
             .into_iter()
-            .map(|(id, prefix, label, scope, is_active, expires_at, last_used_at, created_at)| {
-                crate::api::api_key::ApiKeyListItem {
-                    id,
-                    prefix,
-                    label,
-                    scope,
-                    is_active,
-                    expires_at,
-                    last_used_at,
-                    created_at,
-                }
-            })
+            .map(
+                |(id, prefix, label, scope, is_active, expires_at, last_used_at, created_at)| {
+                    crate::api::api_key::ApiKeyListItem {
+                        id,
+                        prefix,
+                        label,
+                        scope,
+                        is_active,
+                        expires_at,
+                        last_used_at,
+                        created_at,
+                    }
+                },
+            )
             .collect())
     }
 

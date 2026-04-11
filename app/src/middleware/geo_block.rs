@@ -263,7 +263,9 @@ fn get_country_from_headers(req: &ServiceRequest) -> Option<String> {
 fn is_internal_service_bypass(req: &ServiceRequest) -> bool {
     static INTERNAL_KEY: OnceLock<Option<String>> = OnceLock::new();
     let expected = INTERNAL_KEY.get_or_init(|| {
-        std::env::var("INTERNAL_SERVICE_KEY").ok().filter(|k| !k.is_empty())
+        std::env::var("INTERNAL_SERVICE_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
     });
     match expected {
         Some(key) => req

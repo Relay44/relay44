@@ -1802,7 +1802,10 @@ fn bootstrap_parkinson_volatility_bps(fill_prices: &[f64]) -> u64 {
     if fill_prices.len() < 2 {
         return 0;
     }
-    let hi = fill_prices.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let hi = fill_prices
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let lo = fill_prices.iter().cloned().fold(f64::INFINITY, f64::min);
     if lo <= 0.0 {
         return 0;
@@ -5097,8 +5100,13 @@ pub async fn get_base_orderbook(
             "EVM services are disabled",
         ));
     }
-    let settlement =
-        x402::ensure_payment_for_request_with_rpc(&state.config, &req, X402Resource::OrderBook, Some(&state.evm_rpc)).await?;
+    let settlement = x402::ensure_payment_for_request_with_rpc(
+        &state.config,
+        &req,
+        X402Resource::OrderBook,
+        Some(&state.evm_rpc),
+    )
+    .await?;
 
     let market_id_raw = path.into_inner();
     let outcome = match query.outcome.as_deref().unwrap_or("yes") {
@@ -5405,8 +5413,13 @@ pub async fn get_base_trades(
             "EVM services are disabled",
         ));
     }
-    let settlement =
-        x402::ensure_payment_for_request_with_rpc(&state.config, &req, X402Resource::Trades, Some(&state.evm_rpc)).await?;
+    let settlement = x402::ensure_payment_for_request_with_rpc(
+        &state.config,
+        &req,
+        X402Resource::Trades,
+        Some(&state.evm_rpc),
+    )
+    .await?;
 
     let market_id_raw = path.into_inner();
     let limit = query.limit.unwrap_or(50).min(MAX_TRADES_PAGE_SIZE);
@@ -7446,13 +7459,7 @@ async fn fetch_pyth_price_and_check_threshold(
         .parse()
         .map_err(|_| "invalid target_value in config")?;
 
-    crate::services::pyth::check_threshold(
-        &state.redis,
-        feed_id,
-        target,
-        &config.comparison,
-    )
-    .await
+    crate::services::pyth::check_threshold(&state.redis, feed_id, target, &config.comparison).await
 }
 
 async fn matcher_runtime_state(state: &AppState) -> Result<MatcherRuntimeState, ApiError> {
@@ -8561,8 +8568,8 @@ async fn fetch_erc8004_reputation_all_feedback(
         ERC8004_REPUTATION_READ_ALL_FEEDBACK_SELECTOR,
         encode_u256_hex_u128(agent_id),
         encode_u256_hex_u128(head_len_bytes),
-        zero_bytes32, // tag1 = 0 (no filter)
-        zero_bytes32.clone(), // tag2 = 0 (no filter)
+        zero_bytes32,           // tag1 = 0 (no filter)
+        zero_bytes32.clone(),   // tag2 = 0 (no filter)
         encode_bool_word(true), // includeRevoked = true
         clients_tail,
     );
@@ -9394,8 +9401,7 @@ fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb\
         let tag1 = "0x0000000000000000000000000000000000000000000000000000000000000001";
         let tag2 = "0x0000000000000000000000000000000000000000000000000000000000000002";
         let endpoint = "0x0000000000000000000000000000000000000000000000000000000000000003";
-        let feedback_hash =
-            "0x00000000000000000000000000000000000000000000000000000000000000aa";
+        let feedback_hash = "0x00000000000000000000000000000000000000000000000000000000000000aa";
 
         let data = format!(
             "{}{}{}{}{}{}{}{}{}{}",
@@ -9455,11 +9461,7 @@ fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb\
     #[test]
     fn test_decode_address_array_empty() {
         // offset word + length 0
-        let payload = format!(
-            "0x{}{}",
-            encode_u256_hex_u128(32),
-            encode_u256_hex_u128(0),
-        );
+        let payload = format!("0x{}{}", encode_u256_hex_u128(32), encode_u256_hex_u128(0),);
         let clients = decode_address_array(&payload).unwrap();
         assert!(clients.is_empty());
     }
@@ -9497,8 +9499,7 @@ fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb\
 
         let head_len_bytes = 32u128 * 5;
         let response_uri_tail = encode_dynamic_string_tail("ipfs://resp");
-        let response_hash =
-            "0x00000000000000000000000000000000000000000000000000000000000000bb";
+        let response_hash = "0x00000000000000000000000000000000000000000000000000000000000000bb";
 
         let data = format!(
             "{}{}{}{}{}{}{}",

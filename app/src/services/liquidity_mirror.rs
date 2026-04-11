@@ -137,7 +137,9 @@ async fn run_mirror_tick(state: &AppState) -> Result<usize, String> {
     for link in &links {
         match mirror_single_market(state, link).await {
             Ok(snapshot) => {
-                if let Err(e) = store_mirror_snapshot(state, link.internal_market_id as u64, &snapshot).await {
+                if let Err(e) =
+                    store_mirror_snapshot(state, link.internal_market_id as u64, &snapshot).await
+                {
                     warn!(
                         "Failed to store mirror snapshot for market {}: {}",
                         link.internal_market_id, e
@@ -265,10 +267,7 @@ async fn store_mirror_snapshot(
 }
 
 /// Load mirror snapshot from Redis (called by orderbook endpoint).
-pub async fn load_mirror_snapshot(
-    state: &AppState,
-    market_id: u64,
-) -> Option<MirrorDepthSnapshot> {
+pub async fn load_mirror_snapshot(state: &AppState, market_id: u64) -> Option<MirrorDepthSnapshot> {
     let key = format!("{}{}", MIRROR_REDIS_PREFIX, market_id);
     state
         .redis
@@ -320,7 +319,9 @@ async fn load_active_mirror_links(
                 external_market_id: row.get("external_market_id"),
                 external_provider: row.get("external_provider"),
                 spread_premium_bps: row.get("spread_premium_bps"),
-                max_depth_usdc: max_depth_str.parse::<f64>().unwrap_or(DEFAULT_MAX_DEPTH_USDC),
+                max_depth_usdc: max_depth_str
+                    .parse::<f64>()
+                    .unwrap_or(DEFAULT_MAX_DEPTH_USDC),
                 hedge_mode: row.get("hedge_mode"),
                 hedge_credential_id: row.try_get("hedge_credential_id").ok(),
                 active: row.get("active"),

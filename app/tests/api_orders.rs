@@ -15,9 +15,7 @@ async fn list_orders_requires_auth() {
 #[actix_rt::test]
 async fn place_order_requires_auth() {
     let app = common::build_test_app().await;
-    let req = test::TestRequest::post()
-        .uri("/v1/orders")
-        .to_request();
+    let req = test::TestRequest::post().uri("/v1/orders").to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_client_error());
 }

@@ -48,7 +48,10 @@ pub fn spawn_agent_scheduler(state: Arc<AppState>) {
         loop {
             interval.tick().await;
 
-            if state.is_shutting_down.load(std::sync::atomic::Ordering::Relaxed) {
+            if state
+                .is_shutting_down
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
                 info!("Agent scheduler shutting down");
                 break;
             }
@@ -72,10 +75,7 @@ pub fn spawn_agent_scheduler(state: Arc<AppState>) {
 
 /// Internal tick — loads due agents and executes them.
 /// Returns (agents_scanned, agents_executed).
-async fn run_scheduler_tick(
-    state: &AppState,
-    limit: i64,
-) -> Result<(u64, u64), String> {
+async fn run_scheduler_tick(state: &AppState, limit: i64) -> Result<(u64, u64), String> {
     let now = chrono::Utc::now();
 
     let rows = sqlx::query(
@@ -111,8 +111,9 @@ async fn run_scheduler_tick(
             .await;
 
             let owner: String = sqlx::Row::try_get(row, "owner").unwrap_or_default();
-            state.event_bus.emit(
-                crate::services::event_bus::PlatformEvent::AgentDeactivated(
+            state
+                .event_bus
+                .emit(crate::services::event_bus::PlatformEvent::AgentDeactivated(
                     crate::services::event_bus::AgentLifecycleEvent {
                         agent_id: agent_id.clone(),
                         owner,
@@ -122,8 +123,7 @@ async fn run_scheduler_tick(
                         ),
                         timestamp: now,
                     },
-                ),
-            );
+                ));
             continue;
         }
 

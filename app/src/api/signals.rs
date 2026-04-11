@@ -10,7 +10,10 @@ use crate::AppState;
 
 fn ensure_signals_enabled(state: &AppState) -> Result<(), ApiError> {
     if !state.config.signals_enabled {
-        return Err(ApiError::bad_request("SIGNALS_DISABLED", "signal marketplace is disabled"));
+        return Err(ApiError::bad_request(
+            "SIGNALS_DISABLED",
+            "signal marketplace is disabled",
+        ));
     }
     Ok(())
 }
@@ -56,7 +59,10 @@ pub async fn create_provider(
 
     let name = body.name.trim();
     if name.is_empty() || name.len() > 128 {
-        return Err(ApiError::bad_request("INVALID_NAME", "name must be 1-128 chars"));
+        return Err(ApiError::bad_request(
+            "INVALID_NAME",
+            "name must be 1-128 chars",
+        ));
     }
 
     let id = Uuid::new_v4().to_string();
@@ -90,10 +96,20 @@ pub async fn list_providers(
     ensure_signals_enabled(&state)?;
     let limit = query.limit.unwrap_or(50).min(200);
 
-    let rows: Vec<(String, String, String, Option<String>, String, i64, bool, Option<f64>, Option<i64>, String)> =
-        if let Some(cat) = &query.category {
-            sqlx::query_as(
-                "SELECT p.id, p.owner, p.name, p.description, p.category, \
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        Option<String>,
+        String,
+        i64,
+        bool,
+        Option<f64>,
+        Option<i64>,
+        String,
+    )> = if let Some(cat) = &query.category {
+        sqlx::query_as(
+            "SELECT p.id, p.owner, p.name, p.description, p.category, \
                  p.update_frequency_secs, p.active, s.avg_brier_score, s.scored_signals, \
                  p.created_at::text \
                  FROM signal_providers p \
@@ -101,15 +117,15 @@ pub async fn list_providers(
                  WHERE p.active = true AND p.category = $1 \
                  ORDER BY s.avg_brier_score ASC NULLS LAST \
                  LIMIT $2",
-            )
-            .bind(cat)
-            .bind(limit)
-            .fetch_all(state.db.pool())
-            .await
-            .map_err(|e| ApiError::internal(&e.to_string()))?
-        } else {
-            sqlx::query_as(
-                "SELECT p.id, p.owner, p.name, p.description, p.category, \
+        )
+        .bind(cat)
+        .bind(limit)
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?
+    } else {
+        sqlx::query_as(
+            "SELECT p.id, p.owner, p.name, p.description, p.category, \
                  p.update_frequency_secs, p.active, s.avg_brier_score, s.scored_signals, \
                  p.created_at::text \
                  FROM signal_providers p \
@@ -117,12 +133,12 @@ pub async fn list_providers(
                  WHERE p.active = true \
                  ORDER BY s.avg_brier_score ASC NULLS LAST \
                  LIMIT $1",
-            )
-            .bind(limit)
-            .fetch_all(state.db.pool())
-            .await
-            .map_err(|e| ApiError::internal(&e.to_string()))?
-        };
+        )
+        .bind(limit)
+        .fetch_all(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?
+    };
 
     let items: Vec<_> = rows
         .iter()
@@ -172,7 +188,10 @@ pub async fn emit_signal(
     .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     let provider = provider.ok_or_else(|| {
-        ApiError::bad_request("PROVIDER_NOT_FOUND", "provider not found or not owned by you")
+        ApiError::bad_request(
+            "PROVIDER_NOT_FOUND",
+            "provider not found or not owned by you",
+        )
     })?;
 
     let confidence = body.confidence.unwrap_or(0.5).clamp(0.0, 1.0);

@@ -45,13 +45,11 @@ fn build_auth_headers(api_key: &str) -> Result<HeaderMap, ApiError> {
     let mut headers = HeaderMap::new();
     headers.insert(
         "X-API-Key",
-        HeaderValue::from_str(api_key)
-            .map_err(|_| ApiError::internal("Invalid API key"))?,
+        HeaderValue::from_str(api_key).map_err(|_| ApiError::internal("Invalid API key"))?,
     );
     headers.insert(
         "X-Timestamp",
-        HeaderValue::from_str(&timestamp)
-            .map_err(|_| ApiError::internal("Invalid timestamp"))?,
+        HeaderValue::from_str(&timestamp).map_err(|_| ApiError::internal("Invalid timestamp"))?,
     );
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     Ok(headers)
@@ -77,18 +75,15 @@ fn build_hmac_headers(
     let mut headers = HeaderMap::new();
     headers.insert(
         "lmts-api-key",
-        HeaderValue::from_str(api_key)
-            .map_err(|_| ApiError::internal("Invalid API key"))?,
+        HeaderValue::from_str(api_key).map_err(|_| ApiError::internal("Invalid API key"))?,
     );
     headers.insert(
         "lmts-timestamp",
-        HeaderValue::from_str(&timestamp)
-            .map_err(|_| ApiError::internal("Invalid timestamp"))?,
+        HeaderValue::from_str(&timestamp).map_err(|_| ApiError::internal("Invalid timestamp"))?,
     );
     headers.insert(
         "lmts-signature",
-        HeaderValue::from_str(&signature)
-            .map_err(|_| ApiError::internal("Invalid signature"))?,
+        HeaderValue::from_str(&signature).map_err(|_| ApiError::internal("Invalid signature"))?,
     );
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
@@ -128,7 +123,9 @@ pub async fn create_sub_account(
         .map_err(|e| ApiError::internal(&format!("Limitless partner API: {e}")))?;
 
     let status = response.status();
-    let text = response.text().await
+    let text = response
+        .text()
+        .await
         .map_err(|e| ApiError::internal(&format!("Response read: {e}")))?;
 
     if !status.is_success() {
@@ -230,7 +227,9 @@ pub async fn place_delegated_order(
         .map_err(|e| ApiError::internal(&format!("Limitless order API: {e}")))?;
 
     let status = response.status();
-    let text = response.text().await
+    let text = response
+        .text()
+        .await
         .map_err(|e| ApiError::internal(&format!("Response read: {e}")))?;
 
     if !status.is_success() {
@@ -244,9 +243,21 @@ pub async fn place_delegated_order(
         .map_err(|e| ApiError::internal(&format!("Parse response: {e}")))?;
 
     Ok(OrderResponse {
-        order_id: result.get("orderId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        status: result.get("status").and_then(|v| v.as_str()).unwrap_or("submitted").to_string(),
-        maker_matches: result.get("makerMatches").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+        order_id: result
+            .get("orderId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        status: result
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("submitted")
+            .to_string(),
+        maker_matches: result
+            .get("makerMatches")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default(),
     })
 }
 
@@ -298,13 +309,8 @@ mod tests {
 
     #[test]
     fn hmac_headers_are_valid() {
-        let headers = build_hmac_headers(
-            "test-key",
-            "POST",
-            "/orders",
-            r#"{"test": true}"#,
-        )
-        .unwrap();
+        let headers =
+            build_hmac_headers("test-key", "POST", "/orders", r#"{"test": true}"#).unwrap();
 
         assert!(headers.contains_key("lmts-api-key"));
         assert!(headers.contains_key("lmts-timestamp"));

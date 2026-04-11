@@ -147,10 +147,7 @@ pub async fn create_api_key_handler(
 
     // Validate scope
     let scope = ApiKeyScope::from_str(&body.scope).ok_or_else(|| {
-        ApiError::bad_request(
-            "INVALID_SCOPE",
-            "Scope must be 'read', 'trade', or 'admin'",
-        )
+        ApiError::bad_request("INVALID_SCOPE", "Scope must be 'read', 'trade', or 'admin'")
     })?;
 
     // Admin scope requires admin role
@@ -170,10 +167,7 @@ pub async fn create_api_key_handler(
     // Validate and sanitize label
     let label = body.label.trim().to_string();
     if label.is_empty() {
-        return Err(ApiError::bad_request(
-            "INVALID_LABEL",
-            "Label is required",
-        ));
+        return Err(ApiError::bad_request("INVALID_LABEL", "Label is required"));
     }
     if label.len() > 128 {
         return Err(ApiError::bad_request(
