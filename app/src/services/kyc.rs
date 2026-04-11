@@ -100,10 +100,7 @@ impl KycService {
             anyhow::bail!("WORLD_ID_APP_ID is not configured");
         }
 
-        let url = format!(
-            "{}/{}",
-            WORLD_ID_VERIFY_URL, self.config.world_id_app_id
-        );
+        let url = format!("{}/{}", WORLD_ID_VERIFY_URL, self.config.world_id_app_id);
 
         let body = WorldIdVerifyRequest {
             merkle_root,
@@ -113,12 +110,7 @@ impl KycService {
             signal,
         };
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -132,7 +124,10 @@ impl KycService {
             anyhow::bail!("World ID proof verification returned success=false");
         }
 
-        info!("World ID verification succeeded for nullifier {}", nullifier_hash);
+        info!(
+            "World ID verification succeeded for nullifier {}",
+            nullifier_hash
+        );
         Ok(result.nullifier_hash)
     }
 }

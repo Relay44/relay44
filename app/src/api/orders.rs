@@ -780,7 +780,11 @@ pub async fn batch_place_orders(
     if let Some(ref key) = idempotency_key {
         let full_key = format!("batch:{}:{}", owner, key);
         if let Ok(json) = serde_json::to_string(&response) {
-            state.redis.store_idempotency_key(&full_key, &json).await.ok();
+            state
+                .redis
+                .store_idempotency_key(&full_key, &json)
+                .await
+                .ok();
         }
         state.redis.release_idempotency_lock(&full_key).await.ok();
     }
@@ -995,7 +999,11 @@ pub async fn replace_orders(
     // Remove cancelled orders from orderbook
     state.orderbook.remove_orders_batch(&cancels_for_orderbook);
     for (_, _, _, order_id) in &cancels_for_orderbook {
-        if let Err(e) = state.db.update_order_status(order_id, OrderStatus::Cancelled, 0, 0).await {
+        if let Err(e) = state
+            .db
+            .update_order_status(order_id, OrderStatus::Cancelled, 0, 0)
+            .await
+        {
             log::error!("Failed to update cancelled order {} in DB: {}", order_id, e);
         }
         if let Err(e) = state.db.remove_orderbook_entry(order_id).await {
@@ -1104,7 +1112,8 @@ pub async fn replace_orders(
                 }
             };
             maker_order.filled_quantity = maker_order.filled_quantity.saturating_add(filled_delta);
-            maker_order.remaining_quantity = maker_order.remaining_quantity.saturating_sub(filled_delta);
+            maker_order.remaining_quantity =
+                maker_order.remaining_quantity.saturating_sub(filled_delta);
             maker_order.status = if maker_order.remaining_quantity == 0 {
                 OrderStatus::Filled
             } else {

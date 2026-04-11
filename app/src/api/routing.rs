@@ -10,7 +10,10 @@ use crate::AppState;
 
 fn ensure_routing_enabled(state: &AppState) -> Result<(), ApiError> {
     if !state.config.routing_enabled {
-        return Err(ApiError::bad_request("ROUTING_DISABLED", "smart routing is disabled"));
+        return Err(ApiError::bad_request(
+            "ROUTING_DISABLED",
+            "smart routing is disabled",
+        ));
     }
     Ok(())
 }
@@ -42,15 +45,27 @@ pub async fn route_order(
     let _ = extract_authenticated_user(&req, &state).await?;
 
     if body.side != "buy" && body.side != "sell" {
-        return Err(ApiError::bad_request("INVALID_SIDE", "side must be buy or sell"));
+        return Err(ApiError::bad_request(
+            "INVALID_SIDE",
+            "side must be buy or sell",
+        ));
     }
     if body.quantity <= 0.0 {
-        return Err(ApiError::bad_request("INVALID_QUANTITY", "quantity must be positive"));
+        return Err(ApiError::bad_request(
+            "INVALID_QUANTITY",
+            "quantity must be positive",
+        ));
     }
 
-    let decision = smart_router::route_order(&state, &body.market_slug, &body.outcome, &body.side, body.quantity)
-        .await
-        .map_err(|e| ApiError::bad_request("ROUTING_FAILED", &e))?;
+    let decision = smart_router::route_order(
+        &state,
+        &body.market_slug,
+        &body.outcome,
+        &body.side,
+        body.quantity,
+    )
+    .await
+    .map_err(|e| ApiError::bad_request("ROUTING_FAILED", &e))?;
 
     Ok(HttpResponse::Ok().json(json!({
         "chosen": decision.chosen,
@@ -72,7 +87,17 @@ pub async fn list_arbitrage(
     let limit = query.limit.unwrap_or(50).min(200);
 
     let rows: Vec<(
-        i32, String, String, String, f64, String, f64, i32, f64, String, String,
+        i32,
+        String,
+        String,
+        String,
+        f64,
+        String,
+        f64,
+        i32,
+        f64,
+        String,
+        String,
     )> = if let Some(slug) = &query.market_slug {
         sqlx::query_as(
             "SELECT id, market_slug, outcome, buy_provider, buy_price::float8, \

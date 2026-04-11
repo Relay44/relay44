@@ -10,7 +10,10 @@ use crate::AppState;
 
 fn ensure_parlays_enabled(state: &AppState) -> Result<(), ApiError> {
     if !state.config.parlays_enabled {
-        return Err(ApiError::bad_request("PARLAYS_DISABLED", "parlays are disabled"));
+        return Err(ApiError::bad_request(
+            "PARLAYS_DISABLED",
+            "parlays are disabled",
+        ));
     }
     Ok(())
 }
@@ -47,7 +50,10 @@ pub async fn create_parlay(
         ));
     }
     if body.stake_usdc <= 0.0 {
-        return Err(ApiError::bad_request("INVALID_STAKE", "stake must be positive"));
+        return Err(ApiError::bad_request(
+            "INVALID_STAKE",
+            "stake must be positive",
+        ));
     }
 
     // Reject duplicate markets within the same parlay.
@@ -87,16 +93,14 @@ pub async fn create_parlay(
         .await
         .map_err(|e| ApiError::internal(&e.to_string()))?;
 
-    sqlx::query(
-        "INSERT INTO parlays (id, owner, stake_usdc, leg_count) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(&id)
-    .bind(user.wallet_address.as_str())
-    .bind(body.stake_usdc)
-    .bind(leg_count)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    sqlx::query("INSERT INTO parlays (id, owner, stake_usdc, leg_count) VALUES ($1, $2, $3, $4)")
+        .bind(&id)
+        .bind(user.wallet_address.as_str())
+        .bind(body.stake_usdc)
+        .bind(leg_count)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     for (i, leg) in body.legs.iter().enumerate() {
         sqlx::query(
@@ -237,7 +241,10 @@ pub async fn resolve_leg(
     crate::api::compliance::ensure_admin_public(&req, &state)?;
 
     if body.leg_index < 0 {
-        return Err(ApiError::bad_request("INVALID_LEG_INDEX", "leg_index must be non-negative"));
+        return Err(ApiError::bad_request(
+            "INVALID_LEG_INDEX",
+            "leg_index must be non-negative",
+        ));
     }
 
     let mut tx = state

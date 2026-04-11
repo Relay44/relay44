@@ -361,18 +361,19 @@ impl OrderBookService {
         let mut all_matches = Vec::with_capacity(orders.len());
 
         for order in orders {
-            let market_book = books
-                .entry(order.market_id.clone())
-                .or_insert_with(|| MarketOrderBook {
-                    yes: OutcomeOrderBook {
-                        bids: BTreeMap::new(),
-                        asks: BTreeMap::new(),
-                    },
-                    no: OutcomeOrderBook {
-                        bids: BTreeMap::new(),
-                        asks: BTreeMap::new(),
-                    },
-                });
+            let market_book =
+                books
+                    .entry(order.market_id.clone())
+                    .or_insert_with(|| MarketOrderBook {
+                        yes: OutcomeOrderBook {
+                            bids: BTreeMap::new(),
+                            asks: BTreeMap::new(),
+                        },
+                        no: OutcomeOrderBook {
+                            bids: BTreeMap::new(),
+                            asks: BTreeMap::new(),
+                        },
+                    });
 
             let outcome_book = match order.outcome {
                 Outcome::Yes => &mut market_book.yes,
@@ -421,10 +422,7 @@ impl OrderBookService {
     }
 
     /// Remove multiple orders atomically (single lock acquisition).
-    pub fn remove_orders_batch(
-        &self,
-        cancels: &[(String, Outcome, OrderSide, String)],
-    ) {
+    pub fn remove_orders_batch(&self, cancels: &[(String, Outcome, OrderSide, String)]) {
         let mut books = self.write_books();
 
         for (market_id, outcome, side, order_id) in cancels {

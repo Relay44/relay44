@@ -38,10 +38,7 @@ pub fn spawn_limitless_scanner(state: Arc<AppState>) {
         .unwrap_or(60)
         .max(30);
 
-    info!(
-        "Starting Limitless scanner (interval={}s)",
-        interval_secs
-    );
+    info!("Starting Limitless scanner (interval={}s)", interval_secs);
 
     tokio::spawn(async move {
         // Wait for app startup.
@@ -81,9 +78,7 @@ pub fn spawn_limitless_scanner(state: Arc<AppState>) {
 
 // ── Scan execution ──
 
-async fn run_scan(
-    state: &AppState,
-) -> Result<(i32, i32, i32), String> {
+async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
@@ -117,8 +112,8 @@ async fn run_scan(
             None => continue,
         };
 
-        let spread_bps = ((market.yes_price + market.no_price - 1.0).abs() * 10_000.0)
-            .round() as i32;
+        let spread_bps =
+            ((market.yes_price + market.no_price - 1.0).abs() * 10_000.0).round() as i32;
 
         let (opp_type, opp_score) = score_opportunity(market);
         if opp_score > 0.0 {
@@ -221,10 +216,7 @@ fn score_opportunity(market: &ExternalMarketSnapshot) -> (String, f64) {
 /// Compare Limitless markets against Polymarket scanned markets.
 /// When a match is found, upsert into market_venue_links so the
 /// smart router arb scanner can detect price discrepancies.
-async fn match_cross_venue(
-    state: &AppState,
-    limitless_markets: &[ExternalMarketSnapshot],
-) -> i32 {
+async fn match_cross_venue(state: &AppState, limitless_markets: &[ExternalMarketSnapshot]) -> i32 {
     // Load polymarket scanned questions with end_date epoch for close_time validation.
     let poly_rows = match sqlx::query_as::<_, (String, String, Option<String>, Option<f64>)>(
         "SELECT condition_id, question, slug, EXTRACT(EPOCH FROM end_date)::FLOAT8 \
@@ -339,7 +331,12 @@ fn normalize_question(q: &str) -> String {
         })
         .collect::<String>()
         .split_whitespace()
-        .filter(|w| !matches!(*w, "will" | "the" | "a" | "an" | "be" | "by" | "in" | "on" | "of" | "to" | "is" | "it"))
+        .filter(|w| {
+            !matches!(
+                *w,
+                "will" | "the" | "a" | "an" | "be" | "by" | "in" | "on" | "of" | "to" | "is" | "it"
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -498,7 +495,23 @@ pub async fn list_scanned_markets(
     limit: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
     let rows = if let Some(opp_type) = opportunity_type {
-        sqlx::query_as::<_, (String, String, Option<String>, f64, f64, i32, f64, f64, i64, String, f64, Option<String>)>(
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                f64,
+                f64,
+                i32,
+                f64,
+                f64,
+                i64,
+                String,
+                f64,
+                Option<String>,
+            ),
+        >(
             r#"
             SELECT slug, question, category,
                    yes_price, no_price, spread_bps,
@@ -516,7 +529,23 @@ pub async fn list_scanned_markets(
         .await
         .map_err(|e| e.to_string())?
     } else {
-        sqlx::query_as::<_, (String, String, Option<String>, f64, f64, i32, f64, f64, i64, String, f64, Option<String>)>(
+        sqlx::query_as::<
+            _,
+            (
+                String,
+                String,
+                Option<String>,
+                f64,
+                f64,
+                i32,
+                f64,
+                f64,
+                i64,
+                String,
+                f64,
+                Option<String>,
+            ),
+        >(
             r#"
             SELECT slug, question, category,
                    yes_price, no_price, spread_bps,
@@ -536,24 +565,39 @@ pub async fn list_scanned_markets(
 
     Ok(rows
         .into_iter()
-        .map(|(slug, question, category, yes_price, no_price, spread_bps, volume, liquidity, close_time, opp_type, opp_score, pmr)| {
-            json!({
-                "slug": slug,
-                "question": question,
-                "category": category,
-                "yesPrice": yes_price,
-                "noPrice": no_price,
-                "spreadBps": spread_bps,
-                "volumeUsdc": volume,
-                "liquidityUsdc": liquidity,
-                "closeTime": close_time,
-                "opportunityType": opp_type,
-                "opportunityScore": opp_score,
-                "providerMarketRef": pmr,
-                "provider": "limitless",
-                "marketId": format!("limitless:{}", slug)
-            })
-        })
+        .map(
+            |(
+                slug,
+                question,
+                category,
+                yes_price,
+                no_price,
+                spread_bps,
+                volume,
+                liquidity,
+                close_time,
+                opp_type,
+                opp_score,
+                pmr,
+            )| {
+                json!({
+                    "slug": slug,
+                    "question": question,
+                    "category": category,
+                    "yesPrice": yes_price,
+                    "noPrice": no_price,
+                    "spreadBps": spread_bps,
+                    "volumeUsdc": volume,
+                    "liquidityUsdc": liquidity,
+                    "closeTime": close_time,
+                    "opportunityType": opp_type,
+                    "opportunityScore": opp_score,
+                    "providerMarketRef": pmr,
+                    "provider": "limitless",
+                    "marketId": format!("limitless:{}", slug)
+                })
+            },
+        )
         .collect())
 }
 
@@ -696,13 +740,7 @@ mod tests {
             build_venue_slug("btc-above-100k-2026", Some("btc-100k")),
             "btc-100k"
         );
-        assert_eq!(
-            build_venue_slug("short", Some("longer-slug-here")),
-            "short"
-        );
-        assert_eq!(
-            build_venue_slug("only-limitless", None),
-            "only-limitless"
-        );
+        assert_eq!(build_venue_slug("short", Some("longer-slug-here")), "short");
+        assert_eq!(build_venue_slug("only-limitless", None), "only-limitless");
     }
 }
