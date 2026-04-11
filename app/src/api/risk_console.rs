@@ -9,7 +9,10 @@ use crate::AppState;
 
 fn ensure_risk_console_enabled(state: &AppState) -> Result<(), ApiError> {
     if !state.config.risk_console_enabled {
-        return Err(ApiError::bad_request("RISK_CONSOLE_DISABLED", "risk console is disabled"));
+        return Err(ApiError::bad_request(
+            "RISK_CONSOLE_DISABLED",
+            "risk console is disabled",
+        ));
     }
     Ok(())
 }
@@ -40,7 +43,17 @@ pub async fn get_portfolio(
 
     // Get latest snapshot.
     let latest: Option<(
-        f64, f64, f64, i32, f64, f64, Option<f64>, Option<f64>, f64, f64, String,
+        f64,
+        f64,
+        f64,
+        i32,
+        f64,
+        f64,
+        Option<f64>,
+        Option<f64>,
+        f64,
+        f64,
+        String,
     )> = sqlx::query_as(
         "SELECT total_value_usdc, unrealized_pnl_usdc, realized_pnl_usdc, \
          open_positions, gross_exposure_usdc, max_single_position_pct, \
@@ -172,9 +185,17 @@ pub async fn export_compliance(
     let to_ts = query.to.as_deref().unwrap_or("2100-01-01");
 
     let rows: Vec<(
-        i32, String, Option<i64>, Option<String>, Option<String>,
-        Option<f64>, Option<String>, Option<String>, Option<String>,
-        serde_json::Value, String,
+        i32,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<f64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        serde_json::Value,
+        String,
     )> = if let Some(event_type) = &query.event_type {
         sqlx::query_as(
             "SELECT id, event_type, market_id, market_slug, side, amount_usdc, \

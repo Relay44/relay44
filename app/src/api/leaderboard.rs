@@ -5,8 +5,8 @@ use serde_json::{json, Value};
 use sqlx::Row;
 use std::sync::Arc;
 
-use crate::api::jwt::{check_role, UserRole};
 use crate::api::auth::extract_jwt_user;
+use crate::api::jwt::{check_role, UserRole};
 use crate::api::validation::validate_pagination;
 use crate::api::ApiError;
 use crate::AppState;
@@ -46,10 +46,7 @@ fn validate_period(period: &str) -> Result<(), ApiError> {
     if !ALLOWED_PERIODS.contains(&period) {
         return Err(ApiError::bad_request(
             "INVALID_PERIOD",
-            &format!(
-                "Period must be one of: {}",
-                ALLOWED_PERIODS.join(", ")
-            ),
+            &format!("Period must be one of: {}", ALLOWED_PERIODS.join(", ")),
         ));
     }
     Ok(())
@@ -59,10 +56,7 @@ fn validate_metric(metric: &str) -> Result<(), ApiError> {
     if !ALLOWED_METRICS.contains(&metric) {
         return Err(ApiError::bad_request(
             "INVALID_METRIC",
-            &format!(
-                "Metric must be one of: {}",
-                ALLOWED_METRICS.join(", ")
-            ),
+            &format!("Metric must be one of: {}", ALLOWED_METRICS.join(", ")),
         ));
     }
     Ok(())
@@ -105,7 +99,7 @@ pub async fn get_leaderboard(
         "SELECT snapshot_time FROM leaderboard_snapshots
          WHERE period = $1 AND metric = $2
          ORDER BY snapshot_time DESC
-         LIMIT 1"
+         LIMIT 1",
     )
     .bind(period)
     .bind(metric)
@@ -130,7 +124,7 @@ pub async fn get_leaderboard(
     // Count total entries for this snapshot
     let count_row = sqlx::query(
         "SELECT COUNT(*) AS total FROM leaderboard_snapshots
-         WHERE period = $1 AND metric = $2 AND snapshot_time = $3"
+         WHERE period = $1 AND metric = $2 AND snapshot_time = $3",
     )
     .bind(period)
     .bind(metric)
@@ -146,7 +140,7 @@ pub async fn get_leaderboard(
          FROM leaderboard_snapshots
          WHERE period = $1 AND metric = $2 AND snapshot_time = $3
          ORDER BY rank ASC
-         LIMIT $4 OFFSET $5"
+         LIMIT $4 OFFSET $5",
     )
     .bind(period)
     .bind(metric)
@@ -191,7 +185,7 @@ pub async fn get_user_rank(
         "SELECT snapshot_time FROM leaderboard_snapshots
          WHERE period = $1 AND metric = $2
          ORDER BY snapshot_time DESC
-         LIMIT 1"
+         LIMIT 1",
     )
     .bind(period)
     .bind(metric)
@@ -207,7 +201,7 @@ pub async fn get_user_rank(
     let row = sqlx::query(
         "SELECT wallet_address, value, rank, previous_rank, change
          FROM leaderboard_snapshots
-         WHERE period = $1 AND metric = $2 AND snapshot_time = $3 AND wallet_address = $4"
+         WHERE period = $1 AND metric = $2 AND snapshot_time = $3 AND wallet_address = $4",
     )
     .bind(period)
     .bind(metric)
@@ -438,9 +432,7 @@ async fn compute_metric_from_trades(
     agg_query: &str,
 ) -> Result<i64, ApiError> {
     // Fetch aggregated values
-    let rows = sqlx::query(agg_query)
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(agg_query).fetch_all(pool).await?;
 
     if rows.is_empty() {
         return Ok(0);
@@ -451,7 +443,7 @@ async fn compute_metric_from_trades(
         "SELECT snapshot_time FROM leaderboard_snapshots
          WHERE period = $1 AND metric = $2 AND snapshot_time < $3
          ORDER BY snapshot_time DESC
-         LIMIT 1"
+         LIMIT 1",
     )
     .bind(period)
     .bind(metric)
@@ -472,7 +464,7 @@ async fn compute_metric_from_trades(
         let (previous_rank, change) = if let Some(pt) = prev_time {
             let prev_row = sqlx::query(
                 "SELECT rank, value FROM leaderboard_snapshots
-                 WHERE period = $1 AND metric = $2 AND snapshot_time = $3 AND wallet_address = $4"
+                 WHERE period = $1 AND metric = $2 AND snapshot_time = $3 AND wallet_address = $4",
             )
             .bind(period)
             .bind(metric)
@@ -501,7 +493,7 @@ async fn compute_metric_from_trades(
              DO UPDATE SET value = EXCLUDED.value,
                            rank = EXCLUDED.rank,
                            previous_rank = EXCLUDED.previous_rank,
-                           change = EXCLUDED.change"
+                           change = EXCLUDED.change",
         )
         .bind(&wallet)
         .bind(period)

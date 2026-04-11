@@ -1349,7 +1349,11 @@ fn resolved_probability(resolved: &ResolvedNodeMarket) -> Option<i32> {
 
 /// Reduce a node's effective weight when its data hasn't been refreshed recently.
 /// >24h stale → 25% weight, >6h → 50% weight, otherwise full weight.
-fn staleness_adjusted_weight(weight_bps: i32, updated_at: DateTime<Utc>, now: DateTime<Utc>) -> i32 {
+fn staleness_adjusted_weight(
+    weight_bps: i32,
+    updated_at: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> i32 {
     let age_hours = (now - updated_at).num_hours();
     if age_hours > 24 {
         weight_bps / 4

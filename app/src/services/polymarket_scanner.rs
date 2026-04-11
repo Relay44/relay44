@@ -106,10 +106,18 @@ fn classify_category(market: &GammaMarket) -> String {
         if tag.contains("crypto") || tag.contains("bitcoin") || tag.contains("ethereum") {
             return "crypto".to_string();
         }
-        if tag.contains("sport") || tag.contains("nba") || tag.contains("nfl") || tag.contains("soccer") {
+        if tag.contains("sport")
+            || tag.contains("nba")
+            || tag.contains("nfl")
+            || tag.contains("soccer")
+        {
             return "sports".to_string();
         }
-        if tag.contains("politic") || tag.contains("election") || tag.contains("trump") || tag.contains("biden") {
+        if tag.contains("politic")
+            || tag.contains("election")
+            || tag.contains("trump")
+            || tag.contains("biden")
+        {
             return "politics".to_string();
         }
         if tag.contains("entertainment") || tag.contains("celebrity") || tag.contains("oscars") {
@@ -124,13 +132,23 @@ fn classify_category(market: &GammaMarket) -> String {
     }
 
     // Question-based fallback
-    if question_lower.contains("bitcoin") || question_lower.contains("btc") || question_lower.contains("eth") || question_lower.contains("crypto") {
+    if question_lower.contains("bitcoin")
+        || question_lower.contains("btc")
+        || question_lower.contains("eth")
+        || question_lower.contains("crypto")
+    {
         return "crypto".to_string();
     }
-    if question_lower.contains("nba") || question_lower.contains("nfl") || question_lower.contains("win") && question_lower.contains("game") {
+    if question_lower.contains("nba")
+        || question_lower.contains("nfl")
+        || question_lower.contains("win") && question_lower.contains("game")
+    {
         return "sports".to_string();
     }
-    if question_lower.contains("president") || question_lower.contains("elect") || question_lower.contains("congress") {
+    if question_lower.contains("president")
+        || question_lower.contains("elect")
+        || question_lower.contains("congress")
+    {
         return "politics".to_string();
     }
 
@@ -595,10 +613,7 @@ pub fn spawn_scanner(state: Arc<AppState>) {
         .unwrap_or(60)
         .max(30);
 
-    info!(
-        "Starting Polymarket scanner (interval={}s)",
-        interval_secs
-    );
+    info!("Starting Polymarket scanner (interval={}s)", interval_secs);
 
     tokio::spawn(async move {
         // Initial delay to let the rest of the app start
@@ -656,14 +671,28 @@ pub fn spawn_scanner(state: Arc<AppState>) {
 mod tests {
     use super::*;
 
-    fn make_market(yes_price: f64, no_price: f64, category: &str, volume: f64, liquidity: f64) -> GammaMarket {
+    fn make_market(
+        yes_price: f64,
+        no_price: f64,
+        category: &str,
+        volume: f64,
+        liquidity: f64,
+    ) -> GammaMarket {
         GammaMarket {
             condition_id: "test-cond-1".to_string(),
             question: "Test market?".to_string(),
             slug: "test-market".to_string(),
             tokens: vec![
-                GammaToken { token_id: "tok-yes".to_string(), outcome: "Yes".to_string(), price: Some(yes_price) },
-                GammaToken { token_id: "tok-no".to_string(), outcome: "No".to_string(), price: Some(no_price) },
+                GammaToken {
+                    token_id: "tok-yes".to_string(),
+                    outcome: "Yes".to_string(),
+                    price: Some(yes_price),
+                },
+                GammaToken {
+                    token_id: "tok-no".to_string(),
+                    outcome: "No".to_string(),
+                    price: Some(no_price),
+                },
             ],
             outcome_prices: None,
             outcomes: None,
@@ -671,7 +700,10 @@ mod tests {
             liquidity: Some(liquidity.to_string()),
             end_date_iso: None,
             active: true,
-            tags: vec![GammaTag { slug: category.to_string(), label: None }],
+            tags: vec![GammaTag {
+                slug: category.to_string(),
+                label: None,
+            }],
             category: Some(category.to_string()),
         }
     }

@@ -169,21 +169,19 @@ async fn check_oracle_resolutions(state: &AppState) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
         // Get fee_bps from market
-        let fee_bps: (i16,) = sqlx::query_as(
-            "SELECT fee_bps FROM distribution_markets WHERE id = $1",
-        )
-        .bind(&market_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
+        let fee_bps: (i16,) =
+            sqlx::query_as("SELECT fee_bps FROM distribution_markets WHERE id = $1")
+                .bind(&market_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
 
-        let total_pool_row: (i64,) = sqlx::query_as(
-            "SELECT total_collateral FROM distribution_markets WHERE id = $1",
-        )
-        .bind(&market_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| e.to_string())?;
+        let total_pool_row: (i64,) =
+            sqlx::query_as("SELECT total_collateral FROM distribution_markets WHERE id = $1")
+                .bind(&market_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
         let total_pool = total_pool_row.0 as f64;
         let mut total_gross_paid = 0.0;
 
@@ -250,10 +248,7 @@ async fn check_oracle_resolutions(state: &AppState) -> Result<(), String> {
                     owner,
                     kind: NotificationType::DistributionMarketResolved,
                     title: "Distribution market resolved".to_string(),
-                    message: format!(
-                        "Resolved at {:.4}. Claim your payout.",
-                        resolved_value
-                    ),
+                    message: format!("Resolved at {:.4}. Claim your payout.", resolved_value),
                     market_id: Some(market_id.clone()),
                     order_id: None,
                     decision_cell_id: None,

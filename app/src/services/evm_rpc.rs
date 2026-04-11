@@ -180,10 +180,11 @@ impl EvmRpcService {
         Ok(Some(receipt))
     }
 
-
     pub async fn eth_get_transaction_count(&self, address: &str, block: &str) -> Result<u64> {
         let params = serde_json::json!([address, block]);
-        let value = self.rpc_value_call("eth_getTransactionCount", params).await?;
+        let value = self
+            .rpc_value_call("eth_getTransactionCount", params)
+            .await?;
         let raw = value
             .as_str()
             .ok_or_else(|| anyhow!("Invalid eth_getTransactionCount response"))?;
@@ -359,7 +360,6 @@ pub fn parse_u64_hex(value: &str) -> Result<u64> {
 
     u64::from_str_radix(normalized, 16).map_err(|_| anyhow!("Invalid RPC hex value"))
 }
-
 
 pub fn parse_u128_hex(value: &str) -> Result<u128> {
     let trimmed = value.trim_start_matches("0x");

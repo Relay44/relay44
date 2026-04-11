@@ -64,8 +64,7 @@ pub struct AppState {
 }
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
-    cfg
-        .route("/health", web::get().to(api::health::health_check))
+    cfg.route("/health", web::get().to(api::health::health_check))
         .route(
             "/health/detailed",
             web::get().to(api::health::health_detailed),
@@ -97,7 +96,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                         .route("", web::get().to(api::orders::list_orders))
                         .route("", web::post().to(api::orders::place_order))
                         .route("/batch", web::post().to(api::orders::batch_place_orders))
-                        .route("/cancel-batch", web::post().to(api::orders::batch_cancel_orders))
+                        .route(
+                            "/cancel-batch",
+                            web::post().to(api::orders::batch_cancel_orders),
+                        )
                         .route("/replace", web::post().to(api::orders::replace_orders))
                         .route("/{order_id}", web::get().to(api::orders::get_order))
                         .route("/{order_id}", web::delete().to(api::orders::cancel_order)),
@@ -119,17 +121,32 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                                 .route("", web::post().to(api::distribution::create_dist_market))
                                 .route("/{id}", web::get().to(api::distribution::get_dist_market))
                                 .route("/{id}/quote", web::get().to(api::distribution::get_quote))
-                                .route("/{id}/trade", web::post().to(api::distribution::open_position))
-                                .route("/{id}/resolve", web::post().to(api::distribution::resolve_market))
+                                .route(
+                                    "/{id}/trade",
+                                    web::post().to(api::distribution::open_position),
+                                )
+                                .route(
+                                    "/{id}/resolve",
+                                    web::post().to(api::distribution::resolve_market),
+                                )
                                 .route("/{id}/curve", web::get().to(api::distribution::get_curve))
-                                .route("/{id}/history", web::get().to(api::distribution::get_curve_history))
-                                .route("/{id}/activity", web::get().to(api::distribution::get_market_activity)),
+                                .route(
+                                    "/{id}/history",
+                                    web::get().to(api::distribution::get_curve_history),
+                                )
+                                .route(
+                                    "/{id}/activity",
+                                    web::get().to(api::distribution::get_market_activity),
+                                ),
                         )
                         .service(
                             web::scope("/positions")
                                 .route("", web::get().to(api::distribution::list_positions))
                                 .route("/{id}", web::delete().to(api::distribution::close_position))
-                                .route("/{id}/claim", web::post().to(api::distribution::claim_payout)),
+                                .route(
+                                    "/{id}/claim",
+                                    web::post().to(api::distribution::claim_payout),
+                                ),
                         ),
                 )
                 .service(
@@ -189,9 +206,18 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                         )
                         .route("/refresh", web::post().to(api::auth::refresh_token))
                         .route("/logout", web::post().to(api::auth::logout))
-                        .route("/api-keys", web::post().to(api::api_key::create_api_key_handler))
-                        .route("/api-keys", web::get().to(api::api_key::list_api_keys_handler))
-                        .route("/api-keys/{key_id}", web::delete().to(api::api_key::revoke_api_key_handler)),
+                        .route(
+                            "/api-keys",
+                            web::post().to(api::api_key::create_api_key_handler),
+                        )
+                        .route(
+                            "/api-keys",
+                            web::get().to(api::api_key::list_api_keys_handler),
+                        )
+                        .route(
+                            "/api-keys/{key_id}",
+                            web::delete().to(api::api_key::revoke_api_key_handler),
+                        ),
                 )
                 .service(
                     web::scope("/payments").service(
@@ -352,10 +378,19 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                             "/oracle/keeper/report",
                             web::post().to(api::evm::oracle_keeper_report),
                         )
-                        .route("/token/state", web::get().to(api::evm::get_relay_token_state))
+                        .route(
+                            "/token/state",
+                            web::get().to(api::evm::get_relay_token_state),
+                        )
                         // ---- Scanner endpoints ----
-                        .route("/scanner/limitless", web::get().to(api::evm::get_scanned_limitless))
-                        .route("/scanner/aerodrome", web::get().to(api::evm::get_scanned_aerodrome))
+                        .route(
+                            "/scanner/limitless",
+                            web::get().to(api::evm::get_scanned_limitless),
+                        )
+                        .route(
+                            "/scanner/aerodrome",
+                            web::get().to(api::evm::get_scanned_aerodrome),
+                        )
                         .service(
                             web::scope("/write")
                                 .route(
@@ -396,13 +431,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                                 )
                                 .route(
                                     "/agents/manager-approval",
-                                    web::post()
-                                        .to(api::evm::prepare_set_manager_approval_write),
+                                    web::post().to(api::evm::prepare_set_manager_approval_write),
                                 )
                                 .route(
                                     "/agents/bootstrap-create",
-                                    web::post()
-                                        .to(api::evm::prepare_bootstrap_create_agents_write),
+                                    web::post().to(api::evm::prepare_bootstrap_create_agents_write),
                                 )
                                 .route(
                                     "/agents/update",
@@ -431,23 +464,19 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                                 )
                                 .route(
                                     "/reputation/outcome",
-                                    web::post()
-                                        .to(api::evm::prepare_erc8004_submit_outcome_write),
+                                    web::post().to(api::evm::prepare_erc8004_submit_outcome_write),
                                 )
                                 .route(
                                     "/reputation/feedback",
-                                    web::post()
-                                        .to(api::evm::prepare_erc8004_give_feedback_write),
+                                    web::post().to(api::evm::prepare_erc8004_give_feedback_write),
                                 )
                                 .route(
                                     "/reputation/feedback/revoke",
-                                    web::post()
-                                        .to(api::evm::prepare_erc8004_revoke_feedback_write),
+                                    web::post().to(api::evm::prepare_erc8004_revoke_feedback_write),
                                 )
                                 .route(
                                     "/reputation/feedback/response",
-                                    web::post()
-                                        .to(api::evm::prepare_erc8004_append_response_write),
+                                    web::post().to(api::evm::prepare_erc8004_append_response_write),
                                 )
                                 .route(
                                     "/oracle/configure",
@@ -464,14 +493,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                                 )
                                 .route(
                                     "/validation/response",
-                                    web::post().to(
-                                        api::evm::prepare_erc8004_validation_response_write,
-                                    ),
+                                    web::post()
+                                        .to(api::evm::prepare_erc8004_validation_response_write),
                                 )
-                                .route(
-                                    "/relay",
-                                    web::post().to(api::evm::relay_raw_transaction),
-                                ),
+                                .route("/relay", web::post().to(api::evm::relay_raw_transaction)),
                         ),
                 )
                 .service(
@@ -526,10 +551,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                 )
                 .service(
                     web::scope("/copy-trading")
-                        .route(
-                            "/subscribe",
-                            web::post().to(api::copy_trading::subscribe),
-                        )
+                        .route("/subscribe", web::post().to(api::copy_trading::subscribe))
                         .route(
                             "/subscribe/{id}",
                             web::delete().to(api::copy_trading::unsubscribe),
@@ -683,8 +705,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                         )
                         .route(
                             "/agents/public/performance",
-                            web::get()
-                                .to(api::external::get_public_external_agents_performance),
+                            web::get().to(api::external::get_public_external_agents_performance),
                         )
                         .route(
                             "/agents/performance",
@@ -737,10 +758,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                             "/history",
                             web::get().to(api::risk_console::get_portfolio_history),
                         )
-                        .route(
-                            "/drawdown",
-                            web::get().to(api::risk_console::get_drawdown),
-                        )
+                        .route("/drawdown", web::get().to(api::risk_console::get_drawdown))
                         .route(
                             "/compliance/export",
                             web::get().to(api::risk_console::export_compliance),
@@ -748,18 +766,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                 )
                 .service(
                     web::scope("/parlays")
-                        .route(
-                            "",
-                            web::post().to(api::parlays::create_parlay),
-                        )
-                        .route(
-                            "",
-                            web::get().to(api::parlays::list_parlays),
-                        )
-                        .route(
-                            "/{parlay_id}",
-                            web::get().to(api::parlays::get_parlay),
-                        )
+                        .route("", web::post().to(api::parlays::create_parlay))
+                        .route("", web::get().to(api::parlays::list_parlays))
+                        .route("/{parlay_id}", web::get().to(api::parlays::get_parlay))
                         .route(
                             "/{parlay_id}/resolve",
                             web::post().to(api::parlays::resolve_leg),
@@ -767,22 +776,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                 )
                 .service(
                     web::scope("/creator")
-                        .route(
-                            "/tiers",
-                            web::get().to(api::creator_tiers::list_tiers),
-                        )
-                        .route(
-                            "/profile",
-                            web::get().to(api::creator_tiers::get_profile),
-                        )
-                        .route(
-                            "/upgrade",
-                            web::post().to(api::creator_tiers::upgrade_tier),
-                        )
-                        .route(
-                            "/fees",
-                            web::get().to(api::creator_tiers::list_fees),
-                        ),
+                        .route("/tiers", web::get().to(api::creator_tiers::list_tiers))
+                        .route("/profile", web::get().to(api::creator_tiers::get_profile))
+                        .route("/upgrade", web::post().to(api::creator_tiers::upgrade_tier))
+                        .route("/fees", web::get().to(api::creator_tiers::list_fees)),
                 )
                 .service(
                     web::scope("/agents")
@@ -790,10 +787,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                             "/templates",
                             web::get().to(api::agent_service::list_templates),
                         )
-                        .route(
-                            "/deploy",
-                            web::post().to(api::agent_service::deploy_agent),
-                        )
+                        .route("/deploy", web::post().to(api::agent_service::deploy_agent))
                         .route(
                             "/managed",
                             web::get().to(api::agent_service::list_managed_agents),
@@ -809,41 +803,20 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                 )
                 .service(
                     web::scope("/signals")
-                        .route(
-                            "/providers",
-                            web::post().to(api::signals::create_provider),
-                        )
-                        .route(
-                            "/providers",
-                            web::get().to(api::signals::list_providers),
-                        )
-                        .route(
-                            "/emit",
-                            web::post().to(api::signals::emit_signal),
-                        )
+                        .route("/providers", web::post().to(api::signals::create_provider))
+                        .route("/providers", web::get().to(api::signals::list_providers))
+                        .route("/emit", web::post().to(api::signals::emit_signal))
                         .route(
                             "/market/{market_slug}",
                             web::get().to(api::signals::get_market_signals),
                         )
-                        .route(
-                            "/score",
-                            web::post().to(api::signals::score_market),
-                        ),
+                        .route("/score", web::post().to(api::signals::score_market)),
                 )
                 .service(
                     web::scope("/routing")
-                        .route(
-                            "/quote",
-                            web::post().to(api::routing::route_order),
-                        )
-                        .route(
-                            "/arbitrage",
-                            web::get().to(api::routing::list_arbitrage),
-                        )
-                        .route(
-                            "/venues",
-                            web::post().to(api::routing::upsert_venue_link),
-                        ),
+                        .route("/quote", web::post().to(api::routing::route_order))
+                        .route("/arbitrage", web::get().to(api::routing::list_arbitrage))
+                        .route("/venues", web::post().to(api::routing::upsert_venue_link)),
                 )
                 .service(
                     web::scope("/pm-scanner")
@@ -851,18 +824,12 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                             "/opportunities",
                             web::get().to(api::pm_scanner::list_opportunities),
                         )
-                        .route(
-                            "/scan",
-                            web::post().to(api::pm_scanner::trigger_scan),
-                        )
+                        .route("/scan", web::post().to(api::pm_scanner::trigger_scan))
                         .route(
                             "/calibration",
                             web::get().to(api::pm_scanner::get_calibration),
                         )
-                        .route(
-                            "/runs",
-                            web::get().to(api::pm_scanner::list_scan_runs),
-                        ),
+                        .route("/runs", web::get().to(api::pm_scanner::list_scan_runs)),
                 )
                 .service(
                     web::scope("/decisions")
@@ -981,10 +948,12 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                 .service(
                     web::scope("/solana")
                         .route("/programs", web::get().to(api::solana::get_solana_programs))
-                        .service(web::scope("/write").route(
-                            "/relay",
-                            web::post().to(api::solana::relay_raw_transaction),
-                        )),
+                        .service(
+                            web::scope("/write").route(
+                                "/relay",
+                                web::post().to(api::solana::relay_raw_transaction),
+                            ),
+                        ),
                 )
                 .service(
                     web::scope("/web4")
@@ -1001,10 +970,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                         .route("/agent-card", web::get().to(api::web4::get_agent_card))
                         .service(
                             web::scope("/xmtp")
-                                .route(
-                                    "/health",
-                                    web::get().to(api::web4::get_xmtp_swarm_health),
-                                )
+                                .route("/health", web::get().to(api::web4::get_xmtp_swarm_health))
                                 .route(
                                     "/swarm/send",
                                     web::post().to(api::web4::send_xmtp_swarm_message),

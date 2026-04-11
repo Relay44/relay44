@@ -9,7 +9,10 @@ use crate::AppState;
 
 fn ensure_creator_tiers_enabled(state: &AppState) -> Result<(), ApiError> {
     if !state.config.creator_tiers_enabled {
-        return Err(ApiError::bad_request("CREATOR_TIERS_DISABLED", "creator tiers are disabled"));
+        return Err(ApiError::bad_request(
+            "CREATOR_TIERS_DISABLED",
+            "creator tiers are disabled",
+        ));
     }
     Ok(())
 }
@@ -67,18 +70,16 @@ pub async fn get_profile(
 
     let row = match row {
         Some(r) => r,
-        None => {
-            sqlx::query_as(
-                "INSERT INTO creator_profiles (owner) VALUES ($1) \
+        None => sqlx::query_as(
+            "INSERT INTO creator_profiles (owner) VALUES ($1) \
                  RETURNING tier_id, total_seed_deployed, total_pnl_usdc, \
                  total_platform_fees_usdc, markets_created, markets_graduated, \
                  staking_amount_usdc, updated_at::text",
-            )
-            .bind(user.wallet_address.as_str())
-            .fetch_one(state.db.pool())
-            .await
-            .map_err(|e| ApiError::internal(&e.to_string()))?
-        }
+        )
+        .bind(user.wallet_address.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?,
     };
 
     // Get tier details.
@@ -120,29 +121,32 @@ pub async fn upgrade_tier(
     let user = extract_authenticated_user(&req, &state).await?;
 
     // Validate tier exists and is an upgrade.
-    let target: Option<(String, f64)> = sqlx::query_as(
-        "SELECT id, max_seed_usdc FROM creator_tiers WHERE id = $1",
-    )
-    .bind(&body.tier_id)
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    let target: Option<(String, f64)> =
+        sqlx::query_as("SELECT id, max_seed_usdc FROM creator_tiers WHERE id = $1")
+            .bind(&body.tier_id)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     let (tier_id, _) = target.ok_or_else(|| ApiError::not_found("Tier"))?;
 
     // Get current tier.
-    let current: Option<(String,)> = sqlx::query_as(
-        "SELECT tier_id FROM creator_profiles WHERE owner = $1",
-    )
-    .bind(user.wallet_address.as_str())
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    let current: Option<(String,)> =
+        sqlx::query_as("SELECT tier_id FROM creator_profiles WHERE owner = $1")
+            .bind(user.wallet_address.as_str())
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
 
-    let current_tier = current.map(|c| c.0).unwrap_or_else(|| "starter".to_string());
+    let current_tier = current
+        .map(|c| c.0)
+        .unwrap_or_else(|| "starter".to_string());
 
     let tier_order = ["starter", "pro", "institutional"];
-    let current_idx = tier_order.iter().position(|t| *t == current_tier).unwrap_or(0);
+    let current_idx = tier_order
+        .iter()
+        .position(|t| *t == current_tier)
+        .unwrap_or(0);
     let target_idx = tier_order.iter().position(|t| *t == tier_id).unwrap_or(0);
 
     if target_idx <= current_idx {
@@ -152,14 +156,12 @@ pub async fn upgrade_tier(
         ));
     }
 
-    sqlx::query(
-        "UPDATE creator_profiles SET tier_id = $1, updated_at = NOW() WHERE owner = $2",
-    )
-    .bind(&tier_id)
-    .bind(user.wallet_address.as_str())
-    .execute(state.db.pool())
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    sqlx::query("UPDATE creator_profiles SET tier_id = $1, updated_at = NOW() WHERE owner = $2")
+        .bind(&tier_id)
+        .bind(user.wallet_address.as_str())
+        .execute(state.db.pool())
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true, "tierId": tier_id })))
 }

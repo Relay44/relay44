@@ -24,9 +24,7 @@ async fn get_market_is_public() {
 #[actix_rt::test]
 async fn create_market_requires_auth() {
     let app = common::build_test_app().await;
-    let req = test::TestRequest::post()
-        .uri("/v1/markets")
-        .to_request();
+    let req = test::TestRequest::post().uri("/v1/markets").to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_client_error());
 }
