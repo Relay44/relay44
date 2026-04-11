@@ -1,8 +1,23 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+
+// See SidebarMenu.tsx — on docs.relay44.com only /docs/* routes exist, so
+// non-docs footer links must jump to the apex.
+const DOCS_HOST = 'docs.relay44.com';
+const APEX_ORIGIN = 'https://relay44.com';
+
+function useIsDocsHost() {
+  const [isDocs, setIsDocs] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setIsDocs(window.location.hostname === DOCS_HOST);
+  }, []);
+  return isDocs;
+}
 
 const productLinks = [
   { href: '/markets', label: 'Markets' },
@@ -52,46 +67,53 @@ function FooterColumn({
 
 export function Footer() {
   const pathname = usePathname();
+  const isDocsHost = useIsDocsHost();
 
-  const linkClass = (href: string) =>
+  const linkClass = (href: string, crossHost: boolean) =>
     cn(
       'text-xs transition-colors',
-      pathname === href || (href !== '/' && pathname.startsWith(href))
+      !crossHost &&
+        (pathname === href || (href !== '/' && pathname.startsWith(href)))
         ? 'text-text-primary'
         : 'text-text-secondary hover:text-text-primary',
     );
+
+  const renderLink = ({ href, label }: { href: string; label: string }) => {
+    const crossHost = isDocsHost && !href.startsWith('/docs');
+    const resolved = crossHost ? `${APEX_ORIGIN}${href}` : href;
+    if (crossHost) {
+      return (
+        <a href={resolved} className={linkClass(href, true)}>
+          {label}
+        </a>
+      );
+    }
+    return (
+      <Link href={resolved} className={linkClass(href, false)}>
+        {label}
+      </Link>
+    );
+  };
 
   return (
     <footer className="border-t border-border bg-bg-base hidden md:block">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-10">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-8">
           <FooterColumn title="Product">
-            {productLinks.map(({ href, label }) => (
-              <li key={href}>
-                <Link href={href} className={linkClass(href)}>
-                  {label}
-                </Link>
-              </li>
+            {productLinks.map((link) => (
+              <li key={link.href}>{renderLink(link)}</li>
             ))}
           </FooterColumn>
 
           <FooterColumn title="Platform">
-            {platformLinks.map(({ href, label }) => (
-              <li key={href}>
-                <Link href={href} className={linkClass(href)}>
-                  {label}
-                </Link>
-              </li>
+            {platformLinks.map((link) => (
+              <li key={link.href}>{renderLink(link)}</li>
             ))}
           </FooterColumn>
 
           <FooterColumn title="Resources">
-            {resourceLinks.map(({ href, label }) => (
-              <li key={href}>
-                <Link href={href} className={linkClass(href)}>
-                  {label}
-                </Link>
-              </li>
+            {resourceLinks.map((link) => (
+              <li key={link.href}>{renderLink(link)}</li>
             ))}
           </FooterColumn>
 
