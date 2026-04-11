@@ -45,6 +45,7 @@ const navLinks = [
   { href: "/context-graph", label: "Context Graph", note: "Misinformation detection via OriginTrail DKG" },
   { href: "/how-it-works", label: "How it works", note: "Platform overview and rules" },
   { href: "/docs", label: "Docs", note: "Guides, API reference, and developer resources" },
+  { href: "/docs/protocol", label: "Protocol", note: "Overview and technical roadmap" },
   { href: "/docs/contracts", label: "Protocol Reference", note: "Contract addresses, ABIs, and viem snippets" },
 ];
 
