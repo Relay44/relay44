@@ -1,6 +1,7 @@
 import { StructuredData } from '@/components/seo/StructuredData';
 import { CodeBlock } from '@/components/docs';
 import { Card } from '@/components/ui';
+import { CrossHostLink } from '@/components/layout/CrossHostLink';
 import {
   buildBreadcrumbStructuredData,
   buildPageMetadata,
@@ -302,12 +303,12 @@ export default function ContractsPage() {
           </p>
           <p className="mt-3 text-sm leading-6 text-text-secondary">
             Want to build on the protocol directly? See{' '}
-            <a
+            <CrossHostLink
               href="/tokenomics"
               className="text-text-primary underline-offset-2 hover:underline"
             >
               /tokenomics
-            </a>{' '}
+            </CrossHostLink>{' '}
             for how fees and rewards flow back to stakers, agents, and creators, or
             jump straight to the{' '}
             <a
