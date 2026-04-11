@@ -28,7 +28,6 @@ async fn graceful_shutdown(state: Arc<AppState>) {
     info!("Graceful shutdown complete");
 }
 
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -118,7 +117,9 @@ async fn main() -> std::io::Result<()> {
             match migration_db.run_migrations().await {
                 Ok(()) => {
                     info!("Database migrations completed; starting background services");
-                    relay44_backend::services::orchestrator::spawn_background_services(background_state);
+                    relay44_backend::services::orchestrator::spawn_background_services(
+                        background_state,
+                    );
                     return;
                 }
                 Err(e) => {
@@ -181,7 +182,9 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(app_state.clone()))
             .wrap(Governor::new(&governor_conf))
-            .wrap(relay44_backend::middleware::GeoBlock::new(geo_blocking_enabled))
+            .wrap(relay44_backend::middleware::GeoBlock::new(
+                geo_blocking_enabled,
+            ))
             .wrap(cors)
             .wrap(
                 actix_middleware::DefaultHeaders::new()

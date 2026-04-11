@@ -10,7 +10,10 @@ use crate::AppState;
 
 fn ensure_agent_service_enabled(state: &AppState) -> Result<(), ApiError> {
     if !state.config.agent_service_enabled {
-        return Err(ApiError::bad_request("AGENT_SERVICE_DISABLED", "agent service is disabled"));
+        return Err(ApiError::bad_request(
+            "AGENT_SERVICE_DISABLED",
+            "agent service is disabled",
+        ));
     }
     Ok(())
 }
@@ -37,16 +40,24 @@ pub async fn list_templates(
     state: web::Data<Arc<AppState>>,
 ) -> Result<impl Responder, ApiError> {
     ensure_agent_service_enabled(&state)?;
-    let rows: Vec<(String, String, Option<String>, String, String, String, f64, String)> =
-        sqlx::query_as(
-            "SELECT id, name, description, strategy, category, risk_tier, \
+    let rows: Vec<(
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        f64,
+        String,
+    )> = sqlx::query_as(
+        "SELECT id, name, description, strategy, category, risk_tier, \
              min_seed_usdc, default_params::text \
              FROM agent_templates WHERE active = true \
              ORDER BY category, name",
-        )
-        .fetch_all(state.db.pool())
-        .await
-        .map_err(|e| ApiError::internal(&e.to_string()))?;
+    )
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     let templates: Vec<_> = rows
         .iter()
@@ -120,7 +131,10 @@ pub async fn deploy_agent(
 
     let name = body.name.trim();
     if name.is_empty() || name.len() > 128 {
-        return Err(ApiError::bad_request("INVALID_NAME", "name must be 1-128 chars"));
+        return Err(ApiError::bad_request(
+            "INVALID_NAME",
+            "name must be 1-128 chars",
+        ));
     }
 
     // Merge user params over template defaults.
@@ -169,7 +183,18 @@ pub async fn list_managed_agents(
     let limit = query.limit.unwrap_or(50).min(200);
 
     let rows: Vec<(
-        String, String, String, String, f64, String, f64, i64, f64, f64, Option<String>, String,
+        String,
+        String,
+        String,
+        String,
+        f64,
+        String,
+        f64,
+        i64,
+        f64,
+        f64,
+        Option<String>,
+        String,
     )> = if let Some(status) = &query.status {
         sqlx::query_as(
             "SELECT a.id, a.name, t.name, t.strategy, a.seed_usdc, a.status, \
@@ -272,31 +297,39 @@ pub async fn get_agent_trades(
     let user = extract_authenticated_user(&req, &state).await?;
 
     // Verify ownership.
-    let owns: Option<(String,)> = sqlx::query_as(
-        "SELECT id FROM managed_agents WHERE id = $1 AND owner = $2",
-    )
-    .bind(agent_id.as_str())
-    .bind(user.wallet_address.as_str())
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    let owns: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM managed_agents WHERE id = $1 AND owner = $2")
+            .bind(agent_id.as_str())
+            .bind(user.wallet_address.as_str())
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     if owns.is_none() {
         return Err(ApiError::not_found("Managed agent"));
     }
 
-    let rows: Vec<(i32, String, String, String, f64, f64, Option<f64>, Option<String>, String)> =
-        sqlx::query_as(
-            "SELECT id, market_slug, outcome, side, price, quantity, \
+    let rows: Vec<(
+        i32,
+        String,
+        String,
+        String,
+        f64,
+        f64,
+        Option<f64>,
+        Option<String>,
+        String,
+    )> = sqlx::query_as(
+        "SELECT id, market_slug, outcome, side, price, quantity, \
              pnl_usdc, provider, created_at::text \
              FROM managed_agent_trades \
              WHERE agent_id = $1 \
              ORDER BY created_at DESC LIMIT 100",
-        )
-        .bind(agent_id.as_str())
-        .fetch_all(state.db.pool())
-        .await
-        .map_err(|e| ApiError::internal(&e.to_string()))?;
+    )
+    .bind(agent_id.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| ApiError::internal(&e.to_string()))?;
 
     let trades: Vec<_> = rows
         .iter()

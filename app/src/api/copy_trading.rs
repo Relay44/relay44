@@ -115,13 +115,11 @@ pub async fn subscribe(
     }
 
     // Validate: target wallet must exist in users table
-    let target_exists = sqlx::query(
-        "SELECT 1 FROM users WHERE LOWER(wallet) = LOWER($1)",
-    )
-    .bind(&target)
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|err| ApiError::internal(&err.to_string()))?;
+    let target_exists = sqlx::query("SELECT 1 FROM users WHERE LOWER(wallet) = LOWER($1)")
+        .bind(&target)
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(|err| ApiError::internal(&err.to_string()))?;
 
     if target_exists.is_none() {
         return Err(ApiError::bad_request(
@@ -151,10 +149,7 @@ pub async fn subscribe(
 
     let id = uuid::Uuid::new_v4().to_string();
     let allocation = body.allocation_usdc.unwrap_or(50.0).clamp(1.0, 100_000.0);
-    let max_position = body
-        .max_position_usdc
-        .unwrap_or(20.0)
-        .clamp(1.0, 50_000.0);
+    let max_position = body.max_position_usdc.unwrap_or(20.0).clamp(1.0, 50_000.0);
 
     let row = sqlx::query(
         r#"

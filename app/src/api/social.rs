@@ -160,7 +160,10 @@ pub async fn update_profile(
     let bio = body.bio.as_deref().map(|s| &s[..s.len().min(500)]);
     let avatar_url = body.avatar_url.as_deref().map(|s| &s[..s.len().min(512)]);
     let website_url = body.website_url.as_deref().map(|s| &s[..s.len().min(256)]);
-    let twitter_handle = body.twitter_handle.as_deref().map(|s| &s[..s.len().min(32)]);
+    let twitter_handle = body
+        .twitter_handle
+        .as_deref()
+        .map(|s| &s[..s.len().min(32)]);
 
     state
         .db

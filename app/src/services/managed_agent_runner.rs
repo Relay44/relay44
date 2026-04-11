@@ -52,10 +52,7 @@ pub fn spawn_managed_agent_runner(state: Arc<AppState>) {
         return;
     }
 
-    let interval_secs = state
-        .config
-        .managed_agent_runner_interval_secs
-        .max(15);
+    let interval_secs = state.config.managed_agent_runner_interval_secs.max(15);
 
     info!(
         "Starting managed agent runner (interval={}s, fee_bps={}, hold_secs={})",
@@ -153,7 +150,9 @@ async fn run_tick(state: &AppState) -> Result<TickStats, String> {
     // First: sweep positions that need closing (hold expired, or agent
     // stopped/paused). This must run even for paused agents so outstanding
     // positions don't stay open forever.
-    stats.closed += sweep_due_positions(state, now).await.map_err(|e| e.to_string())?;
+    stats.closed += sweep_due_positions(state, now)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Then: load active agents whose next_execution_at is due.
     let rows = sqlx::query(
@@ -191,7 +190,8 @@ async fn run_tick(state: &AppState) -> Result<TickStats, String> {
         }
 
         let params_text: String = row.try_get("params_text").unwrap_or_else(|_| "{}".into());
-        let params: Json = serde_json::from_str(&params_text).unwrap_or(Json::Object(Default::default()));
+        let params: Json =
+            serde_json::from_str(&params_text).unwrap_or(Json::Object(Default::default()));
 
         let agent = AgentRecord {
             id: id.clone(),
@@ -261,7 +261,10 @@ async fn sweep_due_positions(state: &AppState, now: DateTime<Utc>) -> anyhow::Re
         let market_id = match ExternalMarketId::parse(&market_id_str) {
             Ok(m) => m,
             Err(e) => {
-                warn!("sweep: failed to parse market id {}: {:?}", market_id_str, e);
+                warn!(
+                    "sweep: failed to parse market id {}: {:?}",
+                    market_id_str, e
+                );
                 continue;
             }
         };
@@ -274,16 +277,21 @@ async fn sweep_due_positions(state: &AppState, now: DateTime<Utc>) -> anyhow::Re
             }
         };
 
-        let orderbook =
-            match fetch_orderbook(&state.config, &state.redis, &market_id, &outcome, ORDERBOOK_DEPTH)
-                .await
-            {
-                Ok(ob) => ob,
-                Err(e) => {
-                    debug!("sweep: fetch_orderbook {} failed: {:?}", market_id_str, e);
-                    continue;
-                }
-            };
+        let orderbook = match fetch_orderbook(
+            &state.config,
+            &state.redis,
+            &market_id,
+            &outcome,
+            ORDERBOOK_DEPTH,
+        )
+        .await
+        {
+            Ok(ob) => ob,
+            Err(e) => {
+                debug!("sweep: fetch_orderbook {} failed: {:?}", market_id_str, e);
+                continue;
+            }
+        };
 
         // If the market resolved, mark the position out at final resolution price.
         let fill = if market.resolved {
@@ -303,7 +311,9 @@ async fn sweep_due_positions(state: &AppState, now: DateTime<Utc>) -> anyhow::Re
                 used_orderbook_depth: false,
             }
         } else {
-            simulate_fill(&market, &orderbook, &outcome, exit_side, quantity, fee_bps, None)
+            simulate_fill(
+                &market, &orderbook, &outcome, exit_side, quantity, fee_bps, None,
+            )
         };
 
         let realized = realized_pnl(
@@ -374,7 +384,10 @@ async fn execute_agent(
 ) -> Result<u64, String> {
     // Drawdown guard: halt new entries if drawdown exceeds 50%.
     if agent.max_drawdown_pct >= 50.0 {
-        debug!("agent {} halted: drawdown {:.1}%", agent.id, agent.max_drawdown_pct);
+        debug!(
+            "agent {} halted: drawdown {:.1}%",
+            agent.id, agent.max_drawdown_pct
+        );
         return Ok(0);
     }
 
@@ -386,13 +399,12 @@ async fn execute_agent(
     }
 
     let max_markets = agent.param_u64("maxMarkets", 5).min(20) as i64;
-    let open_positions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM managed_agent_positions WHERE agent_id = $1",
-    )
-    .bind(&agent.id)
-    .fetch_one(state.db.pool())
-    .await
-    .map_err(|e| e.to_string())?;
+    let open_positions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM managed_agent_positions WHERE agent_id = $1")
+            .bind(&agent.id)
+            .fetch_one(state.db.pool())
+            .await
+            .map_err(|e| e.to_string())?;
 
     let capacity = (max_markets - open_positions).max(0);
     if capacity == 0 {
@@ -439,11 +451,7 @@ async fn execute_agent(
             Ok(m) => m.value,
             Err(_) => continue,
         };
-        let key = (
-            provider_value,
-            signal.outcome.clone(),
-            signal.side.clone(),
-        );
+        let key = (provider_value, signal.outcome.clone(), signal.side.clone());
         if blocked.contains(&key) {
             continue;
         }
@@ -554,10 +562,7 @@ fn momentum_signals(agent: &AgentRecord, markets: &[ExternalMarketSnapshot]) -> 
 
 /// Mean reversion: fade markets that have moved far from 0.5, betting on
 /// retracement toward the mean.
-fn mean_reversion_signals(
-    agent: &AgentRecord,
-    markets: &[ExternalMarketSnapshot],
-) -> Vec<Signal> {
+fn mean_reversion_signals(agent: &AgentRecord, markets: &[ExternalMarketSnapshot]) -> Vec<Signal> {
     // Use zscoreEntry / 10 as a rough "distance from 0.5" threshold
     // (standard default 2.0 → 0.2 distance → price beyond 0.7 or under 0.3).
     let z = agent.param_f64("zscoreEntry", 2.0);
@@ -574,7 +579,11 @@ fn mean_reversion_signals(
             continue;
         }
         // Fade the move: if yes is rich, buy no; if no is rich, buy yes.
-        let outcome = if yes > 0.5 { "no".to_string() } else { "yes".to_string() };
+        let outcome = if yes > 0.5 {
+            "no".to_string()
+        } else {
+            "yes".to_string()
+        };
         signals.push(Signal {
             market: market.clone(),
             outcome,
@@ -595,10 +604,7 @@ fn mean_reversion_signals(
 
 /// Tail hunter: buy long-odds outcomes (below maxEntryPrice) when the
 /// implied probability is cheap enough to justify the tail exposure.
-fn tail_hunter_signals(
-    agent: &AgentRecord,
-    markets: &[ExternalMarketSnapshot],
-) -> Vec<Signal> {
+fn tail_hunter_signals(agent: &AgentRecord, markets: &[ExternalMarketSnapshot]) -> Vec<Signal> {
     let max_entry = agent.param_f64("maxEntryPrice", 0.10).clamp(0.01, 0.30);
 
     let mut signals: Vec<Signal> = Vec::new();
@@ -658,8 +664,7 @@ async fn open_position(
     // Size the position by budget, not by share count. At the current best
     // price, quantity = budget / price. Cap at 10k shares to avoid absurd
     // sizes in near-zero-price markets.
-    let probe_price =
-        resolve_mark_price(&signal.market, &orderbook, &signal.outcome).max(0.01);
+    let probe_price = resolve_mark_price(&signal.market, &orderbook, &signal.outcome).max(0.01);
     let raw_quantity = (position_budget_usdc / probe_price).min(10_000.0).max(1.0);
 
     let fill = simulate_fill(
@@ -693,7 +698,12 @@ async fn open_position(
     let hold_until = now + ChronoDuration::seconds(hold_secs as i64);
 
     let mark_price = fill.mark_price;
-    let u_pnl = unrealized_pnl(&signal.side, fill.average_price, mark_price, fill.filled_quantity);
+    let u_pnl = unrealized_pnl(
+        &signal.side,
+        fill.average_price,
+        mark_price,
+        fill.filled_quantity,
+    );
 
     let mut tx = state.db.pool().begin().await.map_err(|e| e.to_string())?;
 

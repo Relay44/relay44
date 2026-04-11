@@ -58,7 +58,11 @@ pub async fn trigger_scan(
     let user = extract_authenticated_user(&req, &state).await?;
 
     // Admin-only manual trigger
-    if !state.config.admin_wallets.contains(&user.wallet_address.to_ascii_lowercase()) {
+    if !state
+        .config
+        .admin_wallets
+        .contains(&user.wallet_address.to_ascii_lowercase())
+    {
         return Err(ApiError::forbidden("manual scan requires admin"));
     }
 

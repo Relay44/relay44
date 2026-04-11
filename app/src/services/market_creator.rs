@@ -19,7 +19,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::services::evm_signer;
-use crate::services::external::{self, ExternalMarketsRequest, ExternalMarketSource, TradableFilter};
+use crate::services::external::{
+    self, ExternalMarketSource, ExternalMarketsRequest, TradableFilter,
+};
 use crate::AppState;
 
 const AUTO_CREATE_TICK_INTERVAL_SECS: u64 = 300; // Every 5 minutes
@@ -173,12 +175,11 @@ async fn find_mirror_candidates(
     .map_err(|e| format!("Fetch external markets: {}", e))?;
 
     // Get existing mirror links to avoid duplicates.
-    let existing: Vec<(String,)> = sqlx::query_as(
-        "SELECT external_market_id FROM mirror_market_links",
-    )
-    .fetch_all(state.db.pool())
-    .await
-    .map_err(|e| format!("Query existing links: {}", e))?;
+    let existing: Vec<(String,)> =
+        sqlx::query_as("SELECT external_market_id FROM mirror_market_links")
+            .fetch_all(state.db.pool())
+            .await
+            .map_err(|e| format!("Query existing links: {}", e))?;
 
     let existing_ids: std::collections::HashSet<String> =
         existing.into_iter().map(|r| r.0).collect();
@@ -319,7 +320,10 @@ async fn wait_for_market_id(state: &AppState, tx_hash: &str) -> Result<u64, Stri
             .await
             .map_err(|e| format!("RPC receipt: {}", e))?;
 
-        let result: Value = resp.json().await.map_err(|e| format!("Parse receipt: {}", e))?;
+        let result: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("Parse receipt: {}", e))?;
         let receipt = match result.get("result") {
             Some(Value::Null) | None => continue,
             Some(r) => r,
@@ -438,8 +442,14 @@ async fn fetch_nonce(state: &AppState, address: &str) -> Result<u64, String> {
         .send()
         .await
         .map_err(|e| format!("RPC nonce: {}", e))?;
-    let result: Value = resp.json().await.map_err(|e| format!("Parse nonce: {}", e))?;
-    let hex = result.get("result").and_then(|v| v.as_str()).ok_or("No nonce")?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse nonce: {}", e))?;
+    let hex = result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or("No nonce")?;
     u64::from_str_radix(hex.trim_start_matches("0x"), 16)
         .map_err(|e| format!("Parse nonce hex: {}", e))
 }
@@ -459,7 +469,10 @@ async fn fetch_gas_prices(state: &AppState) -> Result<(u128, u128), String> {
         .await
         .map_err(|e| format!("RPC gas: {}", e))?;
     let result: Value = resp.json().await.map_err(|e| format!("Parse gas: {}", e))?;
-    let hex = result.get("result").and_then(|v| v.as_str()).ok_or("No gas price")?;
+    let hex = result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or("No gas price")?;
     let base_fee = u128::from_str_radix(hex.trim_start_matches("0x"), 16).unwrap_or(1_000_000_000);
     Ok((base_fee, 100_000_000u128))
 }
@@ -478,7 +491,10 @@ async fn broadcast_raw_tx(state: &AppState, signed_tx: &str) -> Result<String, S
         .send()
         .await
         .map_err(|e| format!("Broadcast: {}", e))?;
-    let result: Value = resp.json().await.map_err(|e| format!("Parse broadcast: {}", e))?;
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse broadcast: {}", e))?;
     if let Some(error) = result.get("error") {
         return Err(format!("Broadcast error: {}", error));
     }

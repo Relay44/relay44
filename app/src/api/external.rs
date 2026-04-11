@@ -18,12 +18,12 @@ use crate::api::ApiError;
 use crate::config::{AppConfig, ExternalExecutionMode};
 use crate::services::external;
 use crate::services::external::credentials::{decrypt_json, encrypt_json, mask_secret};
-use crate::services::limitless_partner;
 use crate::services::external::ledger::{self, PerformanceLedgerKind};
 use crate::services::external::paper::{realized_pnl, simulate_fill, unrealized_pnl};
 use crate::services::external::types::{
     ExternalMarketId, ExternalMarketSnapshot, ExternalProvider,
 };
+use crate::services::limitless_partner;
 use crate::services::provider_rails::{evaluate_provider_access, ProviderRailAction, RailProvider};
 use crate::AppState;
 use sqlx::{Postgres, QueryBuilder};
@@ -8314,13 +8314,10 @@ async fn execute_live_agent(
 
     // Portfolio-level risk governor check.
     let order_notional = strategy_signal.price * strategy_signal.quantity;
-    let risk_check = crate::services::risk_governor::check_order(
-        state.db.pool(),
-        &agent.owner,
-        order_notional,
-    )
-    .await
-    .map_err(|e| ApiError::internal(&format!("risk governor error: {e}")))?;
+    let risk_check =
+        crate::services::risk_governor::check_order(state.db.pool(), &agent.owner, order_notional)
+            .await
+            .map_err(|e| ApiError::internal(&format!("risk governor error: {e}")))?;
 
     if !risk_check.allowed {
         let reason = risk_check.reason.unwrap_or_default();
@@ -10418,12 +10415,9 @@ pub async fn get_agent_promotion_readiness(
     }));
 
     // Gate 7: Max drawdown < 5% of bankroll.
-    let risk_state = crate::services::risk_governor::get_or_init(
-        state.db.pool(),
-        &agent.owner,
-    )
-    .await
-    .map_err(|e| ApiError::internal(&e.to_string()))?;
+    let risk_state = crate::services::risk_governor::get_or_init(state.db.pool(), &agent.owner)
+        .await
+        .map_err(|e| ApiError::internal(&e.to_string()))?;
     let bankroll = risk_state.bankroll_usdc;
 
     let outcome_rows = sqlx::query(
@@ -13403,10 +13397,12 @@ pub async fn ingest_edge_scanner_signals(
     }
 
     // expire stale signals
-    sqlx::query("UPDATE edge_scanner_signals SET active = FALSE WHERE active = TRUE AND expires_at < NOW()")
-        .execute(state.db.pool())
-        .await
-        .ok();
+    sqlx::query(
+        "UPDATE edge_scanner_signals SET active = FALSE WHERE active = TRUE AND expires_at < NOW()",
+    )
+    .execute(state.db.pool())
+    .await
+    .ok();
 
     Ok(HttpResponse::Ok().json(json!({ "persisted": persisted })))
 }
@@ -13601,10 +13597,12 @@ pub async fn create_limitless_sub_account(
 ) -> Result<impl Responder, ApiError> {
     let _user = extract_authenticated_user(&req, &state).await?;
 
-    let partner = state
-        .limitless_partner
-        .as_ref()
-        .ok_or_else(|| ApiError::bad_request("LIMITLESS_PARTNER_NOT_CONFIGURED", "Partner API credentials not configured"))?;
+    let partner = state.limitless_partner.as_ref().ok_or_else(|| {
+        ApiError::bad_request(
+            "LIMITLESS_PARTNER_NOT_CONFIGURED",
+            "Partner API credentials not configured",
+        )
+    })?;
 
     let account = limitless_partner::create_sub_account(partner, &body.display_name).await?;
     Ok(HttpResponse::Ok().json(json!({
@@ -13621,10 +13619,12 @@ pub async fn place_limitless_delegated_order(
 ) -> Result<impl Responder, ApiError> {
     let _user = extract_authenticated_user(&req, &state).await?;
 
-    let partner = state
-        .limitless_partner
-        .as_ref()
-        .ok_or_else(|| ApiError::bad_request("LIMITLESS_PARTNER_NOT_CONFIGURED", "Partner API credentials not configured"))?;
+    let partner = state.limitless_partner.as_ref().ok_or_else(|| {
+        ApiError::bad_request(
+            "LIMITLESS_PARTNER_NOT_CONFIGURED",
+            "Partner API credentials not configured",
+        )
+    })?;
 
     let result = limitless_partner::place_delegated_order(partner, &body).await?;
     Ok(HttpResponse::Ok().json(json!({
@@ -13641,10 +13641,12 @@ pub async fn cancel_limitless_order(
 ) -> Result<impl Responder, ApiError> {
     let _user = extract_authenticated_user(&req, &state).await?;
 
-    let partner = state
-        .limitless_partner
-        .as_ref()
-        .ok_or_else(|| ApiError::bad_request("LIMITLESS_PARTNER_NOT_CONFIGURED", "Partner API credentials not configured"))?;
+    let partner = state.limitless_partner.as_ref().ok_or_else(|| {
+        ApiError::bad_request(
+            "LIMITLESS_PARTNER_NOT_CONFIGURED",
+            "Partner API credentials not configured",
+        )
+    })?;
 
     let order_id = path.into_inner();
     limitless_partner::cancel_order(partner, &order_id).await?;

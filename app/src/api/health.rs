@@ -31,8 +31,10 @@ pub async fn health_detailed(state: web::Data<Arc<AppState>>) -> impl Responder 
         "Database health check timed out",
     )
     .await;
-    let redis_health = run_health_check(check_redis_health(&state), "Redis health check timed out").await;
-    let base_health = run_health_check(check_base_health(&state), "Base RPC health check timed out").await;
+    let redis_health =
+        run_health_check(check_redis_health(&state), "Redis health check timed out").await;
+    let base_health =
+        run_health_check(check_base_health(&state), "Base RPC health check timed out").await;
     let solana_health = run_health_check(
         check_solana_health(&state),
         "Solana RPC health check timed out",

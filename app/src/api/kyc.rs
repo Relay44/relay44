@@ -75,9 +75,7 @@ pub async fn verify_kyc(
             &wallet,
         )
         .await
-        .map_err(|err| {
-            ApiError::bad_request("VERIFICATION_FAILED", &err.to_string())
-        })?;
+        .map_err(|err| ApiError::bad_request("VERIFICATION_FAILED", &err.to_string()))?;
 
     // Hash the proof for audit storage (don't store raw ZK proofs)
     let proof_hash = {

@@ -59,9 +59,11 @@ pub async fn build_test_state() -> Arc<AppState> {
     })
 }
 
-pub async fn build_test_app(
-) -> impl actix_web::dev::Service<actix_http::Request, Response = actix_web::dev::ServiceResponse, Error = actix_web::Error>
-{
+pub async fn build_test_app() -> impl actix_web::dev::Service<
+    actix_http::Request,
+    Response = actix_web::dev::ServiceResponse,
+    Error = actix_web::Error,
+> {
     let state = build_test_state().await;
     test::init_service(
         App::new()

@@ -102,10 +102,7 @@ fn validate_status_param(status: &str) -> Result<(), ApiError> {
     if !ALLOWED_STATUSES.contains(&status) {
         return Err(ApiError::bad_request(
             "INVALID_STATUS",
-            &format!(
-                "Status must be one of: {}",
-                ALLOWED_STATUSES.join(", ")
-            ),
+            &format!("Status must be one of: {}", ALLOWED_STATUSES.join(", ")),
         ));
     }
     Ok(())
@@ -252,14 +249,11 @@ pub async fn get_hackathon(
     let hackathon_id = path.into_inner();
     let pool = state.db.pool();
 
-    let row = sqlx::query(&format!(
-        "{} WHERE h.id = $1",
-        hackathon_with_counts_sql()
-    ))
-    .bind(&hackathon_id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| ApiError::not_found("Hackathon"))?;
+    let row = sqlx::query(&format!("{} WHERE h.id = $1", hackathon_with_counts_sql()))
+        .bind(&hackathon_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Hackathon"))?;
 
     Ok(HttpResponse::Ok().json(hackathon_row_to_json(&row)))
 }
@@ -284,10 +278,7 @@ pub async fn create_hackathon(
         ));
     }
 
-    let description = sanitize_string(
-        body.description.as_deref().unwrap_or(""),
-        4000,
-    );
+    let description = sanitize_string(body.description.as_deref().unwrap_or(""), 4000);
 
     let prize_pool = body.prize_pool_usdc.unwrap_or(0.0);
     validate_prize(prize_pool)?;
@@ -343,7 +334,9 @@ pub async fn create_hackathon(
 
     log::info!(
         "Hackathon created: id={}, name={}, by={}",
-        hackathon_id, name, user.wallet_address
+        hackathon_id,
+        name,
+        user.wallet_address
     );
 
     let row = sqlx::query(
@@ -429,7 +422,10 @@ pub async fn update_hackathon(
     if let Some(ref name) = body.name {
         let sanitized = sanitize_string(name, 256);
         if sanitized.is_empty() {
-            return Err(ApiError::bad_request("INVALID_NAME", "Name cannot be empty"));
+            return Err(ApiError::bad_request(
+                "INVALID_NAME",
+                "Name cannot be empty",
+            ));
         }
         idx += 1;
         sets.push(format!("name = ${}", idx));
@@ -465,10 +461,7 @@ pub async fn update_hackathon(
 
     sets.push("updated_at = NOW()".to_string());
 
-    let sql = format!(
-        "UPDATE hackathons SET {} WHERE id = $1",
-        sets.join(", ")
-    );
+    let sql = format!("UPDATE hackathons SET {} WHERE id = $1", sets.join(", "));
 
     let mut query = sqlx::query(&sql).bind(&hackathon_id);
     for val in &binds {
@@ -485,13 +478,10 @@ pub async fn update_hackathon(
         user.wallet_address
     );
 
-    let row = sqlx::query(&format!(
-        "{} WHERE h.id = $1",
-        hackathon_with_counts_sql()
-    ))
-    .bind(&hackathon_id)
-    .fetch_one(pool)
-    .await?;
+    let row = sqlx::query(&format!("{} WHERE h.id = $1", hackathon_with_counts_sql()))
+        .bind(&hackathon_id)
+        .fetch_one(pool)
+        .await?;
 
     Ok(HttpResponse::Ok().json(hackathon_row_to_json(&row)))
 }
@@ -554,7 +544,8 @@ pub async fn register_for_hackathon(
 
     log::info!(
         "Hackathon registration: hackathon={}, wallet={}",
-        hackathon_id, user.wallet_address
+        hackathon_id,
+        user.wallet_address
     );
 
     Ok(HttpResponse::Created().json(json!({
@@ -607,12 +598,11 @@ pub async fn list_registrations(
         })
         .collect();
 
-    let total_row = sqlx::query(
-        "SELECT COUNT(*) AS cnt FROM hackathon_registrations WHERE hackathon_id = $1",
-    )
-    .bind(&hackathon_id)
-    .fetch_one(pool)
-    .await?;
+    let total_row =
+        sqlx::query("SELECT COUNT(*) AS cnt FROM hackathon_registrations WHERE hackathon_id = $1")
+            .bind(&hackathon_id)
+            .fetch_one(pool)
+            .await?;
 
     Ok(HttpResponse::Ok().json(json!({
         "registrations": registrations,
@@ -706,7 +696,9 @@ pub async fn link_agent_to_hackathon(
 
     log::info!(
         "Agent linked: hackathon={}, agent={}, wallet={}",
-        hackathon_id, agent_id, user.wallet_address
+        hackathon_id,
+        agent_id,
+        user.wallet_address
     );
 
     Ok(HttpResponse::Created().json(json!({
@@ -912,11 +904,12 @@ pub async fn trigger_snapshot(
     let pool = state.db.pool();
 
     // Validate hackathon
-    let hackathon = sqlx::query("SELECT id, status, start_time, end_time FROM hackathons WHERE id = $1")
-        .bind(&hackathon_id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Hackathon"))?;
+    let hackathon =
+        sqlx::query("SELECT id, status, start_time, end_time FROM hackathons WHERE id = $1")
+            .bind(&hackathon_id)
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Hackathon"))?;
 
     let status: String = hackathon.get("status");
     if status != "active" {
@@ -933,7 +926,11 @@ pub async fn trigger_snapshot(
         .check_and_record_nonce(&lock_key, SNAPSHOT_LOCK_TTL_SECS)
         .await
         .map_err(|e| {
-            log::error!("Redis lock failed for hackathon snapshot {}: {}", hackathon_id, e);
+            log::error!(
+                "Redis lock failed for hackathon snapshot {}: {}",
+                hackathon_id,
+                e
+            );
             ApiError::internal("Failed to acquire snapshot lock")
         })?;
 
@@ -949,7 +946,11 @@ pub async fn trigger_snapshot(
 
     // Always release lock
     if let Err(e) = state.redis.delete(&lock_key).await {
-        log::warn!("Failed to release snapshot lock for {}: {}", hackathon_id, e);
+        log::warn!(
+            "Failed to release snapshot lock for {}: {}",
+            hackathon_id,
+            e
+        );
     }
 
     result
@@ -970,7 +971,11 @@ fn compute_sharpe_ratio(rows: &[sqlx::postgres::PgRow]) -> i32 {
         .filter_map(|r| {
             let pnl: f64 = r.try_get("realized_pnl").unwrap_or(0.0);
             let cost: f64 = r.try_get("total_cost").unwrap_or(0.0);
-            if cost > 0.0 { Some(pnl / cost) } else { None }
+            if cost > 0.0 {
+                Some(pnl / cost)
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -1031,10 +1036,7 @@ async fn compute_snapshot(
     for row in &agent_rows {
         let wallet: String = row.get("wallet_address");
         let agent_id: String = row.get("agent_id");
-        agents_by_wallet
-            .entry(wallet)
-            .or_default()
-            .push(agent_id);
+        agents_by_wallet.entry(wallet).or_default().push(agent_id);
     }
 
     // Compute PnL, win rate, and Sharpe ratio for each wallet
@@ -1106,7 +1108,12 @@ async fn compute_snapshot(
                 ));
             }
             Err(e) => {
-                log::warn!("PnL query failed for wallet {} in hackathon {}: {}", wallet, hackathon_id, e);
+                log::warn!(
+                    "PnL query failed for wallet {} in hackathon {}: {}",
+                    wallet,
+                    hackathon_id,
+                    e
+                );
                 entries.push((wallet, 0.0, 0.0, 0, 0, 0, 0));
             }
         }
@@ -1122,7 +1129,9 @@ async fn compute_snapshot(
     })?;
 
     let mut snapshot_count = 0;
-    for (rank, (wallet, pnl, volume, win_rate, positions, trades, sharpe)) in entries.iter().enumerate() {
+    for (rank, (wallet, pnl, volume, win_rate, positions, trades, sharpe)) in
+        entries.iter().enumerate()
+    {
         sqlx::query(
             "INSERT INTO hackathon_snapshots
                 (hackathon_id, wallet_address, snapshot_time, net_pnl_usdc,
@@ -1165,7 +1174,9 @@ async fn compute_snapshot(
     let elapsed = started_at.elapsed();
     log::info!(
         "Snapshot complete: hackathon={}, entries={}, elapsed={:?}",
-        hackathon_id, snapshot_count, elapsed
+        hackathon_id,
+        snapshot_count,
+        elapsed
     );
 
     Ok(HttpResponse::Accepted().json(json!({
