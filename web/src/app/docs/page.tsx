@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { CrossHostLink } from "@/components/layout/CrossHostLink";
 import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
@@ -250,12 +251,12 @@ export default function DocsPage() {
               >
                 Protocol Reference
               </Link>
-              <Link
+              <CrossHostLink
                 href="/tokenomics"
                 className="inline-flex h-9 items-center border border-border px-4 font-mono text-xs text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
               >
                 Tokenomics
-              </Link>
+              </CrossHostLink>
             </div>
           </div>
 
