@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   ChevronDown,
@@ -49,6 +49,21 @@ const navLinks = [
   { href: "/docs/contracts", label: "Protocol Reference", note: "Contract addresses, ABIs, and viem snippets" },
 ];
 
+// When the app is served from the docs subdomain, only /docs/* routes exist
+// (see web/src/middleware.ts). Non-docs sidebar links must jump to the apex
+// host instead of staying on docs.relay44.com where they would 404.
+const DOCS_HOST = "docs.relay44.com";
+const APEX_ORIGIN = "https://relay44.com";
+
+function useIsDocsHost() {
+  const [isDocs, setIsDocs] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setIsDocs(window.location.hostname === DOCS_HOST);
+  }, []);
+  return isDocs;
+}
+
 const externalLinks = [
   {
     href: "https://x.com/Relay44BASE",
@@ -87,6 +102,20 @@ export function SidebarMenu() {
   const { readOnly } = useRuntimeMode();
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const isDocsHost = useIsDocsHost();
+
+  const resolvedNavLinks = useMemo(
+    () =>
+      navLinks.map((link) => {
+        const crossHost = isDocsHost && !link.href.startsWith("/docs");
+        return {
+          ...link,
+          resolvedHref: crossHost ? `${APEX_ORIGIN}${link.href}` : link.href,
+          crossHost,
+        };
+      }),
+    [isDocsHost],
+  );
 
   useEffect(() => {
     setOpen(false);
@@ -152,33 +181,45 @@ export function SidebarMenu() {
 
           <nav className="flex-1 overflow-y-auto px-5 py-5">
             <div className="space-y-2">
-              {navLinks.map(({ href, label, note }) => {
-                const active =
-                  pathname === href ||
-                  (href !== "/" && pathname.startsWith(href));
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={cn(
-                      "block border px-4 py-3 transition-colors",
-                      active
-                        ? "border-accent bg-accent/10 text-text-primary"
-                        : "border-border text-text-secondary hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-sm font-medium uppercase tracking-[0.12em]">
-                        {label}
-                      </span>
-                      <SquareDashedMousePointer className="h-4 w-4 opacity-40" />
-                    </div>
-                    <p className="mt-2 text-xs uppercase tracking-[0.14em] text-text-muted">
-                      {note}
-                    </p>
-                  </Link>
-                );
-              })}
+              {resolvedNavLinks.map(
+                ({ href, resolvedHref, crossHost, label, note }) => {
+                  const active =
+                    !crossHost &&
+                    (pathname === href ||
+                      (href !== "/" && pathname.startsWith(href)));
+                  const className = cn(
+                    "block border px-4 py-3 transition-colors",
+                    active
+                      ? "border-accent bg-accent/10 text-text-primary"
+                      : "border-border text-text-secondary hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary",
+                  );
+                  const content = (
+                    <>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-sm font-medium uppercase tracking-[0.12em]">
+                          {label}
+                        </span>
+                        <SquareDashedMousePointer className="h-4 w-4 opacity-40" />
+                      </div>
+                      <p className="mt-2 text-xs uppercase tracking-[0.14em] text-text-muted">
+                        {note}
+                      </p>
+                    </>
+                  );
+                  if (crossHost) {
+                    return (
+                      <a key={href} href={resolvedHref} className={className}>
+                        {content}
+                      </a>
+                    );
+                  }
+                  return (
+                    <Link key={href} href={resolvedHref} className={className}>
+                      {content}
+                    </Link>
+                  );
+                },
+              )}
             </div>
 
             <div className="mt-6 border-t border-border pt-6">
