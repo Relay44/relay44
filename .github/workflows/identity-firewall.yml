@@ -19,23 +19,25 @@ jobs:
 
       - name: Enforce identity separation
         shell: bash
+        env:
+          IDENTITY_FIREWALL_FORBIDDEN: ${{ secrets.IDENTITY_FIREWALL_FORBIDDEN }}
         run: |
           set -euo pipefail
 
-          relay44_marker="relay44"
-          kamiyo_marker="kamiyo"
+          # The forbidden token is stored in a repository-level Actions secret
+          # so it never appears in the public source tree. Each participating
+          # repo sets IDENTITY_FIREWALL_FORBIDDEN to the identifier that must
+          # not leak into any of its commits (author name, email, committer,
+          # or message).
+          if [[ -z "${IDENTITY_FIREWALL_FORBIDDEN:-}" ]]; then
+            echo "identity-firewall: no IDENTITY_FIREWALL_FORBIDDEN secret configured, skipping"
+            exit 0
+          fi
 
-          remote_url="$(git remote get-url origin || true)"
-          remote_lower="$(printf '%s' "$remote_url" | tr '[:upper:]' '[:lower:]')"
+          forbidden="$(printf '%s' "$IDENTITY_FIREWALL_FORBIDDEN" | tr '[:upper:]' '[:lower:]')"
 
-          if [[ "$remote_lower" == *"$relay44_marker"* ]]; then
-            policy="$relay44_marker"
-            forbidden="$kamiyo_marker"
-          elif [[ "$remote_lower" == *"$kamiyo_marker"* ]]; then
-            policy="$kamiyo_marker"
-            forbidden="$relay44_marker"
-          else
-            echo "identity-firewall: no matching policy for remote"
+          if [[ -z "$forbidden" ]]; then
+            echo "identity-firewall: forbidden token is empty, skipping"
             exit 0
           fi
 
@@ -82,7 +84,6 @@ jobs:
             blob="$(printf '%s\n%s\n%s\n%s\n%s\n' "$an" "$ae" "$cn" "$ce" "$msg" | tr '[:upper:]' '[:lower:]')"
             if grep -q "$forbidden" <<<"$blob"; then
               echo "identity-firewall: violation in commit $c"
-              echo "  policy: $policy"
               echo "  author: $an <$ae>"
               echo "  committer: $cn <$ce>"
               violations=1
