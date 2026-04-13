@@ -3828,7 +3828,28 @@ class ApiClient {
     hasMore: boolean;
   }> {
     const query = this.buildQuery(params || {});
-    return this.request(`/distribution/markets${query}`);
+    const response = await this.request<
+      | import("@/types/distribution").DistributionMarket[]
+      | {
+          data?: import("@/types/distribution").DistributionMarket[];
+          markets?: import("@/types/distribution").DistributionMarket[];
+          total?: number;
+          hasMore?: boolean;
+        }
+    >(`/distribution/markets${query}`);
+
+    if (Array.isArray(response)) {
+      return { data: response, total: response.length, hasMore: false };
+    }
+    const data = response.data ?? response.markets ?? [];
+    const total = response.total ?? data.length;
+    const offset = params?.offset ?? 0;
+    const limit = params?.limit ?? data.length;
+    return {
+      data,
+      total,
+      hasMore: response.hasMore ?? offset + limit < total,
+    };
   }
 
   async getDistributionMarket(
