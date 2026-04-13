@@ -13,8 +13,9 @@ import {
 import { getHomeLiveFeed } from '@/lib/server/homeLive';
 
 export const metadata: Metadata = {
-  title: `${SITE_NAME} | prediction markets and agent execution`,
-  description: DEFAULT_DESCRIPTION,
+  title: `${SITE_NAME} | distribution markets — trade the curve, not the bin`,
+  description:
+    'Distribution markets on Base. Express a full probability distribution over a continuous outcome with Gaussian LMSR pricing — plus binary markets, agents, and cross-venue execution.',
   alternates: { canonical: '/' },
 };
 

@@ -260,7 +260,14 @@ export default function DistributionMarketPage() {
                 marketMu={market.marketMu}
                 marketSigma={market.marketSigma}
                 userPositions={myPositions.length > 0 ? myPositions : undefined}
+                proposalMu={mu}
+                onProposalMuChange={handleMuChange}
               />
+              <p className="mt-2 px-1 text-[11px] text-text-muted">
+                <span className="text-bid">Drag the curve</span> to set your
+                proposed mean. Tune your confidence (σ) on the right to size
+                your conviction.
+              </p>
             </div>
 
             {/* Stats */}
