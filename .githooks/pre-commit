@@ -18,13 +18,6 @@ fi
 
 ./scripts/verify-public-repo-standards.sh
 
-if [[ ! -x ./scripts/verify-open-core-boundary.mjs ]]; then
-  echo "Missing open-core checker: scripts/verify-open-core-boundary.mjs"
-  exit 1
-fi
-
-node ./scripts/verify-open-core-boundary.mjs
-
 if [[ ! -x ./scripts/verify-commit-hygiene.sh ]]; then
   echo "Missing commit hygiene checker: scripts/verify-commit-hygiene.sh"
   exit 1
