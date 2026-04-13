@@ -42,6 +42,82 @@ export interface DistributionTradePanelProps {
   onClaimPayout?: (positionId: number) => void;
 }
 
+/**
+ * Compute the expected payout ratio E[beliefPDF(x)/marketPDF(x)] under the
+ * belief distribution, for two Gaussians. Closed-form via completing the
+ * square in the exponent of the ratio integral.
+ *
+ * Returns the expected multiplier on your collateral if your belief is correct.
+ * E.g. 1.4 means you expect 1.4× your collateral back → 40% edge.
+ */
+function expectedPayoutRatio(
+  beliefMu: number,
+  beliefSigma: number,
+  marketMu: number,
+  marketSigma: number,
+): number {
+  const d = beliefMu - marketMu;
+  const sb2 = beliefSigma * beliefSigma;
+  const sm2 = marketSigma * marketSigma;
+  // E[N(x;bMu,bSig)/N(x;mMu,mSig)] under x ~ N(bMu, bSig)
+  // = (mSig/bSig) * exp((d^2 * sm2 + sb2*(sm2-sb2)) / (2*sm2*(sm2-sb2)))  ... only valid when sm > sb
+  // General form via moment generating: = (mSig/bSig) * exp(d^2/(2*sm2) + sb2/(2*sm2) - 0.5)  ... hmm
+  // Actually the integral of p(x)^2/q(x) dx for Gaussians:
+  // = (sigQ / sigP) * exp( (muP-muQ)^2 / (2*sigQ^2) + sigP^2/(2*sigQ^2) - 1/2 )
+  // when sigP < sigQ (tighter belief than market).
+
+  // More robust: numerical integration with 200 points over ±5σ of the belief
+  const steps = 200;
+  const lo = beliefMu - 5 * beliefSigma;
+  const hi = beliefMu + 5 * beliefSigma;
+  const dx = (hi - lo) / steps;
+  let integral = 0;
+  for (let i = 0; i <= steps; i++) {
+    const x = lo + i * dx;
+    const zb = (x - beliefMu) / beliefSigma;
+    const zm = (x - marketMu) / marketSigma;
+    const beliefPdf = Math.exp(-0.5 * zb * zb) / (beliefSigma * Math.sqrt(2 * Math.PI));
+    const marketPdf = Math.exp(-0.5 * zm * zm) / (marketSigma * Math.sqrt(2 * Math.PI));
+    const ratio = marketPdf > 1e-20 ? Math.min(beliefPdf / marketPdf, 10) : 1;
+    integral += beliefPdf * ratio * dx;
+  }
+  return integral;
+}
+
+/**
+ * Kelly-optimal fraction of bankroll to stake.
+ * f* = edge / variance_of_payout_ratio, clamped to [0, maxFraction].
+ *
+ * For Gaussian density ratios, the variance is hard to compute cleanly,
+ * so we use the simple Kelly: f* = (expectedMultiplier - 1) / (maxMultiplier - 1)
+ * where maxMultiplier is the payout if outcome lands exactly at beliefMu.
+ * This is conservative (fractional Kelly when uncertain).
+ */
+function kellyFraction(
+  beliefMu: number,
+  beliefSigma: number,
+  marketMu: number,
+  marketSigma: number,
+  maxFraction: number = 0.25,
+): number {
+  const eRatio = expectedPayoutRatio(beliefMu, beliefSigma, marketMu, marketSigma);
+  const edge = eRatio - 1;
+  if (edge <= 0) return 0;
+
+  // Max payout at beliefMu
+  const zb = 0; // at beliefMu, zb = 0
+  const zm = (beliefMu - marketMu) / marketSigma;
+  const maxRatio = Math.min(
+    (marketSigma / beliefSigma) * Math.exp(0.5 * zm * zm),
+    10,
+  );
+  const variance = maxRatio - 1;
+  if (variance <= 0) return 0;
+
+  const f = edge / variance;
+  return Math.min(Math.max(f, 0), maxFraction);
+}
+
 function formatNum(value: number, decimals = 4): string {
   return value.toFixed(decimals);
 }
@@ -81,6 +157,9 @@ export function DistributionTradePanel({
 }: DistributionTradePanelProps) {
   const [activeTab, setActiveTab] = useState('trade');
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showBelief, setShowBelief] = useState(false);
+  const [beliefMuInput, setBeliefMuInput] = useState('');
+  const [beliefSigmaInput, setBeliefSigmaInput] = useState('');
 
   const deltaMu = quote?.deltaMu ?? (proposalMu - (market.marketMu ?? 0));
   const deltaSigma = quote?.deltaSigma ?? (proposalSigma - (market.marketSigma ?? 1));
@@ -309,6 +388,140 @@ export function DistributionTradePanel({
                   Collateral secures against maximum potential loss
                 </div>
               </div>
+
+              {/* Belief overlay — paste your private (μ, σ) to see edge + Kelly */}
+              <details
+                className="group"
+                open={showBelief}
+                onToggle={(e) => setShowBelief((e.target as HTMLDetailsElement).open)}
+              >
+                <summary className="text-[0.65rem] uppercase tracking-[0.14em] text-text-muted cursor-pointer hover:text-text-secondary transition-colors select-none flex items-center gap-1.5">
+                  <span className="transition-transform group-open:rotate-90">&#9654;</span>
+                  Your private belief — edge + Kelly
+                </summary>
+                <div className="mt-3 border border-border bg-bg-secondary p-4 space-y-4">
+                  <p className="text-xs text-text-muted">
+                    Enter your private estimate. The panel computes your edge
+                    vs the current market curve and a Kelly-optimal position
+                    size.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[0.65rem] text-text-secondary uppercase tracking-wide">
+                        Your {'\u03BC'}
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder={formatNum(market.marketMu ?? (market.outcomeMin + market.outcomeMax) / 2, 2)}
+                        value={beliefMuInput}
+                        onChange={(e) => setBeliefMuInput(e.target.value)}
+                        className="w-full h-9 px-2 bg-bg-primary border border-border text-text-primary font-mono tabular-nums text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[0.65rem] text-text-secondary uppercase tracking-wide">
+                        Your {'\u03C3'}
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder={formatNum(market.marketSigma ?? (market.outcomeMax - market.outcomeMin) / 6, 2)}
+                        value={beliefSigmaInput}
+                        onChange={(e) => setBeliefSigmaInput(e.target.value)}
+                        className="w-full h-9 px-2 bg-bg-primary border border-border text-text-primary font-mono tabular-nums text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                      />
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const bMu = parseFloat(beliefMuInput);
+                    const bSigma = parseFloat(beliefSigmaInput);
+                    const mMu = market.marketMu ?? (market.outcomeMin + market.outcomeMax) / 2;
+                    const mSigma = market.marketSigma ?? (market.outcomeMax - market.outcomeMin) / 6;
+                    if (isNaN(bMu) || isNaN(bSigma) || bSigma <= 0) {
+                      return (
+                        <p className="text-xs text-text-muted">
+                          Enter both values to see your edge.
+                        </p>
+                      );
+                    }
+                    const eRatio = expectedPayoutRatio(bMu, bSigma, mMu, mSigma);
+                    const edge = eRatio - 1;
+                    const kelly = kellyFraction(bMu, bSigma, mMu, mSigma);
+                    const kellyUsdc = quote ? kelly * (quote.cost / (size || 1)) * 10000 : 0;
+                    const edgePct = (edge * 100).toFixed(1);
+                    const kellyPct = (kelly * 100).toFixed(1);
+                    const isPositive = edge > 0;
+
+                    return (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="border border-border p-2 text-center">
+                            <div className="text-[0.6rem] text-text-muted uppercase tracking-wide">
+                              Edge
+                            </div>
+                            <div
+                              className={cn(
+                                'font-mono tabular-nums text-base font-semibold',
+                                isPositive ? 'text-bid' : edge < -0.01 ? 'text-ask' : 'text-text-primary',
+                              )}
+                            >
+                              {isPositive ? '+' : ''}{edgePct}%
+                            </div>
+                          </div>
+                          <div className="border border-border p-2 text-center">
+                            <div className="text-[0.6rem] text-text-muted uppercase tracking-wide">
+                              Kelly f*
+                            </div>
+                            <div className="font-mono tabular-nums text-base font-semibold text-text-primary">
+                              {kellyPct}%
+                            </div>
+                          </div>
+                          <div className="border border-border p-2 text-center">
+                            <div className="text-[0.6rem] text-text-muted uppercase tracking-wide">
+                              E[payout]
+                            </div>
+                            <div
+                              className={cn(
+                                'font-mono tabular-nums text-base font-semibold',
+                                isPositive ? 'text-bid' : 'text-text-primary',
+                              )}
+                            >
+                              {eRatio.toFixed(2)}x
+                            </div>
+                          </div>
+                        </div>
+                        {isPositive && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-[0.65rem]"
+                              onClick={() => {
+                                onMuChange(bMu);
+                                onSigmaChange(bSigma);
+                              }}
+                            >
+                              Use as trade
+                            </Button>
+                            <span className="text-[0.6rem] text-text-muted">
+                              Sets proposal {'\u03BC'}/{'\u03C3'} to your belief
+                            </span>
+                          </div>
+                        )}
+                        {!isPositive && (
+                          <p className="text-xs text-text-muted">
+                            Negative edge — the market curve already prices this
+                            belief. Consider widening your {'\u03C3'} or adjusting
+                            your {'\u03BC'}.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </details>
 
               {/* Payout Preview */}
               {quote && (

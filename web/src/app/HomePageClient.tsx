@@ -7,7 +7,9 @@ import { HeroTicket, type HeroTicketRow } from "@/components/home/HeroTicket";
 import { OnboardingBanner } from "@/components/home/OnboardingBanner";
 import { FeaturedSlider } from "@/components/market";
 import { LeaderboardMini } from "@/components/leaderboard";
+import { DistributionMarketCard } from "@/components/distribution";
 import { useAgents, useMarkets, usePublicExternalAgents } from "@/hooks";
+import { useDistributionMarkets } from "@/hooks/useDistribution";
 import { formatPublicPaperAgentName } from "@/lib/publicPaperAgents";
 import { cn } from "@/lib/utils";
 import type { HomeLiveFeed } from "@/lib/server/homeLive";
@@ -554,6 +556,9 @@ export default function HomePageClient({
     isLoading: isLoadingPublicAgents,
     error: publicAgentsQueryError,
   } = usePublicExternalAgents({ limit: 6, active: true });
+  const { data: distributionData, isLoading: isLoadingDistribution } =
+    useDistributionMarkets({ status: "active", limit: 8 });
+  const distributionMarkets = distributionData?.data ?? [];
   const onchainAgents = agentsData?.data ?? [];
   const publicPaperAgents = publicAgentsData?.data ?? [];
   const agentsError = agentsQueryError instanceof Error ? agentsQueryError : null;
@@ -637,8 +642,66 @@ export default function HomePageClient({
             />
           </section>
 
+          <section className="border-b border-border px-4 py-6 sm:px-6">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <div className="font-mono text-[0.65rem] uppercase tracking-[0.2em] text-accent">
+                  Distribution markets
+                </div>
+                <h2 className="font-display text-xl font-semibold text-text-primary sm:text-2xl">
+                  Trade the curve, not the bin.
+                </h2>
+                <p className="max-w-xl text-sm text-text-secondary">
+                  Express a full probability distribution over a continuous
+                  outcome — set your mean, set your confidence, capture edge
+                  the binary markets cannot price.
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Link
+                  href="/distribution"
+                  className="inline-flex h-10 items-center border border-accent px-4 text-[0.7rem] font-medium uppercase tracking-[0.12em] text-accent transition-colors hover:bg-accent/10"
+                >
+                  Browse curves
+                </Link>
+                <Link
+                  href="/distribution/create"
+                  className="inline-flex h-10 items-center border border-border px-4 text-[0.7rem] font-medium uppercase tracking-[0.12em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
+                >
+                  Create market
+                </Link>
+              </div>
+            </div>
+
+            {isLoadingDistribution ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-[210px] animate-pulse border border-border bg-bg-secondary/40"
+                  />
+                ))}
+              </div>
+            ) : distributionMarkets.length > 0 ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {distributionMarkets.slice(0, 4).map((market) => (
+                  <DistributionMarketCard key={market.id} market={market} />
+                ))}
+              </div>
+            ) : (
+              <div className="border border-border bg-bg-secondary/40 px-4 py-8 text-center">
+                <p className="text-sm text-text-secondary">
+                  No distribution markets are open right now.
+                </p>
+                <p className="mt-1 text-xs text-text-muted">
+                  Check back shortly — flagship curves are spinning up.
+                </p>
+              </div>
+            )}
+          </section>
+
           <section className="py-5 border-b border-border">
-            <FeaturedSlider markets={featuredMarkets} title="Signal Relay" />
+            <FeaturedSlider markets={featuredMarkets} title="Binary Markets" />
           </section>
 
           <PlatformStatsBar markets={markets} agentCount={liveAgents.length} />

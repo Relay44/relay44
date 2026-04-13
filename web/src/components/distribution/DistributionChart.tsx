@@ -13,6 +13,17 @@ export interface DistributionChartProps {
   marketSigma?: number;
   userPositions?: DistributionPosition[];
   onHover?: (point: { x: number; pdf: number; cdf: number } | null) => void;
+  /**
+   * When set, the chart becomes draggable. Click + drag horizontally inside
+   * the plot area to update the proposal mean. The chart fires this callback
+   * with the new mean value (clamped to [outcomeMin, outcomeMax]).
+   */
+  onProposalMuChange?: (mu: number) => void;
+  /**
+   * Current proposal mean. When provided alongside onProposalMuChange, the
+   * chart renders an interactive marker at this position.
+   */
+  proposalMu?: number;
   className?: string;
 }
 
@@ -63,10 +74,28 @@ export function DistributionChart({
   marketSigma,
   userPositions,
   onHover,
+  onProposalMuChange,
+  proposalMu,
   className,
 }: DistributionChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const interactive = typeof onProposalMuChange === 'function';
+
+  const muFromClientX = useCallback(
+    (clientX: number): number | null => {
+      const svg = svgRef.current;
+      if (!svg) return null;
+      const rect = svg.getBoundingClientRect();
+      const svgX = ((clientX - rect.left) / rect.width) * CHART_W;
+      const clampedSvgX = Math.max(PAD_L, Math.min(PAD_L + PLOT_W, svgX));
+      const ratio = (clampedSvgX - PAD_L) / PLOT_W;
+      return outcomeMin + ratio * (outcomeMax - outcomeMin);
+    },
+    [outcomeMin, outcomeMax],
+  );
 
   const maxPdf = useMemo(() => {
     let m = 0;
@@ -139,6 +168,12 @@ export function DistributionChart({
       if (!svgRef.current) return;
       const rect = svgRef.current.getBoundingClientRect();
       const svgX = ((e.clientX - rect.left) / rect.width) * CHART_W;
+
+      if (isDragging && interactive) {
+        const newMu = muFromClientX(e.clientX);
+        if (newMu !== null) onProposalMuChange?.(newMu);
+      }
+
       if (svgX >= PAD_L && svgX <= PAD_L + PLOT_W) {
         setHoverX(svgX);
         if (onHover) {
@@ -161,13 +196,38 @@ export function DistributionChart({
         onHover?.(null);
       }
     },
-    [curveData, outcomeMin, outcomeMax, onHover]
+    [
+      curveData,
+      outcomeMin,
+      outcomeMax,
+      onHover,
+      isDragging,
+      interactive,
+      muFromClientX,
+      onProposalMuChange,
+    ]
   );
 
   const handleMouseLeave = useCallback(() => {
     setHoverX(null);
+    setIsDragging(false);
     onHover?.(null);
   }, [onHover]);
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      if (!interactive) return;
+      const newMu = muFromClientX(e.clientX);
+      if (newMu === null) return;
+      setIsDragging(true);
+      onProposalMuChange?.(newMu);
+    },
+    [interactive, muFromClientX, onProposalMuChange],
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
 
   if (curveData.length === 0) {
     return (
@@ -182,9 +242,14 @@ export function DistributionChart({
       <svg
         ref={svgRef}
         viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-        className="w-full h-auto"
+        className={cn(
+          'w-full h-auto select-none',
+          interactive && (isDragging ? 'cursor-grabbing' : 'cursor-grab'),
+        )}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
       >
         <defs>
           <linearGradient id="dist-market-fill" x1="0" y1="0" x2="0" y2="1">
@@ -266,6 +331,43 @@ export function DistributionChart({
             </text>
           </>
         )}
+
+        {/* Interactive proposal mean indicator (drag-the-curve) */}
+        {interactive && proposalMu !== undefined &&
+          proposalMu >= outcomeMin && proposalMu <= outcomeMax && (
+            <>
+              <line
+                x1={scaleX(proposalMu)}
+                y1={PAD_T}
+                x2={scaleX(proposalMu)}
+                y2={PAD_T + PLOT_H}
+                stroke="var(--color-bid)"
+                strokeWidth="1.5"
+                strokeDasharray="4 2"
+                opacity="0.9"
+              />
+              <circle
+                cx={scaleX(proposalMu)}
+                cy={PAD_T + PLOT_H / 2}
+                r={isDragging ? 7 : 5}
+                fill="var(--color-bid)"
+                stroke="var(--color-bg-primary)"
+                strokeWidth="2"
+                opacity="0.95"
+              />
+              <text
+                x={scaleX(proposalMu)}
+                y={PAD_T + PLOT_H + 16}
+                textAnchor="middle"
+                fill="var(--color-bid)"
+                fontSize="10"
+                fontFamily="monospace"
+                fontWeight="600"
+              >
+                You {formatTickValue(proposalMu)}
+              </text>
+            </>
+          )}
 
         {/* User position markers */}
         {userPositions?.map((pos) => {
