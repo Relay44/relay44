@@ -101,7 +101,6 @@ export function DistributionChart({
     let m = 0;
     for (const pt of curveData) {
       if (pt.marketPdf > m) m = pt.marketPdf;
-      if (pt.proposalPdf !== undefined && pt.proposalPdf > m) m = pt.proposalPdf;
     }
     return m * 1.1 || 1;
   }, [curveData]);
@@ -163,16 +162,18 @@ export function DistributionChart({
     return closest;
   }, [hoverX, curveData, outcomeMin, outcomeMax]);
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
       if (!svgRef.current) return;
-      const rect = svgRef.current.getBoundingClientRect();
-      const svgX = ((e.clientX - rect.left) / rect.width) * CHART_W;
 
       if (isDragging && interactive) {
         const newMu = muFromClientX(e.clientX);
         if (newMu !== null) onProposalMuChange?.(newMu);
+        return;
       }
+
+      const rect = svgRef.current.getBoundingClientRect();
+      const svgX = ((e.clientX - rect.left) / rect.width) * CHART_W;
 
       if (svgX >= PAD_L && svgX <= PAD_L + PLOT_W) {
         setHoverX(svgX);
@@ -208,26 +209,33 @@ export function DistributionChart({
     ]
   );
 
-  const handleMouseLeave = useCallback(() => {
+  const handlePointerLeave = useCallback(() => {
+    if (isDragging) return;
     setHoverX(null);
-    setIsDragging(false);
     onHover?.(null);
-  }, [onHover]);
+  }, [isDragging, onHover]);
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<SVGSVGElement>) => {
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
       if (!interactive) return;
       const newMu = muFromClientX(e.clientX);
       if (newMu === null) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
       setIsDragging(true);
       onProposalMuChange?.(newMu);
     },
     [interactive, muFromClientX, onProposalMuChange],
   );
 
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<SVGSVGElement>) => {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+      setIsDragging(false);
+    },
+    [],
+  );
 
   if (curveData.length === 0) {
     return (
@@ -246,10 +254,12 @@ export function DistributionChart({
           'w-full h-auto select-none',
           interactive && (isDragging ? 'cursor-grabbing' : 'cursor-grab'),
         )}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        onMouseDown={handleMouseDown}
-        onMouseUp={handleMouseUp}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={handlePointerLeave}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        style={{ touchAction: interactive ? 'none' : undefined }}
       >
         <defs>
           <linearGradient id="dist-market-fill" x1="0" y1="0" x2="0" y2="1">
@@ -349,7 +359,7 @@ export function DistributionChart({
               <circle
                 cx={scaleX(proposalMu)}
                 cy={PAD_T + PLOT_H / 2}
-                r={isDragging ? 7 : 5}
+                r="6"
                 fill="var(--color-bid)"
                 stroke="var(--color-bg-primary)"
                 strokeWidth="2"
@@ -433,7 +443,7 @@ export function DistributionChart({
         )}
 
         {/* Hover crosshair */}
-        {hoverX !== null && hoverData && (
+        {!isDragging && hoverX !== null && hoverData && (
           <>
             <line
               x1={hoverX}
@@ -514,7 +524,7 @@ export function DistributionChart({
       </svg>
 
       {/* Hover tooltip */}
-      {hoverX !== null && hoverData && (
+      {!isDragging && hoverX !== null && hoverData && (
         <div
           className="absolute pointer-events-none bg-bg-secondary border border-border px-3 py-2 text-xs"
           style={{
