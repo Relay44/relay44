@@ -17,6 +17,7 @@ pub mod limitless_partner;
 pub mod limitless_scanner;
 pub mod liquidity_mirror;
 pub mod logging;
+pub mod managed_agent_lifecycle;
 pub mod managed_agent_runner;
 pub mod market_creator;
 pub mod metrics;
