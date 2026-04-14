@@ -381,4 +381,58 @@ impl RedisService {
         let exists: bool = conn.exists(&key).await?;
         Ok(exists)
     }
+
+    // ── Managed agent lifecycle mirror ──────────────────────────────
+    //
+    // Postgres is source of truth for lifecycle_state + intents. These helpers
+    // mirror the hot-path state into Redis so runner startup can do a fast
+    // "who might need resume?" scan without walking every row in the agent
+    // table. Every helper degrades silently: Redis being down must not break
+    // the DB-backed lifecycle transitions.
+
+    /// Write the latest checkpoint blob for an agent. 7-day sliding TTL.
+    pub async fn agent_checkpoint_write(&self, agent_id: &str, payload: &str) -> Result<()> {
+        let key = format!("r44:agent:{}:checkpoint", agent_id);
+        let mut conn = self.conn()?;
+        let _: () = conn.set_ex(&key, payload, 7 * 24 * 3600).await?;
+        Ok(())
+    }
+
+    pub async fn agent_checkpoint_read(&self, agent_id: &str) -> Result<Option<String>> {
+        let key = format!("r44:agent:{}:checkpoint", agent_id);
+        let mut conn = self.conn()?;
+        let value: Option<String> = conn.get(&key).await?;
+        Ok(value)
+    }
+
+    /// Record a pending intent in the Redis mirror (hash keyed by seq).
+    pub async fn agent_intent_log(&self, agent_id: &str, seq: i64, payload: &str) -> Result<()> {
+        let key = format!("r44:agent:{}:intents:pending", agent_id);
+        let mut conn = self.conn()?;
+        let _: () = conn.hset(&key, seq, payload).await?;
+        let _: () = conn.expire(&key, 7 * 24 * 3600).await?;
+        Ok(())
+    }
+
+    /// Remove a resolved intent from the pending mirror.
+    pub async fn agent_intent_clear(&self, agent_id: &str, seq: i64) -> Result<()> {
+        let key = format!("r44:agent:{}:intents:pending", agent_id);
+        let mut conn = self.conn()?;
+        let _: () = conn.hdel(&key, seq).await?;
+        Ok(())
+    }
+
+    /// Mark an agent as runnable (lifecycle_state in active/liquidating) in
+    /// the per-runner candidate set.
+    pub async fn agent_active_mark(&self, agent_id: &str) -> Result<()> {
+        let mut conn = self.conn()?;
+        let _: () = conn.sadd("r44:agents:active", agent_id).await?;
+        Ok(())
+    }
+
+    pub async fn agent_active_unmark(&self, agent_id: &str) -> Result<()> {
+        let mut conn = self.conn()?;
+        let _: () = conn.srem("r44:agents:active", agent_id).await?;
+        Ok(())
+    }
 }
