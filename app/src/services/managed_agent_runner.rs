@@ -26,6 +26,7 @@ use crate::services::external::{
     fetch_market_by_id, fetch_markets, fetch_orderbook, ExternalMarketSource,
     ExternalMarketsRequest, TradableFilter,
 };
+use crate::services::managed_agent_lifecycle::{self as lifecycle, IntentKind, LifecycleState};
 use crate::AppState;
 
 /// Default tick interval for the managed agent runner (60 seconds).
@@ -62,6 +63,18 @@ pub fn spawn_managed_agent_runner(state: Arc<AppState>) {
     tokio::spawn(async move {
         // Stagger against the external agents scheduler.
         tokio::time::sleep(Duration::from_secs(12)).await;
+
+        // Reconcile any pending intents left over from a previous run before
+        // the first tick, so we don't double-execute side-effects whose
+        // confirmation was lost to a crash.
+        match lifecycle::recover_unresolved_intents(state.db.pool(), &state.redis).await {
+            Ok(r) if r.scanned > 0 => info!(
+                "lifecycle recovery: scanned={} confirmed={} abandoned={} errors={}",
+                r.scanned, r.confirmed, r.abandoned, r.errors
+            ),
+            Ok(_) => {}
+            Err(e) => warn!("lifecycle recovery failed: {}", e),
+        }
 
         let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -147,6 +160,14 @@ async fn run_tick(state: &AppState) -> Result<TickStats, String> {
     let now = Utc::now();
     let mut stats = TickStats::default();
 
+    // Reconcile user intent (`status`) into lifecycle transitions: if the
+    // user stopped an agent, move it out of `active` into `liquidating` (if
+    // positions are still open) or `settled` (if not). This must run before
+    // the scan so a just-stopped agent isn't evaluated one more time.
+    if let Err(e) = reconcile_status_transitions(state).await {
+        warn!("status reconcile: {}", e);
+    }
+
     // First: sweep positions that need closing (hold expired, or agent
     // stopped/paused). This must run even for paused agents so outstanding
     // positions don't stay open forever.
@@ -154,15 +175,25 @@ async fn run_tick(state: &AppState) -> Result<TickStats, String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // Then: load active agents whose next_execution_at is due.
+    // After sweep, liquidating agents with zero open positions transition
+    // to settled. Terminal.
+    if let Err(e) = finalize_liquidated_agents(state).await {
+        warn!("finalize settled: {}", e);
+    }
+
+    // Then: load active agents whose next_execution_at is due. We scan on
+    // lifecycle_state rather than user-facing status so paused agents
+    // (circuit-breaker or user-paused) are skipped while still letting the
+    // user keep status='active'.
     let rows = sqlx::query(
         "SELECT a.id, a.owner, a.template_id, a.seed_usdc, a.pnl_usdc, \
                 a.high_watermark_usdc, a.max_drawdown_pct, a.total_trades, \
                 a.params::text as params_text, a.consecutive_failures, \
+                a.lifecycle_state, \
                 t.strategy, t.category, t.min_seed_usdc \
          FROM managed_agents a \
          JOIN agent_templates t ON t.id = a.template_id \
-         WHERE a.status = 'active' AND a.next_execution_at <= $1 \
+         WHERE a.lifecycle_state = 'active' AND a.next_execution_at <= $1 \
          ORDER BY a.next_execution_at ASC, a.id ASC \
          LIMIT $2",
     )
@@ -179,13 +210,18 @@ async fn run_tick(state: &AppState) -> Result<TickStats, String> {
         let consecutive_failures: i32 = row.try_get("consecutive_failures").unwrap_or(0);
 
         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-            let _ = sqlx::query(
-                "UPDATE managed_agents SET status = 'stopped', last_error = $2, updated_at = NOW() WHERE id = $1",
+            let reason = format!("auto-paused after {} failures", consecutive_failures);
+            if let Err(e) = lifecycle::set_lifecycle_state(
+                state.db.pool(),
+                &state.redis,
+                id.as_str(),
+                LifecycleState::Paused,
+                Some(&reason),
             )
-            .bind(id.as_str())
-            .bind(format!("auto-stopped after {} failures", consecutive_failures))
-            .execute(state.db.pool())
-            .await;
+            .await
+            {
+                warn!("auto-pause {}: {}", id, e);
+            }
             continue;
         }
 
@@ -324,6 +360,28 @@ async fn sweep_due_positions(state: &AppState, now: DateTime<Utc>) -> anyhow::Re
             entry_fees + fill.fee_usdc,
         );
 
+        let close_payload = serde_json::json!({
+            "position_id": position_id,
+            "market_slug": market_slug,
+            "outcome": outcome,
+            "side": side,
+        });
+        let intent = match lifecycle::log_intent(
+            state.db.pool(),
+            &state.redis,
+            &agent_id,
+            lifecycle::IntentKind::ClosePosition,
+            &close_payload,
+        )
+        .await
+        {
+            Ok(h) => h,
+            Err(e) => {
+                warn!("sweep: log close intent {}: {}", position_id, e);
+                continue;
+            }
+        };
+
         let mut tx = state.db.pool().begin().await?;
 
         sqlx::query("DELETE FROM managed_agent_positions WHERE id = $1")
@@ -368,10 +426,97 @@ async fn sweep_due_positions(state: &AppState, now: DateTime<Utc>) -> anyhow::Re
         .await?;
 
         tx.commit().await?;
+        if let Err(e) =
+            lifecycle::confirm_intent(state.db.pool(), &state.redis, &agent_id, intent).await
+        {
+            warn!("sweep: confirm close intent {}: {}", position_id, e);
+        }
         closed += 1;
     }
 
     Ok(closed)
+}
+
+/// When a user flips `status` to 'stopped' or 'paused', move `lifecycle_state`
+/// out of `active`. Stopped → liquidating if positions still open, else
+/// settled. Paused user-intent → paused lifecycle.
+async fn reconcile_status_transitions(state: &AppState) -> Result<(), String> {
+    let rows = sqlx::query(
+        "SELECT a.id, a.status, a.lifecycle_state, \
+                (SELECT COUNT(*) FROM managed_agent_positions p \
+                 WHERE p.agent_id = a.id) AS open_count \
+         FROM managed_agents a \
+         WHERE (a.status = 'stopped' AND a.lifecycle_state IN ('active', 'paused')) \
+            OR (a.status = 'paused'  AND a.lifecycle_state = 'active') \
+            OR (a.status = 'active'  AND a.lifecycle_state = 'paused' \
+                AND a.consecutive_failures < $1) \
+         LIMIT 200",
+    )
+    .bind(MAX_CONSECUTIVE_FAILURES)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for row in rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        let status: String = row.try_get("status").unwrap_or_default();
+        let open_count: i64 = row.try_get("open_count").unwrap_or(0);
+
+        let target = match (status.as_str(), open_count > 0) {
+            ("stopped", true) => LifecycleState::Liquidating,
+            ("stopped", false) => LifecycleState::Settled,
+            ("paused", _) => LifecycleState::Paused,
+            ("active", _) => LifecycleState::Active,
+            _ => continue,
+        };
+
+        let reason = match status.as_str() {
+            "stopped" => Some("user stop"),
+            "paused" => Some("user pause"),
+            "active" => Some("user resume"),
+            _ => None,
+        };
+
+        if let Err(e) =
+            lifecycle::set_lifecycle_state(state.db.pool(), &state.redis, &id, target, reason).await
+        {
+            warn!("reconcile {} → {}: {}", id, target, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Liquidating agents that have drained all positions move to settled.
+async fn finalize_liquidated_agents(state: &AppState) -> Result<(), String> {
+    let rows = sqlx::query(
+        "SELECT a.id FROM managed_agents a \
+         WHERE a.lifecycle_state = 'liquidating' \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM managed_agent_positions p WHERE p.agent_id = a.id \
+           ) \
+         LIMIT 100",
+    )
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    for row in rows {
+        let id: String = row.try_get("id").unwrap_or_default();
+        if let Err(e) = lifecycle::set_lifecycle_state(
+            state.db.pool(),
+            &state.redis,
+            &id,
+            LifecycleState::Settled,
+            Some("liquidation complete"),
+        )
+        .await
+        {
+            warn!("settle {}: {}", id, e);
+        }
+    }
+
+    Ok(())
 }
 
 /// Execute one active agent: count open positions, evaluate strategy for
@@ -705,6 +850,25 @@ async fn open_position(
         fill.filled_quantity,
     );
 
+    // Record the intent before the side-effect. If we crash after this
+    // point but before confirm_intent, recover_unresolved_intents will
+    // look up the position row and either confirm (side-effect landed) or
+    // abandon (did not).
+    let intent_payload = serde_json::json!({
+        "provider": market_id.provider.as_str(),
+        "market_slug": market_id.value,
+        "outcome": signal.outcome,
+        "side": signal.side,
+    });
+    let intent = lifecycle::log_intent(
+        state.db.pool(),
+        &state.redis,
+        &agent.id,
+        IntentKind::OpenPosition,
+        &intent_payload,
+    )
+    .await?;
+
     let mut tx = state.db.pool().begin().await.map_err(|e| e.to_string())?;
 
     // Insert position — ON CONFLICT DO NOTHING so a concurrent tick can't
@@ -739,6 +903,17 @@ async fn open_position(
 
     if inserted.rows_affected() == 0 {
         tx.rollback().await.ok();
+        // Unique-index conflict: another tick already opened this position.
+        // Nothing to confirm — abandon the intent so it doesn't get
+        // reconciled into a duplicate on restart.
+        let _ = lifecycle::abandon_intent(
+            state.db.pool(),
+            &state.redis,
+            &agent.id,
+            intent,
+            "duplicate — unique index conflict",
+        )
+        .await;
         return Ok(false);
     }
 
@@ -774,6 +949,9 @@ async fn open_position(
     .map_err(|e| e.to_string())?;
 
     tx.commit().await.map_err(|e| e.to_string())?;
+    lifecycle::confirm_intent(state.db.pool(), &state.redis, &agent.id, intent)
+        .await
+        .map_err(|e| format!("confirm open_position intent: {}", e))?;
     Ok(true)
 }
 
