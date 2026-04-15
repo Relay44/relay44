@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crate::services::external::providers::limitless;
 use crate::services::external::types::ExternalMarketSnapshot;
-use crate::services::market_data::{market_key, L2Event, L2Level, L2Payload, Venue};
+use crate::services::market_data::{L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
 
 // ── Scanner entry point ──
@@ -150,7 +150,7 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
             let seq = state.market_data.next_seq(Venue::Limitless);
             state.market_data.emit(L2Event {
                 venue: Venue::Limitless,
-                market_key: market_key(Venue::Limitless, &[slug, outcome]),
+                market_key: format!("{}:{}", slug, outcome),
                 seq,
                 observed_at: chrono::Utc::now(),
                 payload: L2Payload::Snapshot {

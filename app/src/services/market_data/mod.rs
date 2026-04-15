@@ -82,13 +82,3 @@ pub struct L2Event {
     pub payload: L2Payload,
 }
 
-/// Canonical market-key format. Keep producers aligned with consumers.
-pub fn market_key(venue: Venue, parts: &[&str]) -> String {
-    let mut s = String::with_capacity(32);
-    s.push_str(venue.as_str());
-    for p in parts {
-        s.push(':');
-        s.push_str(p);
-    }
-    s
-}
