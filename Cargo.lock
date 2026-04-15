@@ -3540,7 +3540,7 @@ dependencies = [
  "ed25519-dalek",
  "indicatif",
  "percent-encoding",
- "rand 0.8.5",
+ "rand 0.10.0",
  "reqwest",
  "rust_decimal",
  "rustyline",
