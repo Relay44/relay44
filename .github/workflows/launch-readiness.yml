@@ -65,7 +65,7 @@ jobs:
       NEXT_PUBLIC_COLLATERAL_TOKEN_ADDRESS: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
       NEXT_PUBLIC_COLLATERAL_VAULT_ADDRESS: "0x0000000000000000000000000000000000000104"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v4
