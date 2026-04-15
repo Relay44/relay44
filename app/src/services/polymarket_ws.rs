@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
+use crate::services::market_data::{L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
 
 const WS_URL: &str = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
@@ -192,7 +193,7 @@ pub fn spawn_orderbook_feed(
                 break;
             }
 
-            match run_ws_connection(&orderbooks, &token_ids).await {
+            match run_ws_connection(&state, &orderbooks, &token_ids).await {
                 Ok(()) => {
                     info!("PM WS connection closed cleanly");
                 }
@@ -215,6 +216,7 @@ pub fn spawn_orderbook_feed(
 }
 
 async fn run_ws_connection(
+    state: &AppState,
     orderbooks: &SharedOrderbooks,
     token_ids: &[String],
 ) -> Result<(), String> {
@@ -270,10 +272,10 @@ async fn run_ws_connection(
                 // Try to parse as array (Polymarket sends arrays of events)
                 if let Ok(messages) = serde_json::from_str::<Vec<WsMessage>>(&text) {
                     for ws_msg in messages {
-                        process_ws_message(orderbooks, ws_msg).await;
+                        process_ws_message(state, orderbooks, ws_msg).await;
                     }
                 } else if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&text) {
-                    process_ws_message(orderbooks, ws_msg).await;
+                    process_ws_message(state, orderbooks, ws_msg).await;
                 }
                 // Silently ignore unparseable messages
             }
@@ -289,7 +291,7 @@ async fn run_ws_connection(
     Ok(())
 }
 
-async fn process_ws_message(orderbooks: &SharedOrderbooks, msg: WsMessage) {
+async fn process_ws_message(state: &AppState, orderbooks: &SharedOrderbooks, msg: WsMessage) {
     match msg {
         WsMessage::Book {
             asset_id,
@@ -312,6 +314,9 @@ async fn process_ws_message(orderbooks: &SharedOrderbooks, msg: WsMessage) {
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
 
+            let (snapshot_bids, snapshot_asks) = (parsed_bids.clone(), parsed_asks.clone());
+            let token_key = asset_id.clone();
+
             let mut books = orderbooks.write().await;
             let entry = books
                 .entry(asset_id.clone())
@@ -322,33 +327,64 @@ async fn process_ws_message(orderbooks: &SharedOrderbooks, msg: WsMessage) {
             entry.bids = parsed_bids;
             entry.asks = parsed_asks;
             entry.updated_at = std::time::Instant::now();
+            let last_trade = entry.last_trade_price;
+            drop(books);
+
+            let seq = state.market_data.next_seq(Venue::Polymarket);
+            state.market_data.emit(L2Event {
+                venue: Venue::Polymarket,
+                market_key: token_key,
+                seq,
+                observed_at: chrono::Utc::now(),
+                payload: L2Payload::Snapshot {
+                    bids: snapshot_bids
+                        .into_iter()
+                        .take(10)
+                        .map(|l| L2Level { price: l.price, size: l.size })
+                        .collect(),
+                    asks: snapshot_asks
+                        .into_iter()
+                        .take(10)
+                        .map(|l| L2Level { price: l.price, size: l.size })
+                        .collect(),
+                    last_trade,
+                },
+            });
         }
 
         WsMessage::PriceChange {
             asset_id, changes, ..
         } => {
+            let mut bid_updates = Vec::new();
+            let mut ask_updates = Vec::new();
+            let mut removed_bids = Vec::new();
+            let mut removed_asks = Vec::new();
+
             let mut books = orderbooks.write().await;
             if let Some(entry) = books.get_mut(&asset_id) {
-                for change in changes {
+                for change in &changes {
                     if let (Ok(price), Ok(size)) =
                         (change.price.parse::<f64>(), change.size.parse::<f64>())
                     {
-                        let levels = if change.side == "BUY" || change.side == "buy" {
-                            &mut entry.bids
-                        } else {
-                            &mut entry.asks
-                        };
+                        let is_bid = change.side == "BUY" || change.side == "buy";
+                        let levels = if is_bid { &mut entry.bids } else { &mut entry.asks };
 
-                        // Remove existing level at this price
                         levels.retain(|l| (l.price - price).abs() > f64::EPSILON);
 
-                        // Add back if size > 0
                         if size > 0.0 {
                             levels.push(PriceLevel { price, size });
+                            if is_bid {
+                                bid_updates.push(L2Level { price, size });
+                            } else {
+                                ask_updates.push(L2Level { price, size });
+                            }
+                        } else if is_bid {
+                            removed_bids.push(price);
+                        } else {
+                            removed_asks.push(price);
                         }
 
-                        // Re-sort
-                        if change.side == "BUY" || change.side == "buy" {
+                        if is_bid {
                             levels.sort_by(|a, b| {
                                 b.price
                                     .partial_cmp(&a.price)
@@ -364,6 +400,27 @@ async fn process_ws_message(orderbooks: &SharedOrderbooks, msg: WsMessage) {
                     }
                 }
                 entry.updated_at = std::time::Instant::now();
+                drop(books);
+
+                if !bid_updates.is_empty()
+                    || !ask_updates.is_empty()
+                    || !removed_bids.is_empty()
+                    || !removed_asks.is_empty()
+                {
+                    let seq = state.market_data.next_seq(Venue::Polymarket);
+                    state.market_data.emit(L2Event {
+                        venue: Venue::Polymarket,
+                        market_key: asset_id,
+                        seq,
+                        observed_at: chrono::Utc::now(),
+                        payload: L2Payload::Delta {
+                            bid_updates,
+                            ask_updates,
+                            removed_bids,
+                            removed_asks,
+                        },
+                    });
+                }
             }
         }
 

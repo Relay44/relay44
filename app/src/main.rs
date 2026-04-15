@@ -87,6 +87,7 @@ async fn main() -> std::io::Result<()> {
     let metrics = MetricsService::new();
     let ws_hub = WebSocketHub::new();
     let event_bus = EventBus::new();
+    let market_data = Arc::new(relay44_backend::services::market_data::MarketDataBus::new());
 
     let kyc = relay44_backend::services::kyc::KycService::new(
         relay44_backend::services::kyc::KycConfig::from_env(),
@@ -105,10 +106,13 @@ async fn main() -> std::io::Result<()> {
         metrics,
         ws_hub,
         event_bus,
+        market_data,
         kyc,
         limitless_partner,
         is_shutting_down: Arc::new(AtomicBool::new(false)),
     });
+
+    relay44_backend::services::market_data::cache_writer::spawn(app_state.clone());
 
     let migration_db = app_state.db.clone();
     let background_state = app_state.clone();

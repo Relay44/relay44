@@ -41,8 +41,8 @@ use actix_web::web;
 use api::JwtService;
 use config::AppConfig;
 use services::{
-    DatabaseService, EventBus, EvmIndexerService, EvmRpcService, MetricsService, OrderBookService,
-    RedisService, WebSocketHub,
+    market_data::MarketDataBus, DatabaseService, EventBus, EvmIndexerService, EvmRpcService,
+    MetricsService, OrderBookService, RedisService, WebSocketHub,
 };
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -58,6 +58,7 @@ pub struct AppState {
     pub metrics: MetricsService,
     pub ws_hub: WebSocketHub,
     pub event_bus: EventBus,
+    pub market_data: Arc<MarketDataBus>,
     pub kyc: services::kyc::KycService,
     pub limitless_partner: Option<services::limitless_partner::LimitlessPartnerConfig>,
     pub is_shutting_down: Arc<AtomicBool>,

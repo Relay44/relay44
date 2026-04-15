@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::services::external::providers::aerodrome;
+use crate::services::market_data::{market_key, L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
 
 // ── Scanner entry point ──
@@ -124,6 +125,35 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
         // Synthesize orderbook to compute spread.
         let orderbook = aerodrome::synthesize_orderbook(&pool_state, pool_address, price);
         let spread_bps = compute_spread_bps(&orderbook);
+
+        let seq = state.market_data.next_seq(Venue::Aerodrome);
+        state.market_data.emit(L2Event {
+            venue: Venue::Aerodrome,
+            market_key: market_key(Venue::Aerodrome, &[pool_address]),
+            seq,
+            observed_at: chrono::Utc::now(),
+            payload: L2Payload::Snapshot {
+                bids: orderbook
+                    .bids
+                    .iter()
+                    .take(10)
+                    .map(|l| L2Level {
+                        price: l.price,
+                        size: l.quantity,
+                    })
+                    .collect(),
+                asks: orderbook
+                    .asks
+                    .iter()
+                    .take(10)
+                    .map(|l| L2Level {
+                        price: l.price,
+                        size: l.quantity,
+                    })
+                    .collect(),
+                last_trade: None,
+            },
+        });
 
         let (opp_type, opp_score) = score_opportunity(&pool_state, spread_bps);
         if opp_score > 0.0 {
