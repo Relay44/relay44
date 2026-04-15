@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use crate::services::external::providers::limitless;
 use crate::services::external::types::ExternalMarketSnapshot;
+use crate::services::market_data::{market_key, L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
 
 // ── Scanner entry point ──
@@ -141,6 +142,24 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
             continue;
         }
         indexed += 1;
+
+        for (outcome, price) in [("yes", market.yes_price), ("no", market.no_price)] {
+            if price <= 0.0 {
+                continue;
+            }
+            let seq = state.market_data.next_seq(Venue::Limitless);
+            state.market_data.emit(L2Event {
+                venue: Venue::Limitless,
+                market_key: market_key(Venue::Limitless, &[slug, outcome]),
+                seq,
+                observed_at: chrono::Utc::now(),
+                payload: L2Payload::Snapshot {
+                    bids: vec![L2Level { price, size: 0.0 }],
+                    asks: vec![],
+                    last_trade: None,
+                },
+            });
+        }
     }
 
     // Cross-venue matching against Polymarket.

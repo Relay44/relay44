@@ -9,7 +9,26 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::services::market_data::{L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
+
+fn emit_l2(state: &AppState, market_key: String, price: f64) {
+    if price <= 0.0 {
+        return;
+    }
+    let seq = state.market_data.next_seq(Venue::Polymarket);
+    state.market_data.emit(L2Event {
+        venue: Venue::Polymarket,
+        market_key,
+        seq,
+        observed_at: chrono::Utc::now(),
+        payload: L2Payload::Snapshot {
+            bids: vec![L2Level { price, size: 0.0 }],
+            asks: vec![],
+            last_trade: None,
+        },
+    });
+}
 
 // ── Gamma API types ──
 
@@ -491,6 +510,8 @@ pub async fn run_scan(state: &AppState) -> Result<Vec<ScannedOpportunity>, Strin
                 if let Err(e) = upsert_scanned_market(state, &opp).await {
                     warn!("Scanner: failed to persist {}: {}", opp.condition_id, e);
                 }
+                emit_l2(state, opp.yes_token_id.clone(), opp.yes_price);
+                emit_l2(state, opp.no_token_id.clone(), opp.no_price);
                 all_opportunities.push(opp);
             }
         }
