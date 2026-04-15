@@ -27,7 +27,7 @@ ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 bs58 = "0.5"
 colored = "2"
 indicatif = "0.17"
-rand = "0.8"
+rand = "0.10"
 chrono = "0.4"
 base64 = "0.22"
 terminal_size = "0.4"
