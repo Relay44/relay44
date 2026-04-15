@@ -59,7 +59,7 @@ rand = "0.10"
 # Cryptography
 sha2 = "0.10"
 sha3 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 hex = "0.4"
 aes-gcm = "0.10"
 k256 = { version = "0.13", features = ["ecdsa"] }
