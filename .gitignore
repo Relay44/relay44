@@ -76,3 +76,4 @@ docs/reports/*-20??????T??????Z.md
 .internal_assets_location
 .claude/
 .render-workspace-lock.json
+.codex-public-mirror/

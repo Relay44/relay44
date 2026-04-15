@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::services::external::providers::aerodrome;
-use crate::services::market_data::{market_key, L2Event, L2Level, L2Payload, Venue};
+use crate::services::market_data::{L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
 
 // ── Scanner entry point ──
@@ -129,7 +129,7 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
         let seq = state.market_data.next_seq(Venue::Aerodrome);
         state.market_data.emit(L2Event {
             venue: Venue::Aerodrome,
-            market_key: market_key(Venue::Aerodrome, &[pool_address]),
+            market_key: pool_address.to_string(),
             seq,
             observed_at: chrono::Utc::now(),
             payload: L2Payload::Snapshot {

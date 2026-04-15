@@ -12,7 +12,52 @@ use std::time::Duration;
 
 use crate::services::external::types::ExternalMarketId;
 use crate::services::external::{self};
+use crate::services::market_data::{cache as l2_cache, TopOfBook, Venue};
 use crate::AppState;
+
+fn venue_for_provider(provider: &str) -> Option<Venue> {
+    match provider {
+        "polymarket" => Some(Venue::Polymarket),
+        "limitless" => Some(Venue::Limitless),
+        "aerodrome" => Some(Venue::Aerodrome),
+        _ => None,
+    }
+}
+
+fn cache_market_key(venue: Venue, provider_market_id: &str, outcome: &str) -> String {
+    match venue {
+        Venue::Limitless => format!("{}:{}", provider_market_id, outcome),
+        _ => provider_market_id.to_string(),
+    }
+}
+
+fn quote_from_top(link: &VenueLink, top: &TopOfBook) -> Option<VenueQuote> {
+    if top.best_bid.is_none() && top.best_ask.is_none() {
+        return None;
+    }
+    let best_bid = top.best_bid.as_ref().map(|l| l.price).filter(|&p| p > 0.0);
+    let best_ask = top.best_ask.as_ref().map(|l| l.price).filter(|&p| p > 0.0);
+    let fee_mult = link.fee_bps as f64 / 10_000.0;
+    Some(VenueQuote {
+        provider: link.provider.clone(),
+        provider_market_id: link.provider_market_id.clone(),
+        best_bid,
+        best_ask,
+        bid_depth_usdc: top
+            .best_bid
+            .as_ref()
+            .map(|l| l.price * l.size)
+            .unwrap_or(0.0),
+        ask_depth_usdc: top
+            .best_ask
+            .as_ref()
+            .map(|l| l.price * l.size)
+            .unwrap_or(0.0),
+        fee_bps: link.fee_bps,
+        effective_buy: best_ask.map(|p| p * (1.0 + fee_mult)),
+        effective_sell: best_bid.map(|p| p * (1.0 - fee_mult)),
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VenueQuote {
@@ -384,6 +429,25 @@ async fn fetch_venue_quote(
     link: &VenueLink,
     outcome: &str,
 ) -> Result<VenueQuote, String> {
+    if let Some(venue) = venue_for_provider(&link.provider) {
+        let key = cache_market_key(venue, &link.provider_market_id, outcome);
+        match l2_cache::read_top(&state.redis, venue, &key).await {
+            Ok(Some(top)) => {
+                if let Some(q) = quote_from_top(link, &top) {
+                    log::debug!(
+                        "smart_router cache hit {}:{} outcome={}",
+                        link.provider,
+                        key,
+                        outcome
+                    );
+                    return Ok(q);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => log::debug!("l2 cache read failed ({}): {}", link.provider, e),
+        }
+    }
+
     let namespaced = format!("{}:{}", link.provider, link.provider_market_id);
     let market_id = ExternalMarketId::parse(&namespaced)
         .map_err(|e| format!("Bad market id: {}", e.message))?;
