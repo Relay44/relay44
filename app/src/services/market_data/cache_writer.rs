@@ -9,7 +9,7 @@ use std::sync::Arc;
 use log::{debug, warn};
 use tokio::sync::broadcast::error::RecvError;
 
-use super::{cache, L2Event, L2Payload, TopOfBook};
+use super::{cache, FullBook, L2Event, L2Payload, TopOfBook};
 use crate::AppState;
 
 pub fn spawn(state: Arc<AppState>) -> tokio::task::JoinHandle<()> {
@@ -36,6 +36,14 @@ async fn handle_event(state: &AppState, ev: Arc<L2Event>) {
             cache::write_top(&state.redis, ev.venue, &ev.market_key, &top).await
         {
             warn!("l2 cache write failed: {}", e);
+        }
+    }
+
+    if let Some(book) = fold_book(&ev) {
+        if let Err(e) =
+            cache::write_book(&state.redis, ev.venue, &ev.market_key, &book).await
+        {
+            warn!("l2 book cache write failed: {}", e);
         }
     }
 
@@ -67,5 +75,22 @@ fn fold_top(ev: &L2Event) -> Option<TopOfBook> {
             observed_at: ev.observed_at,
         }),
         L2Payload::Delta { .. } | L2Payload::Trade { .. } => None,
+    }
+}
+
+fn fold_book(ev: &L2Event) -> Option<FullBook> {
+    match &ev.payload {
+        L2Payload::Snapshot {
+            bids,
+            asks,
+            last_trade,
+        } if bids.len() > 1 || asks.len() > 1 => Some(FullBook {
+            bids: bids.clone(),
+            asks: asks.clone(),
+            last_trade: *last_trade,
+            seq: ev.seq,
+            observed_at: ev.observed_at,
+        }),
+        _ => None,
     }
 }

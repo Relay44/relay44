@@ -13,8 +13,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::services::external::types::ExternalMarketId;
+use crate::services::external::types::{ExternalMarketId, ExternalOrderBookSnapshot};
 use crate::services::external::{self};
+use crate::services::market_data::{L2Event, L2Level, L2Payload, Venue};
 use crate::AppState;
 
 const DEFAULT_TICK_INTERVAL_SECS: u64 = 5;
@@ -189,6 +190,8 @@ async fn mirror_single_market(
             .await
             .map_err(|e| format!("Fetch yes orderbook: {}", e))?;
 
+    emit_snapshot_to_bus(state, &external_id, "yes", &yes_snapshot);
+
     let mut yes_bids: Vec<MirrorQuote> = Vec::new();
     let mut no_bids: Vec<MirrorQuote> = Vec::new();
     let mut total_depth = 0.0;
@@ -250,6 +253,82 @@ async fn mirror_single_market(
         total_depth_usdc: total_depth,
         updated_at: Utc::now().to_rfc3339(),
     })
+}
+
+fn bus_venue(provider: &crate::services::external::types::ExternalProvider) -> Venue {
+    use crate::services::external::types::ExternalProvider::*;
+    match provider {
+        Polymarket => Venue::Polymarket,
+        Limitless => Venue::Limitless,
+        Aerodrome => Venue::Aerodrome,
+    }
+}
+
+fn bus_market_key(
+    snapshot: &ExternalOrderBookSnapshot,
+    external_id: &ExternalMarketId,
+    outcome: &str,
+) -> String {
+    use crate::services::external::types::ExternalProvider::*;
+    match external_id.provider {
+        Polymarket => {
+            if !snapshot.provider_market_ref.is_empty() {
+                snapshot.provider_market_ref.clone()
+            } else {
+                external_id.value.clone()
+            }
+        }
+        Limitless => {
+            let base = if !snapshot.provider_market_ref.is_empty() {
+                snapshot.provider_market_ref.as_str()
+            } else {
+                external_id.value.as_str()
+            };
+            format!("{}:{}", base, outcome)
+        }
+        Aerodrome => external_id.value.clone(),
+    }
+}
+
+fn emit_snapshot_to_bus(
+    state: &AppState,
+    external_id: &ExternalMarketId,
+    outcome: &str,
+    snapshot: &ExternalOrderBookSnapshot,
+) {
+    let venue = bus_venue(&external_id.provider);
+    let market_key = bus_market_key(snapshot, external_id, outcome);
+    let bids: Vec<L2Level> = snapshot
+        .bids
+        .iter()
+        .map(|l| L2Level {
+            price: l.price,
+            size: l.quantity,
+        })
+        .collect();
+    let asks: Vec<L2Level> = snapshot
+        .asks
+        .iter()
+        .map(|l| L2Level {
+            price: l.price,
+            size: l.quantity,
+        })
+        .collect();
+    if bids.is_empty() && asks.is_empty() {
+        return;
+    }
+    let seq = state.market_data.next_seq(venue);
+    state.market_data.emit(L2Event {
+        venue,
+        market_key,
+        seq,
+        observed_at: Utc::now(),
+        payload: L2Payload::Snapshot {
+            bids,
+            asks,
+            last_trade: None,
+        },
+    });
 }
 
 /// Store mirror snapshot in Redis for the orderbook endpoint to read.

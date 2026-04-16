@@ -14,7 +14,7 @@ pub mod cache;
 pub mod cache_writer;
 
 pub use bus::MarketDataBus;
-pub use cache::TopOfBook;
+pub use cache::{FullBook, TopOfBook};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
