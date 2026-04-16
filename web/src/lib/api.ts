@@ -3986,6 +3986,8 @@ class ApiClient {
     opportunityType?: string;
     category?: string;
     minScore?: number;
+    minLiquidity?: number;
+    sort?: 'score' | 'mispricing' | 'liquidity' | 'volume' | 'recent';
     limit?: number;
   }): Promise<{ opportunities: ScannedOpportunity[]; count: number }> {
     const query = this.buildQuery(params || {});

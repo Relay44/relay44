@@ -570,80 +570,97 @@ pub async fn run_scan(state: &AppState) -> Result<Vec<ScannedOpportunity>, Strin
     Ok(all_opportunities)
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub enum OpportunitySort {
+    #[default]
+    Score,
+    Mispricing,
+    Liquidity,
+    Volume,
+    Recent,
+}
+
+impl OpportunitySort {
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "mispricing" => Self::Mispricing,
+            "liquidity" => Self::Liquidity,
+            "volume" => Self::Volume,
+            "recent" => Self::Recent,
+            _ => Self::Score,
+        }
+    }
+
+    fn order_clause(self) -> &'static str {
+        match self {
+            Self::Score => "opportunity_score DESC NULLS LAST",
+            Self::Mispricing => "mispricing_score DESC NULLS LAST",
+            Self::Liquidity => "liquidity_usdc DESC NULLS LAST",
+            Self::Volume => "volume_usdc DESC NULLS LAST",
+            Self::Recent => "last_scanned_at DESC NULLS LAST",
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct OpportunityFilter<'a> {
+    pub opportunity_type: Option<&'a str>,
+    pub category: Option<&'a str>,
+    pub min_score: Option<f64>,
+    pub min_liquidity: Option<f64>,
+    pub sort: OpportunitySort,
+    pub limit: i64,
+}
+
 /// List top opportunities from the database.
 pub async fn list_opportunities(
     state: &AppState,
-    opportunity_type: Option<&str>,
-    limit: i64,
+    filter: OpportunityFilter<'_>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let pool = state.db.pool();
 
-    let rows = if let Some(opp_type) = opportunity_type {
-        sqlx::query_as::<_, (serde_json::Value,)>(
-            r#"
-            SELECT json_build_object(
-                'conditionId', condition_id,
-                'question', question,
-                'slug', slug,
-                'category', category,
-                'yesTokenId', yes_token_id,
-                'noTokenId', no_token_id,
-                'yesPrice', yes_price,
-                'noPrice', no_price,
-                'spreadBps', spread_bps,
-                'volumeUsdc', volume_usdc,
-                'liquidityUsdc', liquidity_usdc,
-                'opportunityType', opportunity_type,
-                'opportunityScore', opportunity_score,
-                'mispricingScore', mispricing_score,
-                'durationMinutes', duration_minutes,
-                'feeRateBps', fee_rate_bps,
-                'lastScannedAt', last_scanned_at
-            )
-            FROM polymarket_scanned_markets
-            WHERE active = true
-              AND opportunity_type LIKE $1
-            ORDER BY opportunity_score DESC
-            LIMIT $2
-            "#,
+    let sql = format!(
+        r#"
+        SELECT json_build_object(
+            'conditionId', condition_id,
+            'question', question,
+            'slug', slug,
+            'category', category,
+            'yesTokenId', yes_token_id,
+            'noTokenId', no_token_id,
+            'yesPrice', yes_price,
+            'noPrice', no_price,
+            'spreadBps', spread_bps,
+            'volumeUsdc', volume_usdc,
+            'liquidityUsdc', liquidity_usdc,
+            'opportunityType', opportunity_type,
+            'opportunityScore', opportunity_score,
+            'mispricingScore', mispricing_score,
+            'durationMinutes', duration_minutes,
+            'feeRateBps', fee_rate_bps,
+            'lastScannedAt', last_scanned_at
         )
-        .bind(format!("{}%", opp_type))
-        .bind(limit)
+        FROM polymarket_scanned_markets
+        WHERE active = true
+          AND opportunity_type IS NOT NULL
+          AND ($1::text IS NULL OR opportunity_type LIKE $1)
+          AND ($2::text IS NULL OR category = $2)
+          AND ($3::double precision IS NULL OR opportunity_score >= $3)
+          AND ($4::double precision IS NULL OR liquidity_usdc >= $4)
+        ORDER BY {}
+        LIMIT $5
+        "#,
+        filter.sort.order_clause()
+    );
+
+    let rows = sqlx::query_as::<_, (serde_json::Value,)>(&sql)
+        .bind(filter.opportunity_type.map(|t| format!("{}%", t)))
+        .bind(filter.category)
+        .bind(filter.min_score)
+        .bind(filter.min_liquidity)
+        .bind(filter.limit)
         .fetch_all(pool)
-        .await
-    } else {
-        sqlx::query_as::<_, (serde_json::Value,)>(
-            r#"
-            SELECT json_build_object(
-                'conditionId', condition_id,
-                'question', question,
-                'slug', slug,
-                'category', category,
-                'yesTokenId', yes_token_id,
-                'noTokenId', no_token_id,
-                'yesPrice', yes_price,
-                'noPrice', no_price,
-                'spreadBps', spread_bps,
-                'volumeUsdc', volume_usdc,
-                'liquidityUsdc', liquidity_usdc,
-                'opportunityType', opportunity_type,
-                'opportunityScore', opportunity_score,
-                'mispricingScore', mispricing_score,
-                'durationMinutes', duration_minutes,
-                'feeRateBps', fee_rate_bps,
-                'lastScannedAt', last_scanned_at
-            )
-            FROM polymarket_scanned_markets
-            WHERE active = true
-              AND opportunity_type IS NOT NULL
-            ORDER BY opportunity_score DESC
-            LIMIT $1
-            "#,
-        )
-        .bind(limit)
-        .fetch_all(pool)
-        .await
-    };
+        .await;
 
     rows.map(|r| r.into_iter().map(|(v,)| v).collect())
         .map_err(|e| format!("DB query failed: {}", e))
