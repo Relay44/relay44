@@ -752,6 +752,7 @@ mod tests {
                     price: Some(no_price),
                 },
             ],
+            clob_token_ids: None,
             outcome_prices: None,
             outcomes: None,
             volume: Some(volume.to_string()),
