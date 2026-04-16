@@ -4,8 +4,10 @@
 //! - `r44:l2:top:{venue}:{market_key}`  — best bid/ask, sized for hot-path reads.
 //! - `r44:l2:book:{venue}:{market_key}` — full snapshot (bids+asks), for depth consumers.
 //!
-//! Both have a 30s sliding TTL; a silent venue expires and callers fall back
-//! to direct fetches.
+//! Sliding TTLs outlive their producers' poll cadence so keys don't die
+//! between scans. Scanners tick at 60s — a 30s TTL left half of every
+//! cycle with empty cache; 120s gives ~2 missed cycles before a silent
+//! venue actually expires, which is the signal callers fall back on.
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -14,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use super::{L2Level, Venue};
 use crate::services::RedisService;
 
-pub const TOP_OF_BOOK_TTL_SECS: u64 = 30;
-pub const FULL_BOOK_TTL_SECS: u64 = 30;
+pub const TOP_OF_BOOK_TTL_SECS: u64 = 120;
+pub const FULL_BOOK_TTL_SECS: u64 = 120;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopOfBook {
