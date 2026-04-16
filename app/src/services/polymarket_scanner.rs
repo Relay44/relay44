@@ -44,6 +44,8 @@ struct GammaMarket {
     #[serde(default)]
     tokens: Vec<GammaToken>,
     #[serde(default)]
+    clob_token_ids: Option<String>,
+    #[serde(default)]
     outcome_prices: Option<String>,
     #[serde(default)]
     outcomes: Option<String>,
@@ -355,16 +357,46 @@ fn extract_tokens(market: &GammaMarket) -> Option<(GammaToken, GammaToken)> {
             .iter()
             .find(|t| t.outcome.to_ascii_lowercase() == "no")
             .cloned();
-        match (yes, no) {
+        return match (yes, no) {
             (Some(y), Some(n)) => Some((y, n)),
-            _ => {
-                // Fallback: first = Yes, second = No
-                Some((market.tokens[0].clone(), market.tokens[1].clone()))
-            }
-        }
-    } else {
-        None
+            _ => Some((market.tokens[0].clone(), market.tokens[1].clone())),
+        };
     }
+
+    // Gamma /markets returns clobTokenIds / outcomes / outcomePrices as JSON-encoded string arrays.
+    let token_ids: Vec<String> =
+        serde_json::from_str(market.clob_token_ids.as_deref()?).ok()?;
+    let outcomes: Vec<String> = market
+        .outcomes
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+    let prices: Vec<f64> = market
+        .outcome_prices
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        .map(|v| v.iter().filter_map(|p| p.parse().ok()).collect())
+        .unwrap_or_default();
+
+    if token_ids.len() < 2 {
+        return None;
+    }
+
+    let build = |i: usize| GammaToken {
+        token_id: token_ids[i].clone(),
+        outcome: outcomes.get(i).cloned().unwrap_or_default(),
+        price: prices.get(i).copied(),
+    };
+
+    let yes_idx = outcomes
+        .iter()
+        .position(|o| o.eq_ignore_ascii_case("yes"))
+        .unwrap_or(0);
+    let no_idx = outcomes
+        .iter()
+        .position(|o| o.eq_ignore_ascii_case("no"))
+        .unwrap_or(1);
+    Some((build(yes_idx), build(no_idx)))
 }
 
 // ── Scanner fetch ──
