@@ -643,7 +643,7 @@ pub async fn batch_place_orders(
     let mut final_orders = Vec::with_capacity(prepared_orders.len());
     let mut results = Vec::with_capacity(prepared_orders.len());
 
-    for (mut order, matches) in prepared_orders.into_iter().zip(batch_matches.into_iter()) {
+    for (mut order, matches) in prepared_orders.into_iter().zip(batch_matches) {
         let total_filled: u64 = matches.iter().map(|m| m.fill_quantity).sum();
         let remaining = order.quantity.saturating_sub(total_filled);
 
@@ -1066,7 +1066,7 @@ pub async fn replace_orders(
     let mut final_orders = Vec::with_capacity(prepared_orders.len());
     let mut place_results = Vec::with_capacity(prepared_orders.len());
 
-    for (mut order, matches) in prepared_orders.into_iter().zip(batch_matches.into_iter()) {
+    for (mut order, matches) in prepared_orders.into_iter().zip(batch_matches) {
         let total_filled: u64 = matches.iter().map(|m| m.fill_quantity).sum();
         let remaining = order.quantity.saturating_sub(total_filled);
 

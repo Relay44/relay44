@@ -1518,7 +1518,7 @@ fn build_recommendation(
         });
     }
 
-    top_contributors.sort_by(|left, right| right.score_bps.abs().cmp(&left.score_bps.abs()));
+    top_contributors.sort_by_key(|c| std::cmp::Reverse(c.score_bps.abs()));
     top_contributors.truncate(3);
 
     let removed_last_changed_node = last_changed_node.as_ref().is_some_and(|change| {
