@@ -7,6 +7,8 @@ export function useScannerOpportunities(params?: {
   opportunityType?: string;
   category?: string;
   minScore?: number;
+  minLiquidity?: number;
+  sort?: 'score' | 'mispricing' | 'liquidity' | 'volume' | 'recent';
   limit?: number;
   enabled?: boolean;
 }) {
@@ -19,10 +21,12 @@ export function useScannerOpportunities(params?: {
         opportunityType: params?.opportunityType,
         category: params?.category,
         minScore: params?.minScore,
+        minLiquidity: params?.minLiquidity,
+        sort: params?.sort,
         limit: params?.limit,
       }),
-    staleTime: 60_000,
-    refetchInterval: enabled ? 60_000 : false,
+    staleTime: 30_000,
+    refetchInterval: enabled ? 30_000 : false,
     refetchOnWindowFocus: false,
     retry: 1,
   });

@@ -24,6 +24,8 @@ pub struct OpportunitiesQuery {
     pub opportunity_type: Option<String>,
     pub category: Option<String>,
     pub min_score: Option<f64>,
+    pub min_liquidity: Option<f64>,
+    pub sort: Option<String>,
     pub limit: Option<i64>,
 }
 
@@ -36,10 +38,23 @@ pub async fn list_opportunities(
     ensure_scanner_enabled(&state)?;
     let _ = extract_authenticated_user(&req, &state).await?;
 
-    let limit = query.limit.unwrap_or(50).min(200);
-    let opp_type = query.opportunity_type.as_deref();
+    let limit = query.limit.unwrap_or(50).clamp(1, 200);
+    let sort = query
+        .sort
+        .as_deref()
+        .map(polymarket_scanner::OpportunitySort::parse)
+        .unwrap_or_default();
 
-    let opportunities = polymarket_scanner::list_opportunities(&state, opp_type, limit)
+    let filter = polymarket_scanner::OpportunityFilter {
+        opportunity_type: query.opportunity_type.as_deref(),
+        category: query.category.as_deref(),
+        min_score: query.min_score,
+        min_liquidity: query.min_liquidity,
+        sort,
+        limit,
+    };
+
+    let opportunities = polymarket_scanner::list_opportunities(&state, filter)
         .await
         .map_err(|e| ApiError::internal(&e))?;
 
