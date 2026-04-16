@@ -500,6 +500,15 @@ pub async fn run_scan(state: &AppState) -> Result<Vec<ScannedOpportunity>, Strin
         total_scanned += markets.len() as u32;
 
         for market in &markets {
+            if let Some((yes_token, no_token)) = extract_tokens(market) {
+                if let Some(p) = yes_token.price {
+                    emit_l2(state, yes_token.token_id.clone(), p);
+                }
+                if let Some(p) = no_token.price {
+                    emit_l2(state, no_token.token_id.clone(), p);
+                }
+            }
+
             if let Some(opp) = score_market(market) {
                 match opp.opportunity_type.as_str() {
                     t if t.starts_with("longshot") => longshots += 1,
@@ -510,8 +519,6 @@ pub async fn run_scan(state: &AppState) -> Result<Vec<ScannedOpportunity>, Strin
                 if let Err(e) = upsert_scanned_market(state, &opp).await {
                     warn!("Scanner: failed to persist {}: {}", opp.condition_id, e);
                 }
-                emit_l2(state, opp.yes_token_id.clone(), opp.yes_price);
-                emit_l2(state, opp.no_token_id.clone(), opp.no_price);
                 all_opportunities.push(opp);
             }
         }
@@ -656,28 +663,26 @@ pub fn spawn_scanner(state: Arc<AppState>) {
 
             match run_scan(&state).await {
                 Ok(opps) => {
-                    if !opps.is_empty() {
-                        let longshots = opps
-                            .iter()
-                            .filter(|o| o.opportunity_type.starts_with("longshot"))
-                            .count();
-                        let certs = opps
-                            .iter()
-                            .filter(|o| o.opportunity_type.starts_with("near_certainty"))
-                            .count();
-                        let spreads = opps
-                            .iter()
-                            .filter(|o| o.opportunity_type == "spread_capture")
-                            .count();
+                    let longshots = opps
+                        .iter()
+                        .filter(|o| o.opportunity_type.starts_with("longshot"))
+                        .count();
+                    let certs = opps
+                        .iter()
+                        .filter(|o| o.opportunity_type.starts_with("near_certainty"))
+                        .count();
+                    let spreads = opps
+                        .iter()
+                        .filter(|o| o.opportunity_type == "spread_capture")
+                        .count();
 
-                        info!(
-                            "PM scan: {} opportunities (longshot={}, near_cert={}, spread={})",
-                            opps.len(),
-                            longshots,
-                            certs,
-                            spreads
-                        );
-                    }
+                    info!(
+                        "PM scan: {} opportunities (longshot={}, near_cert={}, spread={})",
+                        opps.len(),
+                        longshots,
+                        certs,
+                        spreads
+                    );
                 }
                 Err(e) => {
                     warn!("PM scan error: {}", e);
