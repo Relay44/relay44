@@ -449,11 +449,9 @@ async fn execute_limitless_hedge(
 
     // makerAmount = quantity (USDC in 6 decimals)
     // takerAmount = quantity / price (outcome tokens)
-    let taker_amount = if price_aligned > 0 {
-        (quantity_int * LIMITLESS_SCALE) / price_aligned
-    } else {
-        return Err("Price is zero, cannot compute taker amount".to_string());
-    };
+    let taker_amount = (quantity_int * LIMITLESS_SCALE)
+        .checked_div(price_aligned)
+        .ok_or_else(|| "Price is zero, cannot compute taker amount".to_string())?;
 
     let salt = generate_salt();
     let expiration = (Utc::now().timestamp() as u64) + 3600; // 1 hour
