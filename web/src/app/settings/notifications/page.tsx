@@ -12,8 +12,10 @@ export const metadata = buildPageMetadata({
 export default function NotificationSettingsPage() {
   return (
     <PageShell>
-      <div className="mx-auto max-w-2xl py-2 sm:py-4">
-        <NotificationSettings />
+      <div className="py-2 sm:py-4">
+        <div className="mx-auto max-w-2xl">
+          <NotificationSettings />
+        </div>
       </div>
     </PageShell>
   );

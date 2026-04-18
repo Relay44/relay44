@@ -160,7 +160,8 @@ export default function CreateDistributionMarketPage() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-2xl px-4 py-8">
+      <div className="py-8">
+        <div className="mx-auto max-w-2xl">
         <h1 className="text-lg font-medium text-text-primary mb-2">
           Create Distribution Market
         </h1>
@@ -352,6 +353,7 @@ export default function CreateDistributionMarketPage() {
               Cancel
             </Button>
           </div>
+        </div>
         </div>
       </div>
     </PageShell>

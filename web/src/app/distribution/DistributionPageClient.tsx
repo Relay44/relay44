@@ -46,7 +46,7 @@ export default function DistributionPageClient() {
 
       {/* Sticky filter bar */}
       <div className="top-header sticky z-40 bg-bg-primary border-b border-border">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-8">
           <div className="flex items-center gap-4 py-3 overflow-x-auto scrollbar-hide">
             {/* Status tabs */}
             <div className="flex items-center gap-1 flex-shrink-0">
@@ -89,7 +89,7 @@ export default function DistributionPageClient() {
         </div>
       </div>
 
-      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-6">
         {/* Header + stats */}
         <div className="mb-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">

@@ -32,8 +32,9 @@ export default async function CreateMarketPage({
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-2xl px-4 py-8">
-        <CreateMarketForm
+      <div className="py-8">
+        <div className="mx-auto max-w-2xl">
+          <CreateMarketForm
           draftSlide={draftSlide}
           initialDraftId={draftId}
           initialQuestion={firstParam(params.question)}
@@ -41,8 +42,9 @@ export default async function CreateMarketPage({
           initialCategory={firstParam(params.category)}
           initialResolutionSource={firstParam(params.resolutionSource)}
           initialCustomSource={firstParam(params.customSource)}
-          initialTradingEnd={firstParam(params.tradingEnd)}
-        />
+            initialTradingEnd={firstParam(params.tradingEnd)}
+          />
+        </div>
       </div>
     </PageShell>
   );

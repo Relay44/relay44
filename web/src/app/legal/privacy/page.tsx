@@ -30,7 +30,7 @@ export default function PrivacyPolicyPage() {
           ]),
         ]}
       />
-      <div className="container mx-auto px-4 pb-8 max-w-4xl">
+      <div className="pb-8 mx-auto max-w-3xl">
         <h1 className="text-3xl font-bold text-text-primary mb-8">Privacy Policy</h1>
 
         <div className="prose prose-invert max-w-none space-y-6 text-text-secondary">

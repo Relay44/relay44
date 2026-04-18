@@ -255,26 +255,28 @@ export default function ReferralsPage() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-4xl px-4 py-8">
-        <h1 className="text-2xl font-bold text-text-primary mb-2">Referrals</h1>
-        <p className="mb-6 max-w-2xl text-sm leading-6 text-text-secondary">
-          Invite friends to Relay44 and earn rewards when they start trading.
-          Share your unique referral link and track your progress below.
-        </p>
+      <div className="py-8">
+        <div className="mx-auto max-w-3xl">
+          <h1 className="text-2xl font-bold text-text-primary mb-2">Referrals</h1>
+          <p className="mb-6 text-sm leading-6 text-text-secondary">
+            Invite friends to Relay44 and earn rewards when they start trading.
+            Share your unique referral link and track your progress below.
+          </p>
 
-        {!isAuthenticated ? (
-          <Card>
-            <p className="text-text-secondary text-center py-8">
-              Connect your wallet to access the referral program.
-            </p>
-          </Card>
-        ) : (
-          <>
-            <ReferralLinkSection />
-            <ApplyCodeSection />
-            <StatsSection />
-          </>
-        )}
+          {!isAuthenticated ? (
+            <Card>
+              <p className="text-text-secondary text-center py-8">
+                Connect your wallet to access the referral program.
+              </p>
+            </Card>
+          ) : (
+            <>
+              <ReferralLinkSection />
+              <ApplyCodeSection />
+              <StatsSection />
+            </>
+          )}
+        </div>
       </div>
     </PageShell>
   );

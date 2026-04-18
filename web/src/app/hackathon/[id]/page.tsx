@@ -19,8 +19,10 @@ export default function HackathonDetailPage() {
   if (isLoading) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-4xl px-4 py-8">
-          <div className="h-64 bg-bg-secondary animate-pulse border border-border" />
+        <div className="py-8">
+          <div className="mx-auto max-w-3xl">
+            <div className="h-64 bg-bg-secondary animate-pulse border border-border" />
+          </div>
         </div>
       </PageShell>
     );
@@ -29,8 +31,10 @@ export default function HackathonDetailPage() {
   if (!hackathon) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-4xl px-4 py-8 text-center text-text-secondary">
-          Hackathon not found.
+        <div className="py-8">
+          <div className="mx-auto max-w-3xl text-center text-text-secondary">
+            Hackathon not found.
+          </div>
         </div>
       </PageShell>
     );
@@ -45,7 +49,8 @@ export default function HackathonDetailPage() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-4xl px-4 py-8 space-y-6">
+      <div className="py-8">
+        <div className="mx-auto max-w-3xl space-y-6">
         {/* Header */}
         <div className="space-y-3">
           <div className="flex items-center gap-3 flex-wrap">
@@ -108,6 +113,7 @@ export default function HackathonDetailPage() {
 
         {/* PnL Chart */}
         <HackathonPnlChart hackathonId={hackathon.id} />
+        </div>
       </div>
     </PageShell>
   );

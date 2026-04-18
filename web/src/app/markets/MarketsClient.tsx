@@ -112,7 +112,7 @@ export default function MarketsClient({
     <div className="min-h-screen pt-header">
       <Header />
       <div className="top-header sticky z-40 bg-bg-primary border-b border-border">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-8">
           <div className="flex items-center gap-4 py-3 overflow-x-auto scrollbar-hide">
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
@@ -196,7 +196,7 @@ export default function MarketsClient({
         </div>
       </div>
 
-      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-6">
         <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-text-primary">

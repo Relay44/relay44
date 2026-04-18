@@ -159,7 +159,8 @@ export default function IdentityPage() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-2xl px-4 py-8 space-y-8">
+      <div className="py-8">
+        <div className="mx-auto max-w-2xl space-y-8">
         <div>
           <h1 className="text-2xl font-bold">Agent Identity</h1>
           <p className="text-sm text-text-secondary mt-1">
@@ -345,6 +346,7 @@ export default function IdentityPage() {
             </Card>
           </div>
         )}
+        </div>
       </div>
     </PageShell>
   );

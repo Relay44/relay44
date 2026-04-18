@@ -26,7 +26,7 @@ export default function ProfilePage({ params }: Props) {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-6xl px-4 py-8 space-y-8">
+      <div className="py-8 space-y-8">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
             <ProfileHeader wallet={wallet} />

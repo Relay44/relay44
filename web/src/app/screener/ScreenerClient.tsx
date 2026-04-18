@@ -116,7 +116,7 @@ export default function ScreenerClient() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-6xl px-4 py-8 space-y-6">
+      <div className="py-8 space-y-6">
         <div className="space-y-2">
           <h1 className="text-xl font-semibold">Screener</h1>
           <p className="text-sm text-text-secondary">

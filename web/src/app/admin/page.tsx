@@ -70,7 +70,7 @@ export default function AdminDashboard() {
   if (!address) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-6xl px-4 py-8">
+        <div className="py-8">
           <Card>
             <CardContent className="flex h-40 items-center justify-center text-text-secondary">
               Connect your wallet to access admin dashboard
@@ -84,7 +84,7 @@ export default function AdminDashboard() {
   if (!isAdmin) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-6xl px-4 py-8">
+        <div className="py-8">
           <Card>
             <CardContent className="flex h-40 flex-col items-center justify-center gap-2">
               <p className="text-ask font-medium">Access denied</p>
@@ -100,7 +100,7 @@ export default function AdminDashboard() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-6xl space-y-8 px-4 py-8">
+      <div className="space-y-8 py-8">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-text-primary">Admin Dashboard</h1>
           <Badge variant="accent">Admin Mode</Badge>
