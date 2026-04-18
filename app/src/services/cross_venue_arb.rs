@@ -344,9 +344,7 @@ async fn load_pairs(state: &AppState) -> Result<PairLookup, String> {
         );
     }
     for (market_slug, lim_slug) in limitless_slugs {
-        meta.entry(market_slug)
-            .or_insert_with(PairMeta::default)
-            .lim_slug = Some(lim_slug);
+        meta.entry(market_slug).or_default().lim_slug = Some(lim_slug);
     }
 
     Ok(PairLookup { by_venue_key, meta })
