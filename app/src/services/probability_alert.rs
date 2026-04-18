@@ -6,20 +6,27 @@
 //! per-market cooldown so a rapidly-jittery book can't spam the channel.
 //!
 //! Alerts are enriched with question, deep link, category, liquidity and
-//! 24h volume by joining against the scanner's own market tables.
+//! 24h volume by joining against the scanner's own market tables
+//! (`polymarket_scanned_markets`, `limitless_scanned_markets`).
 //! `PROB_ALERT_MIN_LIQUIDITY_USD` suppresses alerts on known-thin markets
 //! without dropping alerts for markets whose metadata isn't in the scanner
 //! tables yet.
+//!
+//! Message layout is HTML and goes through the shared helpers in
+//! `telegram_format` so this alerter stays visually consistent with
+//! `cross_venue_arb` and `new_market_alert`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
-use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use super::market_data::{L2Event, L2Payload, Venue};
+use super::telegram_format::{
+    format_alert_header, format_deep_link, format_metadata_row, html_escape, TelegramClient,
+};
 use crate::AppState;
 
 const DEFAULT_THRESHOLD_PCT: f64 = 5.0;
@@ -111,7 +118,7 @@ pub fn spawn(state: Arc<AppState>) {
 
 struct MarketContext {
     question: String,
-    url: Option<String>,
+    slug: Option<String>,
     category: Option<String>,
     liquidity_usd: Option<f64>,
     volume_24h_usd: Option<f64>,
@@ -165,12 +172,8 @@ async fn handle_event(
 
     let ctx = lookup_context(state, ev.venue, &ev.market_key).await;
 
-    if min_liquidity_usd > 0.0 {
-        if let Some(liq) = ctx.as_ref().and_then(|c| c.liquidity_usd) {
-            if liq < min_liquidity_usd {
-                return;
-            }
-        }
+    if should_skip_for_liquidity(min_liquidity_usd, ctx.as_ref()) {
+        return;
     }
 
     last_alert.insert(key, Instant::now());
@@ -185,6 +188,20 @@ async fn handle_event(
     );
     if let Err(e) = tg.send(&text).await {
         warn!("telegram send failed: {}", e);
+    }
+}
+
+fn should_skip_for_liquidity(min_liquidity_usd: f64, ctx: Option<&MarketContext>) -> bool {
+    if min_liquidity_usd <= 0.0 {
+        return false;
+    }
+    match ctx.and_then(|c| c.liquidity_usd) {
+        // Gate suppresses only markets whose liquidity is known and below the
+        // threshold. Unknown liquidity (metadata not yet ingested) is allowed
+        // through — we'd rather surface a possibly-thin market than miss a
+        // genuine move on a brand-new listing.
+        Some(liq) => liq < min_liquidity_usd,
+        None => false,
     }
 }
 
@@ -231,7 +248,7 @@ async fn lookup_polymarket(state: &AppState, token_id: &str) -> Option<MarketCon
 
     row.map(|(question, slug, category, liquidity_usd, volume_24h_usd)| MarketContext {
         question,
-        url: (!slug.is_empty()).then(|| format!("https://polymarket.com/event/{}", slug)),
+        slug: (!slug.is_empty()).then_some(slug),
         category: normalize_category(&category),
         liquidity_usd,
         volume_24h_usd,
@@ -260,7 +277,7 @@ async fn lookup_limitless(state: &AppState, market_key: &str) -> Option<MarketCo
 
     row.map(|(question, category, liquidity_usd, volume_24h_usd)| MarketContext {
         question,
-        url: Some(format!("https://limitless.exchange/markets/{}", slug)),
+        slug: Some(slug.to_string()),
         category: category.as_deref().and_then(normalize_category),
         liquidity_usd,
         volume_24h_usd,
@@ -293,97 +310,42 @@ fn format_alert(
     delta_pct: f64,
 ) -> String {
     let arrow = if delta_pct > 0.0 { "↑" } else { "↓" };
-    let question = ctx
+    let emoji = if delta_pct > 0.0 {
+        "\u{1F4C8}"
+    } else {
+        "\u{1F4C9}"
+    };
+    let question_raw = ctx
         .map(|c| c.question.clone())
         .unwrap_or_else(|| format!("{}:{}", venue.as_str(), truncate(market_key, 12)));
 
-    let mut lines = vec![
-        format!("{arrow} {question}"),
-        format!(
-            "{:.1}¢ → {:.1}¢  ({:+.1}%)",
-            prev * 100.0,
-            curr * 100.0,
-            delta_pct
-        ),
-    ];
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format_alert_header(emoji, "Probability shift", venue.as_str()));
+    lines.push(format!("<i>{}</i>", html_escape(&question_raw)));
+    lines.push(format!(
+        "{arrow} {:.1}¢ → {:.1}¢  ({:+.1}%)",
+        prev * 100.0,
+        curr * 100.0,
+        delta_pct
+    ));
 
     if let Some(c) = ctx {
-        let mut meta: Vec<String> = Vec::new();
-        if let Some(cat) = &c.category {
-            meta.push(cat.clone());
-        }
-        if let Some(liq) = c.liquidity_usd {
-            meta.push(format!("liq {}", format_money(liq)));
-        }
-        if let Some(vol) = c.volume_24h_usd {
-            meta.push(format!("vol {}", format_money(vol)));
-        }
+        let meta = format_metadata_row(
+            c.liquidity_usd,
+            c.volume_24h_usd,
+            c.category.as_deref(),
+        );
         if !meta.is_empty() {
-            lines.push(meta.join(" · "));
+            lines.push(meta);
         }
-        if let Some(url) = &c.url {
-            lines.push(url.clone());
+        if let Some(slug) = &c.slug {
+            if let Some(link) = format_deep_link(venue.as_str(), slug) {
+                lines.push(link);
+            }
         }
     }
 
     lines.join("\n")
-}
-
-fn format_money(v: f64) -> String {
-    let abs = v.abs();
-    if abs >= 1_000_000.0 {
-        format!("${:.1}M", v / 1_000_000.0)
-    } else if abs >= 1_000.0 {
-        format!("${:.1}k", v / 1_000.0)
-    } else {
-        format!("${:.0}", v)
-    }
-}
-
-struct TelegramClient {
-    bot_token: String,
-    chat_id: String,
-    http: reqwest::Client,
-}
-
-impl TelegramClient {
-    fn new(bot_token: String, chat_id: String) -> Self {
-        Self {
-            bot_token,
-            chat_id,
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("reqwest client"),
-        }
-    }
-
-    async fn send(&self, text: &str) -> Result<(), String> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            chat_id: &'a str,
-            text: &'a str,
-            disable_web_page_preview: bool,
-        }
-        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
-        let resp = self
-            .http
-            .post(&url)
-            .json(&Payload {
-                chat_id: &self.chat_id,
-                text,
-                disable_web_page_preview: true,
-            })
-            .send()
-            .await
-            .map_err(|e| format!("request: {}", e))?;
-        if !resp.status().is_success() {
-            let code = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("telegram {}: {}", code, body));
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -393,7 +355,7 @@ mod tests {
     fn ctx_full() -> MarketContext {
         MarketContext {
             question: "Will X happen?".to_string(),
-            url: Some("https://polymarket.com/event/will-x".to_string()),
+            slug: Some("will-x".to_string()),
             category: Some("politics".to_string()),
             liquidity_usd: Some(125_000.0),
             volume_24h_usd: Some(3_400_000.0),
@@ -411,6 +373,15 @@ mod tests {
     }
 
     #[test]
+    fn format_header_is_bold_and_venue_titled() {
+        let c = ctx_full();
+        let s = format_alert(Some(&c), Venue::Polymarket, "tok", 0.10, 0.18, 80.0);
+        assert!(s.contains("<b>"));
+        assert!(s.contains("Probability shift"));
+        assert!(s.contains("Polymarket"));
+    }
+
+    #[test]
     fn format_down_arrow_for_negative() {
         let c = ctx_full();
         let s = format_alert(Some(&c), Venue::Polymarket, "tok", 0.50, 0.40, -20.0);
@@ -418,13 +389,42 @@ mod tests {
     }
 
     #[test]
-    fn format_includes_enrichment_when_ctx_present() {
+    fn format_includes_metadata_row_when_ctx_present() {
         let c = ctx_full();
         let s = format_alert(Some(&c), Venue::Polymarket, "tok", 0.10, 0.18, 80.0);
-        assert!(s.contains("politics"));
-        assert!(s.contains("liq $125.0k"));
-        assert!(s.contains("vol $3.4M"));
-        assert!(s.contains("https://polymarket.com/event/will-x"));
+        assert!(s.contains("Liquidity: $125.0k"));
+        assert!(s.contains("24h vol: $3.4M"));
+        assert!(s.contains("Category: politics"));
+        assert!(s.contains("https://polymarket.com/market/will-x"));
+        assert!(s.contains("Open on Polymarket"));
+    }
+
+    #[test]
+    fn format_html_escapes_question() {
+        let c = MarketContext {
+            question: "Will A<B>&C?".to_string(),
+            slug: None,
+            category: None,
+            liquidity_usd: None,
+            volume_24h_usd: None,
+        };
+        let s = format_alert(Some(&c), Venue::Polymarket, "tok", 0.10, 0.15, 50.0);
+        assert!(s.contains("A&lt;B&gt;&amp;C"));
+        assert!(!s.contains("A<B>"));
+    }
+
+    #[test]
+    fn format_limitless_link_uses_limitless_domain() {
+        let c = MarketContext {
+            question: "Q".to_string(),
+            slug: Some("lim-slug".to_string()),
+            category: None,
+            liquidity_usd: None,
+            volume_24h_usd: None,
+        };
+        let s = format_alert(Some(&c), Venue::Limitless, "lim-slug:yes", 0.10, 0.15, 50.0);
+        assert!(s.contains("limitless.exchange/markets/lim-slug"));
+        assert!(s.contains("Open on Limitless"));
     }
 
     #[test]
@@ -438,23 +438,17 @@ mod tests {
     fn format_omits_missing_enrichment_fields() {
         let c = MarketContext {
             question: "Q".to_string(),
-            url: None,
+            slug: None,
             category: None,
             liquidity_usd: None,
             volume_24h_usd: None,
         };
         let s = format_alert(Some(&c), Venue::Polymarket, "tok", 0.10, 0.15, 50.0);
         assert!(s.contains("Q"));
-        assert!(!s.contains("liq "));
-        assert!(!s.contains("vol "));
-        assert!(!s.contains("http"));
-    }
-
-    #[test]
-    fn money_formatter_ranges() {
-        assert_eq!(format_money(42.0), "$42");
-        assert_eq!(format_money(4_200.0), "$4.2k");
-        assert_eq!(format_money(4_200_000.0), "$4.2M");
+        assert!(!s.contains("Liquidity:"));
+        assert!(!s.contains("24h vol:"));
+        assert!(!s.contains("Category:"));
+        assert!(!s.contains("href="));
     }
 
     #[test]
@@ -463,5 +457,60 @@ mod tests {
         assert_eq!(normalize_category("Unknown"), None);
         assert_eq!(normalize_category("  "), None);
         assert_eq!(normalize_category(""), None);
+    }
+
+    #[test]
+    fn liquidity_gate_skips_below_threshold() {
+        let c = MarketContext {
+            question: "Q".to_string(),
+            slug: None,
+            category: None,
+            liquidity_usd: Some(500.0),
+            volume_24h_usd: None,
+        };
+        assert!(should_skip_for_liquidity(1_000.0, Some(&c)));
+    }
+
+    #[test]
+    fn liquidity_gate_passes_above_threshold() {
+        let c = MarketContext {
+            question: "Q".to_string(),
+            slug: None,
+            category: None,
+            liquidity_usd: Some(5_000.0),
+            volume_24h_usd: None,
+        };
+        assert!(!should_skip_for_liquidity(1_000.0, Some(&c)));
+    }
+
+    #[test]
+    fn liquidity_gate_disabled_when_threshold_zero() {
+        let c = MarketContext {
+            question: "Q".to_string(),
+            slug: None,
+            category: None,
+            liquidity_usd: Some(10.0),
+            volume_24h_usd: None,
+        };
+        assert!(!should_skip_for_liquidity(0.0, Some(&c)));
+    }
+
+    #[test]
+    fn liquidity_gate_allows_unknown_liquidity_through() {
+        // Metadata not yet ingested → don't suppress; we'd rather risk a
+        // possibly-thin alert than miss a genuine move on a brand-new listing.
+        let c = MarketContext {
+            question: "Q".to_string(),
+            slug: None,
+            category: None,
+            liquidity_usd: None,
+            volume_24h_usd: None,
+        };
+        assert!(!should_skip_for_liquidity(1_000.0, Some(&c)));
+    }
+
+    #[test]
+    fn liquidity_gate_allows_missing_ctx_through() {
+        assert!(!should_skip_for_liquidity(1_000.0, None));
     }
 }
