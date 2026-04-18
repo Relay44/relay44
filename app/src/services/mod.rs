@@ -23,6 +23,7 @@ pub mod managed_agent_runner;
 pub mod market_creator;
 pub mod market_data;
 pub mod metrics;
+pub mod new_market_alert;
 pub mod orchestrator;
 pub mod orderbook;
 pub mod polymarket_scanner;

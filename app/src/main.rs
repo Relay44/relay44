@@ -116,6 +116,7 @@ async fn main() -> std::io::Result<()> {
     relay44_backend::services::probability_alert::spawn(app_state.clone());
     relay44_backend::services::telegram_commands::spawn(app_state.clone());
     relay44_backend::services::cross_venue_arb::spawn(app_state.clone());
+    relay44_backend::services::new_market_alert::spawn(app_state.clone());
 
     let migration_db = app_state.db.clone();
     let background_state = app_state.clone();
