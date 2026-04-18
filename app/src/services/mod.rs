@@ -38,6 +38,7 @@ pub mod redis;
 pub mod risk_governor;
 pub mod smart_router;
 pub mod staking;
+pub mod volume_spike_alert;
 pub mod websocket;
 pub mod x402;
 pub mod xmtp_swarm;
