@@ -38,7 +38,7 @@ export default function TokenomicsPage() {
   const orderBook = prod.contracts.orderBook!;
 
   return (
-    <div className="container mx-auto max-w-5xl px-4 py-10">
+    <div className="py-10">
       <StructuredData
         data={[
           buildWebPageStructuredData({
@@ -68,6 +68,22 @@ export default function TokenomicsPage() {
           lock RELAY to capture a cut of protocol revenue — all on Base, all
           open source.
         </p>
+        <div className="flex flex-wrap gap-3 pt-2">
+          <a
+            href="https://www.geckoterminal.com/base/pools/0xc9b0297827af885f115621b30fdfb13318e75f0649d1cdb45fe71f3cc22fff91"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-10 items-center border border-accent bg-accent px-5 text-xs uppercase tracking-widest text-text-inverse transition-colors hover:bg-accent-hover"
+          >
+            Trade $RELAY ↗
+          </a>
+          <Link
+            href="/staking"
+            className="inline-flex h-10 items-center border border-border bg-bg-secondary px-5 text-xs uppercase tracking-widest text-text-primary transition-colors hover:border-border-hover"
+          >
+            Stake $RELAY
+          </Link>
+        </div>
       </div>
 
       {/* ---------------- Token summary ---------------- */}
