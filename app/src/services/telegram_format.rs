@@ -64,14 +64,14 @@ pub fn venue_link(venue: &str, slug: &str) -> Option<String> {
         return None;
     }
     match venue {
-        "polymarket" => Some(format!("https://polymarket.com/market/{}", slug)),
+        "polymarket" => Some(format!("https://polymarket.com/event/{}", slug)),
         "limitless" => Some(format!("https://limitless.exchange/markets/{}", slug)),
         _ => None,
     }
 }
 
 /// Returns the HTML anchor line for the alert footer, e.g.
-/// `<a href="https://polymarket.com/market/abc">Open on Polymarket</a>`.
+/// `<a href="https://polymarket.com/event/abc">Open on Polymarket</a>`.
 /// Returns `None` when there's no public URL for this venue/slug.
 pub fn format_deep_link(venue: &str, slug: &str) -> Option<String> {
     let url = venue_link(venue, slug)?;
@@ -202,7 +202,7 @@ mod tests {
     fn venue_link_builds_expected_urls() {
         assert_eq!(
             venue_link("polymarket", "will-x"),
-            Some("https://polymarket.com/market/will-x".to_string())
+            Some("https://polymarket.com/event/will-x".to_string())
         );
         assert_eq!(
             venue_link("limitless", "some-slug"),
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn deep_link_wraps_url_in_anchor() {
         let s = format_deep_link("polymarket", "abc").unwrap();
-        assert!(s.contains("href=\"https://polymarket.com/market/abc\""));
+        assert!(s.contains("href=\"https://polymarket.com/event/abc\""));
         assert!(s.contains("Open on Polymarket"));
     }
 

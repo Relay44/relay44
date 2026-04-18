@@ -365,7 +365,7 @@ mod tests {
         assert!(s.contains("New market"));
         assert!(s.contains("Polymarket"));
         assert!(s.contains("<i>Will BTC hit 100k?</i>"));
-        assert!(s.contains("polymarket.com/market/example-slug"));
+        assert!(s.contains("polymarket.com/event/example-slug"));
         assert!(s.contains("Open on Polymarket"));
         assert!(s.contains("kw:btc"));
     }

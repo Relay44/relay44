@@ -395,7 +395,7 @@ mod tests {
         assert!(s.contains("Liquidity: $125.0k"));
         assert!(s.contains("24h vol: $3.4M"));
         assert!(s.contains("Category: politics"));
-        assert!(s.contains("https://polymarket.com/market/will-x"));
+        assert!(s.contains("https://polymarket.com/event/will-x"));
         assert!(s.contains("Open on Polymarket"));
     }
 
