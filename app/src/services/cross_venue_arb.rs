@@ -7,17 +7,23 @@
 //! `CROSS_VENUE_ARB_THRESHOLD` (absolute probability, default 0.05 = 5¢) and
 //! both sides are fresh, we push a Telegram alert. Each (pair, outcome) has
 //! an independent cooldown so a flapping book can't spam the channel.
+//!
+//! Message layout is HTML and uses the shared helpers in `telegram_format` so
+//! this alerter stays consistent with `probability_alert` and
+//! `new_market_alert`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
-use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::RwLock;
 
 use super::market_data::{L2Event, L2Payload, Venue};
+use super::telegram_format::{
+    format_deep_link, format_metadata_row, html_escape, TelegramClient,
+};
 use crate::AppState;
 
 const DEFAULT_THRESHOLD: f64 = 0.05;
@@ -42,9 +48,19 @@ impl Outcome {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+struct PairMeta {
+    question: String,
+    pm_slug: Option<String>,
+    lim_slug: Option<String>,
+    category: Option<String>,
+    liquidity_usd: Option<f64>,
+    volume_24h_usd: Option<f64>,
+}
+
 struct PairLookup {
     by_venue_key: HashMap<(Venue, String), (String, Outcome)>,
-    questions: HashMap<String, String>,
+    meta: HashMap<String, PairMeta>,
 }
 
 pub fn spawn(state: Arc<AppState>) {
@@ -79,7 +95,7 @@ pub fn spawn(state: Arc<AppState>) {
 
     let lookup: Arc<RwLock<PairLookup>> = Arc::new(RwLock::new(PairLookup {
         by_venue_key: HashMap::new(),
-        questions: HashMap::new(),
+        meta: HashMap::new(),
     }));
 
     {
@@ -192,15 +208,15 @@ async fn handle_event(
         _ => return,
     };
 
-    let question = {
+    let meta = {
         let l = lookup.read().await;
-        l.questions
-            .get(&pair_id)
-            .cloned()
-            .unwrap_or_else(|| pair_id.clone())
+        l.meta.get(&pair_id).cloned().unwrap_or_else(|| PairMeta {
+            question: pair_id.clone(),
+            ..Default::default()
+        })
     };
 
-    let text = format_alert(&question, outcome, pm_price, lim_price);
+    let text = format_alert(&meta, outcome, pm_price, lim_price);
     if let Err(e) = tg.send(&text).await {
         warn!("telegram send failed (cross-venue arb): {}", e);
     }
@@ -245,9 +261,26 @@ async fn load_pairs(state: &AppState) -> Result<PairLookup, String> {
     .await
     .map_err(|e| format!("load_pairs venue-keys: {}", e))?;
 
-    let questions_rows: Vec<(String, String)> = sqlx::query_as(
+    // Per-pair metadata from the Polymarket side (question, slug, category,
+    // liquidity, volume). We deliberately prefer PM's metadata here because
+    // it's historically more complete — Limitless categories are often
+    // unset or "unknown".
+    let meta_rows: Vec<(
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<f64>,
+        Option<f64>,
+    )> = sqlx::query_as(
         r#"
-        SELECT pm.market_slug, psm.question
+        SELECT
+            pm.market_slug,
+            psm.question,
+            psm.slug,
+            psm.category,
+            psm.liquidity_usdc::double precision,
+            psm.volume_usdc::double precision
         FROM market_venue_links pm
         JOIN polymarket_scanned_markets psm
             ON psm.condition_id = pm.provider_market_id
@@ -256,7 +289,18 @@ async fn load_pairs(state: &AppState) -> Result<PairLookup, String> {
     )
     .fetch_all(pool)
     .await
-    .map_err(|e| format!("load_pairs questions: {}", e))?;
+    .map_err(|e| format!("load_pairs meta: {}", e))?;
+
+    let limitless_slugs: Vec<(String, String)> = sqlx::query_as(
+        r#"
+        SELECT market_slug, provider_market_id
+        FROM market_venue_links
+        WHERE provider = 'limitless' AND active = TRUE
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("load_pairs lim slugs: {}", e))?;
 
     let mut by_venue_key = HashMap::new();
     for (market_slug, lim_slug, yes_tok, no_tok) in rows {
@@ -278,28 +322,78 @@ async fn load_pairs(state: &AppState) -> Result<PairLookup, String> {
         );
     }
 
-    let mut questions = HashMap::new();
-    for (slug, q) in questions_rows {
-        questions.insert(slug, q);
+    let mut meta: HashMap<String, PairMeta> = HashMap::new();
+    for (market_slug, question, pm_slug, category, liquidity, volume) in meta_rows {
+        meta.insert(
+            market_slug,
+            PairMeta {
+                question,
+                pm_slug: pm_slug.filter(|s| !s.is_empty()),
+                lim_slug: None,
+                category: category.and_then(|c| {
+                    let t = c.trim();
+                    if t.is_empty() || t.eq_ignore_ascii_case("unknown") {
+                        None
+                    } else {
+                        Some(t.to_string())
+                    }
+                }),
+                liquidity_usd: liquidity,
+                volume_24h_usd: volume,
+            },
+        );
+    }
+    for (market_slug, lim_slug) in limitless_slugs {
+        meta.entry(market_slug).or_default().lim_slug = Some(lim_slug);
     }
 
-    Ok(PairLookup {
-        by_venue_key,
-        questions,
-    })
+    Ok(PairLookup { by_venue_key, meta })
 }
 
-fn format_alert(question: &str, outcome: Outcome, pm: f64, lim: f64) -> String {
+fn format_alert(meta: &PairMeta, outcome: Outcome, pm: f64, lim: f64) -> String {
     let edge_cents = (pm - lim).abs() * 100.0;
     let direction = if pm > lim { "PM↑ LIM↓" } else { "PM↓ LIM↑" };
-    format!(
-        "⚡ Cross-venue arb: {question}\n{} {}: Polymarket {:.1}¢  |  Limitless {:.1}¢  (Δ {:.1}¢)",
+
+    let mut lines: Vec<String> = Vec::new();
+    // Arb header uses a neutral venue label since the signal spans both.
+    lines.push("<b>\u{2696}\u{FE0F} Cross-venue arb — PM vs LIM</b>".to_string());
+    lines.push(format!("<i>{}</i>", html_escape(&meta.question)));
+    lines.push(format!(
+        "{} {}: Polymarket {:.1}¢ | Limitless {:.1}¢ (Δ {:.1}¢)",
         outcome.as_str(),
         direction,
         pm * 100.0,
         lim * 100.0,
         edge_cents
-    )
+    ));
+
+    let meta_row = format_metadata_row(
+        meta.liquidity_usd,
+        meta.volume_24h_usd,
+        meta.category.as_deref(),
+    );
+    if !meta_row.is_empty() {
+        lines.push(meta_row);
+    }
+
+    // Dual footer: one link per venue so readers can jump to whichever side
+    // they're more comfortable trading on.
+    let mut link_parts: Vec<String> = Vec::new();
+    if let Some(slug) = &meta.pm_slug {
+        if let Some(link) = format_deep_link("polymarket", slug) {
+            link_parts.push(link);
+        }
+    }
+    if let Some(slug) = &meta.lim_slug {
+        if let Some(link) = format_deep_link("limitless", slug) {
+            link_parts.push(link);
+        }
+    }
+    if !link_parts.is_empty() {
+        lines.push(link_parts.join(" | "));
+    }
+
+    lines.join("\n")
 }
 
 fn env_bool(key: &str, default: bool) -> bool {
@@ -323,60 +417,25 @@ fn env_f64(key: &str, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
-struct TelegramClient {
-    bot_token: String,
-    chat_id: String,
-    http: reqwest::Client,
-}
-
-impl TelegramClient {
-    fn new(bot_token: String, chat_id: String) -> Self {
-        Self {
-            bot_token,
-            chat_id,
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("reqwest client"),
-        }
-    }
-
-    async fn send(&self, text: &str) -> Result<(), String> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            chat_id: &'a str,
-            text: &'a str,
-            disable_web_page_preview: bool,
-        }
-        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
-        let resp = self
-            .http
-            .post(&url)
-            .json(&Payload {
-                chat_id: &self.chat_id,
-                text,
-                disable_web_page_preview: true,
-            })
-            .send()
-            .await
-            .map_err(|e| format!("request: {}", e))?;
-        if !resp.status().is_success() {
-            let code = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("telegram {}: {}", code, body));
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::services::market_data::L2Level;
 
+    fn meta(question: &str) -> PairMeta {
+        PairMeta {
+            question: question.to_string(),
+            pm_slug: Some("pm-slug".to_string()),
+            lim_slug: Some("lim-slug".to_string()),
+            category: Some("politics".to_string()),
+            liquidity_usd: Some(50_000.0),
+            volume_24h_usd: Some(1_200_000.0),
+        }
+    }
+
     #[test]
     fn format_shows_question_outcome_and_edge() {
-        let s = format_alert("Will BTC hit 100k by EOY?", Outcome::Yes, 0.42, 0.37);
+        let s = format_alert(&meta("Will BTC hit 100k by EOY?"), Outcome::Yes, 0.42, 0.37);
         assert!(s.contains("Will BTC hit 100k by EOY?"));
         assert!(s.contains("YES"));
         assert!(s.contains("42.0¢"));
@@ -385,11 +444,37 @@ mod tests {
     }
 
     #[test]
+    fn format_header_identifies_pm_vs_lim() {
+        let s = format_alert(&meta("Q"), Outcome::Yes, 0.50, 0.40);
+        assert!(s.contains("<b>"));
+        assert!(s.contains("Cross-venue arb"));
+        assert!(s.contains("PM vs LIM"));
+    }
+
+    #[test]
     fn format_marks_direction() {
-        let up = format_alert("Q", Outcome::No, 0.60, 0.45);
+        let up = format_alert(&meta("Q"), Outcome::No, 0.60, 0.45);
         assert!(up.contains("PM↑ LIM↓"));
-        let dn = format_alert("Q", Outcome::No, 0.30, 0.45);
+        let dn = format_alert(&meta("Q"), Outcome::No, 0.30, 0.45);
         assert!(dn.contains("PM↓ LIM↑"));
+    }
+
+    #[test]
+    fn format_includes_metadata_and_dual_links() {
+        let s = format_alert(&meta("Q"), Outcome::Yes, 0.50, 0.40);
+        assert!(s.contains("Liquidity: $50.0k"));
+        assert!(s.contains("24h vol: $1.2M"));
+        assert!(s.contains("Category: politics"));
+        assert!(s.contains("polymarket.com/event/pm-slug"));
+        assert!(s.contains("limitless.exchange/markets/lim-slug"));
+        assert!(s.contains("Open on Polymarket"));
+        assert!(s.contains("Open on Limitless"));
+    }
+
+    #[test]
+    fn format_html_escapes_question() {
+        let s = format_alert(&meta("A<B>&C"), Outcome::Yes, 0.50, 0.40);
+        assert!(s.contains("A&lt;B&gt;&amp;C"));
     }
 
     #[test]

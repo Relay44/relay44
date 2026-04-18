@@ -6,6 +6,10 @@
 //! `NEW_MARKET_CATEGORIES` filter matches — we push a Telegram alert. One
 //! cooldown per keyword-match prevents the same keyword from re-alerting on a
 //! backlog of near-simultaneous launches.
+//!
+//! Message layout is HTML and uses the shared helpers in `telegram_format` so
+//! this alerter stays consistent with `probability_alert` and
+//! `cross_venue_arb`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,8 +17,10 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use log::{info, warn};
-use serde::Serialize;
 
+use super::telegram_format::{
+    format_alert_header, format_deep_link, format_metadata_row, html_escape, TelegramClient,
+};
 use crate::AppState;
 
 const DEFAULT_POLL_SECS: u64 = 60;
@@ -114,6 +120,8 @@ struct NewMarket {
     question: String,
     category: String,
     slug: String,
+    liquidity_usd: Option<f64>,
+    volume_24h_usd: Option<f64>,
     created_at: DateTime<Utc>,
 }
 
@@ -148,8 +156,17 @@ async fn fetch_new_polymarket(
     let pool = state.db.pool();
     let cutoff = cursor.unwrap_or_else(|| Utc::now() - chrono::Duration::minutes(5));
 
-    let rows: Vec<(String, String, String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT question, COALESCE(category, 'unknown'), COALESCE(slug, ''), created_at \
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        Option<f64>,
+        Option<f64>,
+        DateTime<Utc>,
+    )> = sqlx::query_as(
+        "SELECT question, COALESCE(category, 'unknown'), COALESCE(slug, ''), \
+                liquidity_usdc::double precision, volume_usdc::double precision, \
+                created_at \
          FROM polymarket_scanned_markets \
          WHERE created_at > $1 AND active = TRUE \
          ORDER BY created_at ASC \
@@ -162,13 +179,17 @@ async fn fetch_new_polymarket(
 
     Ok(rows
         .into_iter()
-        .map(|(question, category, slug, created_at)| NewMarket {
-            venue: "polymarket",
-            question,
-            category,
-            slug,
-            created_at,
-        })
+        .map(
+            |(question, category, slug, liquidity_usd, volume_24h_usd, created_at)| NewMarket {
+                venue: "polymarket",
+                question,
+                category,
+                slug,
+                liquidity_usd,
+                volume_24h_usd,
+                created_at,
+            },
+        )
         .collect())
 }
 
@@ -179,8 +200,16 @@ async fn fetch_new_limitless(
     let pool = state.db.pool();
     let cutoff = cursor.unwrap_or_else(|| Utc::now() - chrono::Duration::minutes(5));
 
-    let rows: Vec<(String, String, String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT question, COALESCE(category, 'unknown'), slug, created_at \
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        Option<f64>,
+        Option<f64>,
+        DateTime<Utc>,
+    )> = sqlx::query_as(
+        "SELECT question, COALESCE(category, 'unknown'), slug, \
+                liquidity_usdc, volume_usdc, created_at \
          FROM limitless_scanned_markets \
          WHERE created_at > $1 AND active = TRUE \
          ORDER BY created_at ASC \
@@ -193,13 +222,17 @@ async fn fetch_new_limitless(
 
     Ok(rows
         .into_iter()
-        .map(|(question, category, slug, created_at)| NewMarket {
-            venue: "limitless",
-            question,
-            category,
-            slug,
-            created_at,
-        })
+        .map(
+            |(question, category, slug, liquidity_usd, volume_24h_usd, created_at)| NewMarket {
+                venue: "limitless",
+                question,
+                category,
+                slug,
+                liquidity_usd,
+                volume_24h_usd,
+                created_at,
+            },
+        )
         .collect())
 }
 
@@ -247,28 +280,21 @@ fn match_hit(watchlist: &[String], categories: &[String], m: &NewMarket) -> Opti
 }
 
 fn format_alert(m: &NewMarket, reason: &str) -> String {
-    let link = market_link(m);
-    format!(
-        "🆕 New market ({venue}, {category})\n{question}\nmatch: {reason}{link}",
-        venue = m.venue,
-        category = m.category,
-        question = m.question,
-        reason = reason,
-        link = link
-            .map(|l| format!("\n{}", l))
-            .unwrap_or_default(),
-    )
-}
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format_alert_header("\u{1F195}", "New market", m.venue));
+    lines.push(format!("<i>{}</i>", html_escape(&m.question)));
+    lines.push(format!("match: <code>{}</code>", html_escape(reason)));
 
-fn market_link(m: &NewMarket) -> Option<String> {
-    if m.slug.is_empty() {
-        return None;
+    let meta = format_metadata_row(m.liquidity_usd, m.volume_24h_usd, Some(&m.category));
+    if !meta.is_empty() {
+        lines.push(meta);
     }
-    match m.venue {
-        "polymarket" => Some(format!("https://polymarket.com/event/{}", m.slug)),
-        "limitless" => Some(format!("https://limitless.exchange/markets/{}", m.slug)),
-        _ => None,
+
+    if let Some(link) = format_deep_link(m.venue, &m.slug) {
+        lines.push(link);
     }
+
+    lines.join("\n")
 }
 
 fn parse_csv_lower(raw: String) -> Vec<String> {
@@ -292,52 +318,6 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-struct TelegramClient {
-    bot_token: String,
-    chat_id: String,
-    http: reqwest::Client,
-}
-
-impl TelegramClient {
-    fn new(bot_token: String, chat_id: String) -> Self {
-        Self {
-            bot_token,
-            chat_id,
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .expect("reqwest client"),
-        }
-    }
-
-    async fn send(&self, text: &str) -> Result<(), String> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            chat_id: &'a str,
-            text: &'a str,
-            disable_web_page_preview: bool,
-        }
-        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
-        let resp = self
-            .http
-            .post(&url)
-            .json(&Payload {
-                chat_id: &self.chat_id,
-                text,
-                disable_web_page_preview: true,
-            })
-            .send()
-            .await
-            .map_err(|e| format!("request: {}", e))?;
-        if !resp.status().is_success() {
-            let code = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("telegram {}: {}", code, body));
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +328,8 @@ mod tests {
             question: question.to_string(),
             category: category.to_string(),
             slug: "example-slug".to_string(),
+            liquidity_usd: Some(10_000.0),
+            volume_24h_usd: Some(250_000.0),
             created_at: Utc::now(),
         }
     }
@@ -376,14 +358,35 @@ mod tests {
     }
 
     #[test]
-    fn alert_body_contains_question_and_link() {
+    fn alert_body_contains_question_header_and_link() {
         let m = sample("Will BTC hit 100k?", "crypto");
         let s = format_alert(&m, "kw:btc");
-        assert!(s.contains("🆕 New market"));
-        assert!(s.contains("polymarket"));
-        assert!(s.contains("Will BTC hit 100k?"));
+        assert!(s.contains("<b>"));
+        assert!(s.contains("New market"));
+        assert!(s.contains("Polymarket"));
+        assert!(s.contains("<i>Will BTC hit 100k?</i>"));
         assert!(s.contains("polymarket.com/event/example-slug"));
+        assert!(s.contains("Open on Polymarket"));
         assert!(s.contains("kw:btc"));
+    }
+
+    #[test]
+    fn alert_includes_metadata_row() {
+        let m = sample("Will BTC hit 100k?", "crypto");
+        let s = format_alert(&m, "kw:btc");
+        assert!(s.contains("Liquidity: $10.0k"));
+        assert!(s.contains("24h vol: $250.0k"));
+        assert!(s.contains("Category: crypto"));
+    }
+
+    #[test]
+    fn alert_html_escapes_question_and_reason() {
+        let mut m = sample("Will <X> happen?", "crypto");
+        m.slug = "slug".to_string();
+        let s = format_alert(&m, "kw:<evil>");
+        assert!(s.contains("Will &lt;X&gt; happen?"));
+        assert!(s.contains("kw:&lt;evil&gt;"));
+        assert!(!s.contains("<evil>"));
     }
 
     #[test]
@@ -392,6 +395,17 @@ mod tests {
         m.slug.clear();
         let s = format_alert(&m, "kw:btc");
         assert!(!s.contains("polymarket.com"));
+    }
+
+    #[test]
+    fn alert_limitless_uses_limitless_link() {
+        let mut m = sample("Will BTC hit 100k?", "crypto");
+        m.venue = "limitless";
+        m.slug = "lim-slug".to_string();
+        let s = format_alert(&m, "kw:btc");
+        assert!(s.contains("limitless.exchange/markets/lim-slug"));
+        assert!(s.contains("Open on Limitless"));
+        assert!(s.contains("Limitless"));
     }
 
     #[test]
