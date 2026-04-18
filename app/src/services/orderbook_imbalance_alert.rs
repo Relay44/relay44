@@ -53,8 +53,8 @@ struct LocalBook {
 
 impl LocalBook {
     fn apply_snapshot(&mut self, bids: &[L2Level], asks: &[L2Level]) {
-        self.bids = bids.iter().cloned().collect();
-        self.asks = asks.iter().cloned().collect();
+        self.bids = bids.to_vec();
+        self.asks = asks.to_vec();
         self.sort_and_trim();
     }
 
