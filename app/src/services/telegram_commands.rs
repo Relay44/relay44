@@ -1,25 +1,33 @@
 //! Telegram command handler.
 //!
 //! Long-polls the Telegram Bot API (`getUpdates`) and dispatches slash
-//! commands sent into the configured chat. Read-only commands in this
-//! first cut: `/status`, `/help`, `/top [category]`, `/market <slug>`.
-//! State-changing commands (mute / threshold override) land in Phase 2b
-//! once `tg_chat_config` migration is in place.
+//! commands sent into the configured chat. Read-only commands:
+//! `/status`, `/help`, `/top [category]`, `/market <slug>`. State-changing
+//! commands persist into `tg_chat_config`: `/mute`, `/unmute`, `/threshold`,
+//! `/cooldown`, `/config`, `/link`, `/verify`, `/unlink`.
+//!
+//! `/link` + `/verify` establish a read-only wallet identity binding via
+//! EIP-191 `personal_sign`. No trade-execution commands are wired up and
+//! none are planned in this patch — the binding exists so future
+//! portfolio-aware routing can target the right wallet without re-prompting.
 //!
 //! Messages from chats other than `TELEGRAM_CHAT_ID` are ignored — the
 //! bot isn't open to the public yet.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
+use crate::services::tg_chat_config;
 use crate::AppState;
 
 const POLL_TIMEOUT_SECS: u64 = 30;
 const HTTP_TIMEOUT_SECS: u64 = POLL_TIMEOUT_SECS + 10;
 const ERROR_BACKOFF_SECS: u64 = 5;
+const NONCE_TTL_SECS: u64 = 600;
 
 pub fn spawn(state: Arc<AppState>) {
     let enabled = std::env::var("TELEGRAM_COMMANDS_ENABLED")
@@ -53,6 +61,7 @@ pub fn spawn(state: Arc<AppState>) {
         }
     };
     let client = TelegramClient { bot_token, http };
+    let nonces: NonceStore = Arc::new(Mutex::new(HashMap::new()));
     info!("Starting Telegram command handler");
 
     tokio::spawn(async move {
@@ -63,7 +72,7 @@ pub fn spawn(state: Arc<AppState>) {
                     for upd in updates {
                         offset = upd.update_id + 1;
                         if let Some(msg) = upd.message {
-                            handle_message(&state, &client, allowed_chat_id, &msg).await;
+                            handle_message(&state, &client, allowed_chat_id, &nonces, &msg).await;
                         }
                     }
                 }
@@ -76,10 +85,64 @@ pub fn spawn(state: Arc<AppState>) {
     });
 }
 
+/// In-memory store for outstanding `/link` nonces, keyed by
+/// `(chat_id, wallet_lower)`. Entries expire after `NONCE_TTL_SECS`.
+///
+/// Deliberately not persisted: on restart the user simply re-issues
+/// `/link`. Keeps the surface small and avoids granting nonce visibility
+/// to anyone with DB read access.
+type NonceStore = Arc<Mutex<HashMap<(i64, String), PendingNonce>>>;
+
+struct PendingNonce {
+    nonce: String,
+    created_at: Instant,
+}
+
+fn put_nonce(store: &NonceStore, chat_id: i64, wallet_lower: &str, nonce: String) {
+    let mut guard = store.lock().expect("nonce store poisoned");
+    purge_expired(&mut guard);
+    guard.insert(
+        (chat_id, wallet_lower.to_string()),
+        PendingNonce {
+            nonce,
+            created_at: Instant::now(),
+        },
+    );
+}
+
+fn take_nonce(store: &NonceStore, chat_id: i64, wallet_lower: &str) -> Option<String> {
+    let mut guard = store.lock().expect("nonce store poisoned");
+    purge_expired(&mut guard);
+    guard
+        .remove(&(chat_id, wallet_lower.to_string()))
+        .map(|p| p.nonce)
+}
+
+fn find_nonce_for_chat(store: &NonceStore, chat_id: i64) -> Option<(String, String)> {
+    let mut guard = store.lock().expect("nonce store poisoned");
+    purge_expired(&mut guard);
+    guard
+        .iter()
+        .find(|((cid, _), _)| *cid == chat_id)
+        .map(|((_, wallet), p)| (wallet.clone(), p.nonce.clone()))
+}
+
+fn purge_expired(map: &mut HashMap<(i64, String), PendingNonce>) {
+    let ttl = Duration::from_secs(NONCE_TTL_SECS);
+    map.retain(|_, v| v.created_at.elapsed() < ttl);
+}
+
+fn fresh_nonce() -> String {
+    let hi: u64 = rand::random();
+    let lo: u64 = rand::random();
+    format!("{:016x}{:016x}", hi, lo)
+}
+
 async fn handle_message(
     state: &AppState,
     client: &TelegramClient,
     allowed_chat_id: Option<i64>,
+    nonces: &NonceStore,
     msg: &Message,
 ) {
     if allowed_chat_id.is_some() && Some(msg.chat.id) != allowed_chat_id {
@@ -96,7 +159,15 @@ async fn handle_message(
         "status" => status_text(),
         "top" => top_text(state, parsed.args.as_deref()).await,
         "market" => market_text(state, parsed.args.as_deref()).await,
-        _ => format!("unknown command /{}. try /help", parsed.name),
+        "mute" => mute_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "unmute" => unmute_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "threshold" => threshold_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "cooldown" => cooldown_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "config" => config_text(state, msg.chat.id).await,
+        "link" => link_text(msg.chat.id, nonces, parsed.args.as_deref()),
+        "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
+        "unlink" => unlink_text(state, msg.chat.id).await,
+        _ => format!("unknown command /{}. try /help", html_escape(&parsed.name)),
     };
 
     if let Err(e) = client.send(msg.chat.id, &reply, Some(msg.message_id)).await {
@@ -130,9 +201,17 @@ fn help_text() -> String {
         "/status — alerter config + health",
         "/top [category] — top 5 live markets by opportunity score",
         "/market &lt;slug&gt; — price, depth, and link for one market",
+        "/config — show this chat's overrides + linked wallet",
+        "/mute &lt;slug_or_id&gt; — suppress alerts for a market",
+        "/unmute &lt;slug_or_id&gt; — undo a mute",
+        "/threshold &lt;pct&gt; — per-chat alert threshold (e.g. 3 or 3.5%)",
+        "/cooldown &lt;secs&gt; — per-chat alert cooldown (60-3600)",
+        "/link &lt;0x…&gt; — start read-only wallet binding",
+        "/verify &lt;signature&gt; — finish wallet binding",
+        "/unlink — drop linked wallet",
         "/help — this list",
         "",
-        "<i>Write-commands (/mute, /threshold) coming in the next drop.</i>",
+        "<i>Binding a wallet grants no spending authority. Trade execution is not available.</i>",
     ]
     .join("\n")
 }
@@ -251,6 +330,166 @@ async fn market_text(state: &AppState, args: Option<&str>) -> String {
         Ok(None) => format!("no market with slug <code>{}</code>", html_escape(&slug)),
         Err(e) => {
             warn!("/market query failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn mute_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let market = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /mute &lt;slug_or_market_id&gt;".to_string(),
+    };
+    match tg_chat_config::add_muted_market(state.db.pool(), chat_id, &market).await {
+        Ok(()) => format!("muted <code>{}</code>", html_escape(&market)),
+        Err(e) => {
+            warn!("/mute persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn unmute_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let market = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /unmute &lt;slug_or_market_id&gt;".to_string(),
+    };
+    match tg_chat_config::remove_muted_market(state.db.pool(), chat_id, &market).await {
+        Ok(()) => format!("unmuted <code>{}</code>", html_escape(&market)),
+        Err(e) => {
+            warn!("/unmute persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn threshold_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /threshold &lt;pct&gt; (e.g. 3 or 3.5%)".to_string(),
+    };
+    let parsed = match tg_chat_config::parse_threshold_arg(&raw) {
+        Ok(v) => v,
+        Err(e) => return html_escape(&e),
+    };
+    match tg_chat_config::set_threshold_override(state.db.pool(), chat_id, parsed).await {
+        Ok(()) => format!("threshold set to {:.2}%", parsed),
+        Err(e) => {
+            warn!("/threshold persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn cooldown_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /cooldown &lt;secs&gt; (60-3600)".to_string(),
+    };
+    let parsed = match tg_chat_config::parse_cooldown_arg(&raw) {
+        Ok(v) => v,
+        Err(e) => return html_escape(&e),
+    };
+    match tg_chat_config::set_cooldown_override(state.db.pool(), chat_id, parsed).await {
+        Ok(()) => format!("cooldown set to {}s", parsed),
+        Err(e) => {
+            warn!("/cooldown persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn config_text(state: &AppState, chat_id: i64) -> String {
+    let cfg = match tg_chat_config::fetch(state.db.pool(), chat_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("/config fetch failed: {}", e);
+            return "query failed".to_string();
+        }
+    };
+    let mut out = vec!["<b>chat config</b>".to_string()];
+    for line in tg_chat_config::dump_config_lines(cfg.as_ref()) {
+        out.push(html_escape(&line));
+    }
+    out.join("\n")
+}
+
+fn link_text(chat_id: i64, nonces: &NonceStore, args: Option<&str>) -> String {
+    let raw = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /link &lt;0x…&gt;".to_string(),
+    };
+    let wallet_lower = match tg_chat_config::validate_and_normalize_evm_address(&raw) {
+        Ok(w) => w,
+        Err(e) => return html_escape(&e),
+    };
+    let nonce = fresh_nonce();
+    let message = tg_chat_config::link_message(chat_id, &wallet_lower, &nonce);
+    put_nonce(nonces, chat_id, &wallet_lower, nonce);
+    format!(
+        "Sign this message with your wallet and send <code>/verify &lt;signature&gt;</code> within 10 min:\n\n<code>{}</code>\n\n<i>Read-only binding. No spending authority is granted.</i>",
+        html_escape(&message)
+    )
+}
+
+async fn verify_text(
+    state: &AppState,
+    chat_id: i64,
+    nonces: &NonceStore,
+    args: Option<&str>,
+) -> String {
+    let signature = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /verify &lt;signature&gt;".to_string(),
+    };
+    let (expected_wallet, nonce) = match find_nonce_for_chat(nonces, chat_id) {
+        Some(pair) => pair,
+        None => {
+            return "no pending /link for this chat. run /link &lt;0x…&gt; first.".to_string();
+        }
+    };
+    let message = tg_chat_config::link_message(chat_id, &expected_wallet, &nonce);
+    let recovered = match tg_chat_config::recover_personal_sign(&message, &signature) {
+        Ok(a) => a,
+        Err(e) => return format!("signature invalid: {}", html_escape(&e)),
+    };
+    if recovered != expected_wallet {
+        return "signature does not match the wallet you linked".to_string();
+    }
+
+    // Nonce is single-use; consume on success. Keeps replay closed.
+    let _ = take_nonce(nonces, chat_id, &expected_wallet);
+
+    // If the existing users table has a row for this wallet, we'd resolve an
+    // id here. Today the table is keyed on a Solana-length `wallet` primary
+    // key, so there is no UUID to resolve. Leaving linked_user_id NULL is
+    // correct until an EVM-native user identifier is introduced.
+    let linked_user_id = None;
+
+    match tg_chat_config::set_linked_wallet(
+        state.db.pool(),
+        chat_id,
+        &expected_wallet,
+        linked_user_id,
+    )
+    .await
+    {
+        Ok(()) => format!(
+            "wallet <code>{}</code> linked (read-only).",
+            html_escape(&expected_wallet)
+        ),
+        Err(e) => {
+            warn!("/verify persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn unlink_text(state: &AppState, chat_id: i64) -> String {
+    match tg_chat_config::clear_linked_wallet(state.db.pool(), chat_id).await {
+        Ok(()) => "wallet unlinked".to_string(),
+        Err(e) => {
+            warn!("/unlink persist failed: {}", e);
             "query failed".to_string()
         }
     }
@@ -445,5 +684,40 @@ mod tests {
         assert!(h.contains("/top"));
         assert!(h.contains("/market"));
         assert!(h.contains("/help"));
+        assert!(h.contains("/mute"));
+        assert!(h.contains("/threshold"));
+        assert!(h.contains("/cooldown"));
+        assert!(h.contains("/link"));
+        assert!(h.contains("/verify"));
+        assert!(h.contains("/unlink"));
+        assert!(h.contains("/config"));
+    }
+
+    #[test]
+    fn fresh_nonce_is_hex_and_unique_enough() {
+        let a = fresh_nonce();
+        let b = fresh_nonce();
+        assert_eq!(a.len(), 32);
+        assert_eq!(b.len(), 32);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn nonce_store_put_and_take_roundtrip() {
+        let store: NonceStore = Arc::new(Mutex::new(HashMap::new()));
+        put_nonce(&store, 7, "0xabc", "n1".to_string());
+        assert_eq!(take_nonce(&store, 7, "0xabc").as_deref(), Some("n1"));
+        // single-use: second take returns None.
+        assert!(take_nonce(&store, 7, "0xabc").is_none());
+    }
+
+    #[test]
+    fn nonce_store_find_returns_latest_for_chat() {
+        let store: NonceStore = Arc::new(Mutex::new(HashMap::new()));
+        put_nonce(&store, 7, "0xabc", "n1".to_string());
+        let found = find_nonce_for_chat(&store, 7);
+        assert_eq!(found.as_ref().map(|(w, n)| (w.as_str(), n.as_str())), Some(("0xabc", "n1")));
+        assert!(find_nonce_for_chat(&store, 99).is_none());
     }
 }
