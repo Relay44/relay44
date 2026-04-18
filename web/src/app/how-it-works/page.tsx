@@ -65,7 +65,7 @@ export default function HowItWorksPage() {
           ]),
         ]}
       />
-      <div className="mx-auto max-w-5xl py-2 sm:py-4">
+      <div className="py-2 sm:py-4">
         <div className="mb-8 max-w-3xl">
           <h1 className="text-3xl font-semibold text-text-primary sm:text-4xl">How It Works</h1>
           <p className="mt-4 text-base leading-7 text-text-secondary">

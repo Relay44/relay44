@@ -13,7 +13,7 @@ export function SecurityAuditPageClient() {
   if (!address) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-6xl px-4 py-8">
+        <div className="py-8">
           <Card>
             <CardContent className="flex h-40 items-center justify-center text-text-secondary">
               Connect your wallet to access security audit notes
@@ -27,7 +27,7 @@ export function SecurityAuditPageClient() {
   if (!isAdmin) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-6xl px-4 py-8">
+        <div className="py-8">
           <Card>
             <CardContent className="flex h-40 flex-col items-center justify-center gap-2">
               <p className="text-ask font-medium">Access denied</p>
@@ -43,7 +43,7 @@ export function SecurityAuditPageClient() {
 
   return (
     <PageShell>
-      <div className="container mx-auto px-4 py-8">
+      <div className="py-8">
         <h1 className="mb-6 text-2xl font-bold text-text-primary">Security Audit Preparation</h1>
         <SecurityAuditChecklist />
       </div>

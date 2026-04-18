@@ -86,7 +86,7 @@
 
   @media (min-width: 640px) {
     .container-app {
-      padding-inline: 1.5rem;
+      padding-inline: 2rem;
     }
   }
 
@@ -98,7 +98,7 @@
 
   @media (min-width: 640px) {
     .shell-frame {
-      padding-inline: 1.5rem;
+      padding-inline: 2rem;
     }
   }
 

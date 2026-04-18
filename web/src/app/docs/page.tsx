@@ -191,7 +191,7 @@ const mcpTools = [
 
 export default function DocsPage() {
   return (
-    <div className="mx-auto max-w-7xl px-4 pb-8 sm:px-6 lg:px-8">
+    <div className="pb-8">
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_14rem] lg:gap-12">
         {/* ---- Main content ---- */}
         <div className="min-w-0 max-w-3xl">

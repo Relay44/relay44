@@ -37,12 +37,14 @@ export default function HackathonAdminPage() {
   if (!address) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-4xl px-4 py-8">
-          <Card>
-            <CardContent className="py-8 text-center text-text-secondary">
-              Connect your wallet to access admin panel.
-            </CardContent>
-          </Card>
+        <div className="py-8">
+          <div className="mx-auto max-w-3xl">
+            <Card>
+              <CardContent className="py-8 text-center text-text-secondary">
+                Connect your wallet to access admin panel.
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </PageShell>
     );
@@ -51,12 +53,14 @@ export default function HackathonAdminPage() {
   if (!isAdmin) {
     return (
       <PageShell>
-        <div className="container mx-auto max-w-4xl px-4 py-8">
-          <Card>
-            <CardContent className="py-8 text-center text-text-secondary">
-              Access denied. Admin wallet required.
-            </CardContent>
-          </Card>
+        <div className="py-8">
+          <div className="mx-auto max-w-3xl">
+            <Card>
+              <CardContent className="py-8 text-center text-text-secondary">
+                Access denied. Admin wallet required.
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </PageShell>
     );
@@ -135,11 +139,12 @@ export default function HackathonAdminPage() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-4xl px-4 py-8 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Hackathon Admin</h1>
-          <Badge variant="accent">Admin Mode</Badge>
-        </div>
+      <div className="py-8">
+        <div className="mx-auto max-w-3xl space-y-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Hackathon Admin</h1>
+            <Badge variant="accent">Admin Mode</Badge>
+          </div>
 
         {/* Create form */}
         <Card>
@@ -278,6 +283,7 @@ export default function HackathonAdminPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     </PageShell>
   );

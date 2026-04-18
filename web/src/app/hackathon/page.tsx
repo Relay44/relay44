@@ -17,7 +17,7 @@ export default function HackathonPage() {
 
   return (
     <PageShell>
-      <div className="container mx-auto max-w-6xl px-4 py-8 space-y-8">
+      <div className="py-8 space-y-8">
         {/* Hero */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">

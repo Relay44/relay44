@@ -13,11 +13,10 @@ export default function SwarmPage({ params }: Props) {
 
   return (
     <PageShell>
-      <div
-        className="container mx-auto max-w-3xl px-4 py-4"
-        style={{ height: 'calc(100vh - 8rem)' }}
-      >
-        <SwarmPanel swarmId={swarmId} />
+      <div className="py-4" style={{ height: 'calc(100vh - 8rem)' }}>
+        <div className="mx-auto max-w-3xl h-full">
+          <SwarmPanel swarmId={swarmId} />
+        </div>
       </div>
     </PageShell>
   );

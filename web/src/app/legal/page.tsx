@@ -49,20 +49,22 @@ export default function LegalPage() {
           }),
         ]}
       />
-      <div className="container mx-auto px-4 pb-8 max-w-4xl">
-        <h1 className="text-3xl font-bold text-text-primary mb-8">Legal</h1>
+      <div className="pb-8">
+        <div className="mx-auto max-w-4xl">
+          <h1 className="text-3xl font-bold text-text-primary mb-8">Legal</h1>
 
-        <div className="grid gap-4">
-          {legalPages.map((page) => (
-            <Link key={page.href} href={page.href}>
-              <Card hover>
-                <CardHeader>
-                  <CardTitle>{page.title}</CardTitle>
-                  <CardDescription>{page.description}</CardDescription>
-                </CardHeader>
-              </Card>
-            </Link>
-          ))}
+          <div className="grid gap-4">
+            {legalPages.map((page) => (
+              <Link key={page.href} href={page.href}>
+                <Card hover>
+                  <CardHeader>
+                    <CardTitle>{page.title}</CardTitle>
+                    <CardDescription>{page.description}</CardDescription>
+                  </CardHeader>
+                </Card>
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
     </>

@@ -185,7 +185,7 @@ export default function DistributionMarketPage() {
 
   return (
     <PageShell>
-      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 pb-24 lg:pb-6">
+      <div className="py-6 pb-24 lg:pb-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start justify-between gap-3 mb-6">
           <div className="flex-1 min-w-0">
