@@ -2,6 +2,7 @@ pub mod aerodrome;
 pub mod aerodrome_scanner;
 pub mod agent_scheduler;
 pub mod creator_economics;
+pub mod cross_venue_arb;
 pub mod database;
 pub mod distribution;
 pub mod distribution_scheduler;
