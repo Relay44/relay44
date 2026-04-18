@@ -28,6 +28,7 @@ pub mod polymarket_scanner;
 pub mod polymarket_ws;
 pub mod portfolio_snapshot;
 pub mod probability_alert;
+pub mod telegram_commands;
 pub mod provider_rails;
 pub mod pyth;
 pub mod redis;
