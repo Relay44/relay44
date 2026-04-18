@@ -24,7 +24,8 @@ use crate::AppState;
 
 const DEFAULT_THRESHOLD_PCT: f64 = 5.0;
 const DEFAULT_COOLDOWN_SECS: u64 = 300;
-const MIN_PRICE_FOR_ALERT: f64 = 0.01;
+const DEFAULT_MIN_PRICE: f64 = 0.05;
+const HARD_MIN_PRICE: f64 = 0.01;
 
 pub fn spawn(state: Arc<AppState>) {
     let enabled = std::env::var("TELEGRAM_ALERTS_ENABLED")
@@ -59,12 +60,18 @@ pub fn spawn(state: Arc<AppState>) {
         .ok()
         .and_then(|v| v.parse::<f64>().ok())
         .unwrap_or(0.0);
+    let min_price = std::env::var("PROB_ALERT_MIN_PRICE")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(DEFAULT_MIN_PRICE)
+        .max(HARD_MIN_PRICE);
 
     info!(
-        "Starting Telegram probability alerts (threshold={}%, cooldown={}s, min_liquidity=${})",
+        "Starting Telegram probability alerts (threshold={}%, cooldown={}s, min_liquidity=${}, min_price={}¢)",
         threshold_pct,
         cooldown.as_secs(),
         min_liquidity_usd,
+        (min_price * 100.0) as i32,
     );
 
     let mut rx = state.market_data.subscribe();
@@ -83,6 +90,7 @@ pub fn spawn(state: Arc<AppState>) {
                         threshold_pct,
                         cooldown,
                         min_liquidity_usd,
+                        min_price,
                         &mut last_price,
                         &mut last_alert,
                         &ev,
@@ -115,6 +123,7 @@ async fn handle_event(
     threshold_pct: f64,
     cooldown: Duration,
     min_liquidity_usd: f64,
+    min_price: f64,
     last_price: &mut HashMap<String, f64>,
     last_alert: &mut HashMap<String, Instant>,
     ev: &L2Event,
@@ -122,7 +131,7 @@ async fn handle_event(
     let Some(price) = current_price(&ev.payload) else {
         return;
     };
-    if price < MIN_PRICE_FOR_ALERT {
+    if price < HARD_MIN_PRICE {
         return;
     }
 
@@ -132,7 +141,14 @@ async fn handle_event(
     let Some(prev_price) = prev else {
         return;
     };
-    if prev_price < MIN_PRICE_FOR_ALERT {
+    if prev_price < HARD_MIN_PRICE {
+        return;
+    }
+
+    // Dust-market gate: if either end of the move is below the configured
+    // min price, this is almost certainly a penny bouncing around rather
+    // than a meaningful probability shift.
+    if price < min_price || prev_price < min_price {
         return;
     }
 
