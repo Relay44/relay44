@@ -26,6 +26,7 @@ pub mod metrics;
 pub mod new_market_alert;
 pub mod orchestrator;
 pub mod orderbook;
+pub mod orderbook_imbalance_alert;
 pub mod polymarket_scanner;
 pub mod polymarket_ws;
 pub mod portfolio_snapshot;
