@@ -163,6 +163,11 @@ async fn handle_message(
         "unmute" => unmute_text(state, msg.chat.id, parsed.args.as_deref()).await,
         "threshold" => threshold_text(state, msg.chat.id, parsed.args.as_deref()).await,
         "cooldown" => cooldown_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "quiet" => quiet_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "unquiet" => unquiet_text(state, msg.chat.id).await,
+        "subscribe" => subscribe_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "unsubscribe" => unsubscribe_text(state, msg.chat.id, parsed.args.as_deref()).await,
+        "digest" => digest_text(state).await,
         "config" => config_text(state, msg.chat.id).await,
         "link" => link_text(msg.chat.id, nonces, parsed.args.as_deref()),
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
@@ -206,6 +211,11 @@ fn help_text() -> String {
         "/unmute &lt;slug_or_id&gt; — undo a mute",
         "/threshold &lt;pct&gt; — per-chat alert threshold (e.g. 3 or 3.5%)",
         "/cooldown &lt;secs&gt; — per-chat alert cooldown (60-3600)",
+        "/quiet &lt;hours&gt; — snooze digest for this chat (0.25-168)",
+        "/unquiet — cancel an active quiet window",
+        "/subscribe &lt;kind&gt; — subscribe to a signal kind (probability_shift, volume_spike)",
+        "/unsubscribe &lt;kind&gt; — remove a signal kind",
+        "/digest — on-demand: drain bus and send current top signals",
         "/link &lt;0x…&gt; — start read-only wallet binding",
         "/verify &lt;signature&gt; — finish wallet binding",
         "/unlink — drop linked wallet",
@@ -397,6 +407,112 @@ async fn cooldown_text(state: &AppState, chat_id: i64, args: Option<&str>) -> St
             "query failed".to_string()
         }
     }
+}
+
+async fn quiet_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => return "usage: /quiet &lt;hours&gt; (0.25-168)".to_string(),
+    };
+    let hours = match tg_chat_config::parse_quiet_hours_arg(&raw) {
+        Ok(v) => v,
+        Err(e) => return html_escape(&e),
+    };
+    match tg_chat_config::set_quiet_until(state.db.pool(), chat_id, hours).await {
+        Ok(until) => format!(
+            "quiet until {}",
+            html_escape(&until.format("%Y-%m-%d %H:%M UTC").to_string())
+        ),
+        Err(e) => {
+            warn!("/quiet persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn unquiet_text(state: &AppState, chat_id: i64) -> String {
+    match tg_chat_config::clear_quiet_until(state.db.pool(), chat_id).await {
+        Ok(()) => "quiet window cleared".to_string(),
+        Err(e) => {
+            warn!("/unquiet persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn subscribe_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => {
+            return format!(
+                "usage: /subscribe &lt;kind&gt; ({})",
+                tg_chat_config::VALID_KINDS.join(", ")
+            );
+        }
+    };
+    let kind = match tg_chat_config::parse_kind_arg(&raw) {
+        Ok(k) => k,
+        Err(e) => return html_escape(&e),
+    };
+    match tg_chat_config::add_subscribed_kind(state.db.pool(), chat_id, kind).await {
+        Ok(()) => format!("subscribed to <code>{}</code>", kind),
+        Err(e) => {
+            warn!("/subscribe persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn unsubscribe_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = match args.and_then(|s| s.split_whitespace().next()) {
+        Some(s) => s.to_string(),
+        None => {
+            return format!(
+                "usage: /unsubscribe &lt;kind&gt; ({})",
+                tg_chat_config::VALID_KINDS.join(", ")
+            );
+        }
+    };
+    let kind = match tg_chat_config::parse_kind_arg(&raw) {
+        Ok(k) => k,
+        Err(e) => return html_escape(&e),
+    };
+    match tg_chat_config::remove_subscribed_kind(state.db.pool(), chat_id, kind).await {
+        Ok(()) => format!("unsubscribed from <code>{}</code>", kind),
+        Err(e) => {
+            warn!("/unsubscribe persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+/// Drains the alert bus immediately and returns a formatted digest. Bypasses
+/// the scheduler's cooldown and send path — the reply lands in the /digest
+/// caller's chat as a normal command response. Useful to peek at what would
+/// be sent on the next scheduled tick without waiting.
+async fn digest_text(state: &AppState) -> String {
+    use crate::services::digest_scheduler;
+    let drained = state.alert_bus.drain().await;
+    if drained.is_empty() {
+        return "bus empty — nothing queued".to_string();
+    }
+    let now = crate::services::alert_bus::now_secs();
+    let top_n = std::env::var("DIGEST_TOP_N")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(3)
+        .max(1);
+    let selected = digest_scheduler::select_top_signals(
+        drained,
+        top_n,
+        0,
+        now,
+        &std::collections::HashMap::new(),
+    );
+    if selected.is_empty() {
+        return "no signals after dedup".to_string();
+    }
+    digest_scheduler::format_digest(&selected)
 }
 
 async fn config_text(state: &AppState, chat_id: i64) -> String {
