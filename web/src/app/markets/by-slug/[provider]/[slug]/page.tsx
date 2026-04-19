@@ -21,7 +21,7 @@ export default function MarketBySlugPage() {
     (async () => {
       try {
         const url = resolveApiUrl(
-          `/v1/evm/markets/by-slug/${encodeURIComponent(provider)}/${encodeURIComponent(slug)}`,
+          `/evm/markets/by-slug/${encodeURIComponent(provider)}/${encodeURIComponent(slug)}`,
         );
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`resolve failed: ${res.status}`);
