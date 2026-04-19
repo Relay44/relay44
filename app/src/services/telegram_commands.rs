@@ -163,7 +163,7 @@ async fn handle_message(
 ) {
     let is_group_match = Some(msg.chat.id) == allowed_chat_id;
     let is_dm = msg.chat.is_dm();
-    if !is_group_match && !(dm_enabled && is_dm) {
+    if !(is_group_match || (dm_enabled && is_dm)) {
         return;
     }
     let Some(text) = &msg.text else { return };
