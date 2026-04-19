@@ -49,6 +49,13 @@ pub fn spawn(state: Arc<AppState>) {
     if allowed_chat_id.is_none() {
         warn!("TELEGRAM_CHAT_ID missing or non-numeric; commands will be ignored from every chat");
     }
+    let dm_enabled = std::env::var("TELEGRAM_DM_ENABLED")
+        .ok()
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(false);
+    if dm_enabled {
+        info!("Telegram DM commands enabled — strangers can DM the bot");
+    }
 
     let http = match reqwest::Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
@@ -72,7 +79,15 @@ pub fn spawn(state: Arc<AppState>) {
                     for upd in updates {
                         offset = upd.update_id + 1;
                         if let Some(msg) = upd.message {
-                            handle_message(&state, &client, allowed_chat_id, &nonces, &msg).await;
+                            handle_message(
+                                &state,
+                                &client,
+                                allowed_chat_id,
+                                dm_enabled,
+                                &nonces,
+                                &msg,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -142,10 +157,13 @@ async fn handle_message(
     state: &AppState,
     client: &TelegramClient,
     allowed_chat_id: Option<i64>,
+    dm_enabled: bool,
     nonces: &NonceStore,
     msg: &Message,
 ) {
-    if allowed_chat_id.is_some() && Some(msg.chat.id) != allowed_chat_id {
+    let is_group_match = Some(msg.chat.id) == allowed_chat_id;
+    let is_dm = msg.chat.is_dm();
+    if !(is_group_match || (dm_enabled && is_dm)) {
         return;
     }
     let Some(text) = &msg.text else { return };
@@ -168,6 +186,7 @@ async fn handle_message(
         "subscribe" => subscribe_text(state, msg.chat.id, parsed.args.as_deref()).await,
         "unsubscribe" => unsubscribe_text(state, msg.chat.id, parsed.args.as_deref()).await,
         "digest" => digest_text(state).await,
+        "quote" => quote_text(state, is_dm, parsed.args.as_deref()).await,
         "config" => config_text(state, msg.chat.id).await,
         "link" => link_text(msg.chat.id, nonces, parsed.args.as_deref()),
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
@@ -216,6 +235,7 @@ fn help_text() -> String {
         "/subscribe &lt;kind&gt; — subscribe to a signal kind (probability_shift, volume_spike)",
         "/unsubscribe &lt;kind&gt; — remove a signal kind",
         "/digest — on-demand: drain bus and send current top signals",
+        "/quote &lt;slug&gt; &lt;outcome&gt; &lt;buy|sell&gt; [size] — DM-only: best-execution quote",
         "/link &lt;0x…&gt; — start read-only wallet binding",
         "/verify &lt;signature&gt; — finish wallet binding",
         "/unlink — drop linked wallet",
@@ -515,6 +535,98 @@ async fn digest_text(state: &AppState) -> String {
     digest_scheduler::format_digest(&selected)
 }
 
+/// Build a best-execution quote across linked venues for a market. Read-only
+/// — does NOT place or sign any order. Gated to DM chats because the reply
+/// may reveal which markets the user is watching.
+async fn quote_text(state: &AppState, is_dm: bool, args: Option<&str>) -> String {
+    if !is_dm {
+        return "/quote is available in DM only — open a private chat with the bot.".to_string();
+    }
+    let (slug, outcome, side, size) = match parse_quote_args(args) {
+        Ok(v) => v,
+        Err(e) => return html_escape(&e),
+    };
+    let decision = match crate::services::smart_router::route_order(
+        state, &slug, &outcome, &side, size,
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => return format!("no quote: {}", html_escape(&e)),
+    };
+
+    let is_buy = side == "buy";
+    let chosen_px = if is_buy {
+        decision.chosen.effective_buy
+    } else {
+        decision.chosen.effective_sell
+    };
+    let chosen_px_s = chosen_px
+        .map(|p| format!("{:.2}¢", p * 100.0))
+        .unwrap_or_else(|| "—".to_string());
+    let mut out = String::new();
+    out.push_str(&format!(
+        "<b>Best {} — {}</b>\n",
+        html_escape(&side),
+        html_escape(&slug)
+    ));
+    out.push_str(&format!(
+        "<b>{}</b> · {} (fee {}bps)\n",
+        html_escape(&decision.chosen.provider),
+        chosen_px_s,
+        decision.chosen.fee_bps
+    ));
+    if !decision.alternatives.is_empty() {
+        out.push_str("vs:\n");
+        for alt in &decision.alternatives {
+            let px = if is_buy {
+                alt.effective_buy
+            } else {
+                alt.effective_sell
+            };
+            let px_s = px
+                .map(|p| format!("{:.2}¢", p * 100.0))
+                .unwrap_or_else(|| "—".to_string());
+            out.push_str(&format!(
+                "  {} · {}\n",
+                html_escape(&alt.provider),
+                px_s
+            ));
+        }
+    }
+    if decision.savings_bps > 0 {
+        out.push_str(&format!("savings: {}bps", decision.savings_bps));
+    }
+    out.push_str(
+        "\n\n<i>Quote only — no order was placed. Trade execution from Telegram is not yet available.</i>",
+    );
+    out
+}
+
+fn parse_quote_args(args: Option<&str>) -> Result<(String, String, String, f64), String> {
+    let raw = args.ok_or_else(|| "usage: /quote <slug> <outcome> <buy|sell> [size]".to_string())?;
+    let parts: Vec<&str> = raw.split_whitespace().collect();
+    if parts.len() < 3 {
+        return Err("usage: /quote <slug> <outcome> <buy|sell> [size]".to_string());
+    }
+    let slug = parts[0].to_string();
+    let outcome = parts[1].to_string();
+    let side = parts[2].to_ascii_lowercase();
+    if side != "buy" && side != "sell" {
+        return Err(format!("side must be 'buy' or 'sell', got '{}'", parts[2]));
+    }
+    let size = match parts.get(3) {
+        Some(s) => s
+            .parse::<f64>()
+            .map_err(|_| format!("'{}' is not a number", s))?,
+        None => 1.0,
+    };
+    if !(size > 0.0 && size.is_finite()) {
+        return Err("size must be a positive finite number".to_string());
+    }
+    Ok((slug, outcome, side, size))
+}
+
 async fn config_text(state: &AppState, chat_id: i64) -> String {
     let cfg = match tg_chat_config::fetch(state.db.pool(), chat_id).await {
         Ok(v) => v,
@@ -659,6 +771,16 @@ struct Message {
 #[derive(Debug, Deserialize)]
 struct Chat {
     id: i64,
+    /// Telegram chat type: "private" for DMs, otherwise "group", "supergroup",
+    /// "channel". Optional because some legacy updates don't include it.
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+}
+
+impl Chat {
+    fn is_dm(&self) -> bool {
+        self.kind.as_deref() == Some("private")
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -835,5 +957,45 @@ mod tests {
         let found = find_nonce_for_chat(&store, 7);
         assert_eq!(found.as_ref().map(|(w, n)| (w.as_str(), n.as_str())), Some(("0xabc", "n1")));
         assert!(find_nonce_for_chat(&store, 99).is_none());
+    }
+
+    #[test]
+    fn quote_parses_slug_outcome_side() {
+        let (slug, outcome, side, size) =
+            parse_quote_args(Some("btc-100k-by-eoy YES buy")).unwrap();
+        assert_eq!(slug, "btc-100k-by-eoy");
+        assert_eq!(outcome, "YES");
+        assert_eq!(side, "buy");
+        assert!((size - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quote_parses_optional_size() {
+        let (_, _, _, size) = parse_quote_args(Some("slug YES sell 250")).unwrap();
+        assert!((size - 250.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn quote_normalizes_side_case() {
+        let (_, _, side, _) = parse_quote_args(Some("slug YES BUY")).unwrap();
+        assert_eq!(side, "buy");
+    }
+
+    #[test]
+    fn quote_rejects_bad_side() {
+        assert!(parse_quote_args(Some("slug YES maybe")).is_err());
+    }
+
+    #[test]
+    fn quote_rejects_missing_fields() {
+        assert!(parse_quote_args(None).is_err());
+        assert!(parse_quote_args(Some("slug YES")).is_err());
+    }
+
+    #[test]
+    fn quote_rejects_bad_size() {
+        assert!(parse_quote_args(Some("slug YES buy -5")).is_err());
+        assert!(parse_quote_args(Some("slug YES buy abc")).is_err());
+        assert!(parse_quote_args(Some("slug YES buy 0")).is_err());
     }
 }
