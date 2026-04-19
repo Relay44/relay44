@@ -105,6 +105,10 @@ impl AlertBus {
     pub async fn len(&self) -> usize {
         self.signals.read().await.len()
     }
+
+    pub async fn is_empty(&self) -> bool {
+        self.signals.read().await.is_empty()
+    }
 }
 
 pub fn now_secs() -> u64 {
