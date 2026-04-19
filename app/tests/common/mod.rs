@@ -39,6 +39,7 @@ pub async fn build_test_state() -> Arc<AppState> {
     let ws_hub = WebSocketHub::new();
     let event_bus = EventBus::new();
     let market_data = Arc::new(relay44_backend::services::market_data::MarketDataBus::new());
+    let alert_bus = relay44_backend::services::alert_bus::AlertBus::new();
     let kyc = relay44_backend::services::kyc::KycService::new(
         relay44_backend::services::kyc::KycConfig::from_env(),
     );
@@ -55,6 +56,7 @@ pub async fn build_test_state() -> Arc<AppState> {
         ws_hub,
         event_bus,
         market_data,
+        alert_bus,
         kyc,
         limitless_partner: None,
         is_shutting_down: Arc::new(AtomicBool::new(false)),

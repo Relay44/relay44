@@ -1,7 +1,7 @@
 //! Telegram probability-shift alerts.
 //!
 //! Subscribes to the market_data bus, tracks the last observed price per
-//! (venue, market_key), and pushes a Telegram message when a fresh snapshot
+//! (venue, market_key), and emits an alerter signal when a fresh snapshot
 //! moves by more than `PROB_ALERT_THRESHOLD_PCT`. Each market is on a
 //! per-market cooldown so a rapidly-jittery book can't spam the channel.
 //!
@@ -12,9 +12,10 @@
 //! without dropping alerts for markets whose metadata isn't in the scanner
 //! tables yet.
 //!
-//! Message layout is HTML and goes through the shared helpers in
-//! `telegram_format` so this alerter stays visually consistent with
-//! `cross_venue_arb` and `new_market_alert`.
+//! When `DIGEST_ENABLED=true` (the default shipping config), signals are
+//! published to the shared `AlertBus` and the `digest_scheduler` decides
+//! what to send. Otherwise this alerter keeps its legacy direct-send path,
+//! which remains useful for local dev and incident debugging.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use std::time::{Duration, Instant};
 use log::{info, warn};
 use tokio::sync::broadcast::error::RecvError;
 
+use super::alert_bus::{now_secs, Signal, SignalKind};
 use super::market_data::{L2Event, L2Payload, Venue};
 use super::telegram_format::{
     format_alert_header, format_deep_link, format_metadata_row, html_escape, TelegramClient,
@@ -44,13 +46,23 @@ pub fn spawn(state: Arc<AppState>) {
         return;
     }
 
-    let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") else {
-        warn!("TELEGRAM_ALERTS_ENABLED=true but TELEGRAM_BOT_TOKEN missing; not starting");
-        return;
-    };
-    let Ok(chat_id) = std::env::var("TELEGRAM_CHAT_ID") else {
-        warn!("TELEGRAM_ALERTS_ENABLED=true but TELEGRAM_CHAT_ID missing; not starting");
-        return;
+    let digest_enabled = std::env::var("DIGEST_ENABLED")
+        .ok()
+        .and_then(|v| v.parse::<bool>().ok())
+        .unwrap_or(false);
+
+    let direct_send_client = if digest_enabled {
+        None
+    } else {
+        let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") else {
+            warn!("TELEGRAM_ALERTS_ENABLED=true but TELEGRAM_BOT_TOKEN missing; not starting");
+            return;
+        };
+        let Ok(chat_id) = std::env::var("TELEGRAM_CHAT_ID") else {
+            warn!("TELEGRAM_ALERTS_ENABLED=true but TELEGRAM_CHAT_ID missing; not starting");
+            return;
+        };
+        Some(TelegramClient::new(bot_token, chat_id))
     };
 
     let threshold_pct = std::env::var("PROB_ALERT_THRESHOLD_PCT")
@@ -74,15 +86,15 @@ pub fn spawn(state: Arc<AppState>) {
         .max(HARD_MIN_PRICE);
 
     info!(
-        "Starting Telegram probability alerts (threshold={}%, cooldown={}s, min_liquidity=${}, min_price={}¢)",
+        "Starting Telegram probability alerts (threshold={}%, cooldown={}s, min_liquidity=${}, min_price={}¢, digest={})",
         threshold_pct,
         cooldown.as_secs(),
         min_liquidity_usd,
         (min_price * 100.0) as i32,
+        digest_enabled,
     );
 
     let mut rx = state.market_data.subscribe();
-    let tg = TelegramClient::new(bot_token, chat_id);
 
     tokio::spawn(async move {
         let mut last_price: HashMap<String, f64> = HashMap::new();
@@ -93,7 +105,7 @@ pub fn spawn(state: Arc<AppState>) {
                 Ok(ev) => {
                     handle_event(
                         &state,
-                        &tg,
+                        direct_send_client.as_ref(),
                         threshold_pct,
                         cooldown,
                         min_liquidity_usd,
@@ -126,7 +138,7 @@ struct MarketContext {
 
 async fn handle_event(
     state: &AppState,
-    tg: &TelegramClient,
+    tg: Option<&TelegramClient>,
     threshold_pct: f64,
     cooldown: Duration,
     min_liquidity_usd: f64,
@@ -178,16 +190,54 @@ async fn handle_event(
 
     last_alert.insert(key, Instant::now());
 
-    let text = format_alert(
-        ctx.as_ref(),
-        ev.venue,
-        &ev.market_key,
-        prev_price,
-        price,
-        delta_pct,
+    if let Some(tg) = tg {
+        let text = format_alert(
+            ctx.as_ref(),
+            ev.venue,
+            &ev.market_key,
+            prev_price,
+            price,
+            delta_pct,
+        );
+        if let Err(e) = tg.send(&text).await {
+            warn!("telegram send failed: {}", e);
+        }
+    } else {
+        let signal = build_signal(ctx.as_ref(), ev.venue, &ev.market_key, prev_price, price, delta_pct);
+        state.alert_bus.publish(signal).await;
+    }
+}
+
+fn build_signal(
+    ctx: Option<&MarketContext>,
+    venue: Venue,
+    market_key: &str,
+    prev: f64,
+    curr: f64,
+    delta_pct: f64,
+) -> Signal {
+    let arrow = if delta_pct > 0.0 { "↑" } else { "↓" };
+    let question_raw = ctx
+        .map(|c| c.question.clone())
+        .unwrap_or_else(|| format!("{}:{}", venue.as_str(), truncate(market_key, 12)));
+    let body = format!(
+        "{arrow} {:.1}¢ → {:.1}¢  ({:+.1}%)",
+        prev * 100.0,
+        curr * 100.0,
+        delta_pct
     );
-    if let Err(e) = tg.send(&text).await {
-        warn!("telegram send failed: {}", e);
+    Signal {
+        kind: SignalKind::ProbabilityShift,
+        venue: venue.as_str().to_string(),
+        market_key: market_key.to_string(),
+        slug: ctx.and_then(|c| c.slug.clone()),
+        question: question_raw,
+        liquidity_usd: ctx.and_then(|c| c.liquidity_usd),
+        volume_24h_usd: ctx.and_then(|c| c.volume_24h_usd),
+        category: ctx.and_then(|c| c.category.clone()),
+        move_size: delta_pct.abs(),
+        body,
+        timestamp_secs: now_secs(),
     }
 }
 

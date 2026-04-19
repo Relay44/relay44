@@ -11,7 +11,7 @@
 //! this alerter stays consistent with `probability_alert` and
 //! `cross_venue_arb`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,6 +25,8 @@ use crate::AppState;
 
 const DEFAULT_POLL_SECS: u64 = 60;
 const DEFAULT_COOLDOWN_SECS: u64 = 900;
+const DEFAULT_RATE_LIMIT_PER_HOUR: usize = 3;
+const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(3600);
 const MAX_ALERTS_PER_TICK: usize = 5;
 
 pub fn spawn(state: Arc<AppState>) {
@@ -50,6 +52,8 @@ pub fn spawn(state: Arc<AppState>) {
         "NEW_MARKET_COOLDOWN_SECS",
         DEFAULT_COOLDOWN_SECS,
     ));
+    let rate_limit_per_hour =
+        env_usize("NEW_MARKET_RATE_LIMIT_PER_HOUR", DEFAULT_RATE_LIMIT_PER_HOUR);
 
     if watchlist.is_empty() && categories.is_empty() {
         warn!(
@@ -61,10 +65,11 @@ pub fn spawn(state: Arc<AppState>) {
     }
 
     info!(
-        "Starting new-market alerts (watchlist={:?}, categories={:?}, poll={}s)",
+        "Starting new-market alerts (watchlist={:?}, categories={:?}, poll={}s, rate_limit={}/hr)",
         watchlist,
         categories,
-        poll.as_secs()
+        poll.as_secs(),
+        rate_limit_per_hour,
     );
 
     let tg = TelegramClient::new(bot_token, chat_id);
@@ -73,6 +78,7 @@ pub fn spawn(state: Arc<AppState>) {
         let mut cursor_poly: Option<DateTime<Utc>> = None;
         let mut cursor_lim: Option<DateTime<Utc>> = None;
         let mut last_alert: HashMap<String, Instant> = HashMap::new();
+        let mut sent_times: VecDeque<Instant> = VecDeque::new();
 
         let mut interval = tokio::time::interval(poll);
         interval.tick().await;
@@ -84,7 +90,17 @@ pub fn spawn(state: Arc<AppState>) {
             match fetch_new_polymarket(&state, cursor_poly).await {
                 Ok(rows) => {
                     for r in rows.iter().take(MAX_ALERTS_PER_TICK) {
-                        maybe_alert(&tg, &watchlist, &categories, cooldown, &mut last_alert, r).await;
+                        maybe_alert(
+                            &tg,
+                            &watchlist,
+                            &categories,
+                            cooldown,
+                            rate_limit_per_hour,
+                            &mut last_alert,
+                            &mut sent_times,
+                            r,
+                        )
+                        .await;
                     }
                     if let Some(latest) = rows.iter().map(|r| r.created_at).max() {
                         cursor_poly = Some(match cursor_poly {
@@ -99,7 +115,17 @@ pub fn spawn(state: Arc<AppState>) {
             match fetch_new_limitless(&state, cursor_lim).await {
                 Ok(rows) => {
                     for r in rows.iter().take(MAX_ALERTS_PER_TICK) {
-                        maybe_alert(&tg, &watchlist, &categories, cooldown, &mut last_alert, r).await;
+                        maybe_alert(
+                            &tg,
+                            &watchlist,
+                            &categories,
+                            cooldown,
+                            rate_limit_per_hour,
+                            &mut last_alert,
+                            &mut sent_times,
+                            r,
+                        )
+                        .await;
                     }
                     if let Some(latest) = rows.iter().map(|r| r.created_at).max() {
                         cursor_lim = Some(match cursor_lim {
@@ -241,7 +267,9 @@ async fn maybe_alert(
     watchlist: &[String],
     categories: &[String],
     cooldown: Duration,
+    rate_limit_per_hour: usize,
     last_alert: &mut HashMap<String, Instant>,
+    sent_times: &mut VecDeque<Instant>,
     m: &NewMarket,
 ) {
     let hit = match_hit(watchlist, categories, m);
@@ -253,11 +281,32 @@ async fn maybe_alert(
             return;
         }
     }
+
+    prune_rate_window(sent_times);
+    if rate_limit_per_hour > 0 && sent_times.len() >= rate_limit_per_hour {
+        info!(
+            "new_market_alert suppressed ({}): rate limit {}/hr reached",
+            reason, rate_limit_per_hour
+        );
+        return;
+    }
+
     last_alert.insert(cooldown_key, Instant::now());
 
     let text = format_alert(m, &reason);
-    if let Err(e) = tg.send(&text).await {
-        warn!("telegram send failed (new-market): {}", e);
+    match tg.send(&text).await {
+        Ok(()) => sent_times.push_back(Instant::now()),
+        Err(e) => warn!("telegram send failed (new-market): {}", e),
+    }
+}
+
+fn prune_rate_window(sent_times: &mut VecDeque<Instant>) {
+    while let Some(front) = sent_times.front() {
+        if front.elapsed() >= RATE_LIMIT_WINDOW {
+            sent_times.pop_front();
+        } else {
+            break;
+        }
     }
 }
 
@@ -315,6 +364,13 @@ fn env_u64(key: &str, default: u64) -> u64 {
     std::env::var(key)
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(default)
 }
 

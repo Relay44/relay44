@@ -88,6 +88,7 @@ async fn main() -> std::io::Result<()> {
     let ws_hub = WebSocketHub::new();
     let event_bus = EventBus::new();
     let market_data = Arc::new(relay44_backend::services::market_data::MarketDataBus::new());
+    let alert_bus = relay44_backend::services::alert_bus::AlertBus::new();
 
     let kyc = relay44_backend::services::kyc::KycService::new(
         relay44_backend::services::kyc::KycConfig::from_env(),
@@ -107,6 +108,7 @@ async fn main() -> std::io::Result<()> {
         ws_hub,
         event_bus,
         market_data,
+        alert_bus,
         kyc,
         limitless_partner,
         is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -119,6 +121,7 @@ async fn main() -> std::io::Result<()> {
     relay44_backend::services::new_market_alert::spawn(app_state.clone());
     relay44_backend::services::volume_spike_alert::spawn(app_state.clone());
     relay44_backend::services::orderbook_imbalance_alert::spawn(app_state.clone());
+    relay44_backend::services::digest_scheduler::spawn(app_state.clone());
 
     let migration_db = app_state.db.clone();
     let background_state = app_state.clone();
