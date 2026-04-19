@@ -53,32 +53,34 @@ pub fn venue_title(venue: &str) -> &'static str {
     }
 }
 
-/// Builds the public market URL for a given venue/slug pair.
+/// Builds the Relay44 market URL for a given venue/slug pair. The slug is the
+/// same one scanners write to `market_venue_links` and the Next.js screener
+/// uses for `/markets/<slug>`, so alerts drive traffic back to the platform
+/// where users can actually trade instead of sending them to the upstream
+/// venue.
 ///
-/// Returns `None` when the slug is empty or the venue has no public URL
-/// convention. The slug is NOT html-escaped here — embedding the raw URL
-/// into an href attribute is the caller's responsibility (use
-/// `format_deep_link` for the full HTML link).
+/// Returns `None` when the slug is empty or the venue isn't one we index. The
+/// slug is NOT html-escaped here — embedding the raw URL into an href
+/// attribute is the caller's responsibility (use `format_deep_link` for the
+/// full HTML link).
 pub fn venue_link(venue: &str, slug: &str) -> Option<String> {
     if slug.is_empty() {
         return None;
     }
     match venue {
-        "polymarket" => Some(format!("https://polymarket.com/event/{}", slug)),
-        "limitless" => Some(format!("https://limitless.exchange/markets/{}", slug)),
+        "polymarket" | "limitless" => Some(format!("https://relay44.com/markets/{}", slug)),
         _ => None,
     }
 }
 
 /// Returns the HTML anchor line for the alert footer, e.g.
-/// `<a href="https://polymarket.com/event/abc">Open on Polymarket</a>`.
-/// Returns `None` when there's no public URL for this venue/slug.
+/// `<a href="https://relay44.com/markets/abc">Trade on Relay44</a>`.
+/// Returns `None` when there's no URL for this venue/slug.
 pub fn format_deep_link(venue: &str, slug: &str) -> Option<String> {
     let url = venue_link(venue, slug)?;
     Some(format!(
-        "<a href=\"{}\">Open on {}</a>",
+        "<a href=\"{}\">Trade on Relay44</a>",
         html_escape(&url),
-        venue_title(venue),
     ))
 }
 
@@ -199,14 +201,14 @@ mod tests {
     }
 
     #[test]
-    fn venue_link_builds_expected_urls() {
+    fn venue_link_builds_relay44_urls() {
         assert_eq!(
             venue_link("polymarket", "will-x"),
-            Some("https://polymarket.com/event/will-x".to_string())
+            Some("https://relay44.com/markets/will-x".to_string())
         );
         assert_eq!(
             venue_link("limitless", "some-slug"),
-            Some("https://limitless.exchange/markets/some-slug".to_string())
+            Some("https://relay44.com/markets/some-slug".to_string())
         );
     }
 
@@ -219,8 +221,8 @@ mod tests {
     #[test]
     fn deep_link_wraps_url_in_anchor() {
         let s = format_deep_link("polymarket", "abc").unwrap();
-        assert!(s.contains("href=\"https://polymarket.com/event/abc\""));
-        assert!(s.contains("Open on Polymarket"));
+        assert!(s.contains("href=\"https://relay44.com/markets/abc\""));
+        assert!(s.contains("Trade on Relay44"));
     }
 
     #[test]

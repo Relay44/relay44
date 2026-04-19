@@ -391,12 +391,12 @@ fn format_alert(
         Venue::Polymarket => (
             "Polymarket",
             ctx.and_then(|c| c.slug.as_deref())
-                .map(|s| format!("https://polymarket.com/market/{}", s)),
+                .map(|s| format!("https://relay44.com/markets/{}", s)),
         ),
         Venue::Limitless => (
             "Limitless",
             ctx.and_then(|c| c.slug.as_deref())
-                .map(|s| format!("https://limitless.exchange/markets/{}", s)),
+                .map(|s| format!("https://relay44.com/markets/{}", s)),
         ),
         Venue::Aerodrome => ("Aerodrome", None),
         Venue::Internal => ("Internal", None),
@@ -441,14 +441,10 @@ fn format_alert(
         format!("Mid: {:.2} | Liquidity: {}", mid, liquidity_str),
     ];
     if let Some(url) = link {
-        let label = match venue {
-            Venue::Limitless => "Open on Limitless",
-            _ => "Open on Polymarket",
-        };
+        let _ = venue;
         lines.push(format!(
-            "<a href=\"{}\">{}</a>",
+            "<a href=\"{}\">Trade on Relay44</a>",
             html_escape(&url),
-            label
         ));
     }
     lines.join("\n")
@@ -714,8 +710,8 @@ mod tests {
         assert!(s.contains("<b>Orderbook imbalance"));
         assert!(s.contains("Polymarket"));
         assert!(s.contains("Will BTC close above 100k?"));
-        assert!(s.contains("polymarket.com/market/btc-100k"));
-        assert!(s.contains("Open on Polymarket"));
+        assert!(s.contains("relay44.com/markets/btc-100k"));
+        assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("5min EMA"));
         assert!(s.contains("Mid: 0.34"));
         assert!(s.contains("$12,400"));
@@ -739,8 +735,8 @@ mod tests {
             0.25,
         );
         assert!(s.contains("Limitless"));
-        assert!(s.contains("limitless.exchange/markets/eth-4k"));
-        assert!(s.contains("Open on Limitless"));
+        assert!(s.contains("relay44.com/markets/eth-4k"));
+        assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("1/2.5x"));
     }
 

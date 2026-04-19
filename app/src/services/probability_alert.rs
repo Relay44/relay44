@@ -395,8 +395,8 @@ mod tests {
         assert!(s.contains("Liquidity: $125.0k"));
         assert!(s.contains("24h vol: $3.4M"));
         assert!(s.contains("Category: politics"));
-        assert!(s.contains("https://polymarket.com/event/will-x"));
-        assert!(s.contains("Open on Polymarket"));
+        assert!(s.contains("https://relay44.com/markets/will-x"));
+        assert!(s.contains("Trade on Relay44"));
     }
 
     #[test]
@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn format_limitless_link_uses_limitless_domain() {
+    fn format_limitless_link_uses_relay44_domain() {
         let c = MarketContext {
             question: "Q".to_string(),
             slug: Some("lim-slug".to_string()),
@@ -423,8 +423,8 @@ mod tests {
             volume_24h_usd: None,
         };
         let s = format_alert(Some(&c), Venue::Limitless, "lim-slug:yes", 0.10, 0.15, 50.0);
-        assert!(s.contains("limitless.exchange/markets/lim-slug"));
-        assert!(s.contains("Open on Limitless"));
+        assert!(s.contains("relay44.com/markets/lim-slug"));
+        assert!(s.contains("Trade on Relay44"));
     }
 
     #[test]
