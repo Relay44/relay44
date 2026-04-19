@@ -346,16 +346,14 @@ fn format_alert(
     vol_24h_total: f64,
 ) -> String {
     let ratio = if rate_1h > 0.0 { rate_5m / rate_1h } else { 0.0 };
-    let link = match venue {
-        Venue::Polymarket => format!("https://polymarket.com/event/{}", slug),
-        Venue::Limitless => format!("https://limitless.exchange/markets/{}", slug),
-    };
+    let link = format!("https://relay44.com/markets/{}", slug);
+    let _ = venue;
     format!(
         "🌊 <b>Volume spike — {header}</b>\n\
          <i>{question}</i>\n\n\
          Rate: <b>${rate_5m_fmt}/min</b> last 5m vs ${rate_1h_fmt}/min 1h baseline (<b>{ratio:.1}x</b>)\n\
          24h vol: ${vol_24h_fmt}\n\
-         <a href=\"{link}\">Open on {header}</a>",
+         <a href=\"{link}\">Trade on Relay44</a>",
         header = venue.header(),
         question = html_escape(question),
         rate_5m_fmt = format_money(rate_5m),
@@ -605,8 +603,8 @@ mod tests {
         assert!(s.contains("$180/min"));
         assert!(s.contains("<b>13.0x</b>"));
         assert!(s.contains("$485,200"));
-        assert!(s.contains("https://polymarket.com/event/btc-100k-eoy"));
-        assert!(s.contains("Open on Polymarket"));
+        assert!(s.contains("https://relay44.com/markets/btc-100k-eoy"));
+        assert!(s.contains("Trade on Relay44"));
     }
 
     #[test]
@@ -620,8 +618,8 @@ mod tests {
             12_345.0,
         );
         assert!(s.contains("<b>Volume spike — Limitless</b>"));
-        assert!(s.contains("https://limitless.exchange/markets/x-happen"));
-        assert!(s.contains("Open on Limitless"));
+        assert!(s.contains("https://relay44.com/markets/x-happen"));
+        assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("<b>10.0x</b>"));
     }
 

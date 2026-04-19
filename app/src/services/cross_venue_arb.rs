@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 
 use super::market_data::{L2Event, L2Payload, Venue};
 use super::telegram_format::{
-    format_deep_link, format_metadata_row, html_escape, TelegramClient,
+    format_metadata_row, html_escape, venue_link, TelegramClient,
 };
 use crate::AppState;
 
@@ -376,17 +376,23 @@ fn format_alert(meta: &PairMeta, outcome: Outcome, pm: f64, lim: f64) -> String 
         lines.push(meta_row);
     }
 
-    // Dual footer: one link per venue so readers can jump to whichever side
-    // they're more comfortable trading on.
+    // Dual footer: both sides are indexed on Relay44 under their own slugs so
+    // the reader can jump to the PM or LIM side of the arb on our platform.
     let mut link_parts: Vec<String> = Vec::new();
     if let Some(slug) = &meta.pm_slug {
-        if let Some(link) = format_deep_link("polymarket", slug) {
-            link_parts.push(link);
+        if let Some(url) = venue_link("polymarket", slug) {
+            link_parts.push(format!(
+                "<a href=\"{}\">Trade PM side on Relay44</a>",
+                html_escape(&url)
+            ));
         }
     }
     if let Some(slug) = &meta.lim_slug {
-        if let Some(link) = format_deep_link("limitless", slug) {
-            link_parts.push(link);
+        if let Some(url) = venue_link("limitless", slug) {
+            link_parts.push(format!(
+                "<a href=\"{}\">Trade LIM side on Relay44</a>",
+                html_escape(&url)
+            ));
         }
     }
     if !link_parts.is_empty() {
@@ -465,10 +471,10 @@ mod tests {
         assert!(s.contains("Liquidity: $50.0k"));
         assert!(s.contains("24h vol: $1.2M"));
         assert!(s.contains("Category: politics"));
-        assert!(s.contains("polymarket.com/event/pm-slug"));
-        assert!(s.contains("limitless.exchange/markets/lim-slug"));
-        assert!(s.contains("Open on Polymarket"));
-        assert!(s.contains("Open on Limitless"));
+        assert!(s.contains("relay44.com/markets/pm-slug"));
+        assert!(s.contains("relay44.com/markets/lim-slug"));
+        assert!(s.contains("Trade PM side on Relay44"));
+        assert!(s.contains("Trade LIM side on Relay44"));
     }
 
     #[test]
