@@ -365,7 +365,7 @@ mod tests {
         assert!(s.contains("New market"));
         assert!(s.contains("Polymarket"));
         assert!(s.contains("<i>Will BTC hit 100k?</i>"));
-        assert!(s.contains("relay44.com/markets/example-slug"));
+        assert!(s.contains("relay44.com/markets/by-slug/polymarket/example-slug"));
         assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("kw:btc"));
     }
@@ -403,7 +403,7 @@ mod tests {
         m.venue = "limitless";
         m.slug = "lim-slug".to_string();
         let s = format_alert(&m, "kw:btc");
-        assert!(s.contains("relay44.com/markets/lim-slug"));
+        assert!(s.contains("relay44.com/markets/by-slug/limitless/lim-slug"));
         assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("Limitless"));
     }

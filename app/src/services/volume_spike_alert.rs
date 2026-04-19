@@ -346,8 +346,11 @@ fn format_alert(
     vol_24h_total: f64,
 ) -> String {
     let ratio = if rate_1h > 0.0 { rate_5m / rate_1h } else { 0.0 };
-    let link = format!("https://relay44.com/markets/{}", slug);
-    let _ = venue;
+    let venue_slug = match venue {
+        Venue::Polymarket => "polymarket",
+        Venue::Limitless => "limitless",
+    };
+    let link = format!("https://relay44.com/markets/by-slug/{}/{}", venue_slug, slug);
     format!(
         "🌊 <b>Volume spike — {header}</b>\n\
          <i>{question}</i>\n\n\
@@ -603,7 +606,7 @@ mod tests {
         assert!(s.contains("$180/min"));
         assert!(s.contains("<b>13.0x</b>"));
         assert!(s.contains("$485,200"));
-        assert!(s.contains("https://relay44.com/markets/btc-100k-eoy"));
+        assert!(s.contains("https://relay44.com/markets/by-slug/polymarket/btc-100k-eoy"));
         assert!(s.contains("Trade on Relay44"));
     }
 
@@ -618,7 +621,7 @@ mod tests {
             12_345.0,
         );
         assert!(s.contains("<b>Volume spike — Limitless</b>"));
-        assert!(s.contains("https://relay44.com/markets/x-happen"));
+        assert!(s.contains("https://relay44.com/markets/by-slug/limitless/x-happen"));
         assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("<b>10.0x</b>"));
     }

@@ -235,6 +235,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                         .configure(api::creator::configure)
                         .route("/markets", web::get().to(api::evm::get_base_markets))
                         .route(
+                            "/markets/by-slug/{provider}/{slug}",
+                            web::get().to(api::evm::resolve_market_by_slug),
+                        )
+                        .route(
                             "/markets/{market_id}",
                             web::get().to(api::evm::get_base_market),
                         )

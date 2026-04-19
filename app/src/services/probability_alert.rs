@@ -395,7 +395,7 @@ mod tests {
         assert!(s.contains("Liquidity: $125.0k"));
         assert!(s.contains("24h vol: $3.4M"));
         assert!(s.contains("Category: politics"));
-        assert!(s.contains("https://relay44.com/markets/will-x"));
+        assert!(s.contains("https://relay44.com/markets/by-slug/polymarket/will-x"));
         assert!(s.contains("Trade on Relay44"));
     }
 
@@ -423,7 +423,7 @@ mod tests {
             volume_24h_usd: None,
         };
         let s = format_alert(Some(&c), Venue::Limitless, "lim-slug:yes", 0.10, 0.15, 50.0);
-        assert!(s.contains("relay44.com/markets/lim-slug"));
+        assert!(s.contains("relay44.com/markets/by-slug/limitless/lim-slug"));
         assert!(s.contains("Trade on Relay44"));
     }
 

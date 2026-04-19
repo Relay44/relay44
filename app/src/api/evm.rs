@@ -3464,6 +3464,62 @@ pub async fn get_base_market(
     Ok(HttpResponse::Ok().json(market))
 }
 
+pub async fn resolve_market_by_slug(
+    state: web::Data<Arc<AppState>>,
+    path: web::Path<(String, String)>,
+) -> Result<impl Responder, ApiError> {
+    let (provider, slug) = path.into_inner();
+    let provider = provider.trim().to_ascii_lowercase();
+    let slug = slug.trim().to_string();
+    if slug.is_empty() {
+        return Err(ApiError::bad_request("INVALID_SLUG", "slug cannot be empty"));
+    }
+
+    let canonical_id = match provider.as_str() {
+        "limitless" => format!("limitless:{}", slug),
+        "polymarket" => {
+            let cache_key = format!("slug-resolver:polymarket:{}", slug);
+            if let Ok(Some(cached)) = state.redis.get::<String>(&cache_key).await {
+                cached
+            } else {
+                let base = state.config.polymarket_gamma_api_base.trim_end_matches('/');
+                let url = format!("{}/markets", base);
+                let rows: Vec<serde_json::Value> = reqwest::Client::new()
+                    .get(&url)
+                    .query(&[("slug", slug.as_str()), ("limit", "1")])
+                    .send()
+                    .await
+                    .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma request: {}", e)))?
+                    .error_for_status()
+                    .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma status: {}", e)))?
+                    .json()
+                    .await
+                    .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma parse: {}", e)))?;
+                let id = rows
+                    .first()
+                    .and_then(|r| r.get("id"))
+                    .and_then(|v| {
+                        v.as_str()
+                            .map(str::to_string)
+                            .or_else(|| v.as_u64().map(|n| n.to_string()))
+                    })
+                    .ok_or_else(|| ApiError::not_found("polymarket market"))?;
+                let canonical = format!("polymarket:{}", id);
+                let _ = state.redis.set(&cache_key, &canonical, Some(3600)).await;
+                canonical
+            }
+        }
+        _ => {
+            return Err(ApiError::bad_request(
+                "INVALID_PROVIDER",
+                "provider must be polymarket or limitless",
+            ))
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(json!({ "canonicalId": canonical_id })))
+}
+
 pub async fn register_base_market_bootstrap(
     req: HttpRequest,
     state: web::Data<Arc<AppState>>,
