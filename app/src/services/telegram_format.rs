@@ -68,7 +68,10 @@ pub fn venue_link(venue: &str, slug: &str) -> Option<String> {
         return None;
     }
     match venue {
-        "polymarket" | "limitless" => Some(format!("https://relay44.com/markets/{}", slug)),
+        "polymarket" | "limitless" => Some(format!(
+            "https://relay44.com/markets/by-slug/{}/{}",
+            venue, slug
+        )),
         _ => None,
     }
 }
@@ -204,11 +207,11 @@ mod tests {
     fn venue_link_builds_relay44_urls() {
         assert_eq!(
             venue_link("polymarket", "will-x"),
-            Some("https://relay44.com/markets/will-x".to_string())
+            Some("https://relay44.com/markets/by-slug/polymarket/will-x".to_string())
         );
         assert_eq!(
             venue_link("limitless", "some-slug"),
-            Some("https://relay44.com/markets/some-slug".to_string())
+            Some("https://relay44.com/markets/by-slug/limitless/some-slug".to_string())
         );
     }
 
@@ -221,7 +224,7 @@ mod tests {
     #[test]
     fn deep_link_wraps_url_in_anchor() {
         let s = format_deep_link("polymarket", "abc").unwrap();
-        assert!(s.contains("href=\"https://relay44.com/markets/abc\""));
+        assert!(s.contains("href=\"https://relay44.com/markets/by-slug/polymarket/abc\""));
         assert!(s.contains("Trade on Relay44"));
     }
 

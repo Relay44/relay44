@@ -391,12 +391,12 @@ fn format_alert(
         Venue::Polymarket => (
             "Polymarket",
             ctx.and_then(|c| c.slug.as_deref())
-                .map(|s| format!("https://relay44.com/markets/{}", s)),
+                .map(|s| format!("https://relay44.com/markets/by-slug/polymarket/{}", s)),
         ),
         Venue::Limitless => (
             "Limitless",
             ctx.and_then(|c| c.slug.as_deref())
-                .map(|s| format!("https://relay44.com/markets/{}", s)),
+                .map(|s| format!("https://relay44.com/markets/by-slug/limitless/{}", s)),
         ),
         Venue::Aerodrome => ("Aerodrome", None),
         Venue::Internal => ("Internal", None),
@@ -710,7 +710,7 @@ mod tests {
         assert!(s.contains("<b>Orderbook imbalance"));
         assert!(s.contains("Polymarket"));
         assert!(s.contains("Will BTC close above 100k?"));
-        assert!(s.contains("relay44.com/markets/btc-100k"));
+        assert!(s.contains("relay44.com/markets/by-slug/polymarket/btc-100k"));
         assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("5min EMA"));
         assert!(s.contains("Mid: 0.34"));
@@ -735,7 +735,7 @@ mod tests {
             0.25,
         );
         assert!(s.contains("Limitless"));
-        assert!(s.contains("relay44.com/markets/eth-4k"));
+        assert!(s.contains("relay44.com/markets/by-slug/limitless/eth-4k"));
         assert!(s.contains("Trade on Relay44"));
         assert!(s.contains("1/2.5x"));
     }

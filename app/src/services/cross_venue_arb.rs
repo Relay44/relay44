@@ -471,8 +471,8 @@ mod tests {
         assert!(s.contains("Liquidity: $50.0k"));
         assert!(s.contains("24h vol: $1.2M"));
         assert!(s.contains("Category: politics"));
-        assert!(s.contains("relay44.com/markets/pm-slug"));
-        assert!(s.contains("relay44.com/markets/lim-slug"));
+        assert!(s.contains("relay44.com/markets/by-slug/polymarket/pm-slug"));
+        assert!(s.contains("relay44.com/markets/by-slug/limitless/lim-slug"));
         assert!(s.contains("Trade PM side on Relay44"));
         assert!(s.contains("Trade LIM side on Relay44"));
     }

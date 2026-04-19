@@ -267,7 +267,7 @@ async fn top_text(state: &AppState, args: Option<&str>) -> String {
                 .enumerate()
                 .map(|(i, (q, slug, cat, score, liq))| {
                     let q = html_escape(&q);
-                    let url = format!("https://relay44.com/markets/{}", slug);
+                    let url = format!("https://relay44.com/markets/by-slug/polymarket/{}", slug);
                     let liq_s = liq.map(format_money).unwrap_or_else(|| "—".to_string());
                     format!(
                         "{}. <a href=\"{}\">{}</a>\n   score {:.2} · {} · liq {}",
@@ -310,7 +310,7 @@ async fn market_text(state: &AppState, args: Option<&str>) -> String {
 
     match row {
         Ok(Some((question, slug, category, yes, no, spread_bps, liq, vol))) => {
-            let url = format!("https://relay44.com/markets/{}", slug);
+            let url = format!("https://relay44.com/markets/by-slug/polymarket/{}", slug);
             let liq_s = liq.map(format_money).unwrap_or_else(|| "—".to_string());
             let vol_s = vol.map(format_money).unwrap_or_else(|| "—".to_string());
             format!(
