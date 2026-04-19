@@ -24,6 +24,12 @@ const MIN_THRESHOLD_PCT: f32 = 0.1;
 const MAX_THRESHOLD_PCT: f32 = 50.0;
 const MIN_COOLDOWN_SECS: i32 = 60;
 const MAX_COOLDOWN_SECS: i32 = 3600;
+const MIN_QUIET_HOURS: f32 = 0.25;
+const MAX_QUIET_HOURS: f32 = 168.0;
+
+/// Signal kinds a chat may subscribe to. Strings match
+/// `SignalKind::as_str()` in `alert_bus.rs`.
+pub const VALID_KINDS: &[&str] = &["probability_shift", "volume_spike"];
 
 /// In-memory snapshot of a `tg_chat_config` row.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -36,13 +42,16 @@ pub struct TgChatConfig {
     pub linked_user_id: Option<Uuid>,
     pub linked_wallet: Option<String>,
     pub linked_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub quiet_until: Option<chrono::DateTime<chrono::Utc>>,
+    pub subscribed_kinds: JsonValue,
 }
 
 /// Fetch the config row for `chat_id`, if any.
 pub async fn fetch(pool: &PgPool, chat_id: i64) -> Result<Option<TgChatConfig>, sqlx::Error> {
     sqlx::query_as::<_, TgChatConfig>(
         "SELECT chat_id, threshold_override, cooldown_override, muted_markets, \
-                allow_categories, linked_user_id, linked_wallet, linked_at \
+                allow_categories, linked_user_id, linked_wallet, linked_at, \
+                quiet_until, subscribed_kinds \
          FROM tg_chat_config WHERE chat_id = $1",
     )
     .bind(chat_id)
@@ -170,6 +179,168 @@ pub async fn set_linked_wallet(
     .map(|_| ())
 }
 
+/// Set `quiet_until = NOW() + hours`. Clamped to [0.25, 168] hours.
+pub async fn set_quiet_until(
+    pool: &PgPool,
+    chat_id: i64,
+    hours: f32,
+) -> Result<chrono::DateTime<chrono::Utc>, sqlx::Error> {
+    let clamped = hours.clamp(MIN_QUIET_HOURS, MAX_QUIET_HOURS);
+    let secs = (clamped as f64 * 3600.0) as i64;
+    let until = chrono::Utc::now() + chrono::Duration::seconds(secs);
+    sqlx::query(
+        "INSERT INTO tg_chat_config (chat_id, quiet_until, updated_at) \
+         VALUES ($1, $2, NOW()) \
+         ON CONFLICT (chat_id) DO UPDATE \
+           SET quiet_until = EXCLUDED.quiet_until, updated_at = NOW()",
+    )
+    .bind(chat_id)
+    .bind(until)
+    .execute(pool)
+    .await?;
+    Ok(until)
+}
+
+/// Clear `quiet_until` for `chat_id`. No-op if none was set.
+pub async fn clear_quiet_until(pool: &PgPool, chat_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE tg_chat_config SET quiet_until = NULL, updated_at = NOW() \
+         WHERE chat_id = $1",
+    )
+    .bind(chat_id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// Report whether `chat_id` is currently in a quiet window.
+pub async fn is_quiet_now(pool: &PgPool, chat_id: i64) -> bool {
+    let row: Result<Option<(Option<chrono::DateTime<chrono::Utc>>,)>, sqlx::Error> =
+        sqlx::query_as("SELECT quiet_until FROM tg_chat_config WHERE chat_id = $1")
+            .bind(chat_id)
+            .fetch_optional(pool)
+            .await;
+    matches!(row, Ok(Some((Some(until),))) if until > chrono::Utc::now())
+}
+
+/// Append `kind` to `subscribed_kinds`. No-op if already present.
+pub async fn add_subscribed_kind(
+    pool: &PgPool,
+    chat_id: i64,
+    kind: &str,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let current: Option<JsonValue> = sqlx::query_scalar(
+        "SELECT subscribed_kinds FROM tg_chat_config WHERE chat_id = $1 FOR UPDATE",
+    )
+    .bind(chat_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let next = add_to_json_array(current.as_ref(), kind);
+    sqlx::query(
+        "INSERT INTO tg_chat_config (chat_id, subscribed_kinds, updated_at) \
+         VALUES ($1, $2, NOW()) \
+         ON CONFLICT (chat_id) DO UPDATE \
+           SET subscribed_kinds = EXCLUDED.subscribed_kinds, updated_at = NOW()",
+    )
+    .bind(chat_id)
+    .bind(&next)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
+}
+
+/// Remove `kind` from `subscribed_kinds`. No-op if absent.
+pub async fn remove_subscribed_kind(
+    pool: &PgPool,
+    chat_id: i64,
+    kind: &str,
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let current: Option<JsonValue> = sqlx::query_scalar(
+        "SELECT subscribed_kinds FROM tg_chat_config WHERE chat_id = $1 FOR UPDATE",
+    )
+    .bind(chat_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let next = remove_from_json_array(current.as_ref(), kind);
+    sqlx::query(
+        "INSERT INTO tg_chat_config (chat_id, subscribed_kinds, updated_at) \
+         VALUES ($1, $2, NOW()) \
+         ON CONFLICT (chat_id) DO UPDATE \
+           SET subscribed_kinds = EXCLUDED.subscribed_kinds, updated_at = NOW()",
+    )
+    .bind(chat_id)
+    .bind(&next)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
+}
+
+/// Report whether the chat is subscribed to `kind`. An empty or NULL
+/// `subscribed_kinds` list is treated as "all kinds" — so a fresh chat
+/// keeps receiving everything without explicit /subscribe calls.
+pub async fn is_kind_subscribed(pool: &PgPool, chat_id: i64, kind: &str) -> bool {
+    let row: Result<Option<(JsonValue,)>, sqlx::Error> = sqlx::query_as(
+        "SELECT subscribed_kinds FROM tg_chat_config WHERE chat_id = $1",
+    )
+    .bind(chat_id)
+    .fetch_optional(pool)
+    .await;
+    match row {
+        Ok(Some((val,))) => kind_is_subscribed(&val, kind),
+        _ => true,
+    }
+}
+
+/// Pure form of [`is_kind_subscribed`] for unit-testability.
+pub fn kind_is_subscribed(subscribed: &JsonValue, kind: &str) -> bool {
+    match subscribed {
+        JsonValue::Array(a) if a.is_empty() => true,
+        JsonValue::Array(_) => json_array_contains(subscribed, kind),
+        _ => true,
+    }
+}
+
+/// Normalize a /subscribe or /unsubscribe arg to a valid SignalKind
+/// string. Accepts the kind as-is or common aliases.
+pub fn parse_kind_arg(raw: &str) -> Result<&'static str, String> {
+    let lower = raw.trim().to_ascii_lowercase();
+    let normalized = match lower.as_str() {
+        "probability_shift" | "probability" | "prob" | "shift" => "probability_shift",
+        "volume_spike" | "volume" | "spike" => "volume_spike",
+        _ => {
+            return Err(format!(
+                "unknown kind '{}'. valid: {}",
+                raw,
+                VALID_KINDS.join(", ")
+            ));
+        }
+    };
+    Ok(normalized)
+}
+
+/// Parse the `<hours>` arg for `/quiet`. Accepts "2", "2h", "0.5".
+pub fn parse_quiet_hours_arg(raw: &str) -> Result<f32, String> {
+    let trimmed = raw.trim();
+    let numeric = trimmed.strip_suffix('h').unwrap_or(trimmed).trim();
+    let v: f32 = numeric
+        .parse()
+        .map_err(|_| format!("'{}' is not a number", trimmed))?;
+    if !v.is_finite() {
+        return Err("hours must be finite".to_string());
+    }
+    if v < MIN_QUIET_HOURS || v > MAX_QUIET_HOURS {
+        return Err(format!(
+            "quiet hours must be between {} and {}",
+            MIN_QUIET_HOURS, MAX_QUIET_HOURS
+        ));
+    }
+    Ok(v)
+}
+
 /// Clear any linked wallet for `chat_id`. No-op if none was set.
 pub async fn clear_linked_wallet(pool: &PgPool, chat_id: i64) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -217,7 +388,7 @@ pub async fn is_market_muted(pool: &PgPool, chat_id: i64, market: &str) -> bool 
 
 /// Human-readable dump for `/config`. Caller HTML-escapes as needed.
 pub fn dump_config_lines(cfg: Option<&TgChatConfig>) -> Vec<String> {
-    let (threshold, cooldown, muted, cats, wallet) = match cfg {
+    let (threshold, cooldown, muted, cats, wallet, quiet, subs) = match cfg {
         Some(c) => (
             c.threshold_override
                 .map(|v| format!("{:.2}%", v))
@@ -231,6 +402,21 @@ pub fn dump_config_lines(cfg: Option<&TgChatConfig>) -> Vec<String> {
                 .as_deref()
                 .map(shorten_wallet)
                 .unwrap_or_else(|| "—".to_string()),
+            match c.quiet_until {
+                Some(until) if until > chrono::Utc::now() => {
+                    until.format("until %Y-%m-%d %H:%M UTC").to_string()
+                }
+                _ => "off".to_string(),
+            },
+            match &c.subscribed_kinds {
+                JsonValue::Array(a) if a.is_empty() => "all".to_string(),
+                JsonValue::Array(a) => a
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => "all".to_string(),
+            },
         ),
         None => (
             "env default".to_string(),
@@ -238,6 +424,8 @@ pub fn dump_config_lines(cfg: Option<&TgChatConfig>) -> Vec<String> {
             0,
             0,
             "—".to_string(),
+            "off".to_string(),
+            "all".to_string(),
         ),
     };
     vec![
@@ -246,6 +434,8 @@ pub fn dump_config_lines(cfg: Option<&TgChatConfig>) -> Vec<String> {
         format!("muted markets: {}", muted),
         format!("allow categories: {}", cats),
         format!("linked wallet: {}", wallet),
+        format!("quiet: {}", quiet),
+        format!("subscribed: {}", subs),
     ]
 }
 
@@ -580,5 +770,43 @@ mod tests {
         let lines = dump_config_lines(None);
         assert!(lines.iter().any(|l| l.contains("env default")));
         assert!(lines.iter().any(|l| l.contains("linked wallet: —")));
+        assert!(lines.iter().any(|l| l.contains("quiet: off")));
+        assert!(lines.iter().any(|l| l.contains("subscribed: all")));
+    }
+
+    #[test]
+    fn parse_quiet_hours_accepts_numbers_and_suffix() {
+        assert!((parse_quiet_hours_arg("2").unwrap() - 2.0).abs() < 1e-6);
+        assert!((parse_quiet_hours_arg("2h").unwrap() - 2.0).abs() < 1e-6);
+        assert!((parse_quiet_hours_arg("0.5").unwrap() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_quiet_hours_rejects_out_of_range() {
+        assert!(parse_quiet_hours_arg("0").is_err());
+        assert!(parse_quiet_hours_arg("999").is_err());
+        assert!(parse_quiet_hours_arg("abc").is_err());
+    }
+
+    #[test]
+    fn parse_kind_accepts_canonical_and_aliases() {
+        assert_eq!(parse_kind_arg("probability_shift").unwrap(), "probability_shift");
+        assert_eq!(parse_kind_arg("prob").unwrap(), "probability_shift");
+        assert_eq!(parse_kind_arg("VOLUME").unwrap(), "volume_spike");
+        assert_eq!(parse_kind_arg("volume_spike").unwrap(), "volume_spike");
+        assert!(parse_kind_arg("garbage").is_err());
+    }
+
+    #[test]
+    fn empty_subscribed_kinds_means_all() {
+        assert!(kind_is_subscribed(&json!([]), "probability_shift"));
+        assert!(kind_is_subscribed(&json!([]), "volume_spike"));
+    }
+
+    #[test]
+    fn non_empty_subscribed_kinds_is_exact_match() {
+        let subs = json!(["volume_spike"]);
+        assert!(kind_is_subscribed(&subs, "volume_spike"));
+        assert!(!kind_is_subscribed(&subs, "probability_shift"));
     }
 }

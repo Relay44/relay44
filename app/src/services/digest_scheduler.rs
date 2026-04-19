@@ -53,6 +53,7 @@ pub fn spawn(state: Arc<AppState>) {
     let interval_secs = env_u64("DIGEST_INTERVAL_SECS", DEFAULT_INTERVAL_SECS).max(60);
     let top_n = env_usize("DIGEST_TOP_N", DEFAULT_TOP_N).max(1);
     let cooldown_secs = env_u64("DIGEST_MARKET_COOLDOWN_SECS", DEFAULT_MARKET_COOLDOWN_SECS);
+    let parsed_chat_id: Option<i64> = chat_id.parse().ok();
 
     info!(
         "Starting digest scheduler (interval={}s, top_n={}, market_cooldown={}s)",
@@ -70,7 +71,15 @@ pub fn spawn(state: Arc<AppState>) {
 
         loop {
             interval.tick().await;
-            run_tick(&state, &tg, top_n, cooldown_secs, &mut last_alerted).await;
+            run_tick(
+                &state,
+                &tg,
+                top_n,
+                cooldown_secs,
+                parsed_chat_id,
+                &mut last_alerted,
+            )
+            .await;
         }
     });
 }
@@ -80,16 +89,48 @@ async fn run_tick(
     tg: &TelegramClient,
     top_n: usize,
     cooldown_secs: u64,
+    chat_id: Option<i64>,
     last_alerted: &mut HashMap<String, u64>,
 ) {
+    // Per-chat quiet window: if the destination chat is snoozed, drop
+    // the whole tick. Draining would lose signals the chat asked to defer.
+    if let Some(cid) = chat_id {
+        if crate::services::tg_chat_config::is_quiet_now(state.db.pool(), cid).await {
+            info!("digest tick: chat {} is in quiet window, skipping", cid);
+            return;
+        }
+    }
+
     let drained = state.alert_bus.drain().await;
     if drained.is_empty() {
         info!("digest tick: bus empty, skipping send");
         return;
     }
 
+    // Honor subscribed_kinds for the destination chat. An empty/absent list
+    // means "all kinds", so existing rows keep today's behavior.
+    let filtered: Vec<Signal> = if let Some(cid) = chat_id {
+        let pool = state.db.pool();
+        let mut kept = Vec::with_capacity(drained.len());
+        for s in drained {
+            if crate::services::tg_chat_config::is_kind_subscribed(pool, cid, s.kind.as_str())
+                .await
+            {
+                kept.push(s);
+            }
+        }
+        kept
+    } else {
+        drained
+    };
+
+    if filtered.is_empty() {
+        info!("digest tick: all signals filtered by subscribed_kinds, skipping send");
+        return;
+    }
+
     let now = now_secs();
-    let selected = select_top_signals(drained, top_n, cooldown_secs, now, last_alerted);
+    let selected = select_top_signals(filtered, top_n, cooldown_secs, now, last_alerted);
     if selected.is_empty() {
         info!("digest tick: all candidates filtered by cooldown, skipping send");
         return;
@@ -147,7 +188,7 @@ fn score(signal: &Signal, now: u64) -> f64 {
     liq_weight * signal.move_size.abs() * recency
 }
 
-fn format_digest(signals: &[Signal]) -> String {
+pub fn format_digest(signals: &[Signal]) -> String {
     let mut out = String::new();
     out.push_str("<b>\u{1F4CA} Top signals</b>\n");
     for (i, s) in signals.iter().enumerate() {
