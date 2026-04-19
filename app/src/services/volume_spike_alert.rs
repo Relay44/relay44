@@ -21,6 +21,7 @@ use chrono::{DateTime, Utc};
 use log::{info, warn};
 use serde::Serialize;
 
+use super::alert_bus::{now_secs, Signal, SignalKind};
 use crate::AppState;
 
 const DEFAULT_MULTIPLIER: f64 = 5.0;
@@ -63,6 +64,7 @@ struct MarketSnapshot {
     question: String,
     slug: String,
     volume_usdc: f64,
+    liquidity_usdc: Option<f64>,
     captured_at: DateTime<Utc>,
 }
 
@@ -77,13 +79,20 @@ pub fn spawn(state: Arc<AppState>) {
         return;
     }
 
-    let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") else {
-        warn!("VOLUME_SPIKE_ALERTS_ENABLED=true but TELEGRAM_BOT_TOKEN missing; not starting");
-        return;
-    };
-    let Ok(chat_id) = std::env::var("TELEGRAM_CHAT_ID") else {
-        warn!("VOLUME_SPIKE_ALERTS_ENABLED=true but TELEGRAM_CHAT_ID missing; not starting");
-        return;
+    let digest_enabled = env_bool("DIGEST_ENABLED", false);
+
+    let direct_send_client = if digest_enabled {
+        None
+    } else {
+        let Ok(bot_token) = std::env::var("TELEGRAM_BOT_TOKEN") else {
+            warn!("VOLUME_SPIKE_ALERTS_ENABLED=true but TELEGRAM_BOT_TOKEN missing; not starting");
+            return;
+        };
+        let Ok(chat_id) = std::env::var("TELEGRAM_CHAT_ID") else {
+            warn!("VOLUME_SPIKE_ALERTS_ENABLED=true but TELEGRAM_CHAT_ID missing; not starting");
+            return;
+        };
+        Some(TelegramClient::new(bot_token, chat_id))
     };
 
     let multiplier = env_f64("VOLUME_SPIKE_MULTIPLIER", DEFAULT_MULTIPLIER);
@@ -95,14 +104,13 @@ pub fn spawn(state: Arc<AppState>) {
     let poll = Duration::from_secs(env_u64("VOLUME_SPIKE_POLL_SECS", DEFAULT_POLL_SECS));
 
     info!(
-        "Starting volume-spike alerts (multiplier={:.2}x, min=${:.0}, cooldown={}s, poll={}s)",
+        "Starting volume-spike alerts (multiplier={:.2}x, min=${:.0}, cooldown={}s, poll={}s, digest={})",
         multiplier,
         min_usd,
         cooldown.as_secs(),
-        poll.as_secs()
+        poll.as_secs(),
+        digest_enabled,
     );
-
-    let tg = TelegramClient::new(bot_token, chat_id);
 
     tokio::spawn(async move {
         let mut buffers: HashMap<String, VecDeque<(DateTime<Utc>, f64)>> = HashMap::new();
@@ -126,13 +134,18 @@ pub fn spawn(state: Arc<AppState>) {
             let mut candidates: Vec<(String, f64, f64, f64)> = Vec::new();
             // Meta rebuilt every tick from the current scan — drops rows for
             // markets that have gone inactive.
-            let mut meta: HashMap<String, (Venue, String, String)> = HashMap::new();
+            let mut meta: HashMap<String, (Venue, String, String, Option<f64>)> = HashMap::new();
 
             for snap in snapshots {
                 let key = snap.key.clone();
                 meta.insert(
                     key.clone(),
-                    (snap.venue, snap.question.clone(), snap.slug.clone()),
+                    (
+                        snap.venue,
+                        snap.question.clone(),
+                        snap.slug.clone(),
+                        snap.liquidity_usdc,
+                    ),
                 );
 
                 let buf = buffers.entry(key.clone()).or_default();
@@ -161,7 +174,7 @@ pub fn spawn(state: Arc<AppState>) {
                         continue;
                     }
                 }
-                let Some((venue, question, slug)) = meta.get(&key).cloned() else {
+                let Some((venue, question, slug, liquidity)) = meta.get(&key).cloned() else {
                     continue;
                 };
                 let vol_24h = buffers
@@ -169,10 +182,17 @@ pub fn spawn(state: Arc<AppState>) {
                     .and_then(|b| b.back())
                     .map(|(_, v)| *v)
                     .unwrap_or(0.0);
-                let text = format_alert(venue, &question, &slug, rate_5m, rate_1h, vol_24h);
-                if let Err(e) = tg.send(&text).await {
-                    warn!("telegram send failed (volume-spike): {}", e);
-                    continue;
+                if let Some(tg) = direct_send_client.as_ref() {
+                    let text = format_alert(venue, &question, &slug, rate_5m, rate_1h, vol_24h);
+                    if let Err(e) = tg.send(&text).await {
+                        warn!("telegram send failed (volume-spike): {}", e);
+                        continue;
+                    }
+                } else {
+                    let signal = build_signal(
+                        venue, &key, &question, &slug, rate_5m, rate_1h, vol_24h, liquidity,
+                    );
+                    state.alert_bus.publish(signal).await;
                 }
                 last_alert.insert(key, Instant::now());
                 sent += 1;
@@ -181,9 +201,45 @@ pub fn spawn(state: Arc<AppState>) {
     });
 }
 
+fn build_signal(
+    venue: Venue,
+    market_key: &str,
+    question: &str,
+    slug: &str,
+    rate_5m: f64,
+    rate_1h: f64,
+    vol_24h: f64,
+    liquidity_usdc: Option<f64>,
+) -> Signal {
+    let ratio = if rate_1h > 0.0 { rate_5m / rate_1h } else { 0.0 };
+    let body = format!(
+        "Rate: <b>${}/min</b> last 5m vs ${}/min 1h baseline (<b>{:.1}x</b>)",
+        format_money(rate_5m),
+        format_money(rate_1h),
+        ratio,
+    );
+    let bare_key = market_key
+        .strip_prefix(&format!("{}:", venue.as_str()))
+        .unwrap_or(market_key)
+        .to_string();
+    Signal {
+        kind: SignalKind::VolumeSpike,
+        venue: venue.as_str().to_string(),
+        market_key: bare_key,
+        slug: (!slug.is_empty()).then(|| slug.to_string()),
+        question: question.to_string(),
+        liquidity_usd: liquidity_usdc,
+        volume_24h_usd: Some(vol_24h),
+        category: None,
+        move_size: ratio,
+        body,
+        timestamp_secs: now_secs(),
+    }
+}
+
 fn retain_known(
     buffers: &mut HashMap<String, VecDeque<(DateTime<Utc>, f64)>>,
-    meta: &HashMap<String, (Venue, String, String)>,
+    meta: &HashMap<String, (Venue, String, String, Option<f64>)>,
 ) {
     buffers.retain(|k, _| meta.contains_key(k));
 }
@@ -194,17 +250,19 @@ async fn fetch_snapshots(state: &AppState) -> Result<Vec<MarketSnapshot>, String
 
     let mut out = Vec::new();
 
-    let pm_rows: Vec<(String, String, Option<String>, Option<f64>)> = sqlx::query_as(
-        "SELECT condition_id, question, slug, \
-                volume_usdc::double precision \
-         FROM polymarket_scanned_markets \
-         WHERE active = TRUE",
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| format!("poly query: {}", e))?;
+    let pm_rows: Vec<(String, String, Option<String>, Option<f64>, Option<f64>)> =
+        sqlx::query_as(
+            "SELECT condition_id, question, slug, \
+                    volume_usdc::double precision, \
+                    liquidity_usdc::double precision \
+             FROM polymarket_scanned_markets \
+             WHERE active = TRUE",
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| format!("poly query: {}", e))?;
 
-    for (condition_id, question, slug, volume) in pm_rows {
+    for (condition_id, question, slug, volume, liquidity) in pm_rows {
         let Some(v) = volume else { continue };
         out.push(MarketSnapshot {
             venue: Venue::Polymarket,
@@ -212,12 +270,13 @@ async fn fetch_snapshots(state: &AppState) -> Result<Vec<MarketSnapshot>, String
             question,
             slug: slug.unwrap_or_default(),
             volume_usdc: v,
+            liquidity_usdc: liquidity,
             captured_at: now,
         });
     }
 
-    let lim_rows: Vec<(String, String, Option<f64>)> = sqlx::query_as(
-        "SELECT slug, question, volume_usdc \
+    let lim_rows: Vec<(String, String, Option<f64>, Option<f64>)> = sqlx::query_as(
+        "SELECT slug, question, volume_usdc, liquidity_usdc \
          FROM limitless_scanned_markets \
          WHERE active = TRUE",
     )
@@ -225,7 +284,7 @@ async fn fetch_snapshots(state: &AppState) -> Result<Vec<MarketSnapshot>, String
     .await
     .map_err(|e| format!("limitless query: {}", e))?;
 
-    for (slug, question, volume) in lim_rows {
+    for (slug, question, volume, liquidity) in lim_rows {
         let Some(v) = volume else { continue };
         out.push(MarketSnapshot {
             venue: Venue::Limitless,
@@ -233,6 +292,7 @@ async fn fetch_snapshots(state: &AppState) -> Result<Vec<MarketSnapshot>, String
             question,
             slug,
             volume_usdc: v,
+            liquidity_usdc: liquidity,
             captured_at: now,
         });
     }
