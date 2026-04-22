@@ -142,7 +142,7 @@
     "express": "^5.2.1",
     "http-proxy-middleware": "^3.0.5",
     "pg": "^8.16.3",
-    "viem": "^2.47.18",
+    "viem": "^2.48.4",
     "zod": "^4.3.6"
   },
   "overrides": {
