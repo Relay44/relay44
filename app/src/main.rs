@@ -115,6 +115,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     relay44_backend::services::market_data::cache_writer::spawn(app_state.clone());
+    relay44_backend::services::l2_ws_bridge::spawn(app_state.clone());
     relay44_backend::services::probability_alert::spawn(app_state.clone());
     relay44_backend::services::telegram_commands::spawn(app_state.clone());
     relay44_backend::services::cross_venue_arb::spawn(app_state.clone());

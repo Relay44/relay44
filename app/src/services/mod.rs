@@ -15,6 +15,7 @@ pub mod evm_signer;
 pub mod external;
 pub mod hedge_engine;
 pub mod kelly;
+pub mod l2_ws_bridge;
 pub mod kyc;
 pub mod limitless_partner;
 pub mod limitless_scanner;
