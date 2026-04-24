@@ -34,7 +34,7 @@ jobs:
           components: clippy
 
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -64,7 +64,7 @@ jobs:
           node-version: 22
 
       - name: Cache node_modules and Next.js
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             web/node_modules
@@ -95,7 +95,7 @@ jobs:
           node-version: 22
 
       - name: Cache node_modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: sdk/agent/node_modules
           key: sdk-agent-${{ runner.os }}-${{ hashFiles('sdk/agent/package-lock.json') }}
@@ -125,7 +125,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Cache forge artifacts
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             evm/cache
