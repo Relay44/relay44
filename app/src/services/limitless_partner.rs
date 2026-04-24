@@ -4,7 +4,7 @@
 //! account_creation, delegated_signing) enabled by Limitless on our wallet.
 
 use chrono::Utc;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
