@@ -613,33 +613,8 @@ async fn execute_aerodrome_hedge(
         .map_err(|e| format!("Invalid private key: {}", e))?;
 
     check_hedge_balance(state, &wallet_address, quantity, "Aerodrome").await?;
+    check_eth_balance(state, &wallet_address).await?;
 
-    // Oracle pre-check: verify Pyth oracle price is available and sane.
-    // The actual slippage protection is handled by amount_out_min (5%),
-    // but we log the oracle reference and reject if the oracle itself is stale/unavailable
-    // when a feed is configured (indicates the asset may be in a volatile/abnormal state).
-    if let Some(pyth_feed_id) = lookup_pyth_feed_for_token(state, external_market_id).await {
-        match crate::services::pyth::fetch_price(&state.redis, &pyth_feed_id).await {
-            Ok(Some(oracle_price)) => {
-                info!(
-                    "Hedge oracle ref: token={} pyth=${:.2} quantity={:.2}",
-                    external_market_id, oracle_price, quantity
-                );
-            }
-            Ok(None) => {
-                warn!(
-                    "Hedge oracle: pyth feed {} returned no price, proceeding with on-chain slippage protection",
-                    pyth_feed_id
-                );
-            }
-            Err(e) => {
-                warn!("Hedge oracle: pyth fetch error for {}: {e}", pyth_feed_id);
-            }
-        }
-    }
-
-    // For Aerodrome, the external_market_id contains the token address to swap into.
-    // Look up the pool's tick_spacing from the DB rather than hardcoding.
     let usdc = state.config.usdc_mint.to_ascii_lowercase();
     let token_out = external_market_id.to_ascii_lowercase();
     let tick_spacing: i32 = sqlx::query_scalar(
@@ -654,11 +629,58 @@ async fn execute_aerodrome_hedge(
     .fetch_optional(state.db.pool())
     .await
     .map_err(|e| format!("Query pool tick_spacing: {}", e))?
-    .unwrap_or(200); // fallback to 200 if pool not in registry
+    .unwrap_or(200);
 
-    let amount_in = (quantity * 1_000_000.0).round() as u128; // USDC in 6 decimals
-    let amount_out_min = (amount_in * 95) / 100; // 5% slippage tolerance
-    let deadline = (Utc::now().timestamp() as u64) + 300; // 5 min
+    let amount_in = (quantity * 1_000_000.0).round() as u128;
+
+    // Quote expected output via QuoterV2, then apply 2% slippage.
+    let amount_out_min = match quote_aerodrome_swap(
+        state,
+        &usdc,
+        &token_out,
+        amount_in,
+        tick_spacing,
+    )
+    .await
+    {
+        Ok(quoted) => {
+            info!(
+                "Hedge quote: {} USDC → {} tokens (applying 2% slippage)",
+                quantity, quoted
+            );
+
+            // Oracle cross-check: reject if quote deviates >3% from Pyth
+            if let Some(pyth_feed_id) =
+                lookup_pyth_feed_for_token(state, external_market_id).await
+            {
+                if let Ok(Some(oracle_price)) =
+                    crate::services::pyth::fetch_price(&state.redis, &pyth_feed_id).await
+                {
+                    let expected_tokens = (quantity / oracle_price * 1_000_000.0).round() as u128;
+                    if expected_tokens > 0 {
+                        let deviation_pct = ((quoted as f64 - expected_tokens as f64)
+                            / expected_tokens as f64
+                            * 100.0)
+                            .abs();
+                        if deviation_pct > HEDGE_ORACLE_MAX_DEVIATION_PCT {
+                            return Err(format!(
+                                "Aerodrome quote deviates {:.1}% from Pyth oracle (max {}%)",
+                                deviation_pct, HEDGE_ORACLE_MAX_DEVIATION_PCT
+                            ));
+                        }
+                    }
+                }
+            }
+
+            (quoted * 98) / 100
+        }
+        Err(e) => {
+            warn!("Aerodrome quote failed, using 5% flat slippage: {}", e);
+            (amount_in * 95) / 100
+        }
+    };
+
+    let deadline = (Utc::now().timestamp() as u64) + 300;
 
     let nonce = fetch_nonce(state, &wallet_address).await?;
     let (base_fee, priority_fee) = fetch_gas_prices(state).await?;
@@ -1137,6 +1159,114 @@ async fn load_hedge_credential(
         &row.0,
     )
     .map_err(|e| format!("Decrypt credential: {} {}", e.code, e.message))
+}
+
+async fn quote_aerodrome_swap(
+    state: &AppState,
+    token_in: &str,
+    token_out: &str,
+    amount_in: u128,
+    tick_spacing: i32,
+) -> Result<u128, String> {
+    let calldata = crate::services::aerodrome::encode_quote_exact_input_single(
+        token_in,
+        token_out,
+        amount_in,
+        tick_spacing,
+    )
+    .map_err(|e| format!("Encode quote: {}", e))?;
+
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [{
+            "to": state.config.aerodrome_quoter_address,
+            "data": calldata,
+        }, "latest"]
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&state.config.base_rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("RPC quote: {}", e))?;
+
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse quote: {}", e))?;
+
+    if let Some(error) = result.get("error") {
+        return Err(format!("Quote RPC error: {}", error));
+    }
+
+    let hex = result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or("No quote result")?;
+
+    // QuoterV2 returns (amountOut, sqrtPriceX96After, initializedTicksCrossed, gasEstimate)
+    // amountOut is the first 32 bytes
+    let data = hex.trim_start_matches("0x");
+    if data.len() < 64 {
+        return Err("Quote result too short".to_string());
+    }
+    let amount_out_hex = data[..64].trim_start_matches('0');
+    if amount_out_hex.is_empty() {
+        return Ok(0);
+    }
+    u128::from_str_radix(amount_out_hex, 16)
+        .map_err(|e| format!("Parse quote amount: {}", e))
+}
+
+async fn check_eth_balance(state: &AppState, wallet_address: &str) -> Result<(), String> {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_getBalance",
+        "params": [wallet_address, "latest"]
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&state.config.base_rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("RPC getBalance: {}", e))?;
+
+    let result: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse ETH balance: {}", e))?;
+
+    let hex = result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or("No ETH balance result")?;
+
+    let trimmed = hex.trim_start_matches("0x").trim_start_matches('0');
+    let wei = if trimmed.is_empty() {
+        0u128
+    } else {
+        u128::from_str_radix(trimmed, 16)
+            .map_err(|e| format!("Parse ETH balance hex: {}", e))?
+    };
+
+    // 300k gas * ~0.1 gwei priority + base fee (~0.01 gwei on Base) ≈ 0.00003 ETH minimum
+    let min_wei: u128 = 50_000_000_000_000; // 0.00005 ETH
+    if wei < min_wei {
+        let eth = wei as f64 / 1e18;
+        return Err(format!(
+            "Hedge wallet has {:.6} ETH, need at least 0.00005 for gas",
+            eth
+        ));
+    }
+
+    Ok(())
 }
 
 /// Query on-chain USDC balance for a wallet. Returns balance in USDC (6 decimals → f64).
