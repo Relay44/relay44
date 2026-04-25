@@ -14,8 +14,8 @@ impl RedisService {
         let client = Client::open(redis_url)?;
 
         let config = redis::aio::ConnectionManagerConfig::new()
-            .set_connection_timeout(std::time::Duration::from_secs(5))
-            .set_response_timeout(std::time::Duration::from_secs(5))
+            .set_connection_timeout(Some(std::time::Duration::from_secs(5)))
+            .set_response_timeout(Some(std::time::Duration::from_secs(5)))
             .set_number_of_retries(3);
 
         let manager = match ConnectionManager::new_with_config(client, config).await {
