@@ -5,6 +5,9 @@ markets. Wraps the Relay44 `/v1/evm/write/*` API and the on-chain
 `MarketCore` / `OrderBook` contracts behind a single `TradingAgent` class
 with risk management, strategies, and ERC-8004 helpers.
 
+Protocol addresses and ABIs are re-exported from `@relay44/protocol`; the
+agent SDK no longer maintains a separate ABI surface.
+
 ## Install
 
 ```bash
@@ -18,7 +21,12 @@ import { createPublicClient, createWalletClient, http } from 'viem';
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
-import { createAgent, MomentumStrategy, createDefaultRiskParams } from '@relay44/agent-sdk';
+import {
+  createAgent,
+  createDefaultRiskParams,
+  getContractAddress,
+  MomentumStrategy,
+} from '@relay44/agent-sdk';
 
 const publicClient = createPublicClient({ chain: base, transport: http() });
 const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
@@ -27,9 +35,9 @@ const walletClient = createWalletClient({ chain: base, account, transport: http(
 const agent = createAgent({
   publicClient,
   walletClient,
-  marketCoreAddress: '0xc9259a18696Ecbf7636C1a01F40Bc9d47e249AE8',
-  orderBookAddress: '0x6F9CA4aAEaC13f22ce5D6b4657b2eE4bDFAc6c60',
-  evmWriteApiUrl: 'https://api.relay44.com/v1',
+  marketCoreAddress: getContractAddress('production', 'marketCore'),
+  orderBookAddress: getContractAddress('production', 'orderBook'),
+  evmWriteApiUrl: 'https://relay44-api.onrender.com/v1',
   config: {
     riskParams: createDefaultRiskParams(),
     availableBalance: 1_000_000n, // USDC (6 decimals)
@@ -56,10 +64,8 @@ import {
 } from '@relay44/agent-sdk';
 ```
 
-These are automatically kept in sync with the public ABI endpoint at
-[relay44.com](https://relay44.com) via a CI parity check
-(`scripts/check-abi-parity.mjs`). If the two copies ever drift, the SDK
-build fails — so the static constants are always safe to use.
+These are generated from `evm/out` by `@relay44/protocol` and checked in CI
+against the deployment manifest.
 
 ### Fetching the live ABI
 

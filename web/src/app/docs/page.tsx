@@ -212,9 +212,9 @@ export default function DocsPage() {
             <P>
               Relay44 is a prediction market platform on Base with live markets,
               automated agent execution, and multi-venue data aggregation. This
-              reference covers the Agent SDK surface: MCP server, A2A discovery,
-              authentication, payments, swarm messaging, on-chain identity, market
-              data, order flow, and real-time WebSocket feeds.
+              reference covers the protocol package, Agent SDK surface, MCP server,
+              A2A discovery, authentication, payments, swarm messaging, on-chain
+              identity, market data, order flow, and real-time WebSocket feeds.
             </P>
             <div className="mt-6 flex flex-wrap gap-3">
               <a
@@ -245,6 +245,12 @@ export default function DocsPage() {
               >
                 Protocol
               </Link>
+              <CrossHostLink
+                href="/protocol"
+                className="inline-flex h-9 items-center border border-border px-4 font-mono text-xs text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+              >
+                Protocol Dashboard
+              </CrossHostLink>
               <Link
                 href="/docs/contracts"
                 className="inline-flex h-9 items-center border border-border px-4 font-mono text-xs text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"

@@ -12,6 +12,8 @@ Before tagging:
 - Update `CHANGELOG.md` with all notable changes.
 - Confirm CI is green on `main`.
 - Confirm documentation matches the behavior being released.
+- Confirm `NPM_TOKEN` exists in GitHub Actions secrets.
+- Confirm `.github/release-notes/vX.Y.Z.md` includes package names, contract addresses, production endpoints, and known limitations.
 
 Validation suite:
 
@@ -22,6 +24,9 @@ npm run ops:no-internal-assets:tracked
 npm run ops:commit-hygiene
 npm --prefix web run lint
 npm --prefix web run build
+npm run sdk:check
+npm --workspace @relay44/protocol pack --dry-run
+npm --workspace @relay44/agent-sdk pack --dry-run
 cargo test --manifest-path app/Cargo.toml --release
 forge test --root evm
 ```
@@ -33,6 +38,7 @@ forge test --root evm
 3. Tag: `git tag vX.Y.Z`
 4. Push: `git push origin vX.Y.Z`
 5. `.github/workflows/release.yml` creates the GitHub Release from the tag.
+6. `.github/workflows/publish-npm.yml` publishes `@relay44/protocol` and `@relay44/agent-sdk` from the GitHub Release event.
 
 ## Release Notes
 
