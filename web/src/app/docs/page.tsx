@@ -1007,14 +1007,14 @@ ws.onmessage = (event) => {
           {/* ---- Footer ---- */}
           <div className="mt-16 border-t border-border pt-8 pb-12">
             <p className="text-sm text-text-muted">
-              Questions or issues? Open an issue on{" "}
+              Questions or feedback? Reach out on{" "}
               <a
-                href="https://github.com/relay44"
+                href="https://x.com/Relay44OnBase"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-text-secondary underline transition-colors hover:text-text-primary"
               >
-                GitHub
+                X
               </a>{" "}
               or reach out on the XMTP swarm channel{" "}
               <Code>relay44-dev</Code>.

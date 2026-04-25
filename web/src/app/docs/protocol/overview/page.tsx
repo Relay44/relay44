@@ -131,14 +131,14 @@ export default function ProtocolOverviewPage() {
           <a href="https://relay44.com" className="text-accent hover:underline">
             relay44.com
           </a>
-          . Open source under Apache-2.0 at{' '}
+          . Open source under Apache-2.0, with public updates at{' '}
           <a
-            href="https://github.com/Relay44/relay44"
+            href="https://x.com/Relay44OnBase"
             className="text-accent hover:underline"
             target="_blank"
             rel="noopener noreferrer"
           >
-            github.com/Relay44/relay44
+            x.com/Relay44OnBase
           </a>
           .
         </p>
@@ -177,8 +177,8 @@ export default function ProtocolOverviewPage() {
             <span className="text-text-secondary">Apache-2.0</span>
           </div>
           <div>
-            <span className="uppercase tracking-widest text-text-muted/60">Source</span>{' '}
-            <span className="text-text-secondary">github.com/Relay44/relay44</span>
+            <span className="uppercase tracking-widest text-text-muted/60">Updates</span>{' '}
+            <span className="text-text-secondary">x.com/Relay44OnBase</span>
           </div>
         </div>
       </section>
@@ -267,13 +267,13 @@ export default function ProtocolOverviewPage() {
           </Card>
           <Card className="p-5">
             <div className="font-mono text-[0.6rem] uppercase tracking-widest text-text-muted">
-              Source
+              X
             </div>
             <div className="mt-1 text-sm font-medium text-text-primary">
-              github.com/Relay44/relay44
+              @Relay44OnBase
             </div>
             <div className="mt-1 text-xs text-text-secondary">
-              Apache-2.0 monorepo — contracts, backend, client, SDK.
+              Shipping updates, milestones, and public announcements.
             </div>
           </Card>
         </div>
