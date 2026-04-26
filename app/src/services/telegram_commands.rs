@@ -68,7 +68,7 @@ pub fn spawn(state: Arc<AppState>) {
         }
     };
     let client = TelegramClient { bot_token, http };
-    let nonces: NonceStore = Arc::new(Mutex::new(HashMap::new()));
+    let nonces = Arc::new(NonceStore::new());
     info!("Starting Telegram command handler");
 
     tokio::spawn(async move {
@@ -100,49 +100,121 @@ pub fn spawn(state: Arc<AppState>) {
     });
 }
 
-/// In-memory store for outstanding `/link` nonces, keyed by
-/// `(chat_id, wallet_lower)`. Entries expire after `NONCE_TTL_SECS`.
+/// Stores the outstanding `/link` nonce for each chat. Redis is the primary
+/// backing store with TTL, so a single API restart no longer invalidates
+/// every in-flight `/link`. An in-memory map shadows Redis as a fallback for
+/// the (rare) case of Redis being unavailable mid-flow — `/link` still works,
+/// just without persistence. Latest `/link` per chat wins.
 ///
-/// Deliberately not persisted: on restart the user simply re-issues
-/// `/link`. Keeps the surface small and avoids granting nonce visibility
-/// to anyone with DB read access.
-type NonceStore = Arc<Mutex<HashMap<(i64, String), PendingNonce>>>;
+/// Single-use semantics live at the consume step: `peek` is non-destructive
+/// so the caller can verify a signature first, then `consume` to invalidate.
+struct NonceStore {
+    fallback: Mutex<HashMap<i64, PendingNonce>>,
+}
 
+#[derive(Clone)]
 struct PendingNonce {
+    wallet: String,
     nonce: String,
     created_at: Instant,
 }
 
-fn put_nonce(store: &NonceStore, chat_id: i64, wallet_lower: &str, nonce: String) {
-    let mut guard = store.lock().expect("nonce store poisoned");
-    purge_expired(&mut guard);
-    guard.insert(
-        (chat_id, wallet_lower.to_string()),
-        PendingNonce {
-            nonce,
-            created_at: Instant::now(),
-        },
-    );
+const NONCE_REDIS_PREFIX: &str = "tg:link_pending";
+
+fn nonce_key(chat_id: i64) -> String {
+    format!("{}:{}", NONCE_REDIS_PREFIX, chat_id)
 }
 
-fn take_nonce(store: &NonceStore, chat_id: i64, wallet_lower: &str) -> Option<String> {
-    let mut guard = store.lock().expect("nonce store poisoned");
-    purge_expired(&mut guard);
-    guard
-        .remove(&(chat_id, wallet_lower.to_string()))
-        .map(|p| p.nonce)
+impl NonceStore {
+    fn new() -> Self {
+        Self {
+            fallback: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn put(
+        &self,
+        redis: &super::redis::RedisService,
+        chat_id: i64,
+        wallet_lower: &str,
+        nonce: &str,
+    ) {
+        let value = serde_json::json!({
+            "wallet": wallet_lower,
+            "nonce": nonce,
+        });
+        match redis.set(&nonce_key(chat_id), &value, Some(NONCE_TTL_SECS)).await {
+            Ok(()) => {}
+            Err(e) => {
+                warn!(
+                    "nonce store: redis put failed, using in-memory fallback: {}",
+                    e
+                );
+                self.put_in_memory(chat_id, wallet_lower, nonce);
+            }
+        }
+    }
+
+    async fn peek(
+        &self,
+        redis: &super::redis::RedisService,
+        chat_id: i64,
+    ) -> Option<(String, String)> {
+        match redis.get::<serde_json::Value>(&nonce_key(chat_id)).await {
+            Ok(Some(v)) => {
+                let wallet = v.get("wallet").and_then(|w| w.as_str())?;
+                let nonce = v.get("nonce").and_then(|n| n.as_str())?;
+                Some((wallet.to_string(), nonce.to_string()))
+            }
+            Ok(None) => self.peek_in_memory(chat_id),
+            Err(e) => {
+                warn!(
+                    "nonce store: redis peek failed, falling back to memory: {}",
+                    e
+                );
+                self.peek_in_memory(chat_id)
+            }
+        }
+    }
+
+    async fn consume(&self, redis: &super::redis::RedisService, chat_id: i64) {
+        if let Err(e) = redis.delete(&nonce_key(chat_id)).await {
+            warn!("nonce store: redis delete failed: {}", e);
+        }
+        // Always purge the in-memory shadow regardless of which path served
+        // the value — single-use must hold across both stores.
+        self.consume_in_memory(chat_id);
+    }
+
+    fn put_in_memory(&self, chat_id: i64, wallet_lower: &str, nonce: &str) {
+        let mut guard = self.fallback.lock().expect("nonce store poisoned");
+        purge_expired_in_memory(&mut guard);
+        guard.insert(
+            chat_id,
+            PendingNonce {
+                wallet: wallet_lower.to_string(),
+                nonce: nonce.to_string(),
+                created_at: Instant::now(),
+            },
+        );
+    }
+
+    fn peek_in_memory(&self, chat_id: i64) -> Option<(String, String)> {
+        let mut guard = self.fallback.lock().expect("nonce store poisoned");
+        purge_expired_in_memory(&mut guard);
+        guard
+            .get(&chat_id)
+            .map(|p| (p.wallet.clone(), p.nonce.clone()))
+    }
+
+    fn consume_in_memory(&self, chat_id: i64) {
+        let mut guard = self.fallback.lock().expect("nonce store poisoned");
+        purge_expired_in_memory(&mut guard);
+        guard.remove(&chat_id);
+    }
 }
 
-fn find_nonce_for_chat(store: &NonceStore, chat_id: i64) -> Option<(String, String)> {
-    let mut guard = store.lock().expect("nonce store poisoned");
-    purge_expired(&mut guard);
-    guard
-        .iter()
-        .find(|((cid, _), _)| *cid == chat_id)
-        .map(|((_, wallet), p)| (wallet.clone(), p.nonce.clone()))
-}
-
-fn purge_expired(map: &mut HashMap<(i64, String), PendingNonce>) {
+fn purge_expired_in_memory(map: &mut HashMap<i64, PendingNonce>) {
     let ttl = Duration::from_secs(NONCE_TTL_SECS);
     map.retain(|_, v| v.created_at.elapsed() < ttl);
 }
@@ -158,7 +230,7 @@ async fn handle_message(
     client: &TelegramClient,
     allowed_chat_id: Option<i64>,
     dm_enabled: bool,
-    nonces: &NonceStore,
+    nonces: &Arc<NonceStore>,
     msg: &Message,
 ) {
     let is_group_match = Some(msg.chat.id) == allowed_chat_id;
@@ -193,7 +265,7 @@ async fn handle_message(
         "digest" => digest_text(state).await,
         "quote" => quote_text(state, is_dm, parsed.args.as_deref()).await,
         "config" => config_text(state, msg.chat.id).await,
-        "link" => link_text(msg.chat.id, nonces, parsed.args.as_deref()),
+        "link" => link_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "unlink" => unlink_text(state, msg.chat.id).await,
         _ => {
@@ -742,7 +814,12 @@ async fn config_text(state: &AppState, chat_id: i64) -> String {
     out.join("\n")
 }
 
-fn link_text(chat_id: i64, nonces: &NonceStore, args: Option<&str>) -> String {
+async fn link_text(
+    state: &AppState,
+    chat_id: i64,
+    nonces: &Arc<NonceStore>,
+    args: Option<&str>,
+) -> String {
     let raw = match args.and_then(|s| s.split_whitespace().next()) {
         Some(s) => s.to_string(),
         None => return "usage: /link &lt;0x…&gt;".to_string(),
@@ -753,7 +830,7 @@ fn link_text(chat_id: i64, nonces: &NonceStore, args: Option<&str>) -> String {
     };
     let nonce = fresh_nonce();
     let message = tg_chat_config::link_message(chat_id, &wallet_lower, &nonce);
-    put_nonce(nonces, chat_id, &wallet_lower, nonce);
+    nonces.put(&state.redis, chat_id, &wallet_lower, &nonce).await;
     format!(
         "Sign this message with your wallet and send <code>/verify &lt;signature&gt;</code> within 10 min:\n\n<code>{}</code>\n\n<i>Read-only binding. No spending authority is granted.</i>",
         html_escape(&message)
@@ -763,14 +840,14 @@ fn link_text(chat_id: i64, nonces: &NonceStore, args: Option<&str>) -> String {
 async fn verify_text(
     state: &AppState,
     chat_id: i64,
-    nonces: &NonceStore,
+    nonces: &Arc<NonceStore>,
     args: Option<&str>,
 ) -> String {
     let signature = match args.and_then(|s| s.split_whitespace().next()) {
         Some(s) => s.to_string(),
         None => return "usage: /verify &lt;signature&gt;".to_string(),
     };
-    let (expected_wallet, nonce) = match find_nonce_for_chat(nonces, chat_id) {
+    let (expected_wallet, nonce) = match nonces.peek(&state.redis, chat_id).await {
         Some(pair) => pair,
         None => {
             return "no pending /link for this chat. run /link &lt;0x…&gt; first.".to_string();
@@ -786,7 +863,7 @@ async fn verify_text(
     }
 
     // Nonce is single-use; consume on success. Keeps replay closed.
-    let _ = take_nonce(nonces, chat_id, &expected_wallet);
+    nonces.consume(&state.redis, chat_id).await;
 
     // If the existing users table has a row for this wallet, we'd resolve an
     // id here. Today the table is keyed on a Solana-length `wallet` primary
@@ -1120,21 +1197,47 @@ mod tests {
     }
 
     #[test]
-    fn nonce_store_put_and_take_roundtrip() {
-        let store: NonceStore = Arc::new(Mutex::new(HashMap::new()));
-        put_nonce(&store, 7, "0xabc", "n1".to_string());
-        assert_eq!(take_nonce(&store, 7, "0xabc").as_deref(), Some("n1"));
-        // single-use: second take returns None.
-        assert!(take_nonce(&store, 7, "0xabc").is_none());
+    fn nonce_store_in_memory_roundtrip() {
+        let store = NonceStore::new();
+        store.put_in_memory(7, "0xabc", "n1");
+        let peeked = store.peek_in_memory(7);
+        assert_eq!(
+            peeked.as_ref().map(|(w, n)| (w.as_str(), n.as_str())),
+            Some(("0xabc", "n1"))
+        );
+        // peek is non-destructive.
+        assert!(store.peek_in_memory(7).is_some());
+        // consume invalidates.
+        store.consume_in_memory(7);
+        assert!(store.peek_in_memory(7).is_none());
     }
 
     #[test]
-    fn nonce_store_find_returns_latest_for_chat() {
-        let store: NonceStore = Arc::new(Mutex::new(HashMap::new()));
-        put_nonce(&store, 7, "0xabc", "n1".to_string());
-        let found = find_nonce_for_chat(&store, 7);
-        assert_eq!(found.as_ref().map(|(w, n)| (w.as_str(), n.as_str())), Some(("0xabc", "n1")));
-        assert!(find_nonce_for_chat(&store, 99).is_none());
+    fn nonce_store_in_memory_returns_none_for_unknown_chat() {
+        let store = NonceStore::new();
+        store.put_in_memory(7, "0xabc", "n1");
+        assert!(store.peek_in_memory(99).is_none());
+    }
+
+    #[test]
+    fn nonce_store_latest_link_overwrites_previous() {
+        // Simulates a user re-running /link with a different wallet in the same
+        // chat. We keep latest-wins semantics so the new /link is what
+        // /verify will check against.
+        let store = NonceStore::new();
+        store.put_in_memory(7, "0xaaa", "first-nonce");
+        store.put_in_memory(7, "0xbbb", "second-nonce");
+        let peeked = store.peek_in_memory(7).unwrap();
+        assert_eq!(peeked.0, "0xbbb");
+        assert_eq!(peeked.1, "second-nonce");
+    }
+
+    #[test]
+    fn nonce_redis_key_includes_chat_id_under_link_pending_prefix() {
+        // Keys live under tg:link_pending:* so an ops engineer can easily list
+        // outstanding /link flows in production via Redis SCAN.
+        assert_eq!(nonce_key(123), "tg:link_pending:123");
+        assert_eq!(nonce_key(-1003504563338), "tg:link_pending:-1003504563338");
     }
 
     #[test]
