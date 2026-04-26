@@ -166,6 +166,11 @@ async fn handle_message(
     if !(is_group_match || (dm_enabled && is_dm)) {
         return;
     }
+    // Ignore messages from other bots — they post `/setup_raid` etc. and we
+    // don't want to reply "unknown command" to every one.
+    if msg.from.as_ref().map(|u| u.is_bot).unwrap_or(false) {
+        return;
+    }
     let Some(text) = &msg.text else { return };
     let parsed = match parse_command(text) {
         Some(c) => c,
@@ -191,7 +196,15 @@ async fn handle_message(
         "link" => link_text(msg.chat.id, nonces, parsed.args.as_deref()),
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "unlink" => unlink_text(state, msg.chat.id).await,
-        _ => format!("unknown command /{}. try /help", html_escape(&parsed.name)),
+        _ => {
+            // In groups other bots own commands like `/setup_raid` — stay
+            // silent so we don't spam "unknown command". DMs are 1:1 so the
+            // hint is still useful there.
+            if !is_dm {
+                return;
+            }
+            format!("unknown command /{}. try /help", html_escape(&parsed.name))
+        }
     };
 
     if let Err(e) = client.send(msg.chat.id, &reply, Some(msg.message_id)).await {
@@ -765,7 +778,15 @@ struct Message {
     message_id: i64,
     chat: Chat,
     #[serde(default)]
+    from: Option<User>,
+    #[serde(default)]
     text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct User {
+    #[serde(default)]
+    is_bot: bool,
 }
 
 #[derive(Debug, Deserialize)]
