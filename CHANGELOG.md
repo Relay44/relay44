@@ -14,6 +14,7 @@ Format: keep unreleased changes under `Unreleased`. Move entries to a dated sect
 - `GET /v1/protocol/metrics` endpoint and `/protocol` dashboard for public protocol-level markets, agents, settlement volume, and collateral metrics
 - `GET /v1/protocol/relay-utility` endpoint exposing chain id, RELAY token state, staking total + tier table with fee-discount bps and x402 bypass flags, reward distributor address, and live utility flags
 - `@relay44/protocol` workspace package with generated ABIs, deployment manifest, typed addresses, and helper functions
+- `@relay44/protocol` RELAY utility exports: `RELAY_TIERS` (Bronze/Silver/Gold/Diamond) with thresholds and fee-discount bps, `X402_BYPASS_TIER`, `RELAY_DECIMALS`, `relayTierFromStakedWei`, `relayTierById`, `getRelayUtilityAddresses`, `getRelayChainId`
 - `examples/protocol-read-market` TypeScript example that reads `MarketCore.marketCount` on Base mainnet
 - npm publish workflow for `@relay44/protocol` and `@relay44/agent-sdk`
 - `web/src/lib/protocol.ts` as single source of truth for docs-facing contract metadata
