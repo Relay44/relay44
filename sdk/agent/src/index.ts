@@ -68,3 +68,21 @@ export {
   DEFAULT_CONTRACTS_BASE_URL,
 } from './abis';
 export type { ContractAbiName } from './abis';
+
+// x402 tier-qualification helpers (RELAY staking → x402 access).
+export {
+  RELAY_TIERS,
+  RELAY_DECIMALS,
+  X402_BYPASS_TIER,
+  qualifyX402ByTier,
+  qualifyX402FromStaked,
+  qualifyX402OnChain,
+  priceForX402Tier,
+} from './x402';
+export type {
+  RelayTier,
+  X402Qualification,
+  X402PriceBreakdown,
+  RelayStakingReader,
+  QualifyOnChainOptions,
+} from './x402';
