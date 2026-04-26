@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   ChevronDown,
+  Github,
   Settings2,
   SquareArrowOutUpRight,
   SquareDashedMousePointer,
@@ -74,6 +75,12 @@ const externalLinks = [
     label: "X",
     note: "Updates and announcements",
     icon: XIcon,
+  },
+  {
+    href: "https://github.com/Relay44/relay44",
+    label: "GitHub",
+    note: "Source code and issues",
+    icon: Github,
   },
 ];
 
@@ -170,15 +177,6 @@ export function SidebarMenu() {
             <div className="mt-3">
               <BrandLogo />
             </div>
-            <a
-              href="https://x.com/Relay44OnBase"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-flex items-center gap-2 border border-border px-3 py-2 text-[11px] uppercase tracking-[0.16em] text-text-secondary transition-colors hover:border-border-hover hover:bg-bg-secondary hover:text-text-primary"
-            >
-              <XIcon className="h-3.5 w-3.5" />
-              @Relay44OnBase
-            </a>
             {readOnly ? (
               <div className="mt-4 inline-flex border border-accent/30 bg-accent/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-accent">
                 Read only
