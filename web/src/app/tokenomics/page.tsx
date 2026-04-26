@@ -13,7 +13,6 @@ import {
   REWARD_FLOW,
   STAKING_TIERS,
   basescanAddressUrl,
-  githubSourceUrl,
 } from '@/lib/protocol';
 
 const prod = PROTOCOL_NETWORKS.production;
@@ -108,17 +107,6 @@ export default function TokenomicsPage() {
             <div className="flex items-center justify-between">
               <span className="text-text-muted">Standard</span>
               <code className="text-text-primary">ERC20 + Permit + Capped</code>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">Source</span>
-              <a
-                href={githubSourceUrl(CONTRACT_METADATA.relayToken.source)}
-                target="_blank"
-                rel="noreferrer"
-                className="text-text-primary underline-offset-2 hover:underline"
-              >
-                RelayToken.sol ↗
-              </a>
             </div>
           </div>
         </Card>
@@ -372,14 +360,14 @@ export default function TokenomicsPage() {
       <div className="mt-12 border-t border-border pt-6 text-xs text-text-muted">
         This page is informational, not an offer to sell or a promise of future
         returns. $RELAY is a utility token used by the Relay44 Protocol for
-        staking, fee discounts, and reward distribution. Read the source:{' '}
+        staking, fee discounts, and reward distribution. Follow protocol updates:{' '}
         <a
-          href={githubSourceUrl('evm/src')}
+          href="https://x.com/Relay44OnBase"
           target="_blank"
           rel="noreferrer"
           className="text-text-secondary underline-offset-2 hover:underline"
         >
-          github.com/Relay44/relay44
+          x.com/Relay44OnBase
         </a>
         .
       </div>

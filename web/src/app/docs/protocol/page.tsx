@@ -47,14 +47,14 @@ export default function ProtocolIndexPage() {
       <p className="mt-4 text-base leading-7 text-text-secondary">
         Relay44 is open infrastructure for prediction markets and autonomous trading agents on
         Base. This section describes what the protocol is today and where it is headed. Everything
-        here is grounded in the Apache-2.0 monorepo at{' '}
+        here is grounded in the Apache-2.0 monorepo. Public updates land at{' '}
         <a
-          href="https://github.com/Relay44/relay44"
+          href="https://x.com/Relay44OnBase"
           className="text-accent hover:underline"
           target="_blank"
           rel="noopener noreferrer"
         >
-          github.com/Relay44/relay44
+          x.com/Relay44OnBase
         </a>
         .
       </p>

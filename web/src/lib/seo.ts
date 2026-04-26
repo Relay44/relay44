@@ -5,7 +5,7 @@ import type { DistributionMarket } from '@/types/distribution';
 export const SITE_NAME = 'Relay44';
 export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://relay44.com')
   .replace(/\/$/, '');
-export const SITE_HANDLE = '@Relay44BASE';
+export const SITE_HANDLE = '@Relay44OnBase';
 export const SITE_IMAGE_PATH = '/relay44-sharing.jpg';
 export const SITE_IMAGE_ALT = 'Relay44 share image';
 export const DEFAULT_DESCRIPTION =
@@ -161,7 +161,7 @@ export function buildOrganizationStructuredData(): StructuredDataNode {
     url: SITE_URL,
     logo: absoluteUrl('/relay44.svg'),
     image: absoluteUrl(SITE_IMAGE_PATH),
-    sameAs: ['https://x.com/Relay44BASE'],
+    sameAs: ['https://x.com/Relay44OnBase'],
   };
 }
 

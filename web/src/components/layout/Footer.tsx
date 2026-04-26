@@ -44,8 +44,7 @@ const resourceLinks = [
 ];
 
 const externalLinks = [
-  { href: 'https://x.com/Relay44BASE', label: 'X / Twitter' },
-  { href: 'https://github.com/Relay44/relay44', label: 'GitHub' },
+  { href: 'https://x.com/Relay44OnBase', label: 'X / Relay44OnBase' },
 ];
 
 function FooterColumn({

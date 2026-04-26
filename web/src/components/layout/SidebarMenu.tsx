@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   ChevronDown,
-  Github,
   Settings2,
   SquareArrowOutUpRight,
   SquareDashedMousePointer,
@@ -66,16 +65,10 @@ function useIsDocsHost() {
 
 const externalLinks = [
   {
-    href: "https://x.com/Relay44BASE",
+    href: "https://x.com/Relay44OnBase",
     label: "X",
     note: "Updates and announcements",
     icon: XIcon,
-  },
-  {
-    href: "https://github.com/Relay44/relay44",
-    label: "GitHub",
-    note: "Source code and issues",
-    icon: Github,
   },
 ];
 

@@ -12,7 +12,6 @@ import {
   CONTRACT_ORDER,
   PROTOCOL_NETWORKS,
   basescanAddressUrl,
-  githubSourceUrl,
   type ContractName,
   type NetworkName,
 } from '@/lib/protocol';
@@ -90,16 +89,8 @@ function ContractCard({ name }: { name: ContractName }) {
           </p>
           <h3 className="mt-1 text-lg font-semibold text-text-primary">{meta.label}</h3>
         </div>
-        <div className="flex items-center gap-3 text-[0.7rem] uppercase tracking-widest text-text-muted">
-          <a
-            href={githubSourceUrl(meta.source)}
-            target="_blank"
-            rel="noreferrer"
-            className="transition-colors hover:text-text-primary"
-          >
-            Source ↗
-          </a>
-          {meta.abiKey && (
+        {meta.abiKey ? (
+          <div className="flex items-center gap-3 text-[0.7rem] uppercase tracking-widest text-text-muted">
             <a
               href={`/api/contracts/${meta.abiKey}/abi`}
               target="_blank"
@@ -108,8 +99,8 @@ function ContractCard({ name }: { name: ContractName }) {
             >
               ABI ↗
             </a>
-          )}
-        </div>
+          </div>
+        ) : null}
       </div>
       <p className="mt-3 text-sm leading-6 text-text-secondary">{meta.description}</p>
       <div className="mt-4 overflow-hidden border border-border">
@@ -276,16 +267,7 @@ export default function ContractsPage() {
         <div className="pt-2">
           <h2 className="text-lg font-semibold text-text-primary">Contracts</h2>
           <p className="mt-2 text-sm leading-6 text-text-secondary">
-            All contracts are deployed from the{' '}
-            <a
-              href={githubSourceUrl('evm/src')}
-              target="_blank"
-              rel="noreferrer"
-              className="text-text-primary underline-offset-2 hover:underline"
-            >
-              evm/src
-            </a>{' '}
-            workspace in the open-source monorepo.
+            All contracts are deployed from the `evm/src` workspace in the open-source monorepo.
           </p>
         </div>
 

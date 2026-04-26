@@ -272,14 +272,14 @@ export default function ProtocolRoadmapPage() {
         </h1>
         <p className="mt-4 max-w-3xl text-base leading-7 text-text-secondary">
           A technical reference for engineers, integrators, and researchers. Every component named
-          here lives in the{' '}
+          here lives in the Apache-2.0 monorepo. Public updates land at{' '}
           <a
-            href="https://github.com/Relay44/relay44"
+            href="https://x.com/Relay44OnBase"
             className="text-accent hover:underline"
             target="_blank"
             rel="noopener noreferrer"
           >
-            Apache-2.0 monorepo
+            x.com/Relay44OnBase
           </a>
           . Paths and module names are real — use them as entry points into the code.
         </p>
