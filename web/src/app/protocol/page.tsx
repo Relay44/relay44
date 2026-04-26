@@ -26,6 +26,34 @@ interface ProtocolMetricsResponse {
   updatedAt: string;
 }
 
+interface RelayUtilityResponse {
+  chainId: number;
+  token: { address: string; totalSupplyHex: string; decimals: number };
+  staking: {
+    address: string;
+    totalStakedHex: string;
+    tiers: Array<{
+      tier: number;
+      name: string;
+      minRelayWei: string;
+      feeDiscountBps: number;
+      x402Bypass: boolean;
+    }>;
+    x402BypassTier: number;
+  };
+  rewardDistributor: { address: string };
+  flags: {
+    feeDiscount: boolean;
+    x402Discount: boolean;
+    stakingRewards: boolean;
+    agentRewards: boolean;
+    creatorRewards: boolean;
+    governance: boolean;
+  };
+  source: string;
+  updatedAt: string;
+}
+
 function apiBase() {
   return (
     process.env.NEXT_PUBLIC_API_URL?.trim() ||
@@ -46,10 +74,41 @@ async function loadMetrics(): Promise<ProtocolMetricsResponse | null> {
   }
 }
 
+async function loadRelayUtility(): Promise<RelayUtilityResponse | null> {
+  try {
+    const response = await fetch(`${apiBase()}/protocol/relay-utility`, {
+      next: { revalidate: 60 },
+      headers: { accept: 'application/json' },
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as RelayUtilityResponse;
+  } catch {
+    return null;
+  }
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US', {
     maximumFractionDigits: value >= 1000 ? 0 : 2,
   }).format(value);
+}
+
+function hexToTokenAmount(hex: string, decimals: number): number {
+  if (!hex) return 0;
+  try {
+    const wei = BigInt(hex);
+    const scale = BigInt(10) ** BigInt(decimals);
+    const whole = wei / scale;
+    const fraction = wei % scale;
+    return Number(whole) + Number(fraction) / Number(scale);
+  } catch {
+    return 0;
+  }
+}
+
+function shortAddress(address: string): string {
+  if (!address || address.length < 10) return address;
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
 function MetricCard({
@@ -73,7 +132,14 @@ function MetricCard({
 }
 
 export default async function ProtocolDashboardPage() {
-  const metrics = await loadMetrics();
+  const [metrics, relay] = await Promise.all([loadMetrics(), loadRelayUtility()]);
+  const totalSupply = relay
+    ? hexToTokenAmount(relay.token.totalSupplyHex, relay.token.decimals)
+    : 0;
+  const totalStaked = relay
+    ? hexToTokenAmount(relay.staking.totalStakedHex, relay.token.decimals)
+    : 0;
+  const stakedShare = totalSupply > 0 ? (totalStaked / totalSupply) * 100 : 0;
 
   return (
     <>
@@ -150,6 +216,119 @@ export default async function ProtocolDashboardPage() {
             }
             note="Collateral tracked by market tables where available."
           />
+        </div>
+
+        <div className="mt-12">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[0.7rem] uppercase tracking-[0.22em] text-accent">
+                $RELAY
+              </p>
+              <h2 className="mt-1 text-2xl font-semibold text-text-primary sm:text-3xl">
+                Token utility, on-chain.
+              </h2>
+            </div>
+            <Link
+              href="/docs/protocol/relay-utility"
+              className="inline-flex h-9 items-center border border-border px-4 text-xs uppercase tracking-[0.16em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"
+            >
+              Utility reference
+            </Link>
+          </div>
+
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              label="Total Supply"
+              value={
+                relay ? `${formatNumber(totalSupply)} RELAY` : 'Pending deploy'
+              }
+              note={
+                relay
+                  ? `Cap-enforced ERC20 at ${shortAddress(relay.token.address)}.`
+                  : 'Reads RelayToken.totalSupply from Base mainnet.'
+              }
+            />
+            <MetricCard
+              label="Total Staked"
+              value={
+                relay
+                  ? `${formatNumber(totalStaked)} RELAY`
+                  : 'Pending deploy'
+              }
+              note={
+                relay && stakedShare > 0
+                  ? `~${stakedShare.toFixed(1)}% of supply at ${shortAddress(relay.staking.address)}.`
+                  : 'Reads RelayStaking.totalStaked from Base mainnet.'
+              }
+            />
+            <MetricCard
+              label="Reward Distributor"
+              value={relay ? shortAddress(relay.rewardDistributor.address) : 'Pending'}
+              note="Per-epoch split between stakers, agents, creators, treasury."
+            />
+            <MetricCard
+              label="x402 Bypass"
+              value={
+                relay
+                  ? `Tier ${relay.staking.x402BypassTier}+`
+                  : 'Pending deploy'
+              }
+              note="Free machine-facing API access at Gold and Diamond tiers."
+            />
+          </div>
+
+          {relay ? (
+            <div className="mt-6 overflow-hidden border border-border">
+              <div className="grid grid-cols-12 gap-4 border-b border-border bg-bg-secondary px-4 py-3 text-[0.65rem] uppercase tracking-[0.2em] text-text-muted">
+                <span className="col-span-3">Tier</span>
+                <span className="col-span-3">Minimum RELAY</span>
+                <span className="col-span-3">Fee discount</span>
+                <span className="col-span-3">x402 access</span>
+              </div>
+              {relay.staking.tiers.map((tier) => {
+                const min = hexToTokenAmount(
+                  '0x' + BigInt(tier.minRelayWei).toString(16),
+                  relay.token.decimals,
+                );
+                return (
+                  <div
+                    key={tier.tier}
+                    className="grid grid-cols-12 gap-4 border-b border-border px-4 py-4 text-xs text-text-secondary last:border-b-0"
+                  >
+                    <span className="col-span-3 text-sm font-semibold text-text-primary">
+                      {tier.name}
+                    </span>
+                    <code className="col-span-3 text-text-primary">
+                      {min === 0 ? '0' : formatNumber(min)}
+                    </code>
+                    <code className="col-span-3 text-text-primary">
+                      {(tier.feeDiscountBps / 100).toFixed(0)}%
+                    </code>
+                    <span className="col-span-3">
+                      {tier.x402Bypass ? 'Free (bypass)' : tier.feeDiscountBps > 0 ? '25% discount' : 'Full price'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap gap-2 text-[0.65rem] uppercase tracking-[0.18em] text-text-muted">
+            {relay
+              ? Object.entries(relay.flags).map(([key, on]) => (
+                  <span
+                    key={key}
+                    className={`border px-2 py-1 ${
+                      on
+                        ? 'border-accent text-accent'
+                        : 'border-border text-text-muted'
+                    }`}
+                  >
+                    {key.replace(/([A-Z])/g, ' $1').trim()} · {on ? 'live' : 'roadmap'}
+                  </span>
+                ))
+              : null}
+          </div>
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
