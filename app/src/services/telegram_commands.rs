@@ -197,10 +197,16 @@ async fn handle_message(
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "unlink" => unlink_text(state, msg.chat.id).await,
         _ => {
-            // In groups other bots own commands like `/setup_raid` — stay
-            // silent so we don't spam "unknown command". DMs are 1:1 so the
-            // hint is still useful there.
+            // Groups: stay silent — third-party bots own commands like
+            // /setup_raid and we don't want to spam "unknown command".
             if !is_dm {
+                return;
+            }
+            // DMs: only reply when the command plausibly belongs to us.
+            // Skip the well-known third-party command vocabulary (raid bots,
+            // volume bots, sniper bots) and anything that doesn't look like
+            // a typo of one of our short alphabetic commands.
+            if is_third_party_command(&parsed.name) || !looks_like_our_command(&parsed.name) {
                 return;
             }
             format!("unknown command /{}. try /help", html_escape(&parsed.name))
@@ -230,6 +236,87 @@ fn parse_command(text: &str) -> Option<ParsedCommand> {
         return None;
     }
     Some(ParsedCommand { name, args })
+}
+
+/// Vocabulary owned by other Telegram bots that frequently show up in the same
+/// chats as the relay44 bot — raid coordinators, sniper bots, volume bots,
+/// generic group-engagement bots. We never reply with "unknown command" to
+/// any of these, regardless of chat type. Lowercase, no leading slash.
+const THIRD_PARTY_COMMANDS: &[&str] = &[
+    // Raid / engagement bots.
+    "raid",
+    "raids",
+    "raidstart",
+    "raidend",
+    "setup_raid",
+    "setupraid",
+    "newraid",
+    "checkraid",
+    "endraid",
+    "leaderboard",
+    "leaderboards",
+    "tweet",
+    "tweets",
+    "retweet",
+    "like",
+    "comment",
+    "shill",
+    "engage",
+    "engagement",
+    "task",
+    "tasks",
+    "claim",
+    // Sniper / trading bots that share command surface area.
+    "snipe",
+    "swap",
+    "send",
+    "transfer",
+    "approve",
+    "withdraw",
+    "deposit",
+    "limit",
+    "long",
+    "short",
+    "pnl",
+    "balance",
+    "wallet",
+    "wallets",
+    "portfolio",
+    // Generic group-mod / chat bots.
+    "ban",
+    "kick",
+    "mute_user",
+    "warn",
+    "rules",
+    "captcha",
+    "welcome",
+    "pin",
+    "unpin",
+    "report",
+    // Common chat slang sometimes typed with a leading slash.
+    "gm",
+    "gn",
+    "lfg",
+    "wagmi",
+    "ngmi",
+    "wen",
+    "ca",
+];
+
+fn is_third_party_command(name: &str) -> bool {
+    THIRD_PARTY_COMMANDS.contains(&name)
+}
+
+/// Heuristic for "this could be a typo of one of our commands and a hint is
+/// useful." Our entire command surface is purely-alphabetic ASCII, between 3
+/// and 11 chars. Anything outside that shape (digits, underscores, very long
+/// names, single letters) belongs to another bot or is junk and stays silent.
+fn looks_like_our_command(name: &str) -> bool {
+    let len = name.len();
+    if !(2..=12).contains(&len) {
+        return false;
+    }
+    name.chars().all(|c| c.is_ascii_alphabetic())
 }
 
 fn help_text() -> String {
@@ -922,6 +1009,83 @@ mod tests {
         assert!(parse_command("hello").is_none());
         assert!(parse_command("").is_none());
         assert!(parse_command("/").is_none());
+    }
+
+    #[test]
+    fn third_party_raid_commands_are_silenced() {
+        for cmd in [
+            "raid",
+            "setup_raid",
+            "setupraid",
+            "raidstart",
+            "leaderboard",
+            "tweet",
+            "shill",
+        ] {
+            assert!(
+                is_third_party_command(cmd),
+                "raid-vocabulary command {cmd} should be silenced"
+            );
+        }
+    }
+
+    #[test]
+    fn third_party_sniper_and_chat_commands_are_silenced() {
+        for cmd in ["snipe", "swap", "ban", "captcha", "gm", "lfg"] {
+            assert!(
+                is_third_party_command(cmd),
+                "third-party command {cmd} should be silenced"
+            );
+        }
+    }
+
+    #[test]
+    fn our_commands_are_not_in_third_party_list() {
+        for cmd in [
+            "start",
+            "help",
+            "status",
+            "top",
+            "market",
+            "config",
+            "mute",
+            "unmute",
+            "threshold",
+            "cooldown",
+            "quiet",
+            "unquiet",
+            "subscribe",
+            "unsubscribe",
+            "digest",
+            "quote",
+            "link",
+            "verify",
+            "unlink",
+        ] {
+            assert!(
+                !is_third_party_command(cmd),
+                "{cmd} is one of our commands, must not be in the third-party list"
+            );
+        }
+    }
+
+    #[test]
+    fn typo_heuristic_matches_short_alphabetic_commands() {
+        // Typos of our actual commands should still get a hint.
+        assert!(looks_like_our_command("statu"));
+        assert!(looks_like_our_command("hlep"));
+        assert!(looks_like_our_command("config"));
+        assert!(looks_like_our_command("toop"));
+    }
+
+    #[test]
+    fn typo_heuristic_rejects_third_party_shapes() {
+        // Underscores, digits, very long, very short → not a typo of ours.
+        assert!(!looks_like_our_command("setup_raid"));
+        assert!(!looks_like_our_command("raid123"));
+        assert!(!looks_like_our_command("a"));
+        assert!(!looks_like_our_command("supercalifragilistic"));
+        assert!(!looks_like_our_command(""));
     }
 
     #[test]
