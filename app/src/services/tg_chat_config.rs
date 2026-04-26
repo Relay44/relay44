@@ -354,6 +354,21 @@ pub async fn clear_linked_wallet(pool: &PgPool, chat_id: i64) -> Result<(), sqlx
     .map(|_| ())
 }
 
+/// Return every chat id that has a `tg_chat_config` row. Used by the digest
+/// scheduler to fan out per-chat filtered messages on each tick. Returns an
+/// empty vec on DB error so the digest still posts to the env-default chat.
+pub async fn list_chat_ids(pool: &PgPool) -> Vec<i64> {
+    let rows: Result<Vec<(i64,)>, sqlx::Error> =
+        sqlx::query_as("SELECT chat_id FROM tg_chat_config").fetch_all(pool).await;
+    match rows {
+        Ok(rows) => rows.into_iter().map(|(id,)| id).collect(),
+        Err(err) => {
+            log::warn!("tg_chat_config: list_chat_ids failed: {}", err);
+            Vec::new()
+        }
+    }
+}
+
 /// Resolve the effective threshold for `chat_id`, falling back to `env_default`
 /// when no override is set. Always returns a clamped value.
 pub async fn effective_threshold_for_chat(

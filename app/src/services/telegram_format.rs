@@ -163,6 +163,18 @@ impl TelegramClient {
     }
 
     pub async fn send(&self, text: &str) -> Result<(), String> {
+        self.send_raw(&self.chat_id, text).await
+    }
+
+    /// Send to an arbitrary chat id, ignoring the client's configured default.
+    /// Used by the digest scheduler when it fans a single drained-bus payload
+    /// out to multiple subscribed chats with per-chat filters applied.
+    pub async fn send_to(&self, chat_id: i64, text: &str) -> Result<(), String> {
+        let cid = chat_id.to_string();
+        self.send_raw(&cid, text).await
+    }
+
+    async fn send_raw(&self, chat_id: &str, text: &str) -> Result<(), String> {
         #[derive(Serialize)]
         struct Payload<'a> {
             chat_id: &'a str,
@@ -172,7 +184,7 @@ impl TelegramClient {
         }
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
         let payload = Payload {
-            chat_id: &self.chat_id,
+            chat_id,
             text,
             parse_mode: "HTML",
             disable_web_page_preview: true,
