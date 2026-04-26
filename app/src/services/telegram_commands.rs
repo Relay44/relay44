@@ -951,25 +951,18 @@ impl TelegramClient {
             reply_to_message_id: Option<i64>,
         }
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
-        let resp = self
-            .http
-            .post(&url)
-            .json(&Req {
-                chat_id,
-                text,
-                parse_mode: "HTML",
-                disable_web_page_preview: true,
-                reply_to_message_id: reply_to,
-            })
-            .send()
-            .await
-            .map_err(|e| format!("request: {}", e))?;
-        if !resp.status().is_success() {
-            let code = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("telegram {}: {}", code, body));
-        }
-        Ok(())
+        let payload = Req {
+            chat_id,
+            text,
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            reply_to_message_id: reply_to,
+        };
+        super::telegram_format::send_with_retry("sendMessage", || {
+            self.http.post(&url).json(&payload).send()
+        })
+        .await
+        .map(|_| ())
     }
 }
 

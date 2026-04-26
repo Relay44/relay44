@@ -18,9 +18,15 @@
 //! `TelegramClient` is the shared HTTP client. It posts with
 //! `parse_mode: "HTML"` and `disable_web_page_preview: true`.
 
+use std::future::Future;
 use std::time::Duration;
 
+use log::warn;
 use serde::Serialize;
+use tokio::time::sleep;
+
+const MAX_RETRY_ATTEMPTS: u32 = 5;
+const MAX_RETRY_DELAY_SECS: u64 = 60;
 
 /// HTML-escapes a user-derived string for safe embedding in a Telegram HTML
 /// message. Covers the characters Telegram's HTML parser requires (`<`, `>`,
@@ -165,25 +171,117 @@ impl TelegramClient {
             disable_web_page_preview: bool,
         }
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
-        let resp = self
-            .http
-            .post(&url)
-            .json(&Payload {
-                chat_id: &self.chat_id,
-                text,
-                parse_mode: "HTML",
-                disable_web_page_preview: true,
-            })
-            .send()
+        let payload = Payload {
+            chat_id: &self.chat_id,
+            text,
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+        };
+        send_with_retry("sendMessage", || self.http.post(&url).json(&payload).send())
             .await
-            .map_err(|e| format!("request: {}", e))?;
-        if !resp.status().is_success() {
-            let code = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("telegram {}: {}", code, body));
-        }
-        Ok(())
+            .map(|_| ())
     }
+}
+
+/// Outcome of inspecting a Telegram API response: either a success body or a
+/// classified failure (permanent vs. retryable, with optional `retry_after`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RetryOutcome {
+    Success,
+    Permanent(String),
+    Retryable {
+        message: String,
+        delay_hint: Option<u64>,
+    },
+}
+
+/// Pure classifier for a Telegram API response. Body bytes are passed in so
+/// this is testable without a live HTTP call. Telegram returns
+/// `{"ok": false, "error_code": 429, "parameters": {"retry_after": N}}` on
+/// rate-limits; we honour that hint when present.
+pub(crate) fn classify_response(status: u16, body: &[u8]) -> RetryOutcome {
+    if (200..300).contains(&status) {
+        return RetryOutcome::Success;
+    }
+    let snippet = String::from_utf8_lossy(body).chars().take(256).collect::<String>();
+    if status == 429 {
+        return RetryOutcome::Retryable {
+            message: format!("429 {snippet}"),
+            delay_hint: parse_retry_after(body),
+        };
+    }
+    if (500..600).contains(&status) {
+        return RetryOutcome::Retryable {
+            message: format!("{status} {snippet}"),
+            delay_hint: None,
+        };
+    }
+    RetryOutcome::Permanent(format!("{status} {snippet}"))
+}
+
+fn parse_retry_after(body: &[u8]) -> Option<u64> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    value.get("parameters")?.get("retry_after")?.as_u64()
+}
+
+/// Bounded exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 60s.
+pub(crate) fn backoff_secs(attempt: u32) -> u64 {
+    let shift = attempt.saturating_sub(1).min(6);
+    (1u64 << shift).min(MAX_RETRY_DELAY_SECS)
+}
+
+/// Issue a request via the supplied builder and apply Telegram-aware retries.
+/// `make_request` is invoked on each attempt so it can produce a fresh future.
+/// Returns the response body bytes (with the final status) or the last
+/// classified error after retries are exhausted.
+pub(crate) async fn send_with_retry<F, Fut>(
+    label: &str,
+    mut make_request: F,
+) -> Result<Vec<u8>, String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = reqwest::Result<reqwest::Response>>,
+{
+    let mut last_error: String = String::new();
+    for attempt in 1..=MAX_RETRY_ATTEMPTS {
+        match make_request().await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let bytes = resp.bytes().await.unwrap_or_default();
+                match classify_response(status, &bytes) {
+                    RetryOutcome::Success => {
+                        return Ok(bytes.to_vec());
+                    }
+                    RetryOutcome::Permanent(msg) => {
+                        return Err(format!("{label}: {msg}"));
+                    }
+                    RetryOutcome::Retryable { message, delay_hint } => {
+                        last_error = format!("{label}: {message}");
+                        if attempt < MAX_RETRY_ATTEMPTS {
+                            let wait = delay_hint
+                                .unwrap_or_else(|| backoff_secs(attempt))
+                                .min(MAX_RETRY_DELAY_SECS);
+                            warn!(
+                                "{label} attempt {attempt} failed; retrying in {wait}s ({message})"
+                            );
+                            sleep(Duration::from_secs(wait)).await;
+                            continue;
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                last_error = format!("{label}: request {err}");
+                if attempt < MAX_RETRY_ATTEMPTS {
+                    let wait = backoff_secs(attempt);
+                    warn!("{label} attempt {attempt} request error; retrying in {wait}s ({err})");
+                    sleep(Duration::from_secs(wait)).await;
+                    continue;
+                }
+            }
+        }
+    }
+    Err(format!("retries exhausted: {last_error}"))
 }
 
 #[cfg(test)]
@@ -290,5 +388,67 @@ mod tests {
         assert_eq!(venue_title("polymarket"), "Polymarket");
         assert_eq!(venue_title("limitless"), "Limitless");
         assert_eq!(venue_title("nope"), "Unknown");
+    }
+
+    #[test]
+    fn classify_response_treats_2xx_as_success() {
+        assert_eq!(classify_response(200, b"{}"), RetryOutcome::Success);
+        assert_eq!(classify_response(204, b""), RetryOutcome::Success);
+    }
+
+    #[test]
+    fn classify_response_429_extracts_retry_after_when_present() {
+        let body = br#"{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":12}}"#;
+        match classify_response(429, body) {
+            RetryOutcome::Retryable { delay_hint, .. } => {
+                assert_eq!(delay_hint, Some(12));
+            }
+            other => panic!("expected Retryable with delay_hint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_response_429_without_retry_after_falls_back() {
+        let body = br#"{"ok":false,"error_code":429}"#;
+        match classify_response(429, body) {
+            RetryOutcome::Retryable { delay_hint, .. } => {
+                assert_eq!(delay_hint, None);
+            }
+            other => panic!("expected Retryable with no delay_hint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_response_5xx_is_retryable() {
+        for status in [500_u16, 502, 503, 504] {
+            assert!(matches!(
+                classify_response(status, b"oops"),
+                RetryOutcome::Retryable { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn classify_response_4xx_other_than_429_is_permanent() {
+        // 400/401/403/404 — Telegram says no, no point retrying.
+        for status in [400_u16, 401, 403, 404] {
+            assert!(matches!(
+                classify_response(status, b"bad request"),
+                RetryOutcome::Permanent(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn backoff_secs_is_bounded_exponential() {
+        assert_eq!(backoff_secs(1), 1);
+        assert_eq!(backoff_secs(2), 2);
+        assert_eq!(backoff_secs(3), 4);
+        assert_eq!(backoff_secs(4), 8);
+        assert_eq!(backoff_secs(5), 16);
+        assert_eq!(backoff_secs(6), 32);
+        // Cap kicks in past the 60s ceiling.
+        assert_eq!(backoff_secs(7), MAX_RETRY_DELAY_SECS);
+        assert_eq!(backoff_secs(20), MAX_RETRY_DELAY_SECS);
     }
 }
