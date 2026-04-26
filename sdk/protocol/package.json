@@ -1,0 +1,43 @@
+{
+  "name": "@relay44/protocol",
+  "version": "0.1.0",
+  "description": "Relay44 Protocol addresses, deployment manifests, and generated ABIs",
+  "license": "Apache-2.0",
+  "author": "Relay44 <hello@relay44.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Relay44/relay44.git",
+    "directory": "sdk/protocol"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check": "node scripts/generate.mjs --check",
+    "build": "tsc -p tsconfig.json",
+    "pack:dry": "npm pack --dry-run",
+    "prepack": "npm run check && npm run build"
+  },
+  "keywords": [
+    "base",
+    "prediction-market",
+    "protocol",
+    "abi",
+    "relay44"
+  ],
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

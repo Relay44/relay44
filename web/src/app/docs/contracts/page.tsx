@@ -111,19 +111,9 @@ function ContractCard({ name }: { name: ContractName }) {
   );
 }
 
-const INTEGRATION_EXAMPLE = `import { createPublicClient, http, parseAbi } from 'viem';
+const INTEGRATION_EXAMPLE = `import { createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
-
-// Addresses are published on this page. Pull the ABI directly from the
-// protocol reference endpoint, or paste the minimal one below.
-//   curl https://relay44.com/api/contracts/market-core/abi
-const MARKET_CORE = '0xc9259a18696Ecbf7636C1a01F40Bc9d47e249AE8';
-
-const marketCoreAbi = parseAbi([
-  'function marketCount() view returns (uint256)',
-  'function markets(uint256 marketId) view returns (bytes32 questionHash, uint64 closeTime, uint64 resolveTime, address resolver, bool resolved, bool outcome)',
-  'function getMarketMetadata(uint256 marketId) view returns (string question, string description, string category, string resolutionSource)',
-]);
+import { getContractAddress, marketCoreAbi } from '@relay44/protocol';
 
 const client = createPublicClient({
   chain: base,
@@ -131,25 +121,26 @@ const client = createPublicClient({
 });
 
 async function readLatestMarket() {
+  const marketCore = getContractAddress('production', 'marketCore');
   const count = await client.readContract({
-    address: MARKET_CORE,
+    address: marketCore,
     abi: marketCoreAbi,
     functionName: 'marketCount',
   });
 
   if (count === 0n) return null;
 
-  const latestId = count - 1n;
+  const latestId = count;
 
   const [market, metadata] = await Promise.all([
     client.readContract({
-      address: MARKET_CORE,
+      address: marketCore,
       abi: marketCoreAbi,
       functionName: 'markets',
       args: [latestId],
     }),
     client.readContract({
-      address: MARKET_CORE,
+      address: marketCore,
       abi: marketCoreAbi,
       functionName: 'getMarketMetadata',
       args: [latestId],
@@ -162,7 +153,10 @@ async function readLatestMarket() {
 readLatestMarket().then(console.log);
 `;
 
-const CURL_EXAMPLE = `# Fetch the OrderBook ABI as JSON
+const CURL_EXAMPLE = `# Install importable protocol artifacts
+npm install @relay44/protocol viem
+
+# Fetch the OrderBook ABI as JSON
 curl https://relay44.com/api/contracts/order-book/abi | jq
 
 # Available ABIs:
@@ -243,10 +237,10 @@ export default function ContractsPage() {
         </Card>
 
         <Card className="p-6">
-          <h2 className="text-lg font-semibold text-text-primary">Quick start — viem</h2>
+          <h2 className="text-lg font-semibold text-text-primary">Quick start — @relay44/protocol</h2>
           <p className="mt-2 text-sm leading-6 text-text-secondary">
-            Read the latest market from MarketCore on Base mainnet. Addresses are
-            published below; full ABIs are served over HTTP for any language.
+            Read the latest market from MarketCore on Base mainnet using the
+            importable deployment manifest and generated ABI package.
           </p>
           <div className="mt-4">
             <CodeBlock language="typescript" code={INTEGRATION_EXAMPLE} />

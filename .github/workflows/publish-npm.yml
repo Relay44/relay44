@@ -1,0 +1,53 @@
+name: Publish npm packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Validate npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN is required to publish @relay44/protocol and @relay44/agent-sdk"
+            exit 1
+          fi
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build EVM artifacts
+        run: npm run evm:build
+
+      - name: Validate SDK artifacts
+        run: npm run sdk:check
+
+      - name: Publish protocol package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm --workspace @relay44/protocol publish --access public --provenance
+
+      - name: Publish agent SDK
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm --workspace @relay44/agent-sdk publish --access public --provenance

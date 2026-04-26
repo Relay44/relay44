@@ -23,6 +23,7 @@ pub mod payments;
 pub mod pm_scanner;
 pub mod positions;
 pub mod profiles;
+pub mod protocol;
 pub mod rate_limit;
 pub mod referrals;
 pub mod risk_console;

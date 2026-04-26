@@ -92,7 +92,7 @@ export interface ContractMeta {
   category: 'core' | 'token' | 'agent' | 'identity';
   /** ABI identifier served at `/api/contracts/[name]/abi`. Null means not exported. */
   abiKey: string | null;
-  /** Path within the monorepo on GitHub (main branch) for the source file. */
+  /** Path within the monorepo for the source file. */
   source: string;
 }
 
@@ -236,12 +236,6 @@ export const CONTRACT_ORDER: ContractName[] = [
   'erc8004ReputationRegistry',
   'erc8004ValidationRegistry',
 ];
-
-export const GITHUB_REPO = 'https://github.com/Relay44/relay44';
-
-export function githubSourceUrl(path: string): string {
-  return `${GITHUB_REPO}/blob/main/${path}`;
-}
 
 // ---------------------------------------------------------------------------
 // Tokenomics constants

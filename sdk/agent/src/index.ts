@@ -40,10 +40,23 @@ export {
 // ERC-8004 modules
 export * from './erc8004';
 
-// Canonical contract ABIs + live fetch helper.
-// Use the static constants when you want a compile-time-typed ABI and do
-// not need to track contract upgrades. Use `fetchContractAbi` when you
-// want to always pull the latest ABI from relay44.com/api/contracts/*.
+// Protocol artifacts are owned by @relay44/protocol and re-exported here for
+// backwards compatibility with agent SDK consumers.
+export {
+  deploymentManifest,
+  productionAddresses,
+  stagingAddresses,
+  contractAbis,
+  getContractAbi,
+  getContractAddress,
+} from '@relay44/protocol';
+export type {
+  Address as ProtocolAddress,
+  ContractAbi,
+  ContractName,
+  NetworkName,
+} from '@relay44/protocol';
+
 export {
   MARKET_CORE_ABI,
   ORDER_BOOK_ABI,

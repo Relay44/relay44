@@ -19,7 +19,12 @@
   ],
   "author": "Relay44 <hello@relay44.com>",
   "contributors": [
-    "Mizuki Hayashi"
+    "Mizuki"
+  ],
+  "private": true,
+  "workspaces": [
+    "sdk/protocol",
+    "sdk/agent"
   ],
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
@@ -116,6 +121,12 @@
     "evm:build": "forge build --root evm",
     "evm:test": "forge test --root evm",
     "evm:fmt": "forge fmt --root evm",
+    "sdk:protocol:generate": "npm --workspace @relay44/protocol run generate",
+    "sdk:protocol:check": "npm --workspace @relay44/protocol run check",
+    "sdk:protocol:build": "npm --workspace @relay44/protocol run build",
+    "sdk:agent:build": "npm --workspace @relay44/agent-sdk run build",
+    "sdk:build": "npm run sdk:protocol:build && npm run sdk:agent:build",
+    "sdk:check": "npm run sdk:protocol:check && npm run sdk:build",
     "evm:deploy:base-sepolia": "forge script script/DeployCore.s.sol:DeployCoreScript --root evm --rpc-url $BASE_SEPOLIA_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
     "evm:deploy:base": "forge script script/DeployCore.s.sol:DeployCoreScript --root evm --rpc-url $BASE_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",
     "evm:deploy:programs:base-sepolia": "forge script script/DeployPrograms.s.sol:DeployProgramsScript --root evm --rpc-url $BASE_SEPOLIA_RPC_URL --account $FOUNDRY_ACCOUNT --broadcast --verify",

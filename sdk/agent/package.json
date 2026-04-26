@@ -4,15 +4,21 @@
   "description": "relay44 Base agent SDK",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
-    "test": "node ../../scripts/check-abi-parity.mjs && jest --passWithNoTests",
-    "check:abi": "node ../../scripts/check-abi-parity.mjs",
+    "test": "npm run check:protocol && npm run build",
+    "check:protocol": "node ../protocol/scripts/generate.mjs --check",
+    "check:abi": "npm run check:protocol",
     "lint": "eslint src --ext .ts"
   },
   "keywords": ["base", "prediction-market", "trading-agent", "ai"],
   "license": "MIT",
   "dependencies": {
+    "@relay44/protocol": "0.1.0",
     "viem": "^2.39.3"
   },
   "devDependencies": {

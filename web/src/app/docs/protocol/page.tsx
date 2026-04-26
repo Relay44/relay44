@@ -18,6 +18,24 @@ const pages = [
     href: '/docs/protocol/overview',
   },
   {
+    title: 'Protocol Dashboard',
+    description:
+      'Public protocol metrics for markets, agents, settlement volume, and USDC collateral.',
+    href: 'https://relay44.com/protocol',
+  },
+  {
+    title: 'Contracts and Package',
+    description:
+      'Production/staging addresses, generated ABIs, @relay44/protocol install path, and viem examples.',
+    href: '/docs/contracts',
+  },
+  {
+    title: 'Builder Quickstart',
+    description:
+      'Install @relay44/protocol, read MarketCore on Base, fetch markets, authenticate, and place an order.',
+    href: '/docs/developers/quickstart',
+  },
+  {
     title: 'Technical Roadmap',
     description:
       'Architect-level deep dive — system layers, core subsystems, design principles, eight concrete technical workstreams, and the invariants that shape every decision.',
@@ -61,7 +79,13 @@ export default function ProtocolIndexPage() {
 
       <div className="mt-8 grid gap-4">
         {pages.map((page) => (
-          <Link key={page.href} href={page.href} className="block">
+          <Link
+            key={page.href}
+            href={page.href}
+            className="block"
+            target={page.href.startsWith('http') ? '_blank' : undefined}
+            rel={page.href.startsWith('http') ? 'noreferrer' : undefined}
+          >
             <Card className="p-6 transition-colors hover:border-border-hover">
               <h2 className="text-lg font-semibold text-text-primary">{page.title}</h2>
               <p className="mt-2 text-sm leading-6 text-text-secondary">{page.description}</p>
