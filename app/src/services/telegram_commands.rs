@@ -252,6 +252,7 @@ async fn handle_message(
     let reply = match parsed.name.as_str() {
         "start" | "help" => help_text(),
         "status" => status_text(),
+        "version" => version_text(state),
         "top" => top_text(state, parsed.args.as_deref()).await,
         "market" => market_text(state, parsed.args.as_deref()).await,
         "mute" => mute_text(state, msg.chat.id, parsed.args.as_deref()).await,
@@ -395,6 +396,7 @@ fn help_text() -> String {
     [
         "<b>Relay44Bot commands</b>",
         "/status — alerter config + health",
+        "/version — build sha and uptime",
         "/top [category] — top 5 live markets by opportunity score",
         "/market &lt;slug&gt; — price, depth, and link for one market",
         "/config — show this chat's overrides + linked wallet",
@@ -439,6 +441,61 @@ fn status_text() -> String {
         min_liq = min_liquidity,
         min_px = min_price,
     )
+}
+
+/// `/version` — what commit is live and how long the process has been up.
+/// Used to verify deploys without leaving Telegram. The short SHA matches
+/// the one shown in the Render dashboard and on GitHub.
+fn version_text(state: &AppState) -> String {
+    let pkg_version = env!("CARGO_PKG_VERSION");
+    let sha = build_short_sha();
+    let uptime = format_uptime(state.metrics.get_metrics().uptime_seconds);
+    format!(
+        "<b>Relay44Bot version</b>\n\
+         build: <code>{}</code> ({})\n\
+         uptime: {}",
+        sha, pkg_version, uptime,
+    )
+}
+
+/// Resolve the short commit SHA from any of the build-time env vars Render
+/// (or a manual deploy) might set. Returns "unknown" when none are present
+/// so the command still answers cleanly in local development.
+fn build_short_sha() -> String {
+    resolve_short_sha(|key| std::env::var(key).ok())
+}
+
+/// Pure form for testability — env-var reads are global and would race
+/// across parallel tests. Caller supplies the lookup fn.
+fn resolve_short_sha<F: Fn(&str) -> Option<String>>(lookup: F) -> String {
+    for key in ["RENDER_GIT_COMMIT", "GIT_COMMIT", "BUILD_SHA", "GIT_SHA"] {
+        if let Some(v) = lookup(key) {
+            let trimmed = v.trim();
+            if !trimmed.is_empty() {
+                let len = trimmed.len().min(7);
+                return trimmed[..len].to_string();
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+/// Render an uptime in seconds as `1d 2h 3m`, dropping leading zero units.
+/// Used by `/version` so the chat output stays compact.
+fn format_uptime(secs: u64) -> String {
+    let days = secs / 86_400;
+    let hours = (secs % 86_400) / 3_600;
+    let minutes = (secs % 3_600) / 60;
+    let seconds = secs % 60;
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, minutes)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
 }
 
 async fn top_text(state: &AppState, args: Option<&str>) -> String {
@@ -1184,6 +1241,7 @@ mod tests {
         assert!(h.contains("/verify"));
         assert!(h.contains("/unlink"));
         assert!(h.contains("/config"));
+        assert!(h.contains("/version"));
     }
 
     #[test]
@@ -1230,6 +1288,59 @@ mod tests {
         let peeked = store.peek_in_memory(7).unwrap();
         assert_eq!(peeked.0, "0xbbb");
         assert_eq!(peeked.1, "second-nonce");
+    }
+
+    #[test]
+    fn format_uptime_drops_leading_zero_units() {
+        assert_eq!(format_uptime(0), "0s");
+        assert_eq!(format_uptime(45), "45s");
+        assert_eq!(format_uptime(60), "1m 0s");
+        assert_eq!(format_uptime(125), "2m 5s");
+        assert_eq!(format_uptime(3_600), "1h 0m");
+        assert_eq!(format_uptime(3_725), "1h 2m");
+        assert_eq!(format_uptime(86_400), "1d 0h 0m");
+        assert_eq!(format_uptime(90_061), "1d 1h 1m");
+    }
+
+    #[test]
+    fn resolve_short_sha_truncates_to_seven_chars() {
+        let lookup = |k: &str| {
+            (k == "RENDER_GIT_COMMIT").then(|| "abcdef0123456789".to_string())
+        };
+        assert_eq!(resolve_short_sha(lookup), "abcdef0");
+    }
+
+    #[test]
+    fn resolve_short_sha_falls_through_to_next_var() {
+        // Render not set; manual GIT_COMMIT is. Caller falls through.
+        let lookup = |k: &str| match k {
+            "GIT_COMMIT" => Some("deadbeef".to_string()),
+            _ => None,
+        };
+        assert_eq!(resolve_short_sha(lookup), "deadbee");
+    }
+
+    #[test]
+    fn resolve_short_sha_returns_unknown_when_no_var_set() {
+        let lookup = |_: &str| None;
+        assert_eq!(resolve_short_sha(lookup), "unknown");
+    }
+
+    #[test]
+    fn resolve_short_sha_skips_blank_values() {
+        // Render sometimes injects "" for unset values; treat as absent.
+        let lookup = |k: &str| match k {
+            "RENDER_GIT_COMMIT" => Some("   ".to_string()),
+            "GIT_COMMIT" => Some("real-sha-here".to_string()),
+            _ => None,
+        };
+        assert_eq!(resolve_short_sha(lookup), "real-sh");
+    }
+
+    #[test]
+    fn resolve_short_sha_handles_short_sha_intact() {
+        let lookup = |k: &str| (k == "RENDER_GIT_COMMIT").then(|| "abc".to_string());
+        assert_eq!(resolve_short_sha(lookup), "abc");
     }
 
     #[test]
