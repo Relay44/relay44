@@ -38,6 +38,34 @@ const FETCH_MARKETS = `curl 'https://relay44-api.onrender.com/v1/evm/markets?lim
 
 const PROTOCOL_METRICS = `curl https://relay44-api.onrender.com/v1/protocol/metrics | jq`;
 
+const RELAY_UTILITY = `curl https://relay44-api.onrender.com/v1/protocol/relay-utility | jq`;
+
+const CHECK_STAKING_TIER = `import { createPublicClient, http } from 'viem';
+import { base } from 'viem/chains';
+import {
+  qualifyX402OnChain,
+  priceForX402Tier,
+} from '@relay44/agent-sdk';
+
+const client = createPublicClient({
+  chain: base,
+  transport: http('https://mainnet.base.org'),
+});
+
+const qualification = await qualifyX402OnChain({
+  client,
+  network: 'production',
+  wallet: '0xYourWallet',
+});
+
+console.log(qualification.tier.name);          // Bronze | Silver | Gold | Diamond
+console.log(qualification.bypassesX402);        // true at Gold and above
+console.log(qualification.x402DiscountBps);     // 0, 2500, or 10000
+
+// Compute what an x402-priced endpoint would charge this wallet:
+const breakdown = priceForX402Tier(2_500n, qualification);
+console.log(breakdown.effectiveMicroUsdc);      // 0n at Gold+, 1875n at Silver`;
+
 const AUTHENTICATE = `curl https://relay44-api.onrender.com/v1/auth/siwe/nonce
 
 curl -X POST https://relay44-api.onrender.com/v1/auth/siwe/login \\
@@ -140,7 +168,37 @@ export default function QuickstartPage() {
 
         <Card className="p-6">
           <h2 className="text-lg font-semibold text-text-primary">
-            5. Authenticate for trading
+            5. Read RELAY utility metadata
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-text-secondary">
+            Returns chain id, RELAY token state, total staked, the four-tier
+            table with fee-discount bps and x402 bypass flags, and the reward
+            distributor address. Use this to render a tier badge or to size
+            x402 payments without hard-coding constants.
+          </p>
+          <div className="mt-4">
+            <CodeBlock language="bash" code={RELAY_UTILITY} />
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <h2 className="text-lg font-semibold text-text-primary">
+            6. Check a wallet&apos;s staking tier and x402 access
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-text-secondary">
+            The agent SDK reads <code>RelayStaking.getTier</code> on Base and
+            returns the tier metadata, x402 bypass flag, and effective price
+            for an x402-quoted endpoint. Equivalent to the server-side staking
+            check the API performs before charging an agent.
+          </p>
+          <div className="mt-4">
+            <CodeBlock language="typescript" code={CHECK_STAKING_TIER} />
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <h2 className="text-lg font-semibold text-text-primary">
+            7. Authenticate for trading
           </h2>
           <p className="mt-2 text-sm leading-6 text-text-secondary">
             Trading requires a SIWE JWT. The API never takes custody of keys.
@@ -152,7 +210,7 @@ export default function QuickstartPage() {
 
         <Card className="p-6">
           <h2 className="text-lg font-semibold text-text-primary">
-            6. Read an order book
+            8. Read an order book
           </h2>
           <p className="mt-2 text-sm leading-6 text-text-secondary">
             Market data is public and works without wallet auth.
@@ -164,7 +222,7 @@ export default function QuickstartPage() {
 
         <Card className="p-6">
           <h2 className="text-lg font-semibold text-text-primary">
-            7. Place an order
+            9. Place an order
           </h2>
           <p className="mt-2 text-sm leading-6 text-text-secondary">
             Use the JWT from SIWE auth. Wallet-signed EVM write flows are exposed

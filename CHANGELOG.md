@@ -16,6 +16,8 @@ Format: keep unreleased changes under `Unreleased`. Move entries to a dated sect
 - `@relay44/protocol` workspace package with generated ABIs, deployment manifest, typed addresses, and helper functions
 - `@relay44/protocol` RELAY utility exports: `RELAY_TIERS` (Bronze/Silver/Gold/Diamond) with thresholds and fee-discount bps, `X402_BYPASS_TIER`, `RELAY_DECIMALS`, `relayTierFromStakedWei`, `relayTierById`, `getRelayUtilityAddresses`, `getRelayChainId`
 - `@relay44/agent-sdk` x402 helpers: `qualifyX402ByTier`, `qualifyX402FromStaked`, `qualifyX402OnChain`, and `priceForX402Tier` so agents can compute their own bypass/discount before calling paid endpoints
+- `/docs/protocol/relay-utility` page documenting the public RELAY utility surface for humans and agents
+- Quickstart steps covering the new `/v1/protocol/relay-utility` endpoint and on-chain staking-tier checks via `@relay44/agent-sdk`
 - `examples/protocol-read-market` TypeScript example that reads `MarketCore.marketCount` on Base mainnet
 - npm publish workflow for `@relay44/protocol` and `@relay44/agent-sdk`
 - `web/src/lib/protocol.ts` as single source of truth for docs-facing contract metadata
