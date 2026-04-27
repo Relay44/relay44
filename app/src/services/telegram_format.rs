@@ -163,7 +163,7 @@ impl TelegramClient {
     }
 
     pub async fn send(&self, text: &str) -> Result<(), String> {
-        self.send_raw(&self.chat_id, text).await
+        self.send_raw(&self.chat_id, text, None).await
     }
 
     /// Send to an arbitrary chat id, ignoring the client's configured default.
@@ -171,16 +171,36 @@ impl TelegramClient {
     /// out to multiple subscribed chats with per-chat filters applied.
     pub async fn send_to(&self, chat_id: i64, text: &str) -> Result<(), String> {
         let cid = chat_id.to_string();
-        self.send_raw(&cid, text).await
+        self.send_raw(&cid, text, None).await
     }
 
-    async fn send_raw(&self, chat_id: &str, text: &str) -> Result<(), String> {
+    /// Send with an inline keyboard attached. Buttons render under the
+    /// message in every Telegram client; URL buttons open the link, callback
+    /// buttons fire a `callback_query` update the long-poll handler picks up.
+    pub async fn send_to_with_keyboard(
+        &self,
+        chat_id: i64,
+        text: &str,
+        keyboard: &InlineKeyboardMarkup,
+    ) -> Result<(), String> {
+        let cid = chat_id.to_string();
+        self.send_raw(&cid, text, Some(keyboard)).await
+    }
+
+    async fn send_raw(
+        &self,
+        chat_id: &str,
+        text: &str,
+        keyboard: Option<&InlineKeyboardMarkup>,
+    ) -> Result<(), String> {
         #[derive(Serialize)]
         struct Payload<'a> {
             chat_id: &'a str,
             text: &'a str,
             parse_mode: &'a str,
             disable_web_page_preview: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reply_markup: Option<&'a InlineKeyboardMarkup>,
         }
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
         let payload = Payload {
@@ -188,10 +208,48 @@ impl TelegramClient {
             text,
             parse_mode: "HTML",
             disable_web_page_preview: true,
+            reply_markup: keyboard,
         };
         send_with_retry("sendMessage", || self.http.post(&url).json(&payload).send())
             .await
             .map(|_| ())
+    }
+}
+
+/// Telegram inline keyboard. A grid of buttons rendered under the message.
+/// Each inner Vec is a row; buttons within a row are arranged horizontally.
+#[derive(Debug, Clone, Serialize)]
+pub struct InlineKeyboardMarkup {
+    pub inline_keyboard: Vec<Vec<InlineKeyboardButton>>,
+}
+
+/// One inline keyboard button. Either a URL (opens externally) or a callback
+/// (fires a `callback_query` event the bot handles). Callback data is capped
+/// at 64 bytes by Telegram.
+#[derive(Debug, Clone, Serialize)]
+pub struct InlineKeyboardButton {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub callback_data: Option<String>,
+}
+
+impl InlineKeyboardButton {
+    pub fn url(text: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            url: Some(url.into()),
+            callback_data: None,
+        }
+    }
+
+    pub fn callback(text: impl Into<String>, data: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            url: None,
+            callback_data: Some(data.into()),
+        }
     }
 }
 
