@@ -556,6 +556,16 @@ pub async fn run_scan(state: &AppState) -> Result<Vec<ScannedOpportunity>, Strin
         }
     }
 
+    // Deactivate rows the scanner stopped seeing — Polymarket settles markets
+    // overnight, but our gamma feed filters those out (active=true), so without
+    // this sweep the row's `active` flag stays true forever. Skipping when the
+    // scan returned zero so an upstream outage does not deactivate everything.
+    if total_scanned > 0 {
+        if let Err(e) = deactivate_stale_polymarket(state).await {
+            warn!("Scanner: deactivate-stale failed: {}", e);
+        }
+    }
+
     record_scan_run(
         state,
         total_scanned as i32,
@@ -568,6 +578,26 @@ pub async fn run_scan(state: &AppState) -> Result<Vec<ScannedOpportunity>, Strin
     .await;
 
     Ok(all_opportunities)
+}
+
+/// Mark rows whose `last_scanned_at` is older than five missed ticks
+/// (~5 minutes at the default 60s interval) as inactive. The slug resolver,
+/// volume_spike_alert, and `/top` all read `WHERE active = true`; this keeps
+/// settled markets from leaking into those reads.
+async fn deactivate_stale_polymarket(state: &AppState) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE polymarket_scanned_markets \
+         SET active = false \
+         WHERE active = true \
+           AND last_scanned_at < NOW() - INTERVAL '5 minutes'",
+    )
+    .execute(state.db.pool())
+    .await?;
+    let rows = result.rows_affected();
+    if rows > 0 {
+        info!("Scanner: deactivated {} stale polymarket rows", rows);
+    }
+    Ok(rows)
 }
 
 #[derive(Debug, Default, Clone, Copy)]
