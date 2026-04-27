@@ -165,6 +165,16 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
     // Cross-venue matching against Polymarket.
     let venue_matches = match_cross_venue(state, &all_markets).await;
 
+    // Deactivate rows that disappeared from the active feed — Limitless
+    // settles markets and stops returning them, but the row's `active` flag
+    // would otherwise stay true forever. Skipping when the scan returned zero
+    // so an upstream outage does not deactivate everything.
+    if total_scanned > 0 {
+        if let Err(e) = deactivate_stale_limitless(state).await {
+            warn!("Limitless scanner: deactivate-stale failed: {}", e);
+        }
+    }
+
     record_scan_run(
         state,
         total_scanned,
@@ -176,6 +186,27 @@ async fn run_scan(state: &AppState) -> Result<(i32, i32, i32), String> {
     .await;
 
     Ok((indexed, opportunities, venue_matches))
+}
+
+/// Mark rows whose `last_scanned_at` is older than five missed ticks as
+/// inactive, mirroring the polymarket_scanner sweep. Reads downstream
+/// (volume_spike_alert, /top) filter `WHERE active = TRUE`, so settled
+/// markets stop appearing in alerts and listings the next tick after this
+/// runs.
+async fn deactivate_stale_limitless(state: &AppState) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE limitless_scanned_markets \
+         SET active = false \
+         WHERE active = true \
+           AND last_scanned_at < NOW() - INTERVAL '5 minutes'",
+    )
+    .execute(state.db.pool())
+    .await?;
+    let rows = result.rows_affected();
+    if rows > 0 {
+        info!("Limitless scanner: deactivated {} stale rows", rows);
+    }
+    Ok(rows)
 }
 
 // ── Opportunity scoring ──
