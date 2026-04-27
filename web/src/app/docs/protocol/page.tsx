@@ -36,6 +36,12 @@ const pages = [
     href: '/docs/developers/quickstart',
   },
   {
+    title: '$RELAY Utility',
+    description:
+      'Canonical reference for the RELAY token surface — staking tiers, fee discounts, free x402 access at Gold and above, the public utility endpoint, and importable SDK constants.',
+    href: '/docs/protocol/relay-utility',
+  },
+  {
     title: 'Technical Roadmap',
     description:
       'Architect-level deep dive — system layers, core subsystems, design principles, eight concrete technical workstreams, and the invariants that shape every decision.',

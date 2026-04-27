@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "npm run check:protocol && npm run build",
+    "test": "npm run check:protocol && npm run build && node --test test/*.test.mjs",
     "check:protocol": "node ../protocol/scripts/generate.mjs --check",
     "check:abi": "npm run check:protocol",
     "lint": "eslint src --ext .ts"

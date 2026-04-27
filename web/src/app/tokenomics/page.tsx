@@ -61,11 +61,12 @@ export default function TokenomicsPage() {
           $RELAY Tokenomics
         </h1>
         <p className="max-w-3xl text-base leading-7 text-text-secondary">
-          $RELAY is the economic core of the Relay44 Protocol. Traders pay order
-          book fees in USDC, a keeper swaps those fees into RELAY and burns a
-          share, agents compete for per-epoch reward allocations, and stakers
-          lock RELAY to capture a cut of protocol revenue — all on Base, all
-          open source.
+          Hold and stake $RELAY to reduce protocol fees and access the
+          machine-facing infrastructure on Relay44 — order-book fee discounts,
+          free x402 API access at Gold and above, and eligibility for per-epoch
+          reward distributions. A keeper-operated pipeline converts protocol
+          fees into RELAY and routes them through a public reward distributor
+          on Base.
         </p>
         <div className="flex flex-wrap gap-3 pt-2">
           <a
@@ -84,6 +85,40 @@ export default function TokenomicsPage() {
           </Link>
         </div>
       </div>
+
+      {/* ---------------- Live status ---------------- */}
+      <Card className="mt-10 p-6">
+        <h2 className="text-lg font-semibold text-text-primary">What is live today</h2>
+        <div className="mt-4 grid gap-6 md:grid-cols-2">
+          <div>
+            <p className="text-[0.65rem] uppercase tracking-[0.2em] text-text-muted">
+              Enforced on-chain
+            </p>
+            <ul className="mt-2 space-y-1 text-sm leading-6 text-text-secondary">
+              <li>• ERC20 + Permit + Capped supply for $RELAY</li>
+              <li>• Order-fee discount by staking tier in OrderBook</li>
+              <li>• Stake / unstake / claim flows in RelayStaking</li>
+              <li>• Per-epoch reward accounting in RewardDistributor</li>
+            </ul>
+          </div>
+          <div>
+            <p className="text-[0.65rem] uppercase tracking-[0.2em] text-text-muted">
+              Keeper-operated
+            </p>
+            <ul className="mt-2 space-y-1 text-sm leading-6 text-text-secondary">
+              <li>• Fee sweep from OrderBook to keeper (every 6 hours)</li>
+              <li>• USDC → RELAY swap on Aerodrome above the threshold</li>
+              <li>• Burn share routed to <code className="font-mono">0x…dEaD</code></li>
+              <li>• <code className="font-mono">distribute()</code> called once per epoch</li>
+            </ul>
+          </div>
+        </div>
+        <p className="mt-4 text-xs leading-5 text-text-muted">
+          Keeper schedules and burn share are operator parameters, not contract
+          invariants — they can be paused or retuned without a contract upgrade.
+          The on-chain trail is observable on Basescan.
+        </p>
+      </Card>
 
       {/* ---------------- Token summary ---------------- */}
       <div className="mt-10 grid gap-6 sm:grid-cols-2">
@@ -192,13 +227,16 @@ export default function TokenomicsPage() {
               <div>
                 <p className="text-text-primary font-semibold">USDC → RELAY swap + burn</p>
                 <p>
-                  The keeper swaps USDC for RELAY on Aerodrome, permanently burns a
-                  configurable share (currently{' '}
-                  <code className="font-mono text-text-primary">20%</code>) to{' '}
-                  <code className="font-mono text-text-primary">0x...dEaD</code>,
+                  When accrued USDC clears the keeper threshold, the pipeline
+                  swaps USDC for RELAY on Aerodrome, sends a configurable share
+                  (currently set to{' '}
+                  <code className="font-mono text-text-primary">20%</code> via{' '}
+                  <code className="font-mono text-text-primary">BUYBACK_BURN_SHARE_BPS</code>) to{' '}
+                  <code className="font-mono text-text-primary">0x…dEaD</code>,
                   and forwards the remainder to the RewardDistributor at{' '}
-                  <AddressInline address={rewardDistributor} />. Every trade
-                  becomes structural buy pressure on $RELAY plus a supply sink.
+                  <AddressInline address={rewardDistributor} />. The burn share
+                  and pipeline cadence are operator parameters and can be
+                  retuned without a contract upgrade.
                 </p>
               </div>
             </li>

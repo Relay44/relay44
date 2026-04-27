@@ -231,10 +231,14 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                             ),
                     ),
                 )
-                .service(web::scope("/protocol").route(
-                    "/metrics",
-                    web::get().to(api::protocol::get_protocol_metrics),
-                ))
+                .service(
+                    web::scope("/protocol")
+                        .route("/metrics", web::get().to(api::protocol::get_protocol_metrics))
+                        .route(
+                            "/relay-utility",
+                            web::get().to(api::protocol::get_relay_utility),
+                        ),
+                )
                 .service(
                     web::scope("/evm")
                         .configure(api::creator::configure)
