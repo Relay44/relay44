@@ -3464,6 +3464,40 @@ pub async fn get_base_market(
     Ok(HttpResponse::Ok().json(market))
 }
 
+/// Single gamma `/markets` query for a slug, returning the numeric `id` of
+/// the first match if any. The `closed` flag mirrors gamma's filter so the
+/// caller can distinguish live vs. settled lookups.
+async fn fetch_polymarket_id_by_slug(
+    client: &reqwest::Client,
+    url: &str,
+    slug: &str,
+    closed: bool,
+) -> Result<Option<String>, ApiError> {
+    let closed_str = if closed { "true" } else { "false" };
+    let rows: Vec<serde_json::Value> = client
+        .get(url)
+        .query(&[
+            ("slug", slug),
+            ("limit", "1"),
+            ("closed", closed_str),
+        ])
+        .send()
+        .await
+        .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma request: {}", e)))?
+        .error_for_status()
+        .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma status: {}", e)))?
+        .json()
+        .await
+        .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma parse: {}", e)))?;
+    Ok(rows.first().and_then(|r| {
+        r.get("id").and_then(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .or_else(|| v.as_u64().map(|n| n.to_string()))
+        })
+    }))
+}
+
 pub async fn resolve_market_by_slug(
     state: web::Data<Arc<AppState>>,
     path: web::Path<(String, String)>,
@@ -3484,26 +3518,19 @@ pub async fn resolve_market_by_slug(
             } else {
                 let base = state.config.polymarket_gamma_api_base.trim_end_matches('/');
                 let url = format!("{}/markets", base);
-                let rows: Vec<serde_json::Value> = reqwest::Client::new()
-                    .get(&url)
-                    .query(&[("slug", slug.as_str()), ("limit", "1")])
-                    .send()
-                    .await
-                    .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma request: {}", e)))?
-                    .error_for_status()
-                    .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma status: {}", e)))?
-                    .json()
-                    .await
-                    .map_err(|e| ApiError::bad_request("UPSTREAM_ERROR", &format!("gamma parse: {}", e)))?;
-                let id = rows
-                    .first()
-                    .and_then(|r| r.get("id"))
-                    .and_then(|v| {
-                        v.as_str()
-                            .map(str::to_string)
-                            .or_else(|| v.as_u64().map(|n| n.to_string()))
-                    })
-                    .ok_or_else(|| ApiError::not_found("polymarket market"))?;
+                let client = reqwest::Client::new();
+
+                // Gamma defaults to active=true&closed=false. Live markets resolve
+                // on this first call. Settled (closed=true) markets — which is
+                // where most stale digest links point — need an explicit retry,
+                // because the slug field stays the same after settlement and we
+                // still want the canonical id so the markets/[id] page can render.
+                let mut id: Option<String> = fetch_polymarket_id_by_slug(&client, &url, &slug, false)
+                    .await?;
+                if id.is_none() {
+                    id = fetch_polymarket_id_by_slug(&client, &url, &slug, true).await?;
+                }
+                let id = id.ok_or_else(|| ApiError::not_found("polymarket market"))?;
                 let canonical = format!("polymarket:{}", id);
                 let _ = state.redis.set(&cache_key, &canonical, Some(3600)).await;
                 canonical
