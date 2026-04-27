@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use log::{info, warn};
 
+use super::alert_bus::{now_secs, Signal, SignalKind};
 use super::telegram_format::{
     format_alert_header, format_deep_link, format_metadata_row, html_escape, TelegramClient,
 };
@@ -45,6 +46,15 @@ pub fn spawn(state: Arc<AppState>) {
         return;
     };
 
+    // When the digest scheduler is on, route through the bus so chats can
+    // /subscribe new_market individually instead of flooding the env chat.
+    let digest_enabled = env_bool("DIGEST_ENABLED", false);
+    let direct_send_client = if digest_enabled {
+        None
+    } else {
+        Some(TelegramClient::new(bot_token, chat_id))
+    };
+
     let watchlist = parse_csv_lower(std::env::var("NEW_MARKET_WATCHLIST").unwrap_or_default());
     let categories = parse_csv_lower(std::env::var("NEW_MARKET_CATEGORIES").unwrap_or_default());
     let poll = Duration::from_secs(env_u64("NEW_MARKET_POLL_SECS", DEFAULT_POLL_SECS));
@@ -65,14 +75,13 @@ pub fn spawn(state: Arc<AppState>) {
     }
 
     info!(
-        "Starting new-market alerts (watchlist={:?}, categories={:?}, poll={}s, rate_limit={}/hr)",
+        "Starting new-market alerts (watchlist={:?}, categories={:?}, poll={}s, rate_limit={}/hr, digest={})",
         watchlist,
         categories,
         poll.as_secs(),
         rate_limit_per_hour,
+        digest_enabled,
     );
-
-    let tg = TelegramClient::new(bot_token, chat_id);
 
     tokio::spawn(async move {
         let mut cursor_poly: Option<DateTime<Utc>> = None;
@@ -91,7 +100,8 @@ pub fn spawn(state: Arc<AppState>) {
                 Ok(rows) => {
                     for r in rows.iter().take(MAX_ALERTS_PER_TICK) {
                         maybe_alert(
-                            &tg,
+                            &state,
+                            direct_send_client.as_ref(),
                             &watchlist,
                             &categories,
                             cooldown,
@@ -116,7 +126,8 @@ pub fn spawn(state: Arc<AppState>) {
                 Ok(rows) => {
                     for r in rows.iter().take(MAX_ALERTS_PER_TICK) {
                         maybe_alert(
-                            &tg,
+                            &state,
+                            direct_send_client.as_ref(),
                             &watchlist,
                             &categories,
                             cooldown,
@@ -263,7 +274,8 @@ async fn fetch_new_limitless(
 }
 
 async fn maybe_alert(
-    tg: &TelegramClient,
+    state: &AppState,
+    tg: Option<&TelegramClient>,
     watchlist: &[String],
     categories: &[String],
     cooldown: Duration,
@@ -293,10 +305,44 @@ async fn maybe_alert(
 
     last_alert.insert(cooldown_key, Instant::now());
 
-    let text = format_alert(m, &reason);
-    match tg.send(&text).await {
-        Ok(()) => sent_times.push_back(Instant::now()),
-        Err(e) => warn!("telegram send failed (new-market): {}", e),
+    if let Some(tg) = tg {
+        let text = format_alert(m, &reason);
+        match tg.send(&text).await {
+            Ok(()) => sent_times.push_back(Instant::now()),
+            Err(e) => warn!("telegram send failed (new-market): {}", e),
+        }
+    } else {
+        // Bus path: publish to AlertBus so the digest scheduler delivers per
+        // chat with each chat's /subscribe new_market preference applied.
+        let signal = build_signal(m, &reason);
+        state.alert_bus.publish(signal).await;
+        sent_times.push_back(Instant::now());
+    }
+}
+
+fn build_signal(m: &NewMarket, reason: &str) -> Signal {
+    let mut body = format!("match: <code>{}</code>", html_escape(reason));
+    let meta = format_metadata_row(m.liquidity_usd, m.volume_24h_usd, Some(&m.category));
+    if !meta.is_empty() {
+        body.push('\n');
+        body.push_str(&meta);
+    }
+    Signal {
+        kind: SignalKind::NewMarket,
+        venue: m.venue.to_string(),
+        market_key: m.slug.clone(),
+        slug: (!m.slug.is_empty()).then(|| m.slug.clone()),
+        question: m.question.clone(),
+        liquidity_usd: m.liquidity_usd,
+        volume_24h_usd: m.volume_24h_usd,
+        category: (!m.category.is_empty() && m.category != "unknown")
+            .then(|| m.category.clone()),
+        // For new-market signals there's no shift magnitude — score on
+        // liquidity primarily by giving a constant move_size of 1.0 so the
+        // ranker still uses sqrt(liquidity) and recency.
+        move_size: 1.0,
+        body,
+        timestamp_secs: now_secs(),
     }
 }
 

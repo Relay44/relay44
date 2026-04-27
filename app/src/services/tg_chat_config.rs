@@ -29,7 +29,7 @@ const MAX_QUIET_HOURS: f32 = 168.0;
 
 /// Signal kinds a chat may subscribe to. Strings match
 /// `SignalKind::as_str()` in `alert_bus.rs`.
-pub const VALID_KINDS: &[&str] = &["probability_shift", "volume_spike"];
+pub const VALID_KINDS: &[&str] = &["probability_shift", "volume_spike", "new_market"];
 
 /// In-memory snapshot of a `tg_chat_config` row.
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -311,6 +311,7 @@ pub fn parse_kind_arg(raw: &str) -> Result<&'static str, String> {
     let normalized = match lower.as_str() {
         "probability_shift" | "probability" | "prob" | "shift" => "probability_shift",
         "volume_spike" | "volume" | "spike" => "volume_spike",
+        "new_market" | "new" | "newmarket" | "markets" => "new_market",
         _ => {
             return Err(format!(
                 "unknown kind '{}'. valid: {}",
@@ -809,7 +810,17 @@ mod tests {
         assert_eq!(parse_kind_arg("prob").unwrap(), "probability_shift");
         assert_eq!(parse_kind_arg("VOLUME").unwrap(), "volume_spike");
         assert_eq!(parse_kind_arg("volume_spike").unwrap(), "volume_spike");
+        assert_eq!(parse_kind_arg("new_market").unwrap(), "new_market");
+        assert_eq!(parse_kind_arg("new").unwrap(), "new_market");
+        assert_eq!(parse_kind_arg("newmarket").unwrap(), "new_market");
+        assert_eq!(parse_kind_arg("Markets").unwrap(), "new_market");
         assert!(parse_kind_arg("garbage").is_err());
+    }
+
+    #[test]
+    fn valid_kinds_includes_new_market() {
+        // Subscribers see the canonical list when /subscribe rejects an arg.
+        assert!(VALID_KINDS.contains(&"new_market"));
     }
 
     #[test]

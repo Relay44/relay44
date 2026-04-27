@@ -302,6 +302,7 @@ fn kind_label(kind: &str) -> &'static str {
     match kind {
         "probability_shift" => "Probability shift",
         "volume_spike" => "Volume spike",
+        "new_market" => "New market",
         _ => "Signal",
     }
 }

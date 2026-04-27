@@ -406,7 +406,7 @@ fn help_text() -> String {
         "/cooldown &lt;secs&gt; — per-chat alert cooldown (60-3600)",
         "/quiet &lt;hours&gt; — snooze digest for this chat (0.25-168)",
         "/unquiet — cancel an active quiet window",
-        "/subscribe &lt;kind&gt; — subscribe to a signal kind (probability_shift, volume_spike)",
+        "/subscribe &lt;kind&gt; — subscribe to a signal kind (probability_shift, volume_spike, new_market)",
         "/unsubscribe &lt;kind&gt; — remove a signal kind",
         "/digest — on-demand: drain bus and send current top signals",
         "/quote &lt;slug&gt; &lt;outcome&gt; &lt;buy|sell&gt; [size] — DM-only: best-execution quote",
