@@ -269,6 +269,7 @@ async fn handle_message(
         "link" => link_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "unlink" => unlink_text(state, msg.chat.id).await,
+        "notify" => notify_text(state, msg.chat.id, parsed.args.as_deref()).await,
         _ => {
             // Groups: stay silent — third-party bots own commands like
             // /setup_raid and we don't want to spam "unknown command".
@@ -413,6 +414,7 @@ fn help_text() -> String {
         "/link &lt;0x…&gt; — start read-only wallet binding",
         "/verify &lt;signature&gt; — finish wallet binding",
         "/unlink — drop linked wallet",
+        "/notify &lt;slug&gt; &lt;pct&gt; — one-shot DM when a market crosses pct",
         "/help — this list",
         "",
         "<i>Binding a wallet grants no spending authority. Trade execution is not available.</i>",
@@ -955,6 +957,178 @@ async fn unlink_text(state: &AppState, chat_id: i64) -> String {
             "query failed".to_string()
         }
     }
+}
+
+/// `/notify <slug> <pct>` — create a one-shot DM alert when a market crosses
+/// a threshold. `/notify list` shows active rules; `/notify clear` deletes
+/// every active rule for the chat.
+async fn notify_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = args.map(|s| s.trim()).unwrap_or_default();
+    if raw.is_empty() {
+        return notify_usage();
+    }
+
+    let mut iter = raw.split_whitespace();
+    let head = iter.next().unwrap_or_default();
+    match head {
+        "list" => return notify_list_text(state, chat_id).await,
+        "clear" => return notify_clear_text(state, chat_id).await,
+        _ => {}
+    }
+
+    let slug = head;
+    let threshold_arg = iter.next();
+    if iter.next().is_some() {
+        return notify_usage();
+    }
+    let threshold_arg = match threshold_arg {
+        Some(t) => t,
+        None => return notify_usage(),
+    };
+
+    let threshold = match crate::services::notify_rules::parse_threshold_arg(threshold_arg) {
+        Ok(t) => t,
+        Err(e) => return html_escape(&e),
+    };
+
+    let pool = state.db.pool();
+    let resolved = match resolve_notify_market(pool, slug).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let (venue, canonical_slug, baseline) = resolved;
+
+    if (baseline - threshold).abs() < 1e-9 {
+        return format!(
+            "current price for <code>{}</code> is already at the threshold ({:.0}%); pick a different value",
+            html_escape(&canonical_slug),
+            threshold * 100.0
+        );
+    }
+
+    match crate::services::notify_rules::create(
+        pool,
+        chat_id,
+        &venue,
+        &canonical_slug,
+        threshold,
+        baseline,
+    )
+    .await
+    {
+        Ok(_id) => {
+            let direction = if baseline < threshold {
+                "rises to"
+            } else {
+                "falls to"
+            };
+            format!(
+                "watching <b>{}</b> on {}. baseline {:.0}% \u{2192} ping you when it {} <b>{:.0}%</b>.",
+                html_escape(&canonical_slug),
+                super::telegram_format::venue_title(&venue),
+                baseline * 100.0,
+                direction,
+                threshold * 100.0,
+            )
+        }
+        Err(e) => {
+            warn!("/notify persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn notify_list_text(state: &AppState, chat_id: i64) -> String {
+    match crate::services::notify_rules::list_active_for_chat(state.db.pool(), chat_id).await {
+        Ok(rules) if rules.is_empty() => "no active /notify rules. set one with /notify &lt;slug&gt; &lt;pct&gt;".to_string(),
+        Ok(rules) => {
+            let mut lines = Vec::with_capacity(rules.len() + 1);
+            lines.push(format!("<b>active /notify rules ({})</b>", rules.len()));
+            for r in rules {
+                lines.push(format!(
+                    "• {} <code>{}</code> — baseline {:.0}% \u{2192} {:.0}%",
+                    super::telegram_format::venue_title(&r.venue),
+                    html_escape(&r.slug),
+                    r.baseline_price * 100.0,
+                    r.threshold * 100.0,
+                ));
+            }
+            lines.join("\n")
+        }
+        Err(e) => {
+            warn!("/notify list failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn notify_clear_text(state: &AppState, chat_id: i64) -> String {
+    match crate::services::notify_rules::clear_for_chat(state.db.pool(), chat_id).await {
+        Ok(0) => "no active /notify rules to clear".to_string(),
+        Ok(n) => format!("cleared {} /notify rule(s)", n),
+        Err(e) => {
+            warn!("/notify clear failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+fn notify_usage() -> String {
+    "usage:\n\
+     /notify &lt;slug&gt; &lt;pct&gt; — DM you when the market crosses pct (e.g. 60%)\n\
+     /notify list — show active rules\n\
+     /notify clear — clear every active rule for this chat"
+        .to_string()
+}
+
+/// Look up a market by slug across both scanner tables and return
+/// (venue, canonical_slug, current_yes_price). Errors as a user-facing
+/// HTML-escaped string the command handler can return verbatim.
+async fn resolve_notify_market(
+    pool: &sqlx::PgPool,
+    slug: &str,
+) -> Result<(String, String, f64), String> {
+    let slug_trimmed = slug.trim();
+    if slug_trimmed.is_empty() {
+        return Err("slug required".to_string());
+    }
+
+    let poly: Option<(String, f64)> = sqlx::query_as(
+        "SELECT slug, yes_price::double precision \
+         FROM polymarket_scanned_markets \
+         WHERE active = TRUE AND slug = $1 LIMIT 1",
+    )
+    .bind(slug_trimmed)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        warn!("/notify resolve poly query failed: {}", e);
+        "query failed".to_string()
+    })?;
+    if let Some((s, price)) = poly {
+        return Ok(("polymarket".to_string(), s, price));
+    }
+
+    let lim: Option<(String, f64)> = sqlx::query_as(
+        "SELECT slug, yes_price::double precision \
+         FROM limitless_scanned_markets \
+         WHERE active = TRUE AND slug = $1 LIMIT 1",
+    )
+    .bind(slug_trimmed)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        warn!("/notify resolve limitless query failed: {}", e);
+        "query failed".to_string()
+    })?;
+    if let Some((s, price)) = lim {
+        return Ok(("limitless".to_string(), s, price));
+    }
+
+    Err(format!(
+        "market <code>{}</code> not found in active scanner tables",
+        html_escape(slug_trimmed)
+    ))
 }
 
 fn env_bool(key: &str) -> bool {

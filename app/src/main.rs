@@ -123,6 +123,7 @@ async fn main() -> std::io::Result<()> {
     relay44_backend::services::volume_spike_alert::spawn(app_state.clone());
     relay44_backend::services::orderbook_imbalance_alert::spawn(app_state.clone());
     relay44_backend::services::digest_scheduler::spawn(app_state.clone());
+    relay44_backend::services::notify_scheduler::spawn(app_state.clone());
 
     let migration_db = app_state.db.clone();
     let background_state = app_state.clone();
