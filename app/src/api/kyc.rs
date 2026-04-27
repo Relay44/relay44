@@ -81,7 +81,7 @@ pub async fn verify_kyc(
     let proof_hash = {
         let mut hasher = Sha256::new();
         hasher.update(body.proof.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     };
 
     // Record verification in DB (nullifier uniqueness enforced at DB level)

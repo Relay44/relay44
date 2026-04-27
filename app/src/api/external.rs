@@ -2,7 +2,7 @@ use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine as _;
 use chrono::{DateTime, Duration, Utc};
-use hmac::{Hmac, Mac as _};
+use hmac::{Hmac, KeyInit as _, Mac as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::Sha256;
