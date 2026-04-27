@@ -88,6 +88,15 @@ pub fn spawn(state: Arc<AppState>) {
                                 &msg,
                             )
                             .await;
+                        } else if let Some(cb) = upd.callback_query {
+                            handle_callback_query(
+                                &state,
+                                &client,
+                                allowed_chat_id,
+                                dm_enabled,
+                                &cb,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -249,12 +258,17 @@ async fn handle_message(
         None => return,
     };
 
+    let mut keyboard: Option<super::telegram_format::InlineKeyboardMarkup> = None;
     let reply = match parsed.name.as_str() {
         "start" | "help" => help_text(),
         "status" => status_text(),
         "version" => version_text(state),
         "top" => top_text(state, parsed.args.as_deref()).await,
-        "market" => market_text(state, parsed.args.as_deref()).await,
+        "market" => {
+            let (text, kb) = market_text(state, parsed.args.as_deref()).await;
+            keyboard = kb;
+            text
+        }
         "mute" => mute_text(state, msg.chat.id, parsed.args.as_deref()).await,
         "unmute" => unmute_text(state, msg.chat.id, parsed.args.as_deref()).await,
         "threshold" => threshold_text(state, msg.chat.id, parsed.args.as_deref()).await,
@@ -269,6 +283,7 @@ async fn handle_message(
         "link" => link_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "verify" => verify_text(state, msg.chat.id, nonces, parsed.args.as_deref()).await,
         "unlink" => unlink_text(state, msg.chat.id).await,
+        "notify" => notify_text(state, msg.chat.id, parsed.args.as_deref()).await,
         _ => {
             // Groups: stay silent — third-party bots own commands like
             // /setup_raid and we don't want to spam "unknown command".
@@ -286,8 +301,71 @@ async fn handle_message(
         }
     };
 
-    if let Err(e) = client.send(msg.chat.id, &reply, Some(msg.message_id)).await {
+    let send_result = match keyboard {
+        Some(ref kb) => {
+            client
+                .send_with_keyboard(msg.chat.id, &reply, Some(msg.message_id), kb)
+                .await
+        }
+        None => client.send(msg.chat.id, &reply, Some(msg.message_id)).await,
+    };
+    if let Err(e) = send_result {
         warn!("telegram send failed: {}", e);
+    }
+}
+
+/// Handle a callback_query update emitted when a user taps an inline-keyboard
+/// button whose `callback_data` was set. URL buttons never reach this path.
+/// Each button encodes its action as `<verb>:<args>` in `callback_data`,
+/// capped at 64 bytes by Telegram.
+async fn handle_callback_query(
+    state: &AppState,
+    client: &TelegramClient,
+    allowed_chat_id: Option<i64>,
+    dm_enabled: bool,
+    cb: &CallbackQuery,
+) {
+    let Some(msg) = &cb.message else {
+        // Telegram delivered a callback whose source message we cannot
+        // inspect (very old message, or one outside the bot's history). Ack
+        // so the user's Telegram client stops the loading spinner.
+        let _ = client.answer_callback_query(&cb.id, None).await;
+        return;
+    };
+
+    // Same access policy as message handling — only the env chat or DMs (if
+    // enabled) can drive callbacks.
+    let is_group_match = Some(msg.chat.id) == allowed_chat_id;
+    let is_dm = msg.chat.is_dm();
+    if !(is_group_match || (dm_enabled && is_dm)) {
+        let _ = client.answer_callback_query(&cb.id, None).await;
+        return;
+    }
+
+    let Some(data) = cb.data.as_deref() else {
+        let _ = client.answer_callback_query(&cb.id, None).await;
+        return;
+    };
+
+    let toast = if let Some(slug) = data.strip_prefix(CALLBACK_MUTE_PREFIX) {
+        match tg_chat_config::add_muted_market(state.db.pool(), msg.chat.id, slug).await {
+            Ok(()) => Some(format!("muted {}", slug)),
+            Err(e) => {
+                warn!("callback /mute persist failed: {}", e);
+                Some("query failed".to_string())
+            }
+        }
+    } else {
+        // Unknown verb. Ack silently so the spinner stops; do not echo the
+        // raw payload — it could contain anything.
+        None
+    };
+
+    if let Err(e) = client
+        .answer_callback_query(&cb.id, toast.as_deref())
+        .await
+    {
+        warn!("answer_callback_query failed: {}", e);
     }
 }
 
@@ -413,6 +491,7 @@ fn help_text() -> String {
         "/link &lt;0x…&gt; — start read-only wallet binding",
         "/verify &lt;signature&gt; — finish wallet binding",
         "/unlink — drop linked wallet",
+        "/notify &lt;slug&gt; &lt;pct&gt; — one-shot DM when a market crosses pct",
         "/help — this list",
         "",
         "<i>Binding a wallet grants no spending authority. Trade execution is not available.</i>",
@@ -548,10 +627,13 @@ async fn top_text(state: &AppState, args: Option<&str>) -> String {
     }
 }
 
-async fn market_text(state: &AppState, args: Option<&str>) -> String {
+async fn market_text(
+    state: &AppState,
+    args: Option<&str>,
+) -> (String, Option<super::telegram_format::InlineKeyboardMarkup>) {
     let slug = match args.and_then(|s| s.split_whitespace().next()) {
         Some(s) => s.to_string(),
-        None => return "usage: /market &lt;slug&gt;".to_string(),
+        None => return ("usage: /market &lt;slug&gt;".to_string(), None),
     };
 
     let pool = state.db.pool();
@@ -572,7 +654,7 @@ async fn market_text(state: &AppState, args: Option<&str>) -> String {
             let url = format!("https://relay44.com/markets/by-slug/polymarket/{}", slug);
             let liq_s = liq.map(format_money).unwrap_or_else(|| "—".to_string());
             let vol_s = vol.map(format_money).unwrap_or_else(|| "—".to_string());
-            format!(
+            let text = format!(
                 "<a href=\"{}\">{}</a>\n\
                  YES {:.1}¢ · NO {:.1}¢ · spread {}bps\n\
                  {} · liq {} · vol {}",
@@ -584,15 +666,39 @@ async fn market_text(state: &AppState, args: Option<&str>) -> String {
                 html_escape(&category),
                 liq_s,
                 vol_s,
-            )
+            );
+            let keyboard = build_market_keyboard(&slug, &url);
+            (text, Some(keyboard))
         }
-        Ok(None) => format!("no market with slug <code>{}</code>", html_escape(&slug)),
+        Ok(None) => (
+            format!("no market with slug <code>{}</code>", html_escape(&slug)),
+            None,
+        ),
         Err(e) => {
             warn!("/market query failed: {}", e);
-            "query failed".to_string()
+            ("query failed".to_string(), None)
         }
     }
 }
+
+/// Build the inline keyboard shown under a `/market` reply: an external Trade
+/// button (URL, no callback round-trip) and a Mute button (callback) that
+/// adds the slug to this chat's mute list. Slug must be a polymarket slug
+/// — limitless or aerodrome lookups would need separate keyboards.
+fn build_market_keyboard(
+    slug: &str,
+    relay_url: &str,
+) -> super::telegram_format::InlineKeyboardMarkup {
+    use super::telegram_format::{InlineKeyboardButton, InlineKeyboardMarkup};
+    InlineKeyboardMarkup {
+        inline_keyboard: vec![vec![
+            InlineKeyboardButton::url("\u{2197} Trade", relay_url.to_string()),
+            InlineKeyboardButton::callback("\u{1F515} Mute", format!("{}{}", CALLBACK_MUTE_PREFIX, slug)),
+        ]],
+    }
+}
+
+const CALLBACK_MUTE_PREFIX: &str = "mute:";
 
 async fn mute_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
     let market = match args.and_then(|s| s.split_whitespace().next()) {
@@ -957,6 +1063,178 @@ async fn unlink_text(state: &AppState, chat_id: i64) -> String {
     }
 }
 
+/// `/notify <slug> <pct>` — create a one-shot DM alert when a market crosses
+/// a threshold. `/notify list` shows active rules; `/notify clear` deletes
+/// every active rule for the chat.
+async fn notify_text(state: &AppState, chat_id: i64, args: Option<&str>) -> String {
+    let raw = args.map(|s| s.trim()).unwrap_or_default();
+    if raw.is_empty() {
+        return notify_usage();
+    }
+
+    let mut iter = raw.split_whitespace();
+    let head = iter.next().unwrap_or_default();
+    match head {
+        "list" => return notify_list_text(state, chat_id).await,
+        "clear" => return notify_clear_text(state, chat_id).await,
+        _ => {}
+    }
+
+    let slug = head;
+    let threshold_arg = iter.next();
+    if iter.next().is_some() {
+        return notify_usage();
+    }
+    let threshold_arg = match threshold_arg {
+        Some(t) => t,
+        None => return notify_usage(),
+    };
+
+    let threshold = match crate::services::notify_rules::parse_threshold_arg(threshold_arg) {
+        Ok(t) => t,
+        Err(e) => return html_escape(&e),
+    };
+
+    let pool = state.db.pool();
+    let resolved = match resolve_notify_market(pool, slug).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let (venue, canonical_slug, baseline) = resolved;
+
+    if (baseline - threshold).abs() < 1e-9 {
+        return format!(
+            "current price for <code>{}</code> is already at the threshold ({:.0}%); pick a different value",
+            html_escape(&canonical_slug),
+            threshold * 100.0
+        );
+    }
+
+    match crate::services::notify_rules::create(
+        pool,
+        chat_id,
+        &venue,
+        &canonical_slug,
+        threshold,
+        baseline,
+    )
+    .await
+    {
+        Ok(_id) => {
+            let direction = if baseline < threshold {
+                "rises to"
+            } else {
+                "falls to"
+            };
+            format!(
+                "watching <b>{}</b> on {}. baseline {:.0}% \u{2192} ping you when it {} <b>{:.0}%</b>.",
+                html_escape(&canonical_slug),
+                super::telegram_format::venue_title(&venue),
+                baseline * 100.0,
+                direction,
+                threshold * 100.0,
+            )
+        }
+        Err(e) => {
+            warn!("/notify persist failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn notify_list_text(state: &AppState, chat_id: i64) -> String {
+    match crate::services::notify_rules::list_active_for_chat(state.db.pool(), chat_id).await {
+        Ok(rules) if rules.is_empty() => "no active /notify rules. set one with /notify &lt;slug&gt; &lt;pct&gt;".to_string(),
+        Ok(rules) => {
+            let mut lines = Vec::with_capacity(rules.len() + 1);
+            lines.push(format!("<b>active /notify rules ({})</b>", rules.len()));
+            for r in rules {
+                lines.push(format!(
+                    "• {} <code>{}</code> — baseline {:.0}% \u{2192} {:.0}%",
+                    super::telegram_format::venue_title(&r.venue),
+                    html_escape(&r.slug),
+                    r.baseline_price * 100.0,
+                    r.threshold * 100.0,
+                ));
+            }
+            lines.join("\n")
+        }
+        Err(e) => {
+            warn!("/notify list failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+async fn notify_clear_text(state: &AppState, chat_id: i64) -> String {
+    match crate::services::notify_rules::clear_for_chat(state.db.pool(), chat_id).await {
+        Ok(0) => "no active /notify rules to clear".to_string(),
+        Ok(n) => format!("cleared {} /notify rule(s)", n),
+        Err(e) => {
+            warn!("/notify clear failed: {}", e);
+            "query failed".to_string()
+        }
+    }
+}
+
+fn notify_usage() -> String {
+    "usage:\n\
+     /notify &lt;slug&gt; &lt;pct&gt; — DM you when the market crosses pct (e.g. 60%)\n\
+     /notify list — show active rules\n\
+     /notify clear — clear every active rule for this chat"
+        .to_string()
+}
+
+/// Look up a market by slug across both scanner tables and return
+/// (venue, canonical_slug, current_yes_price). Errors as a user-facing
+/// HTML-escaped string the command handler can return verbatim.
+async fn resolve_notify_market(
+    pool: &sqlx::PgPool,
+    slug: &str,
+) -> Result<(String, String, f64), String> {
+    let slug_trimmed = slug.trim();
+    if slug_trimmed.is_empty() {
+        return Err("slug required".to_string());
+    }
+
+    let poly: Option<(String, f64)> = sqlx::query_as(
+        "SELECT slug, yes_price::double precision \
+         FROM polymarket_scanned_markets \
+         WHERE active = TRUE AND slug = $1 LIMIT 1",
+    )
+    .bind(slug_trimmed)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        warn!("/notify resolve poly query failed: {}", e);
+        "query failed".to_string()
+    })?;
+    if let Some((s, price)) = poly {
+        return Ok(("polymarket".to_string(), s, price));
+    }
+
+    let lim: Option<(String, f64)> = sqlx::query_as(
+        "SELECT slug, yes_price::double precision \
+         FROM limitless_scanned_markets \
+         WHERE active = TRUE AND slug = $1 LIMIT 1",
+    )
+    .bind(slug_trimmed)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        warn!("/notify resolve limitless query failed: {}", e);
+        "query failed".to_string()
+    })?;
+    if let Some((s, price)) = lim {
+        return Ok(("limitless".to_string(), s, price));
+    }
+
+    Err(format!(
+        "market <code>{}</code> not found in active scanner tables",
+        html_escape(slug_trimmed)
+    ))
+}
+
 fn env_bool(key: &str) -> bool {
     std::env::var(key)
         .ok()
@@ -992,6 +1270,8 @@ struct Update {
     update_id: i64,
     #[serde(default)]
     message: Option<Message>,
+    #[serde(default)]
+    callback_query: Option<CallbackQuery>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1008,6 +1288,15 @@ struct Message {
 struct User {
     #[serde(default)]
     is_bot: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CallbackQuery {
+    id: String,
+    #[serde(default)]
+    data: Option<String>,
+    #[serde(default)]
+    message: Option<Message>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1054,7 +1343,7 @@ impl TelegramClient {
             .json(&Req {
                 offset,
                 timeout: POLL_TIMEOUT_SECS,
-                allowed_updates: &["message"],
+                allowed_updates: &["message", "callback_query"],
             })
             .send()
             .await
@@ -1093,6 +1382,68 @@ impl TelegramClient {
             reply_to_message_id: reply_to,
         };
         super::telegram_format::send_with_retry("sendMessage", || {
+            self.http.post(&url).json(&payload).send()
+        })
+        .await
+        .map(|_| ())
+    }
+
+    /// Send a reply with an inline keyboard attached.
+    async fn send_with_keyboard(
+        &self,
+        chat_id: i64,
+        text: &str,
+        reply_to: Option<i64>,
+        keyboard: &super::telegram_format::InlineKeyboardMarkup,
+    ) -> Result<(), String> {
+        #[derive(Serialize)]
+        struct Req<'a> {
+            chat_id: i64,
+            text: &'a str,
+            parse_mode: &'a str,
+            disable_web_page_preview: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            reply_to_message_id: Option<i64>,
+            reply_markup: &'a super::telegram_format::InlineKeyboardMarkup,
+        }
+        let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
+        let payload = Req {
+            chat_id,
+            text,
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+            reply_to_message_id: reply_to,
+            reply_markup: keyboard,
+        };
+        super::telegram_format::send_with_retry("sendMessage", || {
+            self.http.post(&url).json(&payload).send()
+        })
+        .await
+        .map(|_| ())
+    }
+
+    /// Acknowledge a callback_query so the spinner stops in the user's
+    /// Telegram client. Optional `text` shows a brief popup.
+    async fn answer_callback_query(
+        &self,
+        callback_query_id: &str,
+        text: Option<&str>,
+    ) -> Result<(), String> {
+        #[derive(Serialize)]
+        struct Req<'a> {
+            callback_query_id: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text: Option<&'a str>,
+        }
+        let url = format!(
+            "https://api.telegram.org/bot{}/answerCallbackQuery",
+            self.bot_token
+        );
+        let payload = Req {
+            callback_query_id,
+            text,
+        };
+        super::telegram_format::send_with_retry("answerCallbackQuery", || {
             self.http.post(&url).json(&payload).send()
         })
         .await
@@ -1389,5 +1740,38 @@ mod tests {
         assert!(parse_quote_args(Some("slug YES buy -5")).is_err());
         assert!(parse_quote_args(Some("slug YES buy abc")).is_err());
         assert!(parse_quote_args(Some("slug YES buy 0")).is_err());
+    }
+
+    #[test]
+    fn market_keyboard_has_trade_url_and_mute_callback() {
+        let kb = build_market_keyboard(
+            "btc-100k-by-eoy",
+            "https://relay44.com/markets/by-slug/polymarket/btc-100k-by-eoy",
+        );
+        assert_eq!(kb.inline_keyboard.len(), 1);
+        let row = &kb.inline_keyboard[0];
+        assert_eq!(row.len(), 2);
+
+        // Trade button is a URL button — no callback round-trip needed.
+        assert!(row[0].text.contains("Trade"));
+        assert!(row[0].url.is_some());
+        assert!(row[0].callback_data.is_none());
+
+        // Mute button fires a callback the bot dispatches on receive.
+        assert!(row[1].text.contains("Mute"));
+        assert!(row[1].url.is_none());
+        assert_eq!(
+            row[1].callback_data.as_deref(),
+            Some("mute:btc-100k-by-eoy")
+        );
+    }
+
+    #[test]
+    fn callback_data_stays_within_telegram_64_byte_limit() {
+        // Telegram caps callback_data at 64 bytes. Mute prefix + a long slug
+        // could blow past that, so worth pinning.
+        let max_slug_len = 64 - CALLBACK_MUTE_PREFIX.len();
+        // Most polymarket slugs are well under this — sanity-check the cap.
+        assert!(max_slug_len > 50, "mute prefix leaves room for long slugs");
     }
 }
