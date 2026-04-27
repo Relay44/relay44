@@ -10,10 +10,14 @@
 //!   - `batch`     — accumulate fills, hedge net exposure every 30s
 //!   - `disabled`  — no hedging (mirror-only mode)
 
+use base64::engine::general_purpose::URL_SAFE;
+use base64::Engine as _;
 use chrono::Utc;
+use hmac::{Hmac, KeyInit as _, Mac as _};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +37,15 @@ const LIMITLESS_SIGNING_VERSION: &str = "1";
 const LIMITLESS_CHAIN_ID: u64 = 8453;
 const LIMITLESS_SCALE: u128 = 1_000_000;
 const LIMITLESS_PRICE_TICK: u128 = 1_000;
+
+// Polymarket EIP-712 constants (must match api/external.rs)
+const POLYMARKET_SIGNING_NAME: &str = "Polymarket CTF Exchange";
+const POLYMARKET_SIGNING_VERSION: &str = "1";
+const POLYMARKET_CHAIN_ID: u64 = 137;
+const POLYMARKET_SCALE: u128 = 1_000_000;
+const POLYMARKET_LOT_STEP: u128 = 10_000;
+const POLYMARKET_EXCHANGE: &str = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E";
+const POLYMARKET_NEG_RISK_EXCHANGE: &str = "0xC5d563A36AE78145C45a50134d48A1215220f80a";
 
 /// A fill detected on an internal mirrored market that needs hedging.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -381,6 +394,17 @@ async fn execute_hedge(state: &AppState, hedge: &PendingHedgeRow) -> Result<Hedg
             )
             .await
         }
+        "polymarket" => {
+            execute_polymarket_hedge(
+                state,
+                &external_market_id,
+                hedge_credential_id.as_deref(),
+                outcome,
+                price,
+                quantity,
+            )
+            .await
+        }
         _ => Err(format!("Unsupported hedge provider: {}", provider)),
     }
 }
@@ -674,6 +698,414 @@ async fn execute_aerodrome_hedge(
         tx_hash: Some(tx_hash),
         pnl_usdc: None,
     })
+}
+
+/// Execute a hedge on Polymarket by building an EIP-712 signed order and
+/// submitting it to the CLOB API with HMAC authentication.
+async fn execute_polymarket_hedge(
+    state: &AppState,
+    external_market_id: &str,
+    credential_id: Option<&str>,
+    outcome: &str,
+    price: f64,
+    quantity: f64,
+) -> Result<HedgeResult, String> {
+    let credential = load_hedge_credential(state, "polymarket", credential_id).await?;
+
+    let private_key = credential
+        .get("privateKey")
+        .or_else(|| credential.get("private_key"))
+        .and_then(|v| v.as_str())
+        .ok_or("Polymarket credential missing privateKey")?
+        .to_string();
+
+    let api_key = credential
+        .get("apiKey")
+        .or_else(|| credential.get("api_key"))
+        .and_then(|v| v.as_str())
+        .ok_or("Polymarket credential missing apiKey")?
+        .to_string();
+
+    let api_secret = credential
+        .get("apiSecret")
+        .or_else(|| credential.get("api_secret"))
+        .and_then(|v| v.as_str())
+        .ok_or("Polymarket credential missing apiSecret")?
+        .to_string();
+
+    let api_passphrase = credential
+        .get("apiPassphrase")
+        .or_else(|| credential.get("api_passphrase"))
+        .and_then(|v| v.as_str())
+        .ok_or("Polymarket credential missing apiPassphrase")?
+        .to_string();
+
+    let wallet_address = evm_signer::address_from_private_key(&private_key)
+        .map_err(|e| format!("Invalid private key: {}", e))?;
+
+    check_hedge_balance(state, &wallet_address, quantity, "Polymarket").await?;
+
+    let ctx = fetch_polymarket_hedge_context(state, external_market_id, outcome).await?;
+
+    let side_value: u8 = 0; // BUY — hedging a user sell
+    let price_int = scale_decimal_6(price)?;
+    let tick_step = scale_decimal_6(ctx.minimum_tick_size)?;
+    if price_int % tick_step != 0 {
+        return Err(format!(
+            "Polymarket price {} doesn't align to tick {}",
+            price, ctx.minimum_tick_size
+        ));
+    }
+
+    let shares_int = scale_decimal_6(quantity)?;
+    if shares_int % POLYMARKET_LOT_STEP != 0 {
+        return Err(format!(
+            "Polymarket quantity {} doesn't align to lot step",
+            quantity
+        ));
+    }
+
+    let notional_int = shares_int
+        .checked_mul(price_int)
+        .ok_or("Polymarket order amount overflow")?
+        / POLYMARKET_SCALE;
+
+    let (maker_amount, taker_amount) = if side_value == 0 {
+        (notional_int, shares_int)
+    } else {
+        (shares_int, notional_int)
+    };
+
+    let salt = generate_salt();
+
+    let exchange_contract = if ctx.neg_risk {
+        POLYMARKET_NEG_RISK_EXCHANGE
+    } else {
+        POLYMARKET_EXCHANGE
+    };
+
+    // Build EIP-712 struct hash
+    let order_type_hash = Keccak256::digest(
+        b"Order(uint256 salt,address maker,address signer,address taker,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint256 expiration,uint256 nonce,uint256 feeRateBps,uint8 side,uint8 signatureType)"
+    );
+
+    let zero_address = [0u8; 32];
+    let mut maker_word = [0u8; 32];
+    let maker_bytes = hex::decode(wallet_address.trim_start_matches("0x")).unwrap_or_default();
+    if maker_bytes.len() == 20 {
+        maker_word[12..].copy_from_slice(&maker_bytes);
+    }
+
+    let token_id_u256 = u256_from_decimal_str(&ctx.token_id)?;
+
+    let mut encode_data = Vec::with_capacity(12 * 32);
+    encode_data.extend_from_slice(&u256_bytes(salt));
+    encode_data.extend_from_slice(&maker_word); // maker
+    encode_data.extend_from_slice(&maker_word); // signer = maker
+    encode_data.extend_from_slice(&zero_address); // taker = 0
+    encode_data.extend_from_slice(&token_id_u256);
+    encode_data.extend_from_slice(&u256_from_u128(maker_amount));
+    encode_data.extend_from_slice(&u256_from_u128(taker_amount));
+    encode_data.extend_from_slice(&u256_from_u64(0)); // expiration
+    encode_data.extend_from_slice(&u256_from_u64(0)); // nonce
+    encode_data.extend_from_slice(&u256_from_u64(ctx.fee_rate_bps));
+    encode_data.extend_from_slice(&u256_from_u64(side_value as u64));
+    encode_data.extend_from_slice(&u256_from_u64(0)); // signatureType = EOA
+
+    let type_hash_arr: [u8; 32] = order_type_hash.into();
+    let struct_hash = evm_signer::eip712_struct_hash(&type_hash_arr, &encode_data);
+
+    let domain_separator = evm_signer::eip712_domain_separator(
+        POLYMARKET_SIGNING_NAME,
+        POLYMARKET_SIGNING_VERSION,
+        POLYMARKET_CHAIN_ID,
+        exchange_contract,
+    );
+
+    let signing_hash = evm_signer::eip712_signing_hash(&domain_separator, &struct_hash);
+
+    let signature = evm_signer::sign_eip712_hash(&signing_hash, &private_key)
+        .map_err(|e| format!("EIP-712 signing failed: {}", e))?;
+
+    let signed_order = json!({
+        "order": {
+            "salt": salt.to_string(),
+            "maker": wallet_address,
+            "signer": wallet_address,
+            "taker": "0x0000000000000000000000000000000000000000",
+            "tokenId": ctx.token_id,
+            "makerAmount": maker_amount.to_string(),
+            "takerAmount": taker_amount.to_string(),
+            "expiration": "0",
+            "nonce": "0",
+            "feeRateBps": ctx.fee_rate_bps.to_string(),
+            "side": side_value,
+            "signatureType": 0,
+            "signature": signature,
+        },
+        "orderType": "GTC",
+    });
+
+    let body = serde_json::to_string(&signed_order)
+        .map_err(|e| format!("Serialize order: {}", e))?;
+    let path = "/order";
+    let timestamp = Utc::now().timestamp().to_string();
+    let hmac_sig = polymarket_hmac(&api_secret, "POST", path, &body, &timestamp)?;
+
+    let clob_base = state.config.polymarket_clob_api_base.trim_end_matches('/');
+    let url = format!("{}{}", clob_base, path);
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("HTTP client: {}", e))?;
+
+    let mut request = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("POLY_ADDRESS", wallet_address.to_ascii_lowercase())
+        .header("POLY_API_KEY", &api_key)
+        .header("POLY_PASSPHRASE", &api_passphrase)
+        .header("POLY_SIGNATURE", &hmac_sig)
+        .header("POLY_TIMESTAMP", &timestamp);
+
+    if let Some((bk, bs, bp)) = polymarket_builder_creds(state) {
+        let builder_sig = polymarket_hmac(&bs, "POST", path, &body, &timestamp)?;
+        request = request
+            .header("POLY_BUILDER_API_KEY", bk)
+            .header("POLY_BUILDER_PASSPHRASE", bp)
+            .header("POLY_BUILDER_SIGNATURE", builder_sig)
+            .header("POLY_BUILDER_TIMESTAMP", &timestamp);
+    }
+
+    let response = request
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("Polymarket submit failed: {}", e))?;
+
+    let status = response.status();
+    let resp_body: Value = response
+        .json()
+        .await
+        .unwrap_or(json!({ "ok": status.is_success() }));
+
+    if status.is_success() {
+        let order_id = resp_body
+            .get("orderID")
+            .or_else(|| resp_body.get("orderId"))
+            .or_else(|| resp_body.get("id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        Ok(HedgeResult {
+            status: "hedged".to_string(),
+            provider_order_id: Some(order_id),
+            tx_hash: None,
+            pnl_usdc: None,
+        })
+    } else {
+        let msg = resp_body
+            .get("errorMsg")
+            .or_else(|| resp_body.get("message"))
+            .or_else(|| resp_body.get("error"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown error");
+        Err(format!("Polymarket API error ({}): {}", status, msg))
+    }
+}
+
+struct PolymarketHedgeContext {
+    token_id: String,
+    fee_rate_bps: u64,
+    minimum_tick_size: f64,
+    neg_risk: bool,
+}
+
+async fn fetch_polymarket_hedge_context(
+    state: &AppState,
+    external_market_id: &str,
+    outcome: &str,
+) -> Result<PolymarketHedgeContext, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client: {}", e))?;
+
+    let clob_base = state.config.polymarket_clob_api_base.trim_end_matches('/');
+
+    // Fetch market data from Gamma API to get token IDs
+    let gamma_base = std::env::var("POLYMARKET_GAMMA_API_BASE")
+        .unwrap_or_else(|_| "https://gamma-api.polymarket.com".to_string());
+
+    let market_data: Value = client
+        .get(format!(
+            "{}/markets/{}",
+            gamma_base.trim_end_matches('/'),
+            external_market_id
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("Fetch market: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("Parse market: {}", e))?;
+
+    let token_id = extract_polymarket_token_id_from_market(&market_data, outcome)?;
+
+    let tick_payload: Value = client
+        .get(format!("{}/tick-size", clob_base))
+        .query(&[("token_id", token_id.as_str())])
+        .send()
+        .await
+        .map_err(|e| format!("Fetch tick-size: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("Parse tick-size: {}", e))?;
+
+    let minimum_tick_size = tick_payload
+        .get("minimum_tick_size")
+        .or_else(|| tick_payload.get("minimumTickSize"))
+        .and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .ok_or("Missing minimum_tick_size")?;
+
+    let fee_payload: Value = client
+        .get(format!("{}/fee-rate", clob_base))
+        .query(&[("token_id", token_id.as_str())])
+        .send()
+        .await
+        .map_err(|e| format!("Fetch fee-rate: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("Parse fee-rate: {}", e))?;
+
+    let fee_rate_bps = fee_payload
+        .get("base_fee")
+        .or_else(|| fee_payload.get("baseFee"))
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        .ok_or("Missing fee_rate_bps")?;
+
+    let neg_risk_payload: Value = client
+        .get(format!("{}/neg-risk", clob_base))
+        .query(&[("token_id", token_id.as_str())])
+        .send()
+        .await
+        .map_err(|e| format!("Fetch neg-risk: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("Parse neg-risk: {}", e))?;
+
+    let neg_risk = neg_risk_payload
+        .get("neg_risk")
+        .or_else(|| neg_risk_payload.get("negRisk"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    Ok(PolymarketHedgeContext {
+        token_id,
+        fee_rate_bps,
+        minimum_tick_size,
+        neg_risk,
+    })
+}
+
+fn extract_polymarket_token_id_from_market(
+    market: &Value,
+    outcome: &str,
+) -> Result<String, String> {
+    let outcomes: Vec<String> = market
+        .get("outcomes")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .or_else(|| {
+            market
+                .get("outcomes")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+        })
+        .unwrap_or_default();
+
+    let token_ids: Vec<String> = market
+        .get("clobTokenIds")
+        .and_then(|v| v.as_str())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .or_else(|| {
+            market
+                .get("clobTokenIds")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+        })
+        .unwrap_or_default();
+
+    if outcomes.is_empty() || token_ids.is_empty() {
+        return Err("Market payload missing outcomes or clobTokenIds".to_string());
+    }
+
+    for (i, label) in outcomes.iter().enumerate() {
+        if label.eq_ignore_ascii_case(outcome) {
+            if let Some(tid) = token_ids.get(i) {
+                return Ok(tid.clone());
+            }
+        }
+    }
+
+    let fallback = if outcome.eq_ignore_ascii_case("yes") {
+        token_ids.first()
+    } else {
+        token_ids.get(1)
+    };
+
+    fallback
+        .cloned()
+        .ok_or_else(|| format!("Cannot map outcome '{}' to Polymarket token ID", outcome))
+}
+
+fn scale_decimal_6(value: f64) -> Result<u128, String> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!("Value {} must be positive and finite", value));
+    }
+    let normalized = format!("{:.6}", value);
+    let mut parts = normalized.split('.');
+    let whole = parts.next().unwrap_or("0");
+    let frac = parts.next().unwrap_or("0");
+    let raw = format!("{}{}", whole, &format!("{:0<6}", frac)[..6]);
+    raw.parse::<u128>()
+        .map_err(|_| format!("Cannot normalize {}", value))
+}
+
+fn polymarket_hmac(
+    api_secret: &str,
+    method: &str,
+    path: &str,
+    body: &str,
+    timestamp: &str,
+) -> Result<String, String> {
+    let decoded = URL_SAFE
+        .decode(api_secret.trim())
+        .map_err(|_| "Invalid Polymarket API secret (base64 decode failed)".to_string())?;
+    let mut mac = Hmac::<Sha256>::new_from_slice(&decoded)
+        .map_err(|_| "Invalid Polymarket API secret (HMAC key)")?;
+    mac.update(format!("{}{}{}{}", timestamp, method, path, body).as_bytes());
+    Ok(URL_SAFE.encode(mac.finalize().into_bytes()))
+}
+
+fn polymarket_builder_creds(state: &AppState) -> Option<(String, String, String)> {
+    let k = state.config.polymarket_builder_api_key.trim();
+    let s = state.config.polymarket_builder_api_secret.trim();
+    let p = state.config.polymarket_builder_api_passphrase.trim();
+    if k.is_empty() || s.is_empty() || p.is_empty() {
+        return None;
+    }
+    Some((k.to_string(), s.to_string(), p.to_string()))
 }
 
 // ---- Helper functions ----
