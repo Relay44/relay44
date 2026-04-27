@@ -21,6 +21,7 @@ const DEFAULT_CAPACITY: usize = 512;
 pub enum SignalKind {
     ProbabilityShift,
     VolumeSpike,
+    NewMarket,
 }
 
 impl SignalKind {
@@ -28,6 +29,7 @@ impl SignalKind {
         match self {
             SignalKind::ProbabilityShift => "probability_shift",
             SignalKind::VolumeSpike => "volume_spike",
+            SignalKind::NewMarket => "new_market",
         }
     }
 }
