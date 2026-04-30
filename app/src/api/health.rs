@@ -1,12 +1,12 @@
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{HttpResponse, Responder, web};
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
-use crate::services::{ComponentHealth, HealthChecks, HealthStatus, SystemHealth};
 use crate::AppState;
+use crate::services::{ComponentHealth, HealthChecks, HealthStatus, SystemHealth};
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -94,20 +94,66 @@ where
 async fn check_database_health(state: &web::Data<Arc<AppState>>) -> ComponentHealth {
     let start = Instant::now();
 
-    match sqlx::query("SELECT 1").execute(state.db.pool()).await {
-        Ok(_) => {
-            let latency_ms = start.elapsed().as_millis() as u64;
-            let stats = state.db.pool_stats();
+    let mut last_error = None;
+    for attempt in 1..=2 {
+        match sqlx::query("SELECT 1").execute(state.db.pool()).await {
+            Ok(_) => {
+                let latency_ms = start.elapsed().as_millis() as u64;
+                let stats = state.db.pool_stats();
 
-            if stats.size == 0 {
-                ComponentHealth::unhealthy("No database connections available")
-            } else if latency_ms > 500 {
-                ComponentHealth::degraded(latency_ms, "High query latency")
-            } else {
-                ComponentHealth::healthy(latency_ms)
+                if stats.size == 0 {
+                    return ComponentHealth::unhealthy("No database connections available");
+                } else if latency_ms > 500 {
+                    return ComponentHealth::degraded(latency_ms, "High query latency");
+                } else {
+                    return ComponentHealth::healthy(latency_ms);
+                }
+            }
+            Err(err) if attempt == 1 => {
+                log::warn!("database health check failed; retrying once: {}", err);
+                last_error = Some(err);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(err) => {
+                last_error = Some(err);
             }
         }
-        Err(e) => ComponentHealth::unhealthy(&format!("Database query failed: {}", e)),
+    }
+
+    match last_error {
+        Some(err) => ComponentHealth::unhealthy(&format!("Database query failed: {}", err)),
+        None => ComponentHealth::unhealthy("Database query failed"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_unhealthy_makes_overall_unhealthy() {
+        let db = ComponentHealth::unhealthy("db down");
+        let redis = ComponentHealth::healthy(1);
+        let base = ComponentHealth::healthy(1);
+        let solana = ComponentHealth::disabled("off");
+
+        assert_eq!(
+            determine_overall_status(&db, &redis, &base, &solana, true, false),
+            HealthStatus::Unhealthy
+        );
+    }
+
+    #[test]
+    fn optional_chain_failures_degrade_instead_of_failing_health() {
+        let db = ComponentHealth::healthy(1);
+        let redis = ComponentHealth::healthy(1);
+        let base = ComponentHealth::unhealthy("rpc down");
+        let solana = ComponentHealth::disabled("off");
+
+        assert_eq!(
+            determine_overall_status(&db, &redis, &base, &solana, true, false),
+            HealthStatus::Degraded
+        );
     }
 }
 

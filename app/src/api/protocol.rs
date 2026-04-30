@@ -1,10 +1,11 @@
-use actix_web::{web, HttpResponse};
+use actix_web::{HttpResponse, web};
 use chrono::Utc;
 use serde::Serialize;
 use std::sync::Arc;
+use tokio::time::{Duration, sleep};
 
 use crate::services::staking;
-use crate::{api::ApiError, AppState};
+use crate::{AppState, api::ApiError};
 
 const ERC20_TOTAL_SUPPLY_SELECTOR: &str = "0x18160ddd";
 const ERC20_DECIMALS_SELECTOR: &str = "0x313ce567";
@@ -48,23 +49,59 @@ pub struct ProtocolCollateralMetrics {
 }
 
 async fn query_i64(state: &AppState, sql: &str) -> Result<i64, ApiError> {
-    sqlx::query_scalar::<_, i64>(sql)
-        .fetch_one(state.db.pool())
-        .await
-        .map_err(|err| {
-            log::error!("protocol metrics integer query failed: {}", err);
-            ApiError::internal("Failed to load protocol metrics")
-        })
+    let mut last_error = None;
+    for attempt in 1..=2 {
+        match sqlx::query_scalar::<_, i64>(sql)
+            .fetch_one(state.db.pool())
+            .await
+        {
+            Ok(value) => return Ok(value),
+            Err(err) if attempt == 1 => {
+                log::warn!(
+                    "protocol metrics integer query failed; retrying once: {}",
+                    err
+                );
+                last_error = Some(err);
+                sleep(Duration::from_millis(50)).await;
+            }
+            Err(err) => {
+                last_error = Some(err);
+            }
+        }
+    }
+
+    if let Some(err) = last_error {
+        log::error!("protocol metrics integer query failed: {}", err);
+    }
+    Err(ApiError::internal("Failed to load protocol metrics"))
 }
 
 async fn query_f64(state: &AppState, sql: &str) -> Result<f64, ApiError> {
-    sqlx::query_scalar::<_, f64>(sql)
-        .fetch_one(state.db.pool())
-        .await
-        .map_err(|err| {
-            log::error!("protocol metrics decimal query failed: {}", err);
-            ApiError::internal("Failed to load protocol metrics")
-        })
+    let mut last_error = None;
+    for attempt in 1..=2 {
+        match sqlx::query_scalar::<_, f64>(sql)
+            .fetch_one(state.db.pool())
+            .await
+        {
+            Ok(value) => return Ok(value),
+            Err(err) if attempt == 1 => {
+                log::warn!(
+                    "protocol metrics decimal query failed; retrying once: {}",
+                    err
+                );
+                last_error = Some(err);
+                sleep(Duration::from_millis(50)).await;
+            }
+            Err(err) => {
+                last_error = Some(err);
+            }
+        }
+    }
+
+    if let Some(err) = last_error {
+        log::error!("protocol metrics decimal query failed: {}", err);
+    }
+    Err(ApiError::internal("Failed to load protocol metrics"))
 }
 
 pub async fn get_protocol_metrics(
@@ -218,13 +255,10 @@ fn parse_u8_hex(value: &str) -> Result<u8, ApiError> {
     if normalized.is_empty() {
         return Ok(0);
     }
-    u8::from_str_radix(normalized, 16)
-        .map_err(|_| ApiError::internal("Failed to parse hex value"))
+    u8::from_str_radix(normalized, 16).map_err(|_| ApiError::internal("Failed to parse hex value"))
 }
 
-pub async fn get_relay_utility(
-    state: web::Data<Arc<AppState>>,
-) -> Result<HttpResponse, ApiError> {
+pub async fn get_relay_utility(state: web::Data<Arc<AppState>>) -> Result<HttpResponse, ApiError> {
     if !state.config.evm_enabled || !state.config.evm_reads_enabled {
         return Err(ApiError::bad_request(
             "EVM_DISABLED",
@@ -329,7 +363,9 @@ mod tests {
 
     #[test]
     fn validates_evm_addresses() {
-        assert!(is_valid_evm_address("0x580fF5Ae64eC792A949c6123386A8A936c7EBB07"));
+        assert!(is_valid_evm_address(
+            "0x580fF5Ae64eC792A949c6123386A8A936c7EBB07"
+        ));
         assert!(is_valid_evm_address(
             "0x0000000000000000000000000000000000000000"
         ));
