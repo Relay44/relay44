@@ -742,6 +742,8 @@ services:
 
 databases:
   - name: relay44-db
-    plan: starter
-    region: singapore
-    postgresMajorVersion: "16"
+    plan: basic-1gb
+    region: frankfurt
+    diskSizeGB: 5
+    storageAutoscalingEnabled: false
+    postgresMajorVersion: "18"
