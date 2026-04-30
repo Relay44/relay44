@@ -1,6 +1,6 @@
 # Relay44 Protocol v0.1.0 X Copy
 
-Account: https://x.com/Relay44OnBase
+Account: https://x.com/Relay44BASE
 
 ## Protocol Announcement
 

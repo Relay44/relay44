@@ -73,12 +73,12 @@ export default function ProtocolIndexPage() {
         Base. This section describes what the protocol is today and where it is headed. Everything
         here is grounded in the Apache-2.0 monorepo. Public updates land at{' '}
         <a
-          href="https://x.com/Relay44OnBase"
+          href="https://x.com/Relay44BASE"
           className="text-accent hover:underline"
           target="_blank"
           rel="noopener noreferrer"
         >
-          x.com/Relay44OnBase
+          x.com/Relay44BASE
         </a>
         .
       </p>

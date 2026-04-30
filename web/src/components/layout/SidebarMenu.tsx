@@ -71,7 +71,7 @@ function useIsDocsHost() {
 
 const externalLinks = [
   {
-    href: "https://x.com/Relay44OnBase",
+    href: "https://x.com/Relay44BASE",
     label: "X",
     note: "Updates and announcements",
     icon: XIcon,

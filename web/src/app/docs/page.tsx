@@ -1015,7 +1015,7 @@ ws.onmessage = (event) => {
             <p className="text-sm text-text-muted">
               Questions or feedback? Reach out on{" "}
               <a
-                href="https://x.com/Relay44OnBase"
+                href="https://x.com/Relay44BASE"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-text-secondary underline transition-colors hover:text-text-primary"

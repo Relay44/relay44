@@ -400,12 +400,12 @@ export default function TokenomicsPage() {
         returns. $RELAY is a utility token used by the Relay44 Protocol for
         staking, fee discounts, and reward distribution. Follow protocol updates:{' '}
         <a
-          href="https://x.com/Relay44OnBase"
+          href="https://x.com/Relay44BASE"
           target="_blank"
           rel="noreferrer"
           className="text-text-secondary underline-offset-2 hover:underline"
         >
-          x.com/Relay44OnBase
+          x.com/Relay44BASE
         </a>
         .
       </div>

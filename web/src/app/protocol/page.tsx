@@ -354,7 +354,7 @@ export default async function ProtocolDashboardPage() {
                 Quickstart
               </Link>
               <a
-                href="https://x.com/Relay44OnBase"
+                href="https://x.com/Relay44BASE"
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex h-9 items-center border border-border px-4 text-xs uppercase tracking-[0.16em] text-text-primary transition-colors hover:border-border-hover hover:bg-bg-secondary"

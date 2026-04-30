@@ -44,7 +44,7 @@ const resourceLinks = [
 ];
 
 const externalLinks = [
-  { href: 'https://x.com/Relay44OnBase', label: 'X / Relay44OnBase' },
+  { href: 'https://x.com/Relay44BASE', label: 'X / Relay44BASE' },
 ];
 
 function FooterColumn({

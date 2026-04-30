@@ -133,12 +133,12 @@ export default function ProtocolOverviewPage() {
           </a>
           . Open source under Apache-2.0, with public updates at{' '}
           <a
-            href="https://x.com/Relay44OnBase"
+            href="https://x.com/Relay44BASE"
             className="text-accent hover:underline"
             target="_blank"
             rel="noopener noreferrer"
           >
-            x.com/Relay44OnBase
+            x.com/Relay44BASE
           </a>
           .
         </p>
@@ -178,7 +178,7 @@ export default function ProtocolOverviewPage() {
           </div>
           <div>
             <span className="uppercase tracking-widest text-text-muted/60">Updates</span>{' '}
-            <span className="text-text-secondary">x.com/Relay44OnBase</span>
+            <span className="text-text-secondary">x.com/Relay44BASE</span>
           </div>
         </div>
       </section>
@@ -270,7 +270,7 @@ export default function ProtocolOverviewPage() {
               X
             </div>
             <div className="mt-1 text-sm font-medium text-text-primary">
-              @Relay44OnBase
+              @Relay44BASE
             </div>
             <div className="mt-1 text-xs text-text-secondary">
               Shipping updates, milestones, and public announcements.
