@@ -45,9 +45,21 @@ jobs:
       - name: Publish protocol package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm --workspace @relay44/protocol publish --access public --provenance
+        run: |
+          read -r package_name package_version < <(node -e "const p=require('./sdk/protocol/package.json'); console.log(p.name, p.version)")
+          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+            echo "$package_name@$package_version is already published"
+          else
+            npm --workspace @relay44/protocol publish --access public --provenance
+          fi
 
       - name: Publish agent SDK
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm --workspace @relay44/agent-sdk publish --access public --provenance
+        run: |
+          read -r package_name package_version < <(node -e "const p=require('./sdk/agent/package.json'); console.log(p.name, p.version)")
+          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+            echo "$package_name@$package_version is already published"
+          else
+            npm --workspace @relay44/agent-sdk publish --access public --provenance
+          fi
