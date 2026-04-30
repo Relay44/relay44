@@ -8,7 +8,7 @@ resolver = "2"
 
 # Force older blake3 version that uses constant_time_eq 0.3.x (compatible with platform-tools)
 [workspace.dependencies]
-blake3 = "=1.8.4"
+blake3 = "=1.8.5"
 constant_time_eq = "=0.4.2"
 
 [profile.release]
