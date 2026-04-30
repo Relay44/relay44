@@ -333,11 +333,11 @@ async fn fetch_order_filled_logs(
         .unwrap_or_default())
 }
 
-struct HedgeResult {
-    status: String,
-    provider_order_id: Option<String>,
-    tx_hash: Option<String>,
-    pnl_usdc: Option<f64>,
+pub struct HedgeResult {
+    pub status: String,
+    pub provider_order_id: Option<String>,
+    pub tx_hash: Option<String>,
+    pub pnl_usdc: Option<f64>,
 }
 
 type PendingHedgeRow = (i32, i32, String, String, f64, f64); // id, link_id, outcome, provider, price, quantity
@@ -373,11 +373,12 @@ async fn execute_hedge(state: &AppState, hedge: &PendingHedgeRow) -> Result<Hedg
 
     match provider.as_str() {
         "limitless" => {
-            execute_limitless_hedge(
+            execute_limitless_order(
                 state,
                 &external_market_id,
                 hedge_credential_id.as_deref(),
                 outcome,
+                0,
                 price,
                 quantity,
             )
@@ -395,11 +396,12 @@ async fn execute_hedge(state: &AppState, hedge: &PendingHedgeRow) -> Result<Hedg
             .await
         }
         "polymarket" => {
-            execute_polymarket_hedge(
+            execute_polymarket_order(
                 state,
                 &external_market_id,
                 hedge_credential_id.as_deref(),
                 outcome,
+                0,
                 price,
                 quantity,
             )
@@ -409,12 +411,14 @@ async fn execute_hedge(state: &AppState, hedge: &PendingHedgeRow) -> Result<Hedg
     }
 }
 
-/// Execute a hedge on Limitless by building an EIP-712 signed order and submitting it.
-async fn execute_limitless_hedge(
+/// Place an order on Limitless via EIP-712 signed submission.
+/// `side`: 0 = BUY, 1 = SELL.
+pub async fn execute_limitless_order(
     state: &AppState,
     external_market_id: &str,
     credential_id: Option<&str>,
     outcome: &str,
+    side: u8,
     price: f64,
     quantity: f64,
 ) -> Result<HedgeResult, String> {
@@ -465,17 +469,22 @@ async fn execute_limitless_hedge(
 
     let token_id = extract_limitless_token_id_from_market(&market_data, outcome)?;
 
-    // Build the order message (matching the Limitless EIP-712 schema).
-    let side_byte: u8 = 0; // 0 = BUY
+    let side_byte: u8 = side;
     let price_int = (price * LIMITLESS_SCALE as f64).round() as u128;
     let price_aligned = (price_int / LIMITLESS_PRICE_TICK) * LIMITLESS_PRICE_TICK;
     let quantity_int = (quantity * LIMITLESS_SCALE as f64).round() as u128;
 
-    // makerAmount = quantity (USDC in 6 decimals)
-    // takerAmount = quantity / price (outcome tokens)
-    let taker_amount = (quantity_int * LIMITLESS_SCALE)
+    let outcome_tokens = (quantity_int * LIMITLESS_SCALE)
         .checked_div(price_aligned)
-        .ok_or_else(|| "Price is zero, cannot compute taker amount".to_string())?;
+        .ok_or_else(|| "Price is zero, cannot compute token amount".to_string())?;
+
+    // BUY: maker sends USDC, taker sends outcome tokens
+    // SELL: maker sends outcome tokens, taker sends USDC
+    let (maker_amount, taker_amount) = if side_byte == 0 {
+        (quantity_int, outcome_tokens)
+    } else {
+        (outcome_tokens, quantity_int)
+    };
 
     let salt = generate_salt();
     let expiration = (Utc::now().timestamp() as u64) + 3600; // 1 hour
@@ -502,7 +511,7 @@ async fn execute_limitless_hedge(
     encode_data.extend_from_slice(&maker_word); // signer = maker
     encode_data.extend_from_slice(&zero_address); // taker = 0
     encode_data.extend_from_slice(&token_id_u256);
-    encode_data.extend_from_slice(&u256_from_u128(quantity_int));
+    encode_data.extend_from_slice(&u256_from_u128(maker_amount));
     encode_data.extend_from_slice(&u256_from_u128(taker_amount));
     encode_data.extend_from_slice(&u256_from_u64(expiration));
     encode_data.extend_from_slice(&u256_from_u64(nonce));
@@ -533,7 +542,7 @@ async fn execute_limitless_hedge(
             "signer": wallet_address,
             "taker": "0x0000000000000000000000000000000000000000",
             "tokenId": token_id,
-            "makerAmount": quantity_int.to_string(),
+            "makerAmount": maker_amount.to_string(),
             "takerAmount": taker_amount.to_string(),
             "expiration": expiration.to_string(),
             "nonce": nonce.to_string(),
@@ -722,13 +731,14 @@ async fn execute_aerodrome_hedge(
     })
 }
 
-/// Execute a hedge on Polymarket by building an EIP-712 signed order and
-/// submitting it to the CLOB API with HMAC authentication.
-async fn execute_polymarket_hedge(
+/// Place an order on Polymarket via EIP-712 signed CLOB submission.
+/// `side`: 0 = BUY, 1 = SELL.
+pub async fn execute_polymarket_order(
     state: &AppState,
     external_market_id: &str,
     credential_id: Option<&str>,
     outcome: &str,
+    side: u8,
     price: f64,
     quantity: f64,
 ) -> Result<HedgeResult, String> {
@@ -769,7 +779,7 @@ async fn execute_polymarket_hedge(
 
     let ctx = fetch_polymarket_hedge_context(state, external_market_id, outcome).await?;
 
-    let side_value: u8 = 0; // BUY — hedging a user sell
+    let side_value: u8 = side;
     let price_int = scale_decimal_6(price)?;
     let tick_step = scale_decimal_6(ctx.minimum_tick_size)?;
     if price_int % tick_step != 0 {
@@ -1132,7 +1142,7 @@ fn polymarket_builder_creds(state: &AppState) -> Option<(String, String, String)
 
 // ---- Helper functions ----
 
-async fn load_hedge_credential(
+pub async fn load_hedge_credential(
     state: &AppState,
     provider: &str,
     credential_id: Option<&str>,

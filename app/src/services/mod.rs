@@ -1,5 +1,6 @@
 pub mod aerodrome;
 pub mod aerodrome_scanner;
+pub mod arb_executor;
 pub mod agent_scheduler;
 pub mod alert_bus;
 pub mod creator_economics;

@@ -18,9 +18,11 @@ use std::time::{Duration, Instant};
 
 use log::{info, warn};
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 
-use super::market_data::{L2Event, L2Payload, Venue};
+use super::arb_executor::ArbSignal;
+use super::market_data::{cache, L2Event, L2Payload, Venue};
 use super::telegram_format::{
     format_metadata_row, html_escape, venue_link, TelegramClient,
 };
@@ -116,6 +118,16 @@ pub fn spawn(state: Arc<AppState>) {
         });
     }
 
+    let exec_enabled = env_bool("CROSS_VENUE_ARB_EXEC_ENABLED", false);
+    let arb_tx = if exec_enabled {
+        let (tx, rx) = mpsc::channel::<ArbSignal>(64);
+        super::arb_executor::spawn_from_channel(state.clone(), rx);
+        info!("Cross-venue arb executor enabled");
+        Some(tx)
+    } else {
+        None
+    };
+
     let mut rx = state.market_data.subscribe();
     let tg = TelegramClient::new(bot_token, chat_id);
 
@@ -127,6 +139,7 @@ pub fn spawn(state: Arc<AppState>) {
             match rx.recv().await {
                 Ok(ev) => {
                     handle_event(
+                        &state,
                         &tg,
                         &lookup,
                         threshold,
@@ -134,6 +147,7 @@ pub fn spawn(state: Arc<AppState>) {
                         &mut last_price,
                         &mut last_alert,
                         &ev,
+                        arb_tx.as_ref(),
                     )
                     .await;
                 }
@@ -150,6 +164,7 @@ pub fn spawn(state: Arc<AppState>) {
 }
 
 async fn handle_event(
+    state: &AppState,
     tg: &TelegramClient,
     lookup: &RwLock<PairLookup>,
     threshold: f64,
@@ -157,6 +172,7 @@ async fn handle_event(
     last_price: &mut HashMap<(String, Outcome, Venue), (f64, Instant)>,
     last_alert: &mut HashMap<(String, Outcome), Instant>,
     ev: &L2Event,
+    arb_tx: Option<&mpsc::Sender<ArbSignal>>,
 ) {
     let Some(price) = current_price(&ev.payload) else {
         return;
@@ -220,6 +236,92 @@ async fn handle_event(
     if let Err(e) = tg.send(&text).await {
         warn!("telegram send failed (cross-venue arb): {}", e);
     }
+
+    if let Some(tx) = arb_tx {
+        emit_arb_signal(state, tx, &pair_id, outcome, ev.venue, price, other, other_price, &ev.market_key, last_price).await;
+    }
+}
+
+async fn emit_arb_signal(
+    state: &AppState,
+    tx: &mpsc::Sender<ArbSignal>,
+    pair_id: &str,
+    outcome: Outcome,
+    this_venue: Venue,
+    this_price: f64,
+    other_venue: Venue,
+    other_price: f64,
+    this_market_key: &str,
+    last_price: &HashMap<(String, Outcome, Venue), (f64, Instant)>,
+) {
+    let (buy_venue, buy_price, sell_venue, sell_price) = if this_price < other_price {
+        (this_venue, this_price, other_venue, other_price)
+    } else {
+        (other_venue, other_price, this_venue, this_price)
+    };
+
+    let buy_key = find_market_key(last_price, pair_id, outcome, buy_venue, this_venue, this_market_key);
+    let sell_key = find_market_key(last_price, pair_id, outcome, sell_venue, this_venue, this_market_key);
+
+    let buy_depth = book_depth(&state.redis, buy_venue, &buy_key, true).await;
+    let sell_depth = book_depth(&state.redis, sell_venue, &sell_key, false).await;
+
+    let outcome_str = match outcome {
+        Outcome::Yes => "yes",
+        Outcome::No => "no",
+    };
+
+    let signal = ArbSignal {
+        market_slug: pair_id.to_string(),
+        outcome: outcome_str.to_string(),
+        buy_venue,
+        buy_price,
+        buy_market_key: buy_key,
+        sell_venue,
+        sell_price,
+        sell_market_key: sell_key,
+        buy_depth_usdc: buy_depth,
+        sell_depth_usdc: sell_depth,
+    };
+
+    if let Err(e) = tx.try_send(signal) {
+        warn!("arb_executor channel full or closed: {}", e);
+    }
+}
+
+fn find_market_key(
+    last_price: &HashMap<(String, Outcome, Venue), (f64, Instant)>,
+    pair_id: &str,
+    outcome: Outcome,
+    target_venue: Venue,
+    this_venue: Venue,
+    this_market_key: &str,
+) -> String {
+    if target_venue == this_venue {
+        return this_market_key.to_string();
+    }
+    // The other venue's market_key isn't directly available from last_price keys
+    // since HashMap keys include (pair_id, outcome, venue) but not market_key.
+    // We stored the price but not the key. For now, return an empty string —
+    // the arb_executor resolves via market_venue_links anyway.
+    String::new()
+}
+
+async fn book_depth(
+    redis: &crate::services::RedisService,
+    venue: Venue,
+    market_key: &str,
+    buy_side: bool,
+) -> f64 {
+    if market_key.is_empty() {
+        return 0.0;
+    }
+    let book = match cache::read_book(redis, venue, market_key).await {
+        Ok(Some(b)) => b,
+        _ => return 0.0,
+    };
+    let levels = if buy_side { &book.asks } else { &book.bids };
+    levels.iter().map(|l| l.price * l.size).sum()
 }
 
 fn current_price(payload: &L2Payload) -> Option<f64> {
