@@ -39,7 +39,7 @@
     "@reown/appkit": "^1.8.19",
     "@reown/appkit-adapter-wagmi": "^1.8.19",
     "@tanstack/react-query": "^5.99.0",
-    "@wagmi/core": "^3.4.1",
+    "@wagmi/core": "^3.4.8",
     "@worldcoin/idkit": "^1.5.0",
     "@x402/core": "^2.8.0",
     "@x402/evm": "^2.10.0",
