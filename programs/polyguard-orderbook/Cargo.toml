@@ -28,7 +28,7 @@ defi = []                                           # Yield vaults, margin
 events = []                                         # Event queue batching
 
 [dependencies]
-anchor-lang = { version = "0.31.1", features = ["init-if-needed"] }
+anchor-lang = { version = "1.0.1", features = ["init-if-needed"] }
 anchor-spl = { version = "1.0.1", features = ["token", "associated_token"] }
 blake3 = { workspace = true }
 constant_time_eq = { workspace = true }
